@@ -1,17 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
   DollarSign, Calendar, PlusCircle, Activity, PhoneCall, ShieldAlert, 
   Layers, CheckSquare, BarChart3, Settings, CheckCircle2, Trash2, RotateCcw, Home
 } from 'lucide-react';
-import { 
-  loginUser, getClients, getGroups, submitAccountPayment,
+import {
+  loginUser, getClients, getGroups, submitAccountPayment, submitCustomCharge,
   submitClientCallIn, submitGroupCallIn, getPolygraphSlots, createPolygraphSlot,
   submitPolygraphResult, deletePolygraphSlot, assignPolygraphSlot, reopenPolygraphSlot,
-  getClientAttendance, getClientFinancials, 
+  getClientAttendance, getClientFinancials,
   getClientNotes, addClientNote, getClientPolygraphs, getGroupClients, updateGroup, updateClient,
-  assignClientToGroup, createClient, createGroup, deleteGroup, updateEmployee, getClientTests, submitTestResult, getAgentReport,
-  getDepositReport, getEmployees, addEmployee, getSystemLogs
+  assignClientToGroup, createClient, createGroup, deleteGroup, deleteClient, updateEmployee, getClientTests, submitTestResult, getAgentReport,
+  getDepositReport, getEmployees, addEmployee, getSystemLogs, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride
 } from './api';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
@@ -113,6 +113,10 @@ const attendanceBalanceChange = (att: any) => {
 
 // Programs that use the SO phase schedule and show the last polygraph date
 const SO_PROGRAM_TYPES = ['State SO', 'Federal SO'];
+// BIP clients store a whole-number week (starting at 0) in the phase column instead of an SO phase
+const isWholeNumber = (value: unknown) => /^\d+$/.test(String(value ?? '').trim());
+const formatPhase = (programtype?: string | null, phase?: string | null) =>
+  programtype === 'BIP' && isWholeNumber(phase) ? `Week ${phase}` : phase;
 // Group program types offered for each client program type. Programs not listed see every group.
 const GROUP_TYPES_BY_PROGRAM: Record<string, string[]> = {
   'State SO': ['SO', 'FED SO'],
@@ -193,6 +197,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [clients, setClients] = useState<any[]>([]);
   const [clientSearch, setClientSearch] = useState('');
+  const [clientFilters, setClientFilters] = useState({ agent: '', programtype: '', currentgroup: '', status: 'Active', feeoverride: '' });
   const [groups, setGroups] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -219,9 +224,22 @@ export default function App() {
   const [savingClientInfo, setSavingClientInfo] = useState(false);
   const [clientInfoError, setClientInfoError] = useState('');
   const [clientInfoForm, setClientInfoForm] = useState<any>({});
+  const [clientFeeOverride, setClientFeeOverride] = useState<any>(null);
+  const [showFeeOverrideForm, setShowFeeOverrideForm] = useState(false);
+  const [feeOverrideInput, setFeeOverrideInput] = useState('');
+  const [feeOverrideDate, setFeeOverrideDate] = useState('');
 
   // Attendance State
   const [isAccountOnly, setIsAccountOnly] = useState(false);
+  // Custom fee charge (Business Administrators only)
+  const [isCustomCharge, setIsCustomCharge] = useState(false);
+  const [chargeClient, setChargeClient] = useState('');
+  const [chargeInput, setChargeInput] = useState('');
+  const [chargeNotes, setChargeNotes] = useState('');
+  const chargeAmount = Number(chargeInput) || 0;
+  const chargeClientRecord = clients.find(c => c.clientid === Number(chargeClient));
+  const chargeCurrentBalance = Number(chargeClientRecord?.accountbalance || 0);
+  const balanceAfterCharge = chargeCurrentBalance + chargeAmount;
   const [selectedClient, setSelectedClient] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [paymentInput, setPaymentInput] = useState('');
@@ -273,7 +291,9 @@ export default function App() {
 
   // Groups Module State
   const [selectedGroupDetail, setSelectedGroupDetail] = useState<any>(null);
+  const groupDetailRef = useRef<HTMLDivElement>(null);
   const [groupRoster, setGroupRoster] = useState<any[]>([]);
+  const [assignClientSearch, setAssignClientSearch] = useState('');
   const [groupTab, setGroupTab] = useState<'roster' | 'assign' | 'schedule'>('roster');
   const [editGroupName, setEditGroupName] = useState('');
   const [editCounselor, setEditCounselor] = useState('');
@@ -285,11 +305,21 @@ export default function App() {
   // Inactive groups stay in the directory but are hidden from every picker for new assignments and sessions
   const activeGroups = groups.filter(g => g.active !== false);
   const [showInactiveGroups, setShowInactiveGroups] = useState(false);
+  // Normalize location names (e.g., "Oklahoma City" → "OKC")
+  const normalizeLocation = (loc: string) => loc === 'Oklahoma City' ? 'OKC' : loc;
+  // Reverse normalization for storage (e.g., "OKC" → "Oklahoma City")
+  const denormalizeLocation = (loc: string) => loc === 'OKC' ? 'Oklahoma City' : loc;
   // Directory filters; an empty string means "all"
-  const [groupFilters, setGroupFilters] = useState({ location: '', counselor: '', programtype: '' });
+  const [groupFilters, setGroupFilters] = useState({ location: '', counselor: '', programtype: '', status: '' });
   const groupFilterActive = Object.values(groupFilters).some(Boolean);
-  const distinctGroupValues = (key: 'location' | 'counselor' | 'programtype') =>
-    Array.from(new Set(groups.map(g => g[key]).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
+  const distinctGroupValues = (key: 'location' | 'counselor' | 'programtype' | 'status') => {
+    if (key === 'status') return ['Active', 'Inactive'];
+    const values = Array.from(new Set(groups.map(g => {
+      const val = g[key];
+      return key === 'location' && val ? normalizeLocation(val) : val;
+    }).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
+    return values;
+  };
   const emptyNewGroup = { groupName: '', location: '', counselor: '', programType: '', schedule: '', address: '' };
   const [showNewGroupForm, setShowNewGroupForm] = useState(false);
   const [newGroup, setNewGroup] = useState(emptyNewGroup);
@@ -302,9 +332,10 @@ export default function App() {
   const groupSortArrow = (key: GroupSortKey) => (groupSort.key === key ? (groupSort.dir === 'asc' ? ' ▲' : ' ▼') : '');
   const sortedDirectoryGroups = groups
     .filter(g => showInactiveGroups || g.active !== false)
-    .filter(g => (!groupFilters.location || g.location === groupFilters.location)
+    .filter(g => (!groupFilters.location || normalizeLocation(g.location) === groupFilters.location)
       && (!groupFilters.counselor || g.counselor === groupFilters.counselor)
-      && (!groupFilters.programtype || g.programtype === groupFilters.programtype))
+      && (!groupFilters.programtype || g.programtype === groupFilters.programtype)
+      && (!groupFilters.status || (groupFilters.status === 'Active' ? g.active !== false : g.active === false)))
     .sort((a, b) => {
       const read = (g: any) => (groupSort.key === 'active' ? (g.active !== false ? 1 : 0)
         : groupSort.key === 'clientcount' ? Number(g.clientcount || 0)
@@ -340,10 +371,20 @@ export default function App() {
   const [empActive, setEmpActive] = useState(true);
   const [accountFilter, setAccountFilter] = useState<'active' | 'inactive' | 'all'>('active');
   const [empPassword, setEmpPassword] = useState('');
+  const [empSearch, setEmpSearch] = useState('');
 
   // Counselor dropdown choices: active employees with the Counselor role. A group's saved counselor is kept as an option even if that account is no longer listed
   const counselorOptions = employees.filter(e => e.role === 'Counselor' && e.active !== false).map(e => e.displayname as string).filter(Boolean);
   const counselorChoices = (current: string) => (current && !counselorOptions.includes(current) ? [current, ...counselorOptions] : counselorOptions);
+
+  // Auto-scroll to group details when a group is selected
+  useEffect(() => {
+    if (selectedGroupDetail && groupDetailRef.current) {
+      setTimeout(() => {
+        groupDetailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 0);
+    }
+  }, [selectedGroupDetail]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -586,7 +627,7 @@ export default function App() {
   const handleOpenGroup = async (group: any) => {
     setSelectedGroupDetail(group);
     setEditGroupName(group.groupname);
-    setEditLocation(group.location || '');
+    setEditLocation(normalizeLocation(group.location || ''));
     setEditProgramType(group.programtype || '');
     setEditCounselor(group.counselor);
     setEditSchedule(group.schedule);
@@ -602,7 +643,7 @@ export default function App() {
     try {
       await updateGroup(selectedGroupDetail.groupid, {
         groupName: editGroupName,
-        location: editLocation,
+        location: denormalizeLocation(editLocation),
         counselor: editCounselor,
         programType: editProgramType,
         schedule: editSchedule,
@@ -624,10 +665,10 @@ export default function App() {
   // New client form state. Program status and program type start at the most common values.
   const emptyNewClient = {
     firstname: '', middlename: '', lastname: '', docnumber: '', supervisingagent: '', programstartdate: '',
-    programstatus: 'Active', phase: '', programtype: 'State SO', groupid: '',
+    programstatus: 'Active', phase: 'Phase 1 - Weekly', programtype: 'State SO', groupid: '',
     address: '', city: '', county: '', state: '', zip: '',
     mainphone: '', altphone: '', emergencycontact: '', emergencycontactphone: '', comments: '',
-    treatmentfee: '', vouchers: ''
+    treatmentfee: 180, vouchers: ''
   };
   const [showNewClientForm, setShowNewClientForm] = useState(false);
   const [newClient, setNewClient] = useState(emptyNewClient);
@@ -658,7 +699,7 @@ export default function App() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await createGroup(newGroup);
+      const res = await createGroup({ ...newGroup, location: denormalizeLocation(newGroup.location) });
       setSuccessMsg(res.message || 'Group created successfully!');
       setNewGroup(emptyNewGroup);
       setShowNewGroupForm(false);
@@ -680,6 +721,7 @@ export default function App() {
       setSelectedGroupDetail(null);
       setGroupRoster([]);
       setGroupTab('roster');
+      setAssignClientSearch('');
       loadDashboardData();
     } catch (err: any) {
       setError(err.message || 'Error deleting group.');
@@ -693,6 +735,7 @@ export default function App() {
     await assignClientToGroup(selectedGroupDetail.groupid, clientId);
     const updatedRoster = await getGroupClients(selectedGroupDetail.groupid);
     setGroupRoster(updatedRoster);
+    setAssignClientSearch('');
     setSuccessMsg('Client reassigned to group successfully!');
   };
 
@@ -783,6 +826,10 @@ export default function App() {
     setClientTab('information');
     setEditingClientInfo(false);
     setClientInfoForm({ ...client });
+    setShowFeeOverrideForm(false);
+    setFeeOverrideInput('');
+    setFeeOverrideDate('');
+    setClientFeeOverride(null);
     const [att, fin, notes, polys] = await Promise.all([
       getClientAttendance(client.clientid),
       getClientFinancials(client.clientid),
@@ -793,6 +840,12 @@ export default function App() {
     setClientFinancials(fin);
     setClientNotes(notes);
     setClientPolygraphs(polys);
+    try {
+      const { override } = await fetchClientFeeOverride(client.clientid);
+      setClientFeeOverride(override);
+    } catch (err: any) {
+      setClientInfoError(err.message || 'Could not load the temporary fee override.');
+    }
   };
 
   const handleAddNote = async (e: React.FormEvent) => {
@@ -810,7 +863,7 @@ export default function App() {
 
   const handleStandalonePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedClient) return;
+    if (!selectedClient || paymentAmount <= 0) return;
     setLoading(true);
     setLastPayment(null);
     const client = clients.find(c => c.clientid === Number(selectedClient));
@@ -837,6 +890,27 @@ export default function App() {
       setComments('');
     } else {
       setError(res.error || 'Error recording payment.');
+    }
+    setLoading(false);
+  };
+
+  const handleCustomChargeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chargeClient || chargeAmount <= 0 || !chargeNotes.trim()) return;
+    setLoading(true);
+    const res = await submitCustomCharge({
+      client: Number(chargeClient),
+      amount: chargeAmount,
+      comments: chargeNotes.trim(),
+      createdBy: user.employeeemail
+    });
+    if (res.success) {
+      setSuccessMsg(`Custom fee of ${formatMoney(chargeAmount)} charged! Updated Balance: ${formatBalance(res.newBalance)}`);
+      loadDashboardData();
+      setChargeInput('');
+      setChargeNotes('');
+    } else {
+      setError(res.error || 'Error charging custom fee.');
     }
     setLoading(false);
   };
@@ -905,12 +979,30 @@ export default function App() {
 
   // Client directory search: matches name, DOC #, agent, group, program, phase, and status
   const clientSearchTerm = clientSearch.trim().toLowerCase();
-  const filteredClients = clientSearchTerm
-    ? clients.filter(c => [
+  const clientFilterActive = Object.values(clientFilters).some(Boolean);
+  const distinctClientValues = (key: 'agent' | 'programtype' | 'currentgroup' | 'status') => {
+    if (key === 'status') return ['Active', 'Completed', 'Deceased', 'Discharged', 'Failed - Non Attendance', 'Failed - Non Compliance', 'Inactive', 'Revoked', 'Transfered'];
+    if (key === 'agent') return Array.from(new Set(clients.map(c => c.supervisingagent).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
+    if (key === 'programtype') return Array.from(new Set(clients.map(c => c.programtype).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
+    if (key === 'currentgroup') return Array.from(new Set(clients.map(c => c.groupname).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
+    return [];
+  };
+  const filteredClients = clients
+    .filter(c => {
+      if (clientSearchTerm && ![
         c.firstname, c.lastname, `${c.firstname} ${c.lastname}`, `${c.lastname}, ${c.firstname}`,
         c.docnumber, c.supervisingagent, c.groupname, c.programtype, c.phase, c.programstatus
-      ].some(v => String(v ?? '').toLowerCase().includes(clientSearchTerm)))
-    : clients;
+      ].some(v => String(v ?? '').toLowerCase().includes(clientSearchTerm))) return false;
+
+      if (clientFilters.agent && c.supervisingagent !== clientFilters.agent) return false;
+      if (clientFilters.programtype && c.programtype !== clientFilters.programtype) return false;
+      if (clientFilters.currentgroup && c.groupname !== clientFilters.currentgroup) return false;
+      if (clientFilters.status && c.programstatus !== clientFilters.status) return false;
+      if (clientFilters.feeoverride === 'active' && (c.activefeeoverride === null || c.activefeeoverride === undefined)) return false;
+      if (clientFilters.feeoverride === 'none' && c.activefeeoverride !== null && c.activefeeoverride !== undefined) return false;
+
+      return true;
+    });
 
   // Filter assigned slots for Poly Results tab
   const assignedSlots = polySlots.filter(s => s.status === 'Assigned' || s.assignedClientId);
@@ -1022,23 +1114,91 @@ export default function App() {
 
         {activeTab === 'clients' && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-            <div className="p-5 border-b border-slate-800 flex justify-between items-center">
-              <div>
-                <h2 className="font-semibold text-white">Active Client Directory</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Click any client row to view detailed attendance, ledger, notes, and polygraph logs.</p>
+            <div className="p-5 border-b border-slate-800 space-y-4">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h2 className="font-semibold text-white">Active Client Directory</h2>
+                  <p className="text-xs text-slate-400 mt-0.5">Click any client row to view detailed attendance, ledger, notes, and polygraph logs.</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button type="button" onClick={() => setShowNewClientForm(s => !s)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap">+ New Client</button>
+                  <input
+                    type="search"
+                    value={clientSearch}
+                    onChange={(e) => setClientSearch(e.target.value)}
+                    placeholder="Search name, DOC #, agent, group..."
+                    className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs w-64 max-w-full"
+                  />
+                  <span className="text-xs bg-slate-800 px-3 py-1 rounded-full text-slate-300 whitespace-nowrap">
+                    {filteredClients.length === clients.length ? `${clients.length} Registered Clients` : `${filteredClients.length} of ${clients.length} Clients`}
+                  </span>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <button type="button" onClick={() => setShowNewClientForm(s => !s)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap">+ New Client</button>
-                <input
-                  type="search"
-                  value={clientSearch}
-                  onChange={(e) => setClientSearch(e.target.value)}
-                  placeholder="Search name, DOC #, agent, group..."
-                  className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs w-64 max-w-full"
-                />
-                <span className="text-xs bg-slate-800 px-3 py-1 rounded-full text-slate-300 whitespace-nowrap">
-                  {filteredClients.length === clients.length ? `${clients.length} Registered Clients` : `${filteredClients.length} of ${clients.length} Clients`}
-                </span>
+
+              <div className="flex gap-3 flex-wrap">
+                <select
+                  value={clientFilters.agent}
+                  onChange={(e) => setClientFilters({ ...clientFilters, agent: e.target.value })}
+                  className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+                >
+                  <option value="">Agent: All</option>
+                  {distinctClientValues('agent').map(agent => (
+                    <option key={agent} value={agent}>{agent}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={clientFilters.programtype}
+                  onChange={(e) => setClientFilters({ ...clientFilters, programtype: e.target.value })}
+                  className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+                >
+                  <option value="">Program Type: All</option>
+                  {distinctClientValues('programtype').map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={clientFilters.currentgroup}
+                  onChange={(e) => setClientFilters({ ...clientFilters, currentgroup: e.target.value })}
+                  className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+                >
+                  <option value="">Current Group: All</option>
+                  {distinctClientValues('currentgroup').map(group => (
+                    <option key={group} value={group}>{group}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={clientFilters.status}
+                  onChange={(e) => setClientFilters({ ...clientFilters, status: e.target.value })}
+                  className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+                >
+                  <option value="">Status: All</option>
+                  {distinctClientValues('status').map(status => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
+
+                <select
+                  value={clientFilters.feeoverride}
+                  onChange={(e) => setClientFilters({ ...clientFilters, feeoverride: e.target.value })}
+                  className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+                >
+                  <option value="">Fee Override: All</option>
+                  <option value="active">Reduced fee active</option>
+                  <option value="none">No override</option>
+                </select>
+
+                {clientFilterActive && (
+                  <button
+                    type="button"
+                    onClick={() => setClientFilters({ agent: '', programtype: '', currentgroup: '', status: 'Active', feeoverride: '' })}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
+                  >
+                    Reset Filters
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1077,8 +1237,8 @@ export default function App() {
                       setNewClient({
                         ...newClient,
                         programtype: programType,
-                        phase: programType === 'State SO' || programType === 'Federal SO' ? 'Phase 1 - Weekly' : '',
-                        treatmentfee: programType === 'BIP' ? '35' : (programType === 'State SO' ? '180' : '0')
+                        phase: SO_PROGRAM_TYPES.includes(programType) ? 'Phase 1 - Weekly' : programType === 'BIP' ? '0' : '',
+                        treatmentfee: programType === 'BIP' ? 35 : (programType === 'State SO' ? 180 : 0)
                       });
                     }} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm">
                       <option value="State SO">State SO</option>
@@ -1091,10 +1251,17 @@ export default function App() {
 
                   {SO_PROGRAM_TYPES.includes(newClient.programtype) && (
                     <div>
-                      <label className="block text-xs text-slate-400 mb-1">Phase *</label>
-                      <select required value={newClient.phase} disabled className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm opacity-60 cursor-not-allowed">
+                      <label className="block text-xs text-slate-400 mb-1">Phase</label>
+                      <select value={newClient.phase} disabled className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm opacity-60 cursor-not-allowed">
                         {SO_PHASES.map(p => <option key={p} value={p}>{p}</option>)}
                       </select>
+                    </div>
+                  )}
+
+                  {newClient.programtype === 'BIP' && (
+                    <div>
+                      <label className="block text-xs text-slate-400 mb-1">Week</label>
+                      <input type="number" min={0} step={1} value={newClient.phase} onChange={(e) => setNewClient({ ...newClient, phase: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
                     </div>
                   )}
 
@@ -1110,7 +1277,7 @@ export default function App() {
 
                   <div>
                     <label className="block text-xs text-slate-400 mb-1">Treatment Fee</label>
-                    <input type="number" step="0.01" value={newClient.treatmentfee} onChange={(e) => setNewClient({ ...newClient, treatmentfee: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
+                    <input type="number" step="0.01" value={newClient.treatmentfee} onChange={(e) => setNewClient({ ...newClient, treatmentfee: Number(e.target.value) })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
                   </div>
 
                   {newClientField('Vouchers', 'vouchers', 'number')}
@@ -1157,7 +1324,6 @@ export default function App() {
                     <th className="p-3">Last Poly</th>
                     <th className="p-3">Status</th>
                     <th className="p-3">Balance</th>
-                    <th className="p-3 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800 text-sm">
@@ -1167,18 +1333,17 @@ export default function App() {
                       <td className="p-3 text-slate-400 font-mono text-xs">{c.docnumber}</td>
                       <td className="p-3 text-slate-300 text-xs">{c.supervisingagent}</td>
                       <td className="p-3"><span className="bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2 py-0.5 rounded text-xs font-semibold">{c.programtype || 'State SO'}</span></td>
-                      <td className="p-3 text-xs"><span className="bg-slate-800 px-2 py-0.5 rounded text-slate-300">{c.phase || 'N/A'}</span></td>
+                      <td className="p-3 text-xs"><span className="bg-slate-800 px-2 py-0.5 rounded text-slate-300">{formatPhase(c.programtype, c.phase) || 'N/A'}</span></td>
                       <td className="p-3 text-slate-300 text-xs">{c.groupname || 'Unassigned'}</td>
                       <td className="p-3 text-slate-400 text-xs">{c.lastattended ? new Date(c.lastattended).toLocaleDateString() : 'Never'}</td>
                       <td className="p-3 text-slate-400 text-xs">{c.lastpoly ? new Date(c.lastpoly).toLocaleDateString() : 'None'}</td>
                       <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${c.programstatus === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>{c.programstatus}</span></td>
-                      <td className="p-3 font-semibold text-slate-200">{formatBalance(c.accountbalance)}</td>
-                      <td className="p-3 text-right"><button className="text-xs text-blue-400 hover:text-blue-300 font-medium bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-lg">View Logs</button></td>
+                      <td className={`p-3 font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</td>
                     </tr>
                   ))}
                   {filteredClients.length === 0 && (
                     <tr>
-                      <td colSpan={11} className="p-6 text-center text-slate-500 text-sm">No clients match &quot;{clientSearch}&quot;.</td>
+                      <td colSpan={10} className="p-6 text-center text-slate-500 text-sm">No clients match your filters.</td>
                     </tr>
                   )}
                 </tbody>
@@ -1196,7 +1361,30 @@ export default function App() {
                   <h2 className="text-xl font-bold text-white">{selectedClientDetail.firstname} {selectedClientDetail.lastname}</h2>
                   <p className="text-xs text-slate-400 mt-1">DOC #: <span className="text-slate-200 font-mono">{selectedClientDetail.docnumber}</span> | Program: <span className="text-blue-400 font-semibold">{selectedClientDetail.programtype || 'State SO'}</span> | Agent: {selectedClientDetail.supervisingagent}</p>
                 </div>
-                <button onClick={() => setSelectedClientDetail(null)} className="text-slate-400 hover:text-white p-1 rounded-lg bg-slate-800"><X size={20} /></button>
+                <div className="flex gap-2">
+                  {role === 'Business Administrator' && (
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm(`Delete client ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}? This action cannot be undone.`)) return;
+                        setLoading(true);
+                        try {
+                          await deleteClient(selectedClientDetail.clientid);
+                          setSuccessMsg('Client deleted successfully!');
+                          setSelectedClientDetail(null);
+                          loadDashboardData();
+                        } catch (err: any) {
+                          setError(err.message || 'Error deleting client.');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }}
+                      className="text-red-400 hover:text-red-300 hover:bg-red-500/10 p-1 rounded-lg bg-red-500/5 border border-red-500/20"
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                  )}
+                  <button onClick={() => setSelectedClientDetail(null)} className="text-slate-400 hover:text-white p-1 rounded-lg bg-slate-800"><X size={20} /></button>
+                </div>
               </div>
 
               <div className="flex border-b border-slate-800 gap-4 mb-6">
@@ -1269,7 +1457,7 @@ export default function App() {
                         { label: 'DOC #', field: 'docnumber' },
                         { label: 'Supervising Agent', field: 'supervisingagent' },
                         { label: 'Program Status', field: 'programstatus' },
-                        { label: 'Phase', field: 'phase' },
+                        { label: (editingClientInfo ? clientInfoForm.programtype : selectedClientDetail.programtype) === 'BIP' ? 'Week' : 'Phase', field: 'phase' },
                         { label: 'Program Start Date', field: 'programstartdate' },
                         { label: 'Last Date Attended', field: 'lastdateattended' },
                       ].map(({ label, field }) => (
@@ -1306,6 +1494,15 @@ export default function App() {
                                 <option value={clientInfoForm.phase}>{clientInfoForm.phase} (current)</option>
                               )}
                             </select>
+                          ) : editingClientInfo && field === 'phase' && clientInfoForm.programtype === 'BIP' ? (
+                            <input
+                              type="number"
+                              min={0}
+                              step={1}
+                              value={clientInfoForm.phase ?? ''}
+                              onChange={e => setClientInfoForm((f: any) => ({ ...f, phase: e.target.value }))}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
+                            />
                           ) : editingClientInfo ? (
                             <input
                               type={field.includes('date') || field.includes('Date') ? 'date' : 'text'}
@@ -1317,7 +1514,7 @@ export default function App() {
                             <p className="text-white font-medium">
                               {field.includes('date') || field.includes('Date')
                                 ? (selectedClientDetail[field] ? new Date(selectedClientDetail[field]).toLocaleDateString() : '—')
-                                : (selectedClientDetail[field] || '—')}
+                                : ((field === 'phase' ? formatPhase(selectedClientDetail.programtype, selectedClientDetail.phase) : selectedClientDetail[field]) || '—')}
                             </p>
                           )}
                         </div>
@@ -1392,6 +1589,9 @@ export default function App() {
                                 ...f,
                                 programtype: programType,
                                 ...(programType === 'BIP' ? { treatmentfee: 35 } : {}),
+                                // Switching programs resets the phase/week to one that fits the new program
+                                ...(SO_PROGRAM_TYPES.includes(programType) && !SO_PHASES.includes(f.phase) ? { phase: 'Phase 1 - Weekly' } : {}),
+                                ...(programType === 'BIP' && !isWholeNumber(f.phase) ? { phase: '0' } : {}),
                               }));
                             }}
                             className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
@@ -1451,6 +1651,135 @@ export default function App() {
                         </div>
                       ))}
                     </div>
+                  </div>
+
+                  {/* Section 4 – Temporary Fee Override */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
+                    <div className="flex justify-between items-start mb-4">
+                      <h3 className="text-xs font-bold uppercase text-blue-400 tracking-wider">Temporary Fee Override</h3>
+                      {role === 'Business Administrator' && (
+                        <button
+                          type="button"
+                          onClick={() => setShowFeeOverrideForm(!showFeeOverrideForm)}
+                          className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
+                        >
+                          {showFeeOverrideForm ? 'Cancel' : clientFeeOverride ? 'Change Temporary Fee' : 'Set Temporary Fee'}
+                        </button>
+                      )}
+                    </div>
+
+                    {clientFeeOverride ? (
+                      <div className="bg-slate-900 border border-emerald-500/30 rounded-lg p-4 mb-4">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <p className="text-xs text-slate-500 mb-1">Reduced Fee</p>
+                            <p className="text-white font-semibold text-lg">${Number(clientFeeOverride.reducedfee).toFixed(2)}</p>
+                            <p className="text-xs text-slate-500 mt-0.5">Regular fee: ${Number(selectedClientDetail.treatmentfee || 0).toFixed(2)}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-slate-500 mb-1">Expires (last day at reduced rate)</p>
+                            {/* DATE columns arrive as an ISO timestamp; keep only the date part so it isn't shifted a day by time zones */}
+                            <p className="text-white font-semibold">{parseLogDate(String(clientFeeOverride.expirationdate).split('T')[0])?.toLocaleDateString()}</p>
+                          </div>
+                        </div>
+                        {role === 'Business Administrator' && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setLoading(true);
+                              setClientInfoError('');
+                              try {
+                                await deleteClientFeeOverride(selectedClientDetail.clientid, user.employeeemail);
+                                setClientFeeOverride(null);
+                                setSuccessMsg('Temporary fee override removed. Regular fee will apply.');
+                                loadDashboardData();
+                              } catch (err: any) {
+                                setClientInfoError(err.message || 'Failed to remove fee override.');
+                              } finally {
+                                setLoading(false);
+                              }
+                            }}
+                            className="mt-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 px-3 py-1.5 rounded-lg text-xs font-semibold w-full"
+                          >
+                            Remove Override
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400">No temporary fee override is active. Regular fee applies: ${Number(selectedClientDetail.treatmentfee || 0).toFixed(2)}</p>
+                    )}
+
+                    {showFeeOverrideForm && role === 'Business Administrator' && (
+                      <form onSubmit={async (e) => {
+                        e.preventDefault();
+                        if (feeOverrideInput === '' || !feeOverrideDate) {
+                          setClientInfoError('Please enter a reduced fee and expiration date.');
+                          return;
+                        }
+                        if (feeOverrideDate < getLocalDateString()) {
+                          setClientInfoError('The expiration date cannot be in the past.');
+                          return;
+                        }
+                        setLoading(true);
+                        setClientInfoError('');
+                        try {
+                          const result = await saveClientFeeOverride(selectedClientDetail.clientid, Number(feeOverrideInput), feeOverrideDate, user.employeeemail);
+                          setClientFeeOverride(result.override);
+                          setShowFeeOverrideForm(false);
+                          setFeeOverrideInput('');
+                          setFeeOverrideDate('');
+                          setSuccessMsg(`Temporary fee set to $${Number(feeOverrideInput).toFixed(2)} through ${parseLogDate(feeOverrideDate)?.toLocaleDateString()}.`);
+                          loadDashboardData();
+                        } catch (err: any) {
+                          setClientInfoError(err.message || 'Failed to set fee override.');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }} className="space-y-3 border-t border-slate-800 pt-4 mt-4">
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">Reduced Fee Amount *</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={feeOverrideInput}
+                            onChange={(e) => setFeeOverrideInput(e.target.value)}
+                            placeholder="e.g., 90.00"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">Expiration Date *</label>
+                          <input
+                            type="date"
+                            value={feeOverrideDate}
+                            onChange={(e) => setFeeOverrideDate(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
+                            required
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowFeeOverrideForm(false);
+                              setFeeOverrideInput('');
+                              setFeeOverrideDate('');
+                            }}
+                            className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={loading}
+                            className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
+                          >
+                            Set Override
+                          </button>
+                        </div>
+                      </form>
+                    )}
                   </div>
                 </div>
               )}
@@ -1559,12 +1888,60 @@ export default function App() {
               <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
                 <div><h2 className="text-lg font-bold text-white">Attendance Sign-In & Payment Entry</h2><p className="text-xs text-slate-400 mt-0.5">Record attendance, cross-group makeups, or standalone ledger payments.</p></div>
                 <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
-                  <button onClick={() => setIsAccountOnly(false)} className={`px-3 py-1.5 rounded text-xs font-semibold ${!isAccountOnly ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Attendance + Payment</button>
-                  <button onClick={() => setIsAccountOnly(true)} className={`px-3 py-1.5 rounded text-xs font-semibold ${isAccountOnly ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Account-Only Payment</button>
+                  <button onClick={() => { setIsAccountOnly(false); setIsCustomCharge(false); }} className={`px-3 py-1.5 rounded text-xs font-semibold ${!isAccountOnly && !isCustomCharge ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Attendance + Payment</button>
+                  <button onClick={() => { setIsAccountOnly(true); setIsCustomCharge(false); }} className={`px-3 py-1.5 rounded text-xs font-semibold ${isAccountOnly && !isCustomCharge ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Account-Only Payment</button>
+                  {role === 'Business Administrator' && (
+                    <button onClick={() => setIsCustomCharge(true)} className={`px-3 py-1.5 rounded text-xs font-semibold ${isCustomCharge ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Custom Charge</button>
+                  )}
                 </div>
               </div>
 
-              {!isAccountOnly ? (
+              {isCustomCharge && role === 'Business Administrator' ? (
+                <form onSubmit={handleCustomChargeSubmit} className="space-y-5 max-w-xl">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Client</label>
+                    <select value={chargeClient} onChange={(e) => setChargeClient(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required>
+                      <option value="">Select a client…</option>
+                      {clients.map(c => <option key={c.clientid} value={c.clientid}>{c.lastname}, {c.firstname}</option>)}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Fee Amount</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
+                      <input type="number" step="0.01" min="0.01" value={chargeInput} onKeyDown={(e) => { if (e.key === '-' || e.key === 'e' || e.key === 'E') e.preventDefault(); }} onChange={(e) => setChargeInput(e.target.value.replace(/-/g, ''))} placeholder="0.00" className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 pl-7 pr-3 text-white text-sm" required />
+                    </div>
+                    {chargeClientRecord ? (
+                      <div className="mt-3 bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm space-y-1.5">
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">Current balance</span>
+                          <span className={toDisplayBalance(chargeCurrentBalance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatMoney(toDisplayBalance(chargeCurrentBalance))}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">This charge</span>
+                          <span className="text-red-400">-{formatMoney(chargeAmount)}</span>
+                        </div>
+                        <div className="flex justify-between border-t border-slate-800 pt-1.5">
+                          <span className="font-semibold text-slate-300">Balance after charge</span>
+                          <span className={`font-bold ${toDisplayBalance(balanceAfterCharge) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatMoney(toDisplayBalance(balanceAfterCharge))}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 mt-1.5">Select a client to see their account balance.</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Notes</label>
+                    <textarea value={chargeNotes} onChange={(e) => setChargeNotes(e.target.value)} rows={3} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" placeholder="Reason for this fee…" required />
+                  </div>
+
+                  <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
+                    <button type="submit" disabled={loading || !chargeNotes.trim()} className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">Charge Fee</button>
+                  </div>
+                </form>
+              ) : !isAccountOnly ? (
                 <GroupCheckInWorkflow
                   groups={activeGroups}
                   clients={clients}
@@ -1608,13 +1985,13 @@ export default function App() {
                     <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Payment Amount</label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
-                      <input type="number" step="0.01" min="0" value={paymentInput} onChange={(e) => setPaymentInput(e.target.value)} placeholder="0.00" className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 pl-7 pr-3 text-white text-sm" required />
+                      <input type="number" step="0.01" min="0" value={paymentInput} onKeyDown={(e) => { if (e.key === '-' || e.key === 'e' || e.key === 'E') e.preventDefault(); }} onChange={(e) => setPaymentInput(e.target.value.replace(/-/g, ''))} placeholder="0.00" className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 pl-7 pr-3 text-white text-sm" required />
                     </div>
                     {selectedClientRecord ? (
                       <div className="mt-3 bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm space-y-1.5">
                         <div className="flex justify-between">
                           <span className="text-slate-400">Current balance</span>
-                          <span className="text-white">{formatMoney(toDisplayBalance(currentBalance))}</span>
+                          <span className={toDisplayBalance(currentBalance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatMoney(toDisplayBalance(currentBalance))}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-slate-400">This payment</span>
@@ -1622,7 +1999,7 @@ export default function App() {
                         </div>
                         <div className="flex justify-between border-t border-slate-800 pt-1.5">
                           <span className="font-semibold text-slate-300">Balance after payment</span>
-                          <span className="font-bold text-white">{formatMoney(toDisplayBalance(balanceAfterPayment))}</span>
+                          <span className={`font-bold ${toDisplayBalance(balanceAfterPayment) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatMoney(toDisplayBalance(balanceAfterPayment))}</span>
                         </div>
                       </div>
                     ) : (
@@ -1767,6 +2144,7 @@ export default function App() {
                   ['location', 'Location', 'All locations'],
                   ['counselor', 'Counselor', 'All counselors'],
                   ['programtype', 'Program Type', 'All program types'],
+                  ['status', 'Status', 'All statuses'],
                 ] as const).map(([key, label, allLabel]) => (
                   <div key={key} className="flex flex-col gap-1">
                     <label className="text-slate-400">{label}</label>
@@ -1777,14 +2155,14 @@ export default function App() {
                   </div>
                 ))}
                 {groupFilterActive && (
-                  <button type="button" onClick={() => setGroupFilters({ location: '', counselor: '', programtype: '' })} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs font-semibold">Clear filters</button>
+                  <button type="button" onClick={() => setGroupFilters({ location: '', counselor: '', programtype: '', status: '' })} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs font-semibold">Clear filters</button>
                 )}
               </div>
 
               {showNewGroupForm && (
                 <form onSubmit={handleCreateGroup} className="bg-slate-950 border border-slate-800 rounded-lg p-4 mb-5 grid grid-cols-2 gap-4 text-sm">
                   <datalist id="group-locations">
-                    {Array.from(new Set(groups.map(g => g.location).filter(Boolean))).map(v => <option key={v} value={v} />)}
+                    {Array.from(new Set(groups.map(g => normalizeLocation(g.location)).filter(Boolean))).map(v => <option key={v} value={v} />)}
                   </datalist>
                   <datalist id="group-program-types">
                     {Array.from(new Set(groups.map(g => g.programtype).filter(Boolean))).map(v => <option key={v} value={v} />)}
@@ -1819,7 +2197,7 @@ export default function App() {
                   {sortedDirectoryGroups.map(g => (
                     <tr key={g.groupid} className="hover:bg-slate-800/50 transition">
                       <td className="p-3 font-medium text-white">{g.groupname}</td>
-                      <td className="p-3 text-slate-400">{g.location}</td>
+                      <td className="p-3 text-slate-400">{normalizeLocation(g.location)}</td>
                       <td className="p-3 text-slate-300">{g.counselor}</td>
                       <td className="p-3"><span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-xs">{g.programtype}</span></td>
                       <td className="p-3 text-slate-400">{g.schedule}</td>
@@ -1839,7 +2217,7 @@ export default function App() {
             </div>
 
             {selectedGroupDetail && (
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
+              <div ref={groupDetailRef} className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
                 <div className="flex justify-between items-center border-b border-slate-800 pb-4">
                   <h3 className="text-lg font-bold text-white">Managing: {selectedGroupDetail.groupname}</h3>
                   <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
@@ -1866,22 +2244,50 @@ export default function App() {
 
                 {groupTab === 'assign' && (
                   <div className="space-y-3">
-                    <p className="text-xs text-slate-400 uppercase font-semibold">Reassign Client to this Group</p>
-                    <div className="grid grid-cols-2 gap-4">
-                      {clients.map(c => (
-                        <div key={c.clientid} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center text-xs">
-                          <span>{c.lastname}, {c.firstname}</span>
-                          <button onClick={() => handleAssignClient(c.clientid)} className="bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded">Assign</button>
-                        </div>
-                      ))}
+                    <div className="flex justify-between items-center">
+                      <p className="text-xs text-slate-400 uppercase font-semibold">Assign Client to this Group</p>
+                      <input
+                        type="search"
+                        value={assignClientSearch}
+                        onChange={(e) => setAssignClientSearch(e.target.value)}
+                        placeholder="Search client name or DOC #..."
+                        className="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white text-xs w-64 max-w-full"
+                      />
                     </div>
+                    {(() => {
+                      const assignedClientIds = new Set(groupRoster.map(c => c.clientid));
+                      const unassignedClients = clients.filter(c => !assignedClientIds.has(c.clientid));
+                      const searchTerm = assignClientSearch.trim().toLowerCase();
+                      const filteredClients = searchTerm
+                        ? unassignedClients.filter(c => [
+                            c.firstname, c.lastname, `${c.firstname} ${c.lastname}`, `${c.lastname}, ${c.firstname}`, c.docnumber
+                          ].some(v => String(v ?? '').toLowerCase().includes(searchTerm)))
+                        : unassignedClients;
+
+                      return (
+                        <div className="grid grid-cols-2 gap-4">
+                          {filteredClients.length > 0 ? (
+                            filteredClients.map(c => (
+                              <div key={c.clientid} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center text-xs">
+                                <span>{c.lastname}, {c.firstname} ({c.docnumber})</span>
+                                <button onClick={() => handleAssignClient(c.clientid)} className="bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded">Assign</button>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-xs text-slate-500 italic col-span-2">
+                              {searchTerm ? 'No clients match your search.' : 'All available clients are already assigned to this group.'}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
                 {groupTab === 'schedule' && (
                   <form onSubmit={handleUpdateGroup} className="space-y-4 max-w-2xl">
                     <datalist id="edit-group-locations">
-                      {Array.from(new Set(groups.map(g => g.location).filter(Boolean))).map(v => <option key={v} value={v} />)}
+                      {Array.from(new Set(groups.map(g => normalizeLocation(g.location)).filter(Boolean))).map(v => <option key={v} value={v} />)}
                     </datalist>
                     <datalist id="edit-group-program-types">
                       {Array.from(new Set(groups.map(g => g.programtype).filter(Boolean))).map(v => <option key={v} value={v} />)}
@@ -2437,7 +2843,14 @@ export default function App() {
                     ))}
                   </div>
                 </div>
-                {employees.filter(e => accountFilter === 'all' || (accountFilter === 'active' ? e.active !== false : e.active === false)).map(e => (
+                <input
+                  type="search"
+                  value={empSearch}
+                  onChange={(e) => setEmpSearch(e.target.value)}
+                  placeholder="Search by name or email..."
+                  className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-xs placeholder-slate-500"
+                />
+                {employees.filter(e => (accountFilter === 'all' || (accountFilter === 'active' ? e.active !== false : e.active === false)) && (empSearch.trim() === '' || `${e.displayname} ${e.employeeemail} ${e.role}`.toLowerCase().includes(empSearch.toLowerCase()))).map(e => (
                   <div key={e.employeeemail} className={`bg-slate-950 border p-3 rounded flex justify-between items-center gap-3 text-xs ${editingEmail === e.employeeemail ? 'border-blue-500' : 'border-slate-800'}`}>
                     <div className="min-w-0">
                       <p className="font-semibold text-white truncate">{e.displayname}</p>

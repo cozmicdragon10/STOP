@@ -69,7 +69,8 @@ app.get('/api/clients', async (req, res) => {
                 COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
                 (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
                 (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly,
-                ${ATTENDED_THIS_MONTH} AS AttendedThisMonth
+                ${ATTENDED_THIS_MONTH} AS AttendedThisMonth,
+                ${ACTIVE_FEE_OVERRIDE} AS ActiveFeeOverride
             FROM Clients c
             LEFT JOIN Groups g ON c.GroupId = g.GroupId
             ORDER BY c.LastName ASC;
@@ -218,9 +219,15 @@ app.post('/api/clients', async (req, res) => {
             comments, programtype
         } = req.body;
 
+        // BIP clients have no phase; they store a whole-number week in the same column, starting at 0
+        const clientPhase = programtype === 'BIP' ? (String(phase ?? '').trim() || '0') : phase;
+        if (programtype === 'BIP' && !/^\d+$/.test(clientPhase)) {
+            return res.status(400).json({ error: 'Week must be a whole number.' });
+        }
+
         const required = {
             'First name': firstname, 'Last name': lastname, 'DOC #': docnumber, 'Supervising agent': supervisingagent,
-            'Program start date': programstartdate, 'Program status': programstatus, Phase: phase
+            'Program start date': programstartdate, 'Program status': programstatus, Phase: clientPhase
         };
         const missing = Object.entries(required).filter(([, value]) => !String(value || '').trim()).map(([label]) => label);
         if (missing.length > 0) {
@@ -243,7 +250,7 @@ app.post('/api/clients', async (req, res) => {
             ) RETURNING ClientId`,
             [
                 firstname.trim(), middlename?.trim() || null, lastname.trim(), docnumber.trim(), supervisingagent.trim(),
-                programstartdate, programstatus, phase.trim(), groupid ? Number(groupid) : null,
+                programstartdate, programstatus, clientPhase.trim(), groupid ? Number(groupid) : null,
                 address || null, city || null, county || null, state || null, zip || null,
                 mainphone || null, altphone || null, emergencycontact || null, emergencycontactphone || null,
                 comments || null, programtype || null
@@ -256,6 +263,111 @@ app.post('/api/clients', async (req, res) => {
             return res.status(409).json({ error: 'A client with this DOC # already exists.' });
         }
         console.error('Error creating client:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Delete a client (Business Administrators only)
+app.delete('/api/clients/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userEmail = req.headers['x-user-email'] || 'unknown';
+
+        // Check user role
+        const userResult = await pool.query(
+            'SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE',
+            [userEmail]
+        );
+        const userRole = userResult.rows[0]?.role;
+        if (userRole !== 'Business Administrator') {
+            return res.status(403).json({ error: 'Only Business Administrators can delete clients.' });
+        }
+
+        const result = await pool.query('DELETE FROM Clients WHERE ClientId = $1 RETURNING ClientId', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Client not found.' });
+        }
+
+        await logAction(userEmail, 'Client Deleted', `Deleted client ID ${id}`, 'Audit');
+        res.json({ success: true, message: 'Client deleted successfully.' });
+    } catch (err) {
+        // 23503 = foreign_key_violation: attendance, notes, or other records still reference this client
+        if (err.code === '23503') {
+            return res.status(409).json({ error: 'This client has attendance records, notes, or other data that cannot be automatically removed. Contact an administrator for assistance.' });
+        }
+        console.error('Error deleting client:', err);
+        res.status(500).json({ error: 'Failed to delete client.' });
+    }
+});
+
+// --- TEMPORARY FEE OVERRIDES ---
+// A reduced treatment fee that applies through ExpirationDate (inclusive); after that the client's regular TreatmentFee applies again.
+pool.query(`
+    CREATE TABLE IF NOT EXISTS TemporaryFeeOverrides (
+        OverrideId SERIAL PRIMARY KEY,
+        ClientId INT NOT NULL REFERENCES Clients(ClientId) ON DELETE CASCADE,
+        ReducedFee NUMERIC(10, 2) NOT NULL,
+        ExpirationDate DATE NOT NULL,
+        CreatedBy VARCHAR(255),
+        CreatedOn TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+`).catch(err => console.error('Could not create TemporaryFeeOverrides table:', err.message));
+
+const ACTIVE_FEE_OVERRIDE = `(SELECT o.ReducedFee FROM TemporaryFeeOverrides o WHERE o.ClientId = c.ClientId AND o.ExpirationDate >= CURRENT_DATE ORDER BY o.CreatedOn DESC LIMIT 1)`;
+
+app.get('/api/clients/:id/fee-override', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query(
+            `SELECT * FROM TemporaryFeeOverrides
+             WHERE ClientId = $1 AND ExpirationDate >= CURRENT_DATE
+             ORDER BY CreatedOn DESC LIMIT 1`,
+            [id]
+        );
+        res.json({ override: result.rows[0] || null });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/clients/:id/fee-override', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { reducedFee, expirationDate, createdBy } = req.body;
+
+        if (reducedFee === undefined || reducedFee === null || reducedFee === '' || Number(reducedFee) < 0 || !expirationDate) {
+            return res.status(400).json({ error: 'A reduced fee (0 or more) and an expiration date are required.' });
+        }
+
+        await pool.query('DELETE FROM TemporaryFeeOverrides WHERE ClientId = $1', [id]);
+        const result = await pool.query(
+            `INSERT INTO TemporaryFeeOverrides (ClientId, ReducedFee, ExpirationDate, CreatedBy)
+             VALUES ($1, $2, $3, $4) RETURNING *`,
+            [id, Number(reducedFee), expirationDate, createdBy]
+        );
+
+        await logAction(createdBy, 'Fee Override Set', `Set temporary fee override for Client ID ${id}: $${reducedFee} until ${expirationDate}`);
+        res.status(201).json({ override: result.rows[0] });
+    } catch (err) {
+        console.error('Error setting fee override:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/clients/:id/fee-override', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { removedBy } = req.body;
+
+        await pool.query('DELETE FROM TemporaryFeeOverrides WHERE ClientId = $1', [id]);
+
+        if (removedBy) {
+            await logAction(removedBy, 'Fee Override Removed', `Removed temporary fee override for Client ID ${id}`);
+        }
+
+        res.json({ success: true, message: 'Fee override removed successfully.' });
+    } catch (err) {
+        console.error('Error removing fee override:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -279,7 +391,9 @@ app.get('/api/groups/:id/clients', async (req, res) => {
     try {
         const { id } = req.params;
         const result = await pool.query(
-            `SELECT c.*, ${ATTENDED_THIS_MONTH} AS AttendedThisMonth FROM Clients c WHERE c.GroupId = $1`,
+            `SELECT c.*, ${ATTENDED_THIS_MONTH} AS AttendedThisMonth, ${ACTIVE_FEE_OVERRIDE} AS ActiveFeeOverride,
+                    (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended
+             FROM Clients c WHERE c.GroupId = $1`,
             [id]
         );
         res.json(result.rows);
@@ -417,9 +531,16 @@ const recordAttendance = async (db, { client, group, date, paid, groupFee, accou
         );
     }
 
+    // BIP clients count weeks attended: every attendance adds one to the week number stored in Phase.
+    // A non-numeric value (left over from before BIP used week numbers) counts as week 0.
+    const { programtype, phase } = clientRes.rows[0];
+    const newPhase = programtype === 'BIP'
+        ? String((/^\d+$/.test(String(phase ?? '').trim()) ? Number(phase) : 0) + 1)
+        : null;
+
     await db.query(
-        'UPDATE Clients SET AccountBalance = $1, LastDateAttended = $2 WHERE ClientId = $3',
-        [newBalance, sessionDate, client]
+        'UPDATE Clients SET AccountBalance = $1, LastDateAttended = $2, Phase = COALESCE($3, Phase) WHERE ClientId = $4',
+        [newBalance, sessionDate, newPhase, client]
     );
 
     return { attendanceId: attRes.rows[0].attendanceid, newBalance };
@@ -483,6 +604,10 @@ app.post('/api/financials/payment', async (req, res) => {
             await clientDb.query('ROLLBACK');
             return res.status(400).json({ error: 'Choose a payment method: Cash or Credit Card.' });
         }
+        if (!(Number(amount) > 0)) {
+            await clientDb.query('ROLLBACK');
+            return res.status(400).json({ error: 'Payment amount must be greater than zero.' });
+        }
 
         const clientRes = await clientDb.query('SELECT AccountBalance FROM Clients WHERE ClientId = $1', [client]);
         const oldBalance = Number(clientRes.rows[0].accountbalance || 0);
@@ -498,6 +623,50 @@ app.post('/api/financials/payment', async (req, res) => {
         await clientDb.query('UPDATE Clients SET AccountBalance = $1 WHERE ClientId = $2', [newBalance, client]);
 
         await clientDb.query('COMMIT');
+        res.status(201).json({ success: true, newBalance });
+    } catch (error) {
+        await clientDb.query('ROLLBACK');
+        res.status(500).json({ error: error.message });
+    } finally {
+        clientDb.release();
+    }
+});
+
+// Custom fee charged to a client's account (Business Administrators only)
+app.post('/api/financials/charge', async (req, res) => {
+    const clientDb = await pool.connect();
+    try {
+        const { client, amount, comments, createdBy } = req.body;
+        const roleRes = await clientDb.query(
+            'SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE',
+            [createdBy]
+        );
+        if (roleRes.rows[0]?.role !== 'Business Administrator') {
+            return res.status(403).json({ error: 'Only Business Administrators can charge custom fees.' });
+        }
+        if (!(Number(amount) > 0)) {
+            return res.status(400).json({ error: 'Charge amount must be greater than zero.' });
+        }
+        if (!comments || !comments.trim()) {
+            return res.status(400).json({ error: 'Notes are required for a custom fee.' });
+        }
+
+        await clientDb.query('BEGIN');
+        const clientRes = await clientDb.query('SELECT AccountBalance FROM Clients WHERE ClientId = $1', [client]);
+        const oldBalance = Number(clientRes.rows[0].accountbalance || 0);
+        const chargeAmount = Number(amount);
+        const newBalance = oldBalance + chargeAmount;
+
+        await clientDb.query(
+            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments)
+             VALUES ($1, NOW(), 'Charge', $2, 'Custom Fee', $3, $4)`,
+            [client, chargeAmount, newBalance, comments.trim()]
+        );
+
+        await clientDb.query('UPDATE Clients SET AccountBalance = $1 WHERE ClientId = $2', [newBalance, client]);
+
+        await clientDb.query('COMMIT');
+        await logAction(createdBy, 'Custom Fee Charged', `Charged Client ID ${client} a custom fee of $${chargeAmount.toFixed(2)}: ${comments.trim()}`);
         res.status(201).json({ success: true, newBalance });
     } catch (error) {
         await clientDb.query('ROLLBACK');

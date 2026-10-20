@@ -13,8 +13,12 @@ export interface ClientRecord {
   programtype?: string | null;
   phase?: string | null;
   treatmentfee?: number | string | null;
+  // Unexpired temporary reduced fee; replaces treatmentfee while set
+  activefeeoverride?: number | string | null;
   // True when the client already has an attendance this calendar month
   attendedthismonth?: boolean | null;
+  // Date of the client's most recent attendance
+  lastattended?: string | null;
 }
 
 export interface GroupRecord {
@@ -60,6 +64,7 @@ export interface WorkflowNotifier {
 // State SO Phase 1 clients are charged only on their first attendance of the month.
 export const clientFee = (client: ClientRecord): number => {
   if (isMonthlyFeeClient(client.programtype, client.phase) && client.attendedthismonth) return 0;
+  if (client.activefeeoverride !== null && client.activefeeoverride !== undefined) return Number(client.activefeeoverride) || 0;
   return Number(client.treatmentfee) || 0;
 };
 
@@ -80,6 +85,33 @@ const todayLocal = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+const MAKEUP_COMMENT = 'Approved make-up attendance';
+
+// True when a BIP client already attended during the current calendar week (Sunday through Saturday).
+export const attendedThisWeek = (client: ClientRecord): boolean => {
+  if (client.programtype !== 'BIP' || !client.lastattended) return false;
+  const weekStart = new Date();
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+  return new Date(client.lastattended) >= weekStart;
+};
+
+// Asks about each BIP client who already attended this week. Confirmed clients are approved make-ups;
+// denied clients are left off the check-in.
+const confirmMakeups = (clients: ClientRecord[]) => {
+  const makeupIds = new Set<number>();
+  const approved = clients.filter(c => {
+    if (!attendedThisWeek(c)) return true;
+    const ok = window.confirm(
+      `${c.lastname}, ${c.firstname} already attended this week (last attendance: ${new Date(c.lastattended!).toLocaleDateString()}).\n\n` +
+      'Is this an approved make-up attendance?\n\nOK = confirm check-in    Cancel = deny check-in'
+    );
+    if (ok) makeupIds.add(c.clientid);
+    return ok;
+  });
+  return { approved, makeupIds };
+};
+
 export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   const [groupId, setGroupId] = useState<number | null>(null);
   const [view, setView] = useState<WorkflowView>('checkin');
@@ -90,7 +122,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   const [session, setSession] = useState<SessionEntry[]>([]);
   const [submitting, setSubmitting] = useState(false);
   // Clients waiting on the check-in details dialog. fromSelection tells confirm whether to clear the roster selection.
-  const [pendingCheckIn, setPendingCheckIn] = useState<{ clients: ClientRecord[]; fromSelection: boolean } | null>(null);
+  // makeupIds are clients confirmed as approved make-ups for this week.
+  const [pendingCheckIn, setPendingCheckIn] = useState<{ clients: ClientRecord[]; fromSelection: boolean; makeupIds: Set<number> } | null>(null);
 
   // Guards against a slow response for a previous group overwriting the current roster.
   const rosterRequestId = useRef(0);
@@ -172,18 +205,18 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   };
 
   // Adds clients to the sheet. Skips anyone already on it, so repeat calls are safe.
-  const addToSession = useCallback((entries: { client: ClientRecord; terms: CheckInTerms }[]) => {
+  const addToSession = useCallback((entries: { client: ClientRecord; terms: CheckInTerms; comments?: string }[]) => {
     setSession(prev => {
       const onSheet = new Set(prev.map(e => e.client.clientid));
       const fresh = entries
         .filter(({ client }) => !onSheet.has(client.clientid))
-        .map<SessionEntry>(({ client, terms }) => ({
+        .map<SessionEntry>(({ client, terms, comments }) => ({
           client,
           fee: terms.fee,
           payment: terms.payment,
           paymentMethod: terms.paymentMethod,
           voucher: terms.voucher,
-          comments: '',
+          comments: comments ?? '',
         }));
       return fresh.length ? [...prev, ...fresh] : prev;
     });
@@ -193,20 +226,33 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   const checkInSelected = () => {
     const picked = selectableRoster.filter(c => selectedIds.has(c.clientid));
     if (picked.length === 0) return;
-    setPendingCheckIn({ clients: picked, fromSelection: true });
+    const { approved, makeupIds } = confirmMakeups(picked);
+    if (approved.length === 0) {
+      // Every pick was denied; drop them from the selection so they aren't checked in by accident
+      setSelectedIds(new Set());
+      return;
+    }
+    setPendingCheckIn({ clients: approved, fromSelection: true, makeupIds });
   };
 
   const addExternalClients = (clients: ClientRecord[]) => {
     const fresh = clients.filter(c => !checkedInIds.has(c.clientid));
     if (fresh.length === 0) return;
-    setPendingCheckIn({ clients: fresh, fromSelection: false });
+    const { approved, makeupIds } = confirmMakeups(fresh);
+    if (approved.length === 0) return;
+    setPendingCheckIn({ clients: approved, fromSelection: false, makeupIds });
   };
 
   // terms holds each client's payment, method, and voucher from the dialog, keyed by client id.
   const confirmCheckIn = (terms: Record<number, PaymentTerms>) => {
     if (!pendingCheckIn) return;
-    const { clients, fromSelection } = pendingCheckIn;
-    addToSession(clients.map(client => ({ client, terms: { ...terms[client.clientid], fee: clientFee(client) } })));
+    const { clients, fromSelection, makeupIds } = pendingCheckIn;
+    addToSession(clients.map(client => ({
+      client,
+      terms: { ...terms[client.clientid], fee: clientFee(client) },
+      // Approved make-ups are noted on the attendance record
+      comments: makeupIds.has(client.clientid) ? MAKEUP_COMMENT : undefined,
+    })));
     // Only a roster check-in clears the roster selection; external additions never touch it.
     if (fromSelection) setSelectedIds(new Set());
     setPendingCheckIn(null);

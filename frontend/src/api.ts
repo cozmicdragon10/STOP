@@ -64,6 +64,18 @@ export async function createClient(data: Record<string, any>) {
     return body as { success: true; clientId: number; message: string };
 }
 
+export async function deleteClient(clientId: number) {
+    const res = await fetch(`${API_BASE}/clients/${clientId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+    });
+    const body = await res.json();
+    if (!res.ok) {
+        throw new Error(body.error || 'Failed to delete client.');
+    }
+    return body as { success: true; message: string };
+}
+
 export async function updateGroup(groupId: number, data: any) {
     const res = await fetch(`${API_BASE}/groups/${groupId}`, {
         method: 'PUT',
@@ -172,6 +184,15 @@ export async function submitBatchAttendance(data: BatchAttendancePayload) {
 
 export async function submitAccountPayment(data: { client: number; amount: number; comments: string; createdBy: string; paymentMethod: 'Cash' | 'Credit Card' }) {
     const res = await fetch(`${API_BASE}/financials/payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return res.json();
+}
+
+export async function submitCustomCharge(data: { client: number; amount: number; comments: string; createdBy: string }) {
+    const res = await fetch(`${API_BASE}/financials/charge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -328,4 +349,41 @@ export async function deletePolygraphSlot(slotId: number) {
         method: 'DELETE',
     });
     return res.json();
+}
+
+// Reads the JSON body and throws the server's error message on failure.
+// An HTML body means the route is missing, which usually means the backend needs a restart.
+async function feeOverrideResponse(res: Response) {
+    const text = await res.text();
+    let body: any;
+    try {
+        body = JSON.parse(text);
+    } catch {
+        throw new Error(`The server returned an unexpected response (HTTP ${res.status}). Restart the backend (node server.js) and try again.`);
+    }
+    if (!res.ok) throw new Error(body.error || 'Fee override request failed.');
+    return body;
+}
+
+export async function fetchClientFeeOverride(clientId: number) {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/fee-override`);
+    return feeOverrideResponse(res) as Promise<{ override: any | null }>;
+}
+
+export async function saveClientFeeOverride(clientId: number, reducedFee: number, expirationDate: string, createdBy: string) {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/fee-override`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reducedFee, expirationDate, createdBy }),
+    });
+    return feeOverrideResponse(res) as Promise<{ override: any }>;
+}
+
+export async function deleteClientFeeOverride(clientId: number, removedBy: string) {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/fee-override`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ removedBy }),
+    });
+    return feeOverrideResponse(res);
 }

@@ -45,12 +45,43 @@ function StepIndicator({ current }: { current: number }) {
   );
 }
 
+function filterSearchableClients(clients: ClientRecord[], groupType: string | null | undefined, currentGroupName: string | null | undefined): ClientRecord[] {
+  // Groups store 'SO' / 'FED SO'; clients store 'State SO' / 'Federal SO'
+  const normalizedGroupType = (groupType || '').trim().toUpperCase();
+  const isSOGroup = ['SO', 'FED SO'].includes(normalizedGroupType);
+  const isBIPGroup = normalizedGroupType === 'BIP';
+
+  return clients.filter(c => {
+    // Only show active clients
+    if (c.programstatus !== 'Active') return false;
+
+    // Don't show clients already in the current group
+    if (c.groupname === currentGroupName) return false;
+
+    // If it's an SO group, only show State SO/Federal SO clients
+    if (isSOGroup) {
+      const clientType = (c.programtype || '').trim();
+      return ['State SO', 'Federal SO'].includes(clientType);
+    }
+
+    // If it's a BIP group, only show BIP clients
+    if (isBIPGroup) {
+      const clientType = (c.programtype || '').trim();
+      return clientType === 'BIP';
+    }
+
+    // For other group types, show all active clients
+    return true;
+  });
+}
+
 export default function GroupCheckInWorkflow({ groups, clients, createdBy, onSuccess, onError, onSaved }: Props) {
   const wf = useGroupCheckIn(createdBy, { onSuccess, onError, onSaved });
   const [searchOpen, setSearchOpen] = useState(false);
 
   const group = groups.find(g => g.groupid === wf.groupId) ?? null;
   const currentStep = wf.groupId === null ? 1 : wf.view === 'review' ? 3 : 2;
+  const searchableClients = group ? filterSearchableClients(clients, group.programtype, group.groupname) : [];
 
   return (
     <div className="space-y-6">
@@ -88,7 +119,7 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, onSuc
 
       {searchOpen && (
         <ClientSearchModal
-          clients={clients}
+          clients={searchableClients}
           checkedInIds={wf.checkedInIds}
           onAdd={wf.addExternalClients}
           onClose={() => setSearchOpen(false)}
