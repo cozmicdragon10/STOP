@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(Get-ChildItem -Recurse -Depth 2 | Where-Object { $_.PSIsContainer } | Select-Object -ExpandProperty FullName | Select-Object -First 30)"
+      "PowerShell(Get-ChildItem -Recurse -Depth 2 | Where-Object { $_.PSIsContainer } | Select-Object -ExpandProperty FullName | Select-Object -First 30)",
+      "PowerShell(git config --global user.name \"Justin\")",
+      "PowerShell(git config --global user.email \"cozmicfantom@gmail.com\")",
+      "PowerShell(git config --global user.name)",
+      "PowerShell(git config --global user.email)",
+      "PowerShell($gitPaths = @\\(\"C:\\\\Program Files\\\\Git\\\\bin\\\\git.exe\", \"C:\\\\Program Files \\(x86\\)\\\\Git\\\\bin\\\\git.exe\"\\); foreach \\($path in $gitPaths\\) { if \\(Test-Path $path\\) { Write-Host \"Found git at: $path\"; & $path config --global user.name \"Justin\"; & $path config --global user.email \"cozmicfantom@gmail.com\"; & $path config --global user.name; & $path config --global user.email; break } }; if \\(-not \\(Test-Path $gitPaths[0]\\) -and -not \\(Test-Path $gitPaths[1]\\)\\) { Write-Host \"Git not found in common locations. Please install Git or add it to PATH.\" })",
+      "PowerShell($env:PATH -split \";\" | Where-Object { $_ } | ForEach-Object { if \\(Test-Path $_\\) { Get-ChildItem $_ -Filter \"git.exe\" -ErrorAction SilentlyContinue } })",
+      "PowerShell($additionalPaths = @\\(\"C:\\\\Users\\\\justi\\\\AppData\\\\Local\\\\Programs\\\\Git\\\\bin\\\\git.exe\", \"C:\\\\scoop\\\\apps\\\\git\\\\current\\\\cmd\\\\git.exe\", \"C:\\\\tools\\\\git\\\\bin\\\\git.exe\"\\); foreach \\($path in $additionalPaths\\) { if \\(Test-Path $path\\) { Write-Host \"Found git at: $path\"; & $path config --global user.name \"Justin\"; & $path config --global user.email \"cozmicfantom@gmail.com\"; Write-Host \"Configuration saved!\"; & $path config --global user.name; & $path config --global user.email; exit 0 } })"
     ]
   }
 }
