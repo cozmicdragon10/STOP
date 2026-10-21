@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { clientFee, type ClientRecord, type PaymentMethod, type PaymentTerms } from '../../hooks/useGroupCheckIn';
 import { submitAccountPayment } from '../../api';
-import { formatBalance } from '../../utils/balance';
+import { FIRST_CHECKIN_MAX_OWED, formatBalance } from '../../utils/balance';
 import { isMonthlyFeeClient } from '../../utils/soPhases';
 import { printReceipt, type Receipt } from '../../utils/receipt';
 import CardPaymentFields, { emptyCardBilling, type CardBilling } from '../payments/CardPaymentFields';
@@ -34,7 +34,23 @@ const feeLabel = (c: ClientRecord, fee: number): string => {
   if (isMonthlyFeeClient(c.programtype, c.phase) && c.attendedthismonth) return 'Already charged this month (nothing charged)';
   return 'No treatment fee on account (nothing charged)';
 };
-const inputClass = 'w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm';
+// How much a client still has to pay before their first check-in of the month is allowed (0 when they may check in).
+// Balances are in the stored sign (positive = owes); a processed card payment is already in the balance. BIP clients are exempt.
+// A card amount counts only once the card is processed.
+const amountStillOwedToCheckIn = (c: ClientRecord, row: Row): number => {
+  if (c.attendedthismonth || c.programtype === 'BIP') return 0;
+  const cashNow = row.paymentMethod === 'Cash' ? (parsePayment(row) ?? 0) : 0;
+  const balance = row.receipt ? row.receipt.newBalance : Number(c.accountbalance || 0) - cashNow;
+  return Math.max(0, Math.round((balance - FIRST_CHECKIN_MAX_OWED) * 100) / 100);
+};
+
+// The smallest payment that lets the client's first check-in of the month through (0 when no payment is required)
+const minimumCheckInPayment = (c: ClientRecord): number => {
+  if (c.attendedthismonth || c.programtype === 'BIP') return 0;
+  return Math.max(0, Math.round((Number(c.accountbalance || 0) - FIRST_CHECKIN_MAX_OWED) * 100) / 100);
+};
+
+const inputClass ='w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm';
 
 // Returns the parsed payment for one row, or null if the payment is not a valid amount.
 const parsePayment = (row: Row): number | null => {
@@ -94,13 +110,22 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
     const row = rows[c.clientid];
     return !row.receipt && parsePayment(row) === null;
   });
+  // Clients whose balance is too far behind for their first check-in of the month
+  const blocked = clients.filter(c => amountStillOwedToCheckIn(c, rows[c.clientid]) > 0);
 
   const confirm = () => {
-    if (invalid) return;
+    if (invalid || blocked.length > 0) return;
     const terms = Object.fromEntries(clients.map(c => {
       const row = rows[c.clientid];
       const payment = row.receipt ? 0 : (parsePayment(row) ?? 0);
-      return [c.clientid, { payment, paymentMethod: row.paymentMethod, voucher: row.voucher }];
+      return [c.clientid, {
+        payment,
+        paymentMethod: row.paymentMethod,
+        voucher: row.voucher,
+        cardPaid: row.receipt ? row.receipt.amount : 0,
+        // Card payments are already saved, so the balance here already reflects them
+        balance: row.receipt ? row.receipt.newBalance : Number(c.accountbalance || 0),
+      }];
     })) as Record<number, PaymentTerms>;
     onConfirm(terms);
   };
@@ -128,16 +153,25 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
             // Each client's fee comes from their own account
             const fee = clientFee(c);
             const afterCheckIn = baseBalance + fee - (locked ? 0 : paymentNow);
+            const stillOwed = amountStillOwedToCheckIn(c, row);
+            const minimumPayment = minimumCheckInPayment(c);
             return (
-              <article key={c.clientid} className={`bg-slate-950 border rounded-lg p-4 ${rowValid ? 'border-slate-800' : 'border-red-500/50'}`}>
+              <article key={c.clientid} className={`bg-slate-950 border rounded-lg p-4 ${rowValid && stillOwed === 0 ? 'border-slate-800' : 'border-red-500/50'}`}>
                 <div className="flex justify-between items-baseline gap-3 mb-3">
                   <p className="font-semibold text-white truncate">{c.lastname}, {c.firstname}</p>
                   <p className="text-xs text-slate-400 whitespace-nowrap">DOC # {c.docnumber || '—'} · Balance {formatBalance(c.accountbalance)}</p>
                 </div>
+                {stillOwed > 0 && (
+                  <div className="mb-3 bg-red-500/10 border border-red-500/40 rounded-lg p-3 text-xs text-red-300">
+                    This is {c.firstname}'s first group check-in this month. The client must pay their existing balance down to{' '}
+                    {formatBalance(FIRST_CHECKIN_MAX_OWED)} or better to be checked in. A payment of at least <strong>${minimumPayment.toFixed(2)}</strong> is
+                    required{row.paymentMethod === 'Credit Card' ? ', and the card must be processed before check-in' : ''}.
+                  </div>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-slate-300 items-end">
                   <label className="flex flex-col gap-1">
-                    Payment ($)
-                    <input type="number" step="0.01" min="0" placeholder="0.00" disabled={locked} value={row.payment} onChange={e => updateRow(c.clientid, { payment: e.target.value })} className={`${inputClass} disabled:opacity-50`} />
+                    <span>Payment ($){minimumPayment > 0 && !locked && <span className="text-red-400"> · min ${minimumPayment.toFixed(2)}</span>}</span>
+                    <input type="number" step="0.01" min={minimumPayment > 0 ? minimumPayment : 0} placeholder={minimumPayment > 0 ? minimumPayment.toFixed(2) : '0.00'} disabled={locked} value={row.payment} onChange={e => updateRow(c.clientid, { payment: e.target.value })} className={`${inputClass} disabled:opacity-50`} />
                   </label>
                   <div className="flex flex-col gap-1">
                     Payment Method
@@ -210,12 +244,16 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
         </div>
 
         <footer className="p-5 border-t border-slate-800 flex flex-wrap justify-between items-center gap-3">
-          <p className={`text-xs ${invalid ? 'text-red-400' : 'text-slate-500'}`}>
-            {invalid ? 'Enter a payment of 0 or more for every client.' : `${clients.length} client(s) ready to check in.`}
+          <p className={`text-xs ${invalid || blocked.length > 0 ? 'text-red-400' : 'text-slate-500'}`}>
+            {invalid
+              ? 'Enter a payment of 0 or more for every client.'
+              : blocked.length > 0
+                ? `${blocked.map(c => `${c.lastname}, ${c.firstname}`).join('; ')} must pay at least the minimum payment before checking in.`
+                : `${clients.length} client(s) ready to check in.`}
           </p>
           <div className="flex gap-2">
             <button type="button" onClick={onCancel} className="bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 px-4 py-2 rounded-lg text-sm font-semibold">Cancel</button>
-            <button type="button" onClick={confirm} disabled={invalid} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+            <button type="button" onClick={confirm} disabled={invalid || blocked.length > 0} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
               Confirm Check-In ({clients.length})
             </button>
           </div>

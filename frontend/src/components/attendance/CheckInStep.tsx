@@ -1,4 +1,4 @@
-import { ArrowRight, Search, Trash2 } from 'lucide-react';
+import { Save, Search, Trash2 } from 'lucide-react';
 import type { ClientRecord, GroupRecord, GroupCheckInState } from '../../hooks/useGroupCheckIn';
 import { formatBalance } from '../../utils/balance';
 import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
@@ -13,14 +13,18 @@ const buttonBase = 'px-4 py-2 rounded-lg text-sm font-semibold transition disabl
 const primaryButton = `${buttonBase} bg-blue-600 hover:bg-blue-500 text-white`;
 const secondaryButton = `${buttonBase} bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700`;
 
-function RosterCard({ client, checked, selected, onToggle }: {
+function RosterCard({ client, checked, attended, selected, onToggle }: {
   client: ClientRecord;
   checked: boolean;
+  // Already attended this group today, so cannot be checked in again
+  attended: boolean;
   selected: boolean;
   onToggle: () => void;
 }) {
   const tone = checked
     ? 'border-emerald-500/30 bg-emerald-500/5 opacity-70 cursor-default'
+    : attended
+      ? 'border-slate-800 bg-slate-950 opacity-50 cursor-not-allowed'
     : selected
       ? 'border-blue-500 bg-blue-500/10 cursor-pointer'
       : 'border-slate-700 bg-slate-950 hover:border-slate-500 cursor-pointer';
@@ -29,8 +33,8 @@ function RosterCard({ client, checked, selected, onToggle }: {
     <label className={`flex items-start gap-3 p-3 rounded-lg border transition ${tone}`}>
       <input
         type="checkbox"
-        checked={checked || selected}
-        disabled={checked}
+        checked={checked || (selected && !attended)}
+        disabled={checked || attended}
         onChange={onToggle}
         className="mt-1 accent-blue-500"
       />
@@ -38,6 +42,7 @@ function RosterCard({ client, checked, selected, onToggle }: {
         <p className="text-sm font-medium text-white truncate">{client.lastname}, {client.firstname}</p>
         <p className="text-xs text-slate-400">DOC # {client.docnumber || '—'} · Bal {formatBalance(client.accountbalance)}</p>
         {checked && <span className="inline-block mt-1 text-[10px] font-semibold uppercase text-emerald-400">Checked in</span>}
+        {!checked && attended && <span className="inline-block mt-1 text-[10px] font-semibold uppercase text-amber-400">Already attended today</span>}
       </div>
     </label>
   );
@@ -121,6 +126,7 @@ export default function CheckInStep({ group, wf, onOpenSearch }: Props) {
                 key={c.clientid}
                 client={c}
                 checked={wf.checkedInIds.has(c.clientid)}
+                attended={wf.attendedIds.has(c.clientid)}
                 selected={wf.selectedIds.has(c.clientid)}
                 onToggle={() => wf.toggleSelect(c.clientid)}
               />
@@ -154,8 +160,8 @@ export default function CheckInStep({ group, wf, onOpenSearch }: Props) {
       </div>
 
       <div className="flex justify-end pt-2 border-t border-slate-800">
-        <button type="button" onClick={wf.goToReview} disabled={wf.session.length === 0} className={`${primaryButton} flex items-center gap-2`}>
-          Close Group / Finish Attendance <ArrowRight size={14} />
+        <button type="button" onClick={wf.finishCheckIn} disabled={wf.session.length === 0 || wf.submitting} className={`${primaryButton} flex items-center gap-2`}>
+          <Save size={14} /> {wf.submitting ? 'Saving...' : 'Finish Check-In'}
         </button>
       </div>
     </section>

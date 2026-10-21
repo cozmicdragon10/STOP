@@ -34,6 +34,9 @@ export interface Clients {
   treatmentfee?: number;
   accountbalance?: number;
   vouchers?: number;
+  polyfeevoucher?: number;
+  polyfeepaid?: number;
+  polyfee?: number;
   address?: string;
   city?: string;
   state?: string;

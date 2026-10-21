@@ -5,6 +5,8 @@ import type { ClientRecord } from '../../hooks/useGroupCheckIn';
 interface Props {
   clients: ClientRecord[];
   checkedInIds: Set<number>;
+  // Already attended this group today, so cannot be added again
+  attendedIds: Set<number>;
   onAdd: (clients: ClientRecord[]) => void;
   onClose: () => void;
 }
@@ -12,7 +14,7 @@ interface Props {
 const MAX_RESULTS = 50;
 
 // Selection here is local to the modal. Adding clients never touches the roster selection.
-export default function ClientSearchModal({ clients, checkedInIds, onAdd, onClose }: Props) {
+export default function ClientSearchModal({ clients, checkedInIds, attendedIds, onAdd, onClose }: Props) {
   const [query, setQuery] = useState('');
   const [picked, setPicked] = useState<Set<number>>(() => new Set());
 
@@ -91,13 +93,14 @@ export default function ClientSearchModal({ clients, checkedInIds, onAdd, onClos
             )}
             {visible.map(c => {
               const onSheet = checkedInIds.has(c.clientid);
+              const attended = !onSheet && attendedIds.has(c.clientid);
               return (
                 <li key={c.clientid}>
-                  <label className={`flex items-center gap-3 p-3 text-sm ${onSheet ? 'opacity-50' : 'cursor-pointer hover:bg-slate-800/50'}`}>
+                  <label className={`flex items-center gap-3 p-3 text-sm ${onSheet || attended ? 'opacity-50' : 'cursor-pointer hover:bg-slate-800/50'}`}>
                     <input
                       type="checkbox"
-                      disabled={onSheet}
-                      checked={onSheet || picked.has(c.clientid)}
+                      disabled={onSheet || attended}
+                      checked={onSheet || (!attended && picked.has(c.clientid))}
                       onChange={() => togglePick(c.clientid)}
                       className="accent-blue-500"
                     />
@@ -106,6 +109,7 @@ export default function ClientSearchModal({ clients, checkedInIds, onAdd, onClos
                       <p className="text-xs text-slate-400 truncate">DOC # {c.docnumber || '—'} · {c.groupname || 'Unassigned'}</p>
                     </div>
                     {onSheet && <span className="text-[10px] font-semibold uppercase text-emerald-400">On sheet</span>}
+                    {attended && <span className="text-[10px] font-semibold uppercase text-amber-400">Attended today</span>}
                   </label>
                 </li>
               );

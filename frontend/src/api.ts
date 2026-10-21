@@ -1,3 +1,5 @@
+import type { SessionEntry } from './hooks/useGroupCheckIn';
+
 const API_BASE = 'https://192.168.1.133:5000/api';
 
 export async function loginUser(email: string, password: string) {
@@ -22,6 +24,16 @@ export async function getGroups() {
 export async function getGroupClients(groupId: number) {
     const res = await fetch(`${API_BASE}/groups/${groupId}/clients`);
     return res.json();
+}
+
+// Ids of clients who already attended the group on the date (YYYY-MM-DD)
+export async function getGroupAttendedClients(groupId: number, date: string): Promise<number[]> {
+    const res = await fetch(`${API_BASE}/groups/${groupId}/attended?date=${encodeURIComponent(date)}`);
+    const body = await res.json();
+    if (!res.ok || !Array.isArray(body)) {
+        throw new Error(body?.error || 'Could not check who already attended this group today.');
+    }
+    return body.map(Number);
 }
 
 export async function updateClient(clientId: number, data: any) {
@@ -179,10 +191,61 @@ export async function submitBatchAttendance(data: BatchAttendancePayload) {
     if (!res.ok) {
         throw new Error(body.error || 'Failed to save attendance.');
     }
-    return body as { success: true; count: number; results: { client: number; attendanceId: number; newBalance: number }[] };
+    // polyVouchersAwarded: SO clients charged the group fee whose last polygraph was NDI earn one poly fee voucher
+    return body as {
+        success: true; count: number; polyVouchersAwarded: number;
+        results: { client: number; attendanceId: number; newBalance: number; polyVoucherAwarded: boolean }[];
+    };
 }
 
-export async function submitAccountPayment(data: { client: number; amount: number; comments: string; createdBy: string; paymentMethod: 'Cash' | 'Credit Card' }) {
+// A group check-in saved with Finish Check-In and not yet closed. entries is the attendance sheet as the frontend built it.
+export interface OpenGroupSession {
+    opensessionid: number;
+    groupid: number;
+    groupname: string;
+    sessiondate: string;
+    entries: SessionEntry[];
+    createdby: string | null;
+    updatedon: string;
+}
+
+export async function getOpenGroups(): Promise<OpenGroupSession[]> {
+    const res = await fetch(`${API_BASE}/open-groups`);
+    const body = await res.json();
+    if (!res.ok) {
+        throw new Error(body.error || 'Failed to load open groups.');
+    }
+    return body;
+}
+
+export async function saveOpenGroup(data: { group: number; date: string; entries: SessionEntry[]; createdBy: string }): Promise<OpenGroupSession> {
+    const res = await fetch(`${API_BASE}/open-groups`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+        throw new Error(body.error || 'Failed to save the open group.');
+    }
+    return body;
+}
+
+export async function deleteOpenGroup(openSessionId: number, removedBy: string) {
+    const res = await fetch(`${API_BASE}/open-groups/${openSessionId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ removedBy }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+        throw new Error(body.error || 'Failed to discard the open group.');
+    }
+    return body;
+}
+
+// applyToPolyFee: pay down the client's unpaid poly fee first; any excess goes to the account balance
+export async function submitAccountPayment(data: { client: number; amount: number; comments: string; createdBy: string; paymentMethod: 'Cash' | 'Credit Card'; applyToPolyFee?: boolean }) {
     const res = await fetch(`${API_BASE}/financials/payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -326,16 +389,17 @@ export async function getClientPolygraphs(clientId: number) {
     return res.json();
 }
 
-export async function assignPolygraphSlot(slotId: number, clientId: number, type: string, user: string, comments: string) {
+// bypassWaitPeriod: a Business Administrator's confirmed choice to schedule inside the post-NDI waiting period
+export async function assignPolygraphSlot(slotId: number, clientId: number, type: string, user: string, comments: string, bypassWaitPeriod = false) {
     const res = await fetch(`${API_BASE}/polygraphs/slots/${slotId}/assign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, type, user, comments }),
+        body: JSON.stringify({ clientId, type, user, comments, bypassWaitPeriod }),
     });
     return res.json();
 }
 
-export async function reopenPolygraphSlot(slotId: number, cancellation: { reason: string; notes: string; user: string }) {
+export async function reopenPolygraphSlot(slotId: number, cancellation: { reason: string; notes: string; returnVouchers: boolean; overrideVoucherRule: boolean; user: string }) {
     const res = await fetch(`${API_BASE}/polygraphs/slots/${slotId}/open`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

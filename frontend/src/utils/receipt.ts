@@ -10,6 +10,10 @@ export interface Receipt {
   newBalance: number;
   processedBy: string;
   date: string;
+  // Portion of the payment applied to the poly fee, and the poly fee standing afterwards
+  polyApplied?: number;
+  polyFeePaid?: number;
+  polyFee?: number;
 }
 
 const escapeHtml = (value: string) =>
@@ -32,6 +36,9 @@ export const printReceipt = (r: Receipt, onError: (message: string) => void) => 
       ${r.docNumber ? `<tr><td>DOC #</td><td class="r">${escapeHtml(r.docNumber)}</td></tr>` : ''}
       <tr><td>Payment method</td><td class="r">${escapeHtml(r.method)}</td></tr>
       <tr><td>Amount paid</td><td class="r"><b>$${r.amount.toFixed(2)}</b></td></tr>
+      ${r.polyApplied ? `<tr><td>Applied to poly fee</td><td class="r">$${r.polyApplied.toFixed(2)}</td></tr>
+      <tr><td>Applied to account</td><td class="r">$${(r.amount - r.polyApplied).toFixed(2)}</td></tr>
+      <tr><td>Poly fee paid</td><td class="r">$${(r.polyFeePaid ?? 0).toFixed(2)} / $${(r.polyFee ?? 0).toFixed(2)}</td></tr>` : ''}
       <tr><td>Balance after payment</td><td class="r">${escapeHtml(formatBalance(r.newBalance))}</td></tr>
     </table>
     <p class="muted">Processed by ${escapeHtml(r.processedBy)}</p>

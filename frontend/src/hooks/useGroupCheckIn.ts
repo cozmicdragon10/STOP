@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { getGroupClients, submitBatchAttendance } from '../api';
+import { getGroupAttendedClients, getGroupClients, saveOpenGroup, submitBatchAttendance } from '../api';
+import type { OpenGroupSession } from '../api';
 import { isMonthlyFeeClient } from '../utils/soPhases';
 
 export interface ClientRecord {
@@ -19,6 +20,10 @@ export interface ClientRecord {
   attendedthismonth?: boolean | null;
   // Date of the client's most recent attendance
   lastattended?: string | null;
+  // Poly fee total and how much of it has been paid; tracked apart from the account balance
+  polyfee?: number | string | null;
+  polyfeepaid?: number | string | null;
+  polyfeevoucher?: number | string | null;
 }
 
 export interface GroupRecord {
@@ -35,8 +40,13 @@ export type PaymentMethod = 'Cash' | 'Credit Card';
 export interface SessionEntry {
   client: ClientRecord;
   fee: number;
+  // Cash or voucher payment taken at check-in; recorded when the group closes
   payment: number;
   paymentMethod: PaymentMethod;
+  // Card payment taken at check-in; already saved to the account, so it is not recorded again on close
+  cardPaid: number;
+  // Account balance as of check-in, including any card payment already saved
+  balance: number;
   voucher: boolean;
   comments: string;
 }
@@ -46,6 +56,8 @@ export interface CheckInTerms {
   payment: number;
   paymentMethod: PaymentMethod;
   voucher: boolean;
+  cardPaid: number;
+  balance: number;
 }
 
 // What the check-in dialog sets per client. The fee comes from the client's account, not the dialog.
@@ -58,6 +70,8 @@ export interface WorkflowNotifier {
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   onSaved?: () => void;
+  // Called after an open group is saved or closed so the Open Groups list can refresh
+  onOpenGroupsChanged?: () => void;
 }
 
 // Each client is charged the treatment fee on their own account. A client with no fee set is charged nothing.
@@ -80,7 +94,7 @@ export const validateSession = (entries: SessionEntry[]): string | null => {
 };
 
 // Local calendar date. toISOString() is UTC and would roll evening sessions to tomorrow.
-const todayLocal = () => {
+export const todayLocal = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
@@ -121,39 +135,46 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [session, setSession] = useState<SessionEntry[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  // Date of the session on the sheet. Set when an open group is resumed so it closes on the day it was held; null means today.
+  const [sessionDate, setSessionDate] = useState<string | null>(null);
   // Clients waiting on the check-in details dialog. fromSelection tells confirm whether to clear the roster selection.
   // makeupIds are clients confirmed as approved make-ups for this week.
   const [pendingCheckIn, setPendingCheckIn] = useState<{ clients: ClientRecord[]; fromSelection: boolean; makeupIds: Set<number> } | null>(null);
+  // Clients who already attended this group on the session date; a client can attend a group only once per day
+  const [attendedIds, setAttendedIds] = useState<Set<number>>(() => new Set());
 
   // Guards against a slow response for a previous group overwriting the current roster.
   const rosterRequestId = useRef(0);
 
   const checkedInIds = useMemo(() => new Set(session.map(e => e.client.clientid)), [session]);
 
-  // Roster members who can still be checked in (not already on the sheet).
+  // Roster members who can still be checked in (not already on the sheet and not already attended today).
   const selectableRoster = useMemo(
-    () => roster.filter(c => !checkedInIds.has(c.clientid)),
-    [roster, checkedInIds]
+    () => roster.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid)),
+    [roster, checkedInIds, attendedIds]
   );
 
   const allSelected = selectableRoster.length > 0 && selectableRoster.every(c => selectedIds.has(c.clientid));
 
-  const loadRoster = useCallback(async (id: number) => {
+  // date is the session date (YYYY-MM-DD) used to find who already attended the group that day
+  const loadRoster = useCallback(async (id: number, date: string) => {
     const requestId = ++rosterRequestId.current;
     setRosterStatus('loading');
     setRosterError('');
     try {
-      const data: unknown = await getGroupClients(id);
+      const [data, attended]: [unknown, number[]] = await Promise.all([getGroupClients(id), getGroupAttendedClients(id, date)]);
       if (requestId !== rosterRequestId.current) return;
       if (!Array.isArray(data)) {
         const serverError = (data as { error?: string } | null)?.error;
         throw new Error(serverError || 'Unexpected response from server.');
       }
       setRoster(data as ClientRecord[]);
+      setAttendedIds(new Set(attended));
       setRosterStatus('ready');
     } catch (err: unknown) {
       if (requestId !== rosterRequestId.current) return;
       setRoster([]);
+      setAttendedIds(new Set());
       setRosterStatus('error');
       setRosterError(err instanceof Error ? err.message : 'Could not load clients for this group.');
     }
@@ -169,7 +190,43 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     setRosterError('');
     setSelectedIds(new Set());
     setSession([]);
+    setSessionDate(null);
     setPendingCheckIn(null);
+    setAttendedIds(new Set());
+  };
+
+  // Loads a saved open group onto the sheet, ready to review and close
+  const resumeOpenGroup = (open: OpenGroupSession) => {
+    if (groupId === open.groupid && sessionDate === open.sessiondate) {
+      setView('review');
+      return;
+    }
+    if (session.length > 0 && !window.confirm(
+      `Discard the ${session.length} client(s) on this attendance sheet and open ${open.groupname}?`
+    )) return;
+
+    clearWorkflow();
+    setGroupId(open.groupid);
+    setSessionDate(open.sessiondate);
+    setSession(open.entries);
+    setView('review');
+    loadRoster(open.groupid, open.sessiondate);
+  };
+
+  // Finish Check-In: saves the sheet as an open group so it can be closed later, then clears the screen
+  const finishCheckIn = async () => {
+    if (groupId === null || session.length === 0) return;
+    setSubmitting(true);
+    try {
+      await saveOpenGroup({ group: groupId, date: sessionDate ?? todayLocal(), entries: session, createdBy });
+      notify.onSuccess(`Check-in saved for ${session.length} client(s). Close the group from Open Groups when you're ready.`);
+      clearWorkflow();
+      notify.onOpenGroupsChanged?.();
+    } catch (err: unknown) {
+      notify.onError(err instanceof Error && err.message ? err.message : 'Failed to save the check-in. Your entries are still here; try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const selectGroup = (id: number | null) => {
@@ -181,11 +238,11 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     clearWorkflow();
     if (id === null) return;
     setGroupId(id);
-    loadRoster(id);
+    loadRoster(id, todayLocal());
   };
 
   const reloadRoster = () => {
-    if (groupId !== null) loadRoster(groupId);
+    if (groupId !== null) loadRoster(groupId, sessionDate ?? todayLocal());
   };
 
   const toggleSelect = (clientId: number) => {
@@ -215,6 +272,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
           fee: terms.fee,
           payment: terms.payment,
           paymentMethod: terms.paymentMethod,
+          cardPaid: terms.cardPaid,
+          balance: terms.balance,
           voucher: terms.voucher,
           comments: comments ?? '',
         }));
@@ -236,7 +295,11 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   };
 
   const addExternalClients = (clients: ClientRecord[]) => {
-    const fresh = clients.filter(c => !checkedInIds.has(c.clientid));
+    const alreadyAttended = clients.filter(c => attendedIds.has(c.clientid));
+    if (alreadyAttended.length > 0) {
+      notify.onError(`${alreadyAttended.map(c => `${c.lastname}, ${c.firstname}`).join('; ')} already attended this group today and cannot be checked in to it again.`);
+    }
+    const fresh = clients.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid));
     if (fresh.length === 0) return;
     const { approved, makeupIds } = confirmMakeups(fresh);
     if (approved.length === 0) return;
@@ -288,7 +351,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     try {
       const res = await submitBatchAttendance({
         group: groupId,
-        date: todayLocal(),
+        date: sessionDate ?? todayLocal(),
         type: 'Group',
         createdBy,
         entries: session.map(e => ({
@@ -300,9 +363,13 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
           comments: e.comments.trim(),
         })),
       });
-      notify.onSuccess(`Attendance saved for ${res.count} client(s).`);
+      const awarded = res.polyVouchersAwarded
+        ? ` ${res.polyVouchersAwarded} client(s) earned a poly fee voucher (last polygraph NDI).`
+        : '';
+      notify.onSuccess(`Attendance saved for ${res.count} client(s).${awarded}`);
       clearWorkflow();
       notify.onSaved?.();
+      notify.onOpenGroupsChanged?.();
     } catch (err: unknown) {
       // Session is left intact so the user can correct it and retry.
       notify.onError(err instanceof Error && err.message ? err.message : 'Failed to save attendance. Your entries are still here; try again.');
@@ -328,6 +395,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     allSelected,
     checkInSelected,
     checkedInIds,
+    attendedIds,
     addExternalClients,
     pendingCheckIn,
     confirmCheckIn,
@@ -337,6 +405,9 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     removeEntry,
     submitSession,
     submitting,
+    sessionDate,
+    resumeOpenGroup,
+    finishCheckIn,
   };
 }
 

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
-import { useGroupCheckIn } from '../../hooks/useGroupCheckIn';
+import { todayLocal, useGroupCheckIn } from '../../hooks/useGroupCheckIn';
 import type { ClientRecord, GroupRecord } from '../../hooks/useGroupCheckIn';
+import type { OpenGroupSession } from '../../api';
 import CheckInStep from './CheckInStep';
 import ReviewStep from './ReviewStep';
 import ClientSearchModal from './ClientSearchModal';
@@ -14,6 +15,12 @@ interface Props {
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   onSaved: () => void;
+  // Saved check-ins that have not been closed yet
+  openGroups: OpenGroupSession[];
+  onOpenGroupsChanged: () => void;
+  // Open group picked from the Open Groups panel; cleared with onResumeHandled once loaded
+  resumeRequest: OpenGroupSession | null;
+  onResumeHandled: () => void;
 }
 
 const STEPS = ['Select Group', 'Check In Clients', 'Review & Save'];
@@ -75,13 +82,38 @@ function filterSearchableClients(clients: ClientRecord[], groupType: string | nu
   });
 }
 
-export default function GroupCheckInWorkflow({ groups, clients, createdBy, onSuccess, onError, onSaved }: Props) {
-  const wf = useGroupCheckIn(createdBy, { onSuccess, onError, onSaved });
+export default function GroupCheckInWorkflow({ groups, clients, createdBy, onSuccess, onError, onSaved, openGroups, onOpenGroupsChanged, resumeRequest, onResumeHandled }: Props) {
+  const wf = useGroupCheckIn(createdBy, { onSuccess, onError, onSaved, onOpenGroupsChanged });
   const [searchOpen, setSearchOpen] = useState(false);
 
   const group = groups.find(g => g.groupid === wf.groupId) ?? null;
   const currentStep = wf.groupId === null ? 1 : wf.view === 'review' ? 3 : 2;
   const searchableClients = group ? filterSearchableClients(clients, group.programtype, group.groupname) : [];
+
+  // Saved entries keep the client details from when they were checked in; swap in current balances where we have them
+  const resume = (open: OpenGroupSession) => {
+    wf.resumeOpenGroup({
+      ...open,
+      entries: open.entries.map(e => {
+        const client = clients.find(c => c.clientid === e.client.clientid) ?? e.client;
+        return { ...e, client, balance: Number(client.accountbalance || 0), cardPaid: e.cardPaid ?? 0 };
+      }),
+    });
+  };
+
+  useEffect(() => {
+    if (!resumeRequest) return;
+    resume(resumeRequest);
+    onResumeHandled();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeRequest]);
+
+  // Picking a group that already has an open check-in today picks up that sheet instead of starting over
+  const pickGroup = (id: number | null) => {
+    const open = id === null ? undefined : openGroups.find(o => o.groupid === id && o.sessiondate === todayLocal());
+    if (open) resume(open);
+    else wf.selectGroup(id);
+  };
 
   return (
     <div className="space-y-6">
@@ -97,7 +129,7 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, onSuc
           value={wf.groupId ?? ''}
           onChange={e => {
             const id = e.target.value ? Number(e.target.value) : null;
-            wf.selectGroup(id);
+            pickGroup(id);
           }}
           disabled={wf.submitting || wf.view === 'review'}
           className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm"
@@ -107,6 +139,11 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, onSuc
             <option key={g.groupid} value={g.groupid}>{g.groupname}</option>
           ))}
         </select>
+        {wf.sessionDate && wf.sessionDate !== todayLocal() && (
+          <p className="text-xs text-amber-400">
+            Open check-in from {new Date(`${wf.sessionDate}T00:00:00`).toLocaleDateString()}. Attendance will be saved for that date.
+          </p>
+        )}
       </section>
 
       {/* Steps 2 and 3 stay hidden until a group is chosen */}
@@ -121,6 +158,7 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, onSuc
         <ClientSearchModal
           clients={searchableClients}
           checkedInIds={wf.checkedInIds}
+          attendedIds={wf.attendedIds}
           onAdd={wf.addExternalClients}
           onClose={() => setSearchOpen(false)}
         />

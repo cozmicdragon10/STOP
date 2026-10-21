@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ArrowLeft, Save, Trash2 } from 'lucide-react';
 import { validateSession } from '../../hooks/useGroupCheckIn';
 import type { ClientRecord, GroupCheckInState, GroupRecord, SessionEntry } from '../../hooks/useGroupCheckIn';
-import { formatBalance } from '../../utils/balance';
+import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import ClientPaymentDialog from '../payments/ClientPaymentDialog';
 
 interface Props {
@@ -24,13 +24,16 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment }: {
   onMakePayment: () => void;
 }) {
   const { client } = entry;
+  // What the account will read once the group closes: fee charged, cash payment from check-in recorded.
+  // A card payment from check-in is already in the balance, so it is not subtracted again.
+  const afterClose = balance + entry.fee - entry.payment;
 
   return (
     <article className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
       <div className="flex justify-between items-start gap-3">
         <div className="min-w-0">
           <p className="font-semibold text-white truncate">{client.lastname}, {client.firstname}</p>
-          <p className="text-xs text-slate-400">DOC # {client.docnumber || '—'} · Current balance {formatBalance(balance)}</p>
+          <p className="text-xs text-slate-400">DOC # {client.docnumber || '—'}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button
@@ -48,6 +51,30 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment }: {
           >
             <Trash2 size={14} />
           </button>
+        </div>
+      </div>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs space-y-1.5">
+        <div className="flex justify-between">
+          <span className="text-slate-400">Current balance</span>
+          <span className={toDisplayBalance(balance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatBalance(balance)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-slate-400">Group fee applied</span>
+          <span className={entry.fee > 0 ? 'text-red-400' : 'text-slate-400'}>{formatBalance(entry.fee)}</span>
+        </div>
+        {entry.payment > 0 && (
+          <div className="flex justify-between">
+            <span className="text-slate-400">Paid at check-in ({entry.paymentMethod})</span>
+            <span className="text-emerald-400">{formatBalance(-entry.payment)}</span>
+          </div>
+        )}
+        {entry.cardPaid > 0 && (
+          <p className="text-slate-500">Includes ${entry.cardPaid.toFixed(2)} card payment processed at check-in.</p>
+        )}
+        <div className="flex justify-between border-t border-slate-800 pt-1.5">
+          <span className="font-semibold text-slate-300">Balance after group closes</span>
+          <span className={`font-bold ${toDisplayBalance(afterClose) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(afterClose)}</span>
         </div>
       </div>
 
@@ -70,6 +97,7 @@ export default function ReviewStep({ group, wf, createdBy, onSuccess, onError, o
   const [paymentClient, setPaymentClient] = useState<ClientRecord | null>(null);
   // Balances after a payment taken on this screen. Session entries keep the balance they were checked in with.
   const [updatedBalances, setUpdatedBalances] = useState<Record<number, number>>({});
+  const paymentEntry = paymentClient ? wf.session.find(e => e.client.clientid === paymentClient.clientid) : undefined;
 
   return (
     <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-5 shadow-xl">
@@ -91,7 +119,7 @@ export default function ReviewStep({ group, wf, createdBy, onSuccess, onError, o
           <ReviewRow
             key={entry.client.clientid}
             entry={entry}
-            balance={updatedBalances[entry.client.clientid] ?? Number(entry.client.accountbalance ?? 0)}
+            balance={updatedBalances[entry.client.clientid] ?? entry.balance}
             onChange={patch => wf.updateEntry(entry.client.clientid, patch)}
             onRemove={() => wf.removeEntry(entry.client.clientid)}
             onMakePayment={() => setPaymentClient(entry.client)}
@@ -103,20 +131,35 @@ export default function ReviewStep({ group, wf, createdBy, onSuccess, onError, o
         <p className="text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">{problem}</p>
       )}
 
-      <div className="flex justify-end pt-2 border-t border-slate-800">
+      <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
+        <button
+          type="button"
+          onClick={wf.finishCheckIn}
+          disabled={wf.submitting || wf.session.length === 0}
+          className="bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 font-semibold px-6 py-2.5 rounded-lg text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Save for Later
+        </button>
         <button
           type="button"
           onClick={wf.submitSession}
           disabled={wf.submitting || problem !== null}
           className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2.5 rounded-lg text-sm flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          <Save size={14} /> {wf.submitting ? 'Saving...' : 'Submit & Save Attendance'}
+          <Save size={14} /> {wf.submitting ? 'Saving...' : 'Close Group & Save Attendance'}
         </button>
       </div>
 
       {paymentClient && (
         <ClientPaymentDialog
           client={paymentClient}
+          balance={updatedBalances[paymentClient.clientid] ?? paymentEntry?.balance ?? 0}
+          checkIn={{
+            fee: paymentEntry?.fee ?? 0,
+            payment: paymentEntry?.payment ?? 0,
+            paymentMethod: paymentEntry?.paymentMethod ?? 'Cash',
+            cardPaid: paymentEntry?.cardPaid ?? 0,
+          }}
           createdBy={createdBy}
           onClose={() => setPaymentClient(null)}
           onSuccess={onSuccess}

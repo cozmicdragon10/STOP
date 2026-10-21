@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { Fragment, useState, useEffect, useRef } from 'react';
 import { 
   Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
   DollarSign, Calendar, PlusCircle, Activity, PhoneCall, ShieldAlert, 
@@ -11,12 +11,16 @@ import {
   getClientAttendance, getClientFinancials,
   getClientNotes, addClientNote, getClientPolygraphs, getGroupClients, updateGroup, updateClient,
   assignClientToGroup, createClient, createGroup, deleteGroup, deleteClient, updateEmployee, getClientTests, submitTestResult, getAgentReport,
-  getDepositReport, getEmployees, addEmployee, getSystemLogs, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride
+  getDepositReport, getEmployees, addEmployee, getSystemLogs, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
+  getOpenGroups, deleteOpenGroup
 } from './api';
+import type { OpenGroupSession } from './api';
+import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
 import { SO_PHASES, SO_TREATMENT_FEES } from './utils/soPhases';
 import CardPaymentFields from './components/payments/CardPaymentFields';
+import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
 
 // Client program statuses. 'Active' is used by group call-ins and the group roster, so keep that exact spelling.
 const PROGRAM_STATUSES = ['Active', 'Completed', 'Deceased', 'Discharged', 'Failed - Non Attendance', 'Failed - Non Compliance', 'Inactive', 'Revoked', 'Transfered'];
@@ -125,15 +129,53 @@ const GROUP_TYPES_BY_PROGRAM: Record<string, string[]> = {
 };
 
 // Ledger rows store the balance after each transaction. Working back from the amount gives the balance before it.
+// A client's poly fee voucher runs 0 to this; the server fills it when the poly fee is paid in full
+const POLY_VOUCHER_MAX = 6;
+
 const ledgerBalanceChange = (fin: any) => {
   if (fin.finalbalance === null || fin.finalbalance === undefined) return null;
   const amount = Number(fin.amount || 0);
   const after = Number(fin.finalbalance);
-  const before = fin.type === 'Charge' ? after - amount : after + amount;
-  return { before: toDisplayBalance(before), after: toDisplayBalance(after) };
+  // Poly fee payments are tracked apart from the account, so they leave the balance where it was
+  const changesBalance = fin.feetype !== 'Poly Fee';
+  const before = !changesBalance ? after : fin.type === 'Charge' ? after - amount : after + amount;
+  return { before: toDisplayBalance(before), after: toDisplayBalance(after), changesBalance };
 };
 
-const POLY_CANCEL_REASONS =['Client requested cancellation', 'Client did not show', 'Client rescheduled', 'Examiner unavailable', 'Scheduling conflict', 'Other'];
+const POLY_CANCEL_REASONS =['Client requested cancellation', 'Client late / did not show', 'Examiner rescheduled', 'Weather', 'Other'];
+
+// Results that can keep the client in the NDI voucher incentive, but only by Business Administrator override
+const POLY_INCENTIVE_OVERRIDE_RESULTS = ['Inconclusive', 'No Opinion'];
+
+// Hours of notice a client must give for a requested cancellation to get their poly fee vouchers back
+const POLY_CANCEL_NOTICE_HOURS = 48;
+
+// When a slot starts, in local time. Times may be stored as "14:30:00" or "2:30 PM".
+const slotStart = (slot: any): Date | null => {
+  const [year, month, day] = String(slot?.date || '').split('T')[0].split('-').map(Number);
+  const match = /^\s*(\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm)?\s*$/i.exec(String(slot?.time || ''));
+  if (!year || !month || !day || !match) return null;
+  let hours = parseInt(match[1], 10) % (match[3] ? 12 : 24);
+  if (match[3]?.toLowerCase() === 'pm') hours += 12;
+  return new Date(year, month - 1, day, hours, Number(match[2]));
+};
+
+// Whether a cancellation returns the booking's poly fee vouchers: true/false is fixed by the reason, null leaves it to staff
+const polyVoucherReturnRule = (reason: string, slot: any): boolean | null => {
+  switch (reason) {
+    case 'Weather':
+    case 'Examiner rescheduled':
+      return true;
+    case 'Client late / did not show':
+      return false;
+    case 'Client requested cancellation': {
+      const start = slotStart(slot);
+      return start ? start.getTime() - Date.now() > POLY_CANCEL_NOTICE_HOURS * 60 * 60 * 1000 : null;
+    }
+    default:
+      return null;
+  }
+};
 
 // Group schedules are stored as text like "Thursdays @ 7:00 PM"; this picker builds and reads that same format
 const SCHEDULE_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -213,6 +255,7 @@ export default function App() {
 
   // Selected Client Details Drawer State
   const [selectedClientDetail, setSelectedClientDetail] = useState<any>(null);
+  const [showClientPayment, setShowClientPayment] = useState(false);
   const [clientTab, setClientTab] = useState<'information' | 'attendance' | 'financials' | 'notes' | 'polygraphs'>('information');
   const [clientAttendance, setClientAttendance] = useState<any[]>([]);
   const [clientFinancials, setClientFinancials] = useState<any[]>([]);
@@ -233,6 +276,11 @@ export default function App() {
   const [isAccountOnly, setIsAccountOnly] = useState(false);
   // Custom fee charge (Business Administrators only)
   const [isCustomCharge, setIsCustomCharge] = useState(false);
+  // Group check-ins saved with Finish Check-In and not yet closed
+  const [openGroups, setOpenGroups] = useState<OpenGroupSession[]>([]);
+  const [openGroupsError, setOpenGroupsError] = useState('');
+  // Open group picked in the Open Groups panel, handed to the check-in workflow to load
+  const [resumeRequest, setResumeRequest] = useState<OpenGroupSession | null>(null);
   const [chargeClient, setChargeClient] = useState('');
   const [chargeInput, setChargeInput] = useState('');
   const [chargeNotes, setChargeNotes] = useState('');
@@ -278,15 +326,26 @@ export default function App() {
   const [slotComments, setSlotComments] = useState<{ [slotId: number]: string }>({});
   // Slot awaiting the assignment confirmation box
   const [pendingAssignSlotId, setPendingAssignSlotId] = useState<number | null>(null);
+  // Payment prompt for a client who lacks the poly fee vouchers needed to be scheduled
+  const [polyPaymentPrompt, setPolyPaymentPrompt] = useState<{ client: any; amountDue: number; notice: string } | null>(null);
+  // Business Administrator prompt to schedule inside the post-NDI waiting period; the box must be ticked to bypass
+  const [waitBypassPrompt, setWaitBypassPrompt] = useState<{ slotId: number; clientName: string; lastPolyDate: string; earliestDate: string } | null>(null);
+  const [waitBypassConfirmed, setWaitBypassConfirmed] = useState(false);
   // Cancellation prompt for an assigned slot
   const [reopenTarget, setReopenTarget] = useState<any>(null);
   const [reopenReason, setReopenReason] = useState('');
   const [reopenNotes, setReopenNotes] = useState('');
+  const [reopenReturnVouchers, setReopenReturnVouchers] = useState(true);
+  // Business Administrator override of the voucher return the cancellation reason would otherwise lock
+  const [reopenVoucherOverride, setReopenVoucherOverride] = useState(false);
   const [slotTypes, setSlotTypes] = useState<{ [slotId: number]: string }>({});
 
   // Active slot selected on Poly Results tab
   const [selectedSlotForResults, setSelectedSlotForResults] = useState<any>(null);
   const [resResultType, setResResultType] = useState('No Deception Indicated');
+  // Incentive program continuation on an Inconclusive or No Opinion result: unchecked and locked unless a Business Administrator overrides
+  const [resIncentiveContinued, setResIncentiveContinued] = useState(false);
+  const [resIncentiveOverride, setResIncentiveOverride] = useState(false);
   const [resNotes, setResNotes] = useState('');
 
   // Groups Module State
@@ -426,6 +485,35 @@ export default function App() {
     }
   };
 
+  // While the Polygraphs tab is open, refresh slots every minute so open slots whose time has passed
+  // (deleted by the server when slots are listed) drop off the schedule
+  useEffect(() => {
+    if (activeTab !== 'polygraph') return;
+    const timer = setInterval(async () => {
+      try {
+        const freshSlots = await getPolygraphSlots();
+        if (Array.isArray(freshSlots)) setPolySlots(freshSlots);
+      } catch (err) {
+        console.error('Failed to refresh polygraph slots', err);
+      }
+    }, 60 * 1000);
+    return () => clearInterval(timer);
+  }, [activeTab]);
+
+  const loadOpenGroups = async () => {
+    try {
+      setOpenGroups(await getOpenGroups());
+      setOpenGroupsError('');
+    } catch (err: any) {
+      setOpenGroupsError(err.message || 'Failed to load open groups.');
+    }
+  };
+
+  useEffect(() => {
+    if (user && activeTab === 'attendance') loadOpenGroups();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, activeTab]);
+
   // Polygraph Functions
   const handleCreateSlot = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -497,16 +585,56 @@ export default function App() {
     }
   };
 
+  // To be scheduled for a polygraph a client needs a full set of poly fee vouchers and an account balance of
+  // $0.00 or better (stored sign: positive = owes). Mirrors the server's check on assignment.
+  const polySchedulingNeeds = (client: any) => {
+    const vouchers = Number(client.polyfeevoucher ?? 0);
+    const polyFeePaid = Number(client.polyfeepaid ?? 0);
+    const polyFee = Number(client.polyfee ?? 0);
+    const short = vouchers < POLY_VOUCHER_MAX;
+    // Paying off the poly fee is what fills the vouchers, so it is only owed while they are short
+    const polyDue = short ? Math.max(0, polyFee - polyFeePaid) : 0;
+    const balanceDue = Math.max(0, Number(client.accountbalance) || 0);
+    return { vouchers, polyFeePaid, polyFee, short, polyDue, balanceDue, met: !short && balanceDue === 0 };
+  };
+
+  // Offers one payment covering what blocks scheduling: the rest of the poly fee first (which fills the vouchers),
+  // then the account balance. Short vouchers with nothing owed on the poly fee must be fixed in Edit Info.
+  const promptPolyPayment = (client: any) => {
+    const name = `${client.firstname} ${client.lastname}`;
+    const { vouchers, polyFeePaid, polyFee, short, polyDue, balanceDue } = polySchedulingNeeds(client);
+    if (short && polyDue <= 0) {
+      setError(`${name} has ${vouchers}/${POLY_VOUCHER_MAX} poly fee vouchers but nothing is owed on the poly fee. Correct the vouchers in the client's Edit Info.`);
+      return;
+    }
+    const needs = [
+      short && `${POLY_VOUCHER_MAX} poly fee vouchers (has ${vouchers}/${POLY_VOUCHER_MAX}; poly fee paid $${polyFeePaid.toFixed(2)} / $${polyFee.toFixed(2)}, $${polyDue.toFixed(2)} remaining)`,
+      balanceDue > 0 && `an account balance of $0.00 or better (owes $${balanceDue.toFixed(2)})`,
+    ].filter(Boolean);
+    setPolyPaymentPrompt({
+      client,
+      amountDue: polyDue + balanceDue,
+      notice: `Scheduling ${name} for a polygraph needs ${needs.join(' and ')}. `
+        + `Paying $${(polyDue + balanceDue).toFixed(2)} covers ${polyDue > 0 && balanceDue > 0 ? 'both' : 'it'}`
+        + (polyDue > 0 ? '; the poly fee is paid first.' : '.'),
+    });
+  };
+
   // Opens the confirmation box; the assignment is only saved when it is accepted
   const openAssignConfirm = (slotId: number) => {
     if (!slotAssignments[slotId]) {
       setError('Please select a client to assign to this slot.');
       return;
     }
+    const client = clients.find(c => String(c.clientid) === slotAssignments[slotId]);
+    if (client && !polySchedulingNeeds(client).met) {
+      promptPolyPayment(client);
+      return;
+    }
     setPendingAssignSlotId(slotId);
   };
 
-  const handleAssignSlotToClient = async (slotId: number) => {
+  const handleAssignSlotToClient = async (slotId: number, bypassWaitPeriod = false) => {
     if (role !== 'Business Administrator') {
       setError('Only Business Administrators can assign polygraph slots to clients.');
       return;
@@ -520,12 +648,34 @@ export default function App() {
 
     setLoading(true);
     try {
-      const res = await assignPolygraphSlot(slotId, Number(clientId), assignedType, user.employeeemail, (slotComments[slotId] || '').trim());
-      if (res?.error) {
+      const res = await assignPolygraphSlot(slotId, Number(clientId), assignedType, user.employeeemail, (slotComments[slotId] || '').trim(), bypassWaitPeriod);
+      const client = clients.find(c => String(c.clientid) === clientId);
+      if (res?.code === 'POLY_TOO_SOON' && client) {
+        // Only Business Administrators reach this point; offer the override instead of a plain refusal
+        setWaitBypassConfirmed(false);
+        setWaitBypassPrompt({
+          slotId,
+          clientName: `${client.lastname}, ${client.firstname}`,
+          lastPolyDate: res.lastPolyDate,
+          earliestDate: res.earliestDate,
+        });
+      } else if (res?.code === 'POLY_SCHEDULING_REQUIREMENTS' && client) {
+        // The server's figures are current; refresh the client and ask for the payment
+        const updated = { ...client, polyfeevoucher: res.vouchers, polyfeepaid: res.polyFeePaid, polyfee: res.polyFee, accountbalance: res.accountBalance };
+        setClients(prev => prev.map(c => c.clientid === client.clientid ? updated : c));
+        promptPolyPayment(updated);
+      } else if (res?.error) {
         setError(res.error);
       } else {
         setSlotComments({ ...slotComments, [slotId]: '' });
-        const client = clients.find(c => String(c.clientid) === clientId);
+        // Mirror the server: the vouchers are used, and the paid-in-full poly fee is spent with them
+        if (client) {
+          const paid = Number(client.polyfeepaid ?? 0);
+          const fee = Number(client.polyfee ?? 0);
+          setClients(prev => prev.map(c => c.clientid === client.clientid
+            ? { ...c, polyfeevoucher: Number(c.polyfeevoucher ?? 0) - POLY_VOUCHER_MAX, polyfeepaid: paid >= fee ? paid - fee : paid }
+            : c));
+        }
         setSuccessMsg(`Assigned ${assignedType} Polygraph slot to ${client ? client.lastname + ', ' + client.firstname : 'Client'}!`);
         const freshSlots = await getPolygraphSlots();
         setPolySlots(freshSlots);
@@ -541,6 +691,8 @@ export default function App() {
   const handleReopenSlot = (slotId: number) => {
     setReopenReason('');
     setReopenNotes('');
+    setReopenReturnVouchers(true);
+    setReopenVoucherOverride(false);
     setReopenTarget(polySlots.find(s => s.slotid === slotId) || { slotid: slotId });
   };
 
@@ -550,17 +702,21 @@ export default function App() {
     const slotId = reopenTarget.slotid;
     setLoading(true);
     try {
-      const res = await reopenPolygraphSlot(slotId, { reason: reopenReason, notes: reopenNotes, user: user.employeeemail });
+      const res = await reopenPolygraphSlot(slotId, { reason: reopenReason, notes: reopenNotes, returnVouchers: (reopenVoucherOverride ? null : polyVoucherReturnRule(reopenReason, reopenTarget)) ?? reopenReturnVouchers, overrideVoucherRule: reopenVoucherOverride, user: user.employeeemail });
       if (res?.error) {
         setError(res.error);
       } else {
         setReopenTarget(null);
-        setSuccessMsg('Reservation cancelled. Polygraph slot is now open for new bookings!');
+        setSuccessMsg(res.reopened === false
+          ? 'Reservation cancelled. The appointment time has passed, so the slot was closed instead of reopened.'
+          : 'Reservation cancelled. Polygraph slot is now open for new bookings!');
         if (selectedSlotForResults?.slotid === slotId) {
           setSelectedSlotForResults(null);
         }
-        const freshSlots = await getPolygraphSlots();
+        // Clients are reloaded too: cancelling can return the booking's poly fee vouchers
+        const [freshSlots, freshClients] = await Promise.all([getPolygraphSlots(), getClients()]);
         setPolySlots(freshSlots);
+        setClients(freshClients);
       }
     } catch (err: any) {
       setError(err.message || 'Failed to reopen slot.');
@@ -600,15 +756,27 @@ export default function App() {
     return;
   }
 
+  const clientId = Number(selectedSlotForResults.assignedClientId);
+  if (!(clientId > 0)) {
+    setError('This slot has no assigned client, so the result cannot be recorded.');
+    return;
+  }
+
   try {
-    await submitPolygraphResult({ 
-      client: Number(selectedSlotForResults.assignedClientId), 
-      date: new Date().toISOString().split('T')[0], 
-      type: selectedSlotForResults.type || 'Maintenance', 
-      results: resResultType, 
-      polygrapher: selectedSlotForResults.polygrapher || user.employeeemail, 
-      notes: resNotes 
+    const res = await submitPolygraphResult({
+      client: clientId,
+      date: new Date().toISOString().split('T')[0],
+      type: selectedSlotForResults.type || 'Maintenance',
+      results: resResultType,
+      polygrapher: selectedSlotForResults.polygrapher || user.employeeemail,
+      notes: resNotes,
+      // The server reads the polygraph's date and time from the slot
+      slotId: selectedSlotForResults.slotid,
+      incentiveContinued: POLY_INCENTIVE_OVERRIDE_RESULTS.includes(resResultType) && resIncentiveOverride && resIncentiveContinued,
+      user: user.employeeemail
     });
+    // Keep the slot unless the result was saved, so nothing is lost
+    if (res?.error) throw new Error(res.error);
 
     if (selectedSlotForResults.slotid) {
       await deletePolygraphSlot(selectedSlotForResults.slotid);
@@ -616,6 +784,8 @@ export default function App() {
 
     setSelectedSlotForResults(null);
     setResNotes('');
+    setResIncentiveContinued(false);
+    setResIncentiveOverride(false);
     setSuccessMsg('Polygraph result recorded and slot removed permanently!');
     loadDashboardData();
   } catch (err: any) {
@@ -663,16 +833,19 @@ export default function App() {
   };
 
   // New client form state. Program status and program type start at the most common values.
-  const emptyNewClient = {
-    firstname: '', middlename: '', lastname: '', docnumber: '', supervisingagent: '', programstartdate: '',
-    programstatus: 'Active', phase: 'Phase 1 - Weekly', programtype: 'State SO', groupid: '',
+  // Start date defaults to today's local date, computed each time the form is reset.
+  const getEmptyNewClient = () => ({
+    firstname: '', middlename: '', lastname: '', docnumber: '', supervisingagent: '',
+    programstartdate: new Date().toLocaleDateString('en-CA'),
+    // Program type starts blank and must be chosen; phase and treatment fee are filled in from it
+    programstatus: 'Active', phase: '', programtype: '', groupid: '',
     address: '', city: '', county: '', state: '', zip: '',
     mainphone: '', altphone: '', emergencycontact: '', emergencycontactphone: '', comments: '',
-    treatmentfee: 180, vouchers: ''
-  };
+    treatmentfee: 0, vouchers: ''
+  });
   const [showNewClientForm, setShowNewClientForm] = useState(false);
-  const [newClient, setNewClient] = useState(emptyNewClient);
-  const newClientField = (label: string, key: keyof typeof emptyNewClient, type = 'text', required = false, listId?: string) => (
+  const [newClient, setNewClient] = useState(getEmptyNewClient);
+  const newClientField = (label: string, key: keyof ReturnType<typeof getEmptyNewClient>, type = 'text', required = false, listId?: string) => (
     <div>
       <label className="block text-xs text-slate-400 mb-1">{label}{required ? ' *' : ''}</label>
       <input type={type} required={required} list={listId} value={newClient[key]} onChange={(e) => setNewClient({ ...newClient, [key]: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
@@ -685,7 +858,7 @@ export default function App() {
     try {
       const res = await createClient({ ...newClient, groupid: newClient.groupid || null });
       setSuccessMsg(res.message || 'Client added successfully!');
-      setNewClient(emptyNewClient);
+      setNewClient(getEmptyNewClient());
       setShowNewClientForm(false);
       loadDashboardData();
     } catch (err: any) {
@@ -1004,6 +1177,10 @@ export default function App() {
       return true;
     });
 
+  // A reservation cancelled after its appointment time closes the slot instead of reopening it
+  const reopenStart = reopenTarget ? slotStart(reopenTarget) : null;
+  const reopenPassed = reopenStart !== null && reopenStart.getTime() <= Date.now();
+
   // Filter assigned slots for Poly Results tab
   const assignedSlots = polySlots.filter(s => s.status === 'Assigned' || s.assignedClientId);
 
@@ -1212,8 +1389,8 @@ export default function App() {
                   {newClientField('First Name', 'firstname', 'text', true)}
                   {newClientField('Middle Name', 'middlename')}
                   {newClientField('Last Name', 'lastname', 'text', true)}
-                  {newClientField('DOC #', 'docnumber', 'text', true)}
-                  {newClientField('Supervising Agent', 'supervisingagent', 'text', true)}
+                  {newClientField('DOC #', 'docnumber')}
+                  {newClientField('Supervising Agent', 'supervisingagent')}
                   {newClientField('Program Start Date', 'programstartdate', 'date', true)}
 
                   <div>
@@ -1231,8 +1408,8 @@ export default function App() {
                   </div>
 
                   <div>
-                    <label className="block text-xs text-slate-400 mb-1">Program Type</label>
-                    <select value={newClient.programtype} onChange={(e) => {
+                    <label className="block text-xs text-slate-400 mb-1">Program Type *</label>
+                    <select required value={newClient.programtype} onChange={(e) => {
                       const programType = e.target.value;
                       setNewClient({
                         ...newClient,
@@ -1241,11 +1418,12 @@ export default function App() {
                         treatmentfee: programType === 'BIP' ? 35 : (programType === 'State SO' ? 180 : 0)
                       });
                     }} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm">
+                      <option value="">Select a program type...</option>
                       <option value="State SO">State SO</option>
                       <option value="Federal SO">Federal SO</option>
                       <option value="BIP">BIP</option>
                       <option value="Private Pay">Private Pay</option>
-                      <option value="DOC">DOC</option>
+                      <option value="Poly Only">Poly Only</option>
                     </select>
                   </div>
 
@@ -1261,7 +1439,8 @@ export default function App() {
                   {newClient.programtype === 'BIP' && (
                     <div>
                       <label className="block text-xs text-slate-400 mb-1">Week</label>
-                      <input type="number" min={0} step={1} value={newClient.phase} onChange={(e) => setNewClient({ ...newClient, phase: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
+                      {/* New BIP clients always start at week 0; attendance counts it up */}
+                      <input type="number" value={newClient.phase} disabled className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm opacity-60 cursor-not-allowed" />
                     </div>
                   )}
 
@@ -1305,7 +1484,7 @@ export default function App() {
                 </div>
 
                 <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-                  <button type="button" onClick={() => { setShowNewClientForm(false); setNewClient(emptyNewClient); }} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Cancel</button>
+                  <button type="button" onClick={() => { setShowNewClientForm(false); setNewClient(getEmptyNewClient()); }} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Cancel</button>
                   <button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded text-xs font-semibold">Add Client</button>
                 </div>
               </form>
@@ -1352,6 +1531,30 @@ export default function App() {
           </div>
         )}
 
+        {/* Account payment from the client details drawer (Cash or Credit Card) */}
+        {selectedClientDetail && showClientPayment && (
+          <ClientPaymentDialog
+            client={selectedClientDetail}
+            balance={Number(selectedClientDetail.accountbalance) || 0}
+            noteLabel="Account payment"
+            createdBy={user.employeeemail}
+            onClose={() => setShowClientPayment(false)}
+            onSuccess={setSuccessMsg}
+            onError={setError}
+            onProcessed={async (newBalance, polyFeePaid, polyFeeVoucher) => {
+              const clientid = selectedClientDetail.clientid;
+              const changes = { accountbalance: newBalance, polyfeepaid: polyFeePaid, polyfeevoucher: polyFeeVoucher };
+              setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, ...changes } : c));
+              setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, ...changes } : c));
+              try {
+                setClientFinancials(await getClientFinancials(clientid));
+              } catch {
+                // The payment is saved; the ledger refreshes the next time the client is opened
+              }
+            }}
+          />
+        )}
+
         {/* CLIENT DETAILS DRAWER */}
         {selectedClientDetail && (
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex justify-end z-50">
@@ -1362,6 +1565,13 @@ export default function App() {
                   <p className="text-xs text-slate-400 mt-1">DOC #: <span className="text-slate-200 font-mono">{selectedClientDetail.docnumber}</span> | Program: <span className="text-blue-400 font-semibold">{selectedClientDetail.programtype || 'State SO'}</span> | Agent: {selectedClientDetail.supervisingagent}</p>
                 </div>
                 <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowClientPayment(true)}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
+                  >
+                    <DollarSign size={14} /> Make Payment
+                  </button>
                   {role === 'Business Administrator' && (
                     <button
                       onClick={async () => {
@@ -1601,7 +1811,7 @@ export default function App() {
                             <option value="Federal SO">Federal SO</option>
                             <option value="BIP">BIP</option>
                             <option value="Private Pay">Private Pay</option>
-                            <option value="DOC">DOC</option>
+                            <option value="Poly Only">Poly Only</option>
                           </select>
                         ) : (
                           <p className="text-white font-medium">{selectedClientDetail.programtype || '—'}</p>
@@ -1630,19 +1840,24 @@ export default function App() {
                         { label: 'Treatment Fee', field: 'treatmentfee', prefix: '$' },
                         { label: 'Account Balance', field: 'accountbalance', prefix: '$' },
                         { label: 'Vouchers', field: 'vouchers', prefix: '' },
-                      ].map(({ label, field, prefix }) => (
+                        { label: 'Poly Fee Voucher', field: 'polyfeevoucher', prefix: '', step: '1', min: 0, max: POLY_VOUCHER_MAX },
+                      ].map(({ label, field, prefix, step = '0.01', min, max }) => (
                         <div key={field}>
                           <p className="text-xs text-slate-500 mb-0.5">{label}</p>
                           {editingClientInfo ? (
                             <input
                               type="number"
-                              step="0.01"
+                              step={step}
+                              min={min}
+                              max={max}
                               value={field === 'accountbalance' && clientInfoForm[field] !== '' && clientInfoForm[field] != null ? toDisplayBalance(clientInfoForm[field]) : (clientInfoForm[field] ?? '')}
                               onChange={e => setClientInfoForm((f: any) => ({ ...f, [field]: field === 'accountbalance' && e.target.value !== '' ? toDisplayBalance(e.target.value) : e.target.value }))}
                               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
                             />
                           ) : field === 'accountbalance' ? (
-                            <p className="font-medium text-emerald-400">{formatBalance(selectedClientDetail[field])}</p>
+                            <p className={`font-medium ${toDisplayBalance(selectedClientDetail[field]) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(selectedClientDetail[field])}</p>
+                          ) : field === 'polyfeevoucher' ? (
+                            <p className="font-medium text-white">{Number(selectedClientDetail[field] ?? 0)}/{POLY_VOUCHER_MAX}</p>
                           ) : (
                             <p className="font-medium text-white">
                               {prefix}{selectedClientDetail[field] != null ? Number(selectedClientDetail[field]).toFixed(2) : '—'}
@@ -1650,6 +1865,40 @@ export default function App() {
                           )}
                         </div>
                       ))}
+                      {/* Poly fee progress: amount paid so far out of the total poly fee */}
+                      <div>
+                        <p className="text-xs text-slate-500 mb-0.5">Poly Fee (Paid / Total)</p>
+                        {editingClientInfo ? (
+                          <div className="flex items-center gap-2">
+                            {(['polyfeepaid', 'polyfee'] as const).map((field, i) => (
+                              <Fragment key={field}>
+                                {i === 1 && <span className="text-slate-500">/</span>}
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min={0}
+                                  aria-label={field === 'polyfeepaid' ? 'Poly fee paid' : 'Poly fee total'}
+                                  value={clientInfoForm[field] ?? ''}
+                                  onChange={e => setClientInfoForm((f: any) => ({ ...f, [field]: e.target.value }))}
+                                  className="w-full min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
+                                />
+                              </Fragment>
+                            ))}
+                          </div>
+                        ) : (() => {
+                          const paid = Number(selectedClientDetail.polyfeepaid ?? 0);
+                          const total = Number(selectedClientDetail.polyfee ?? 250);
+                          const status = paid >= total ? { text: 'Paid in full', color: 'text-emerald-400' }
+                            : paid > 0 ? { text: `$${(total - paid).toFixed(2)} remaining`, color: 'text-amber-400' }
+                            : { text: 'Not paid', color: 'text-slate-500' };
+                          return (
+                            <p className="font-medium text-white">
+                              ${paid.toFixed(2)} / ${total.toFixed(2)}
+                              <span className={`ml-2 text-xs font-normal ${status.color}`}>{status.text}</span>
+                            </p>
+                          );
+                        })()}
+                      </div>
                     </div>
                   </div>
 
@@ -1794,7 +2043,10 @@ export default function App() {
                     </div>
                     <div className="flex-1 min-w-0 space-y-3">
                     <div className="flex justify-between items-start gap-3">
-                      <p className="font-semibold text-white">{att.groupname || 'Group Session'}</p>
+                      <p className="font-semibold text-white">
+                        {att.groupname || 'Group Session'}
+                        {att.groupschedule && <span className="ml-2 text-xs font-normal text-slate-400">{att.groupschedule}</span>}
+                      </p>
                       <span className={`text-xs font-semibold whitespace-nowrap ${toDisplayBalance(att.accounttotal) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(att.accounttotal)} Balance</span>
                     </div>
                     {(() => { const c = attendanceBalanceChange(att); return (
@@ -1831,7 +2083,9 @@ export default function App() {
                     </p><p className="text-xs text-slate-400">{new Date(fin.date).toLocaleString()} — {fin.comments}</p></div><div className="text-right">
                   <p className={`font-bold ${fin.type === 'Charge' ? 'text-red-400' : 'text-emerald-400'}`}>${Number(fin.amount).toFixed(2)}</p>
                   {(() => { const b = ledgerBalanceChange(fin); return b && (
-                    <p className={`text-xs mt-1 ${b.after < 0 ? 'text-red-400' : 'text-slate-400'}`}>Balance {signedMoney(b.before)} → {signedMoney(b.after)}</p>
+                    <p className={`text-xs mt-1 ${b.after < 0 ? 'text-red-400' : 'text-slate-400'}`}>
+                      {b.changesBalance ? <>Balance {signedMoney(b.before)} → {signedMoney(b.after)}</> : <>Balance unchanged: {signedMoney(b.after)}</>}
+                    </p>
                   ); })()}
                 </div></div>))}</div>
               )}
@@ -1865,7 +2119,8 @@ export default function App() {
                     <div className="shrink-0 w-28 flex flex-col justify-center border-r border-slate-800 pr-5">
                       <p className="text-2xl font-bold text-white leading-tight">{formatLogMonthDay(poly.date)}</p>
                       <p className="text-sm text-slate-400 mt-0.5">{formatLogYear(poly.date)}</p>
-                      <p className="text-xs text-slate-500 mt-1">{formatLogTime(poly.date)}</p>
+                      {/* Date is when the result was recorded (no time is stored for it) */}
+                      <p className="text-xs text-slate-500 mt-1">Recorded</p>
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start gap-3 font-semibold text-white">
@@ -1873,6 +2128,14 @@ export default function App() {
                         <span className="text-xs text-emerald-400 text-right">{poly.results}</span>
                       </div>
                       <p className="text-xs text-slate-400 mt-1">Examiner: {getExaminerDisplayName(poly.polygrapher)}</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Polygraph Date:{' '}
+                        <span className="text-slate-200">
+                          {poly.polygraphdatetime
+                            ? (() => { const d = new Date(poly.polygraphdatetime); return `${d.toLocaleDateString()} @ ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`; })()
+                            : 'Not recorded'}
+                        </span>
+                      </p>
                     </div>
                   </div>
                 ))}</div>
@@ -1949,6 +2212,10 @@ export default function App() {
                   onSuccess={setSuccessMsg}
                   onError={setError}
                   onSaved={loadDashboardData}
+                  openGroups={openGroups}
+                  onOpenGroupsChanged={loadOpenGroups}
+                  resumeRequest={resumeRequest}
+                  onResumeHandled={() => setResumeRequest(null)}
                 />
               ) : (
                 <>
@@ -2051,10 +2318,55 @@ export default function App() {
               )}
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl flex flex-col justify-between">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl flex flex-col justify-between gap-4">
               <div>
-                <h3 className="font-semibold text-white mb-2 flex items-center gap-2"><Activity size={18} className="text-blue-400" /> Workflow Summary</h3>
-                <p className="text-xs text-slate-400 leading-relaxed mb-4">Executes Attendance record, Financial Transaction, and Balance calculation.</p>
+                <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><ClipboardCheck size={18} className="text-blue-400" /> Open Groups</h3>
+                <p className="text-xs text-slate-400 leading-relaxed mb-4">Check-ins saved with Finish Check-In. Open one to review and close the group.</p>
+                {openGroupsError ? (
+                  <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{openGroupsError}</p>
+                ) : openGroups.length === 0 ? (
+                  <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">No open groups.</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {openGroups.map(o => (
+                      <li key={o.opensessionid} className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-white truncate">{o.groupname}</p>
+                            <p className={`text-xs ${o.sessiondate === todayLocal() ? 'text-slate-400' : 'text-amber-400'}`}>
+                              {o.sessiondate === todayLocal() ? 'Today' : new Date(`${o.sessiondate}T00:00:00`).toLocaleDateString()} · {o.entries.length} client(s)
+                            </p>
+                            <p className="text-[11px] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${o.createdby}` : ''}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              if (!window.confirm(`Discard the open check-in for ${o.groupname}? Attendance for these ${o.entries.length} client(s) will not be saved. Payments already taken stay on their accounts.`)) return;
+                              try {
+                                await deleteOpenGroup(o.opensessionid, user.employeeemail);
+                                setSuccessMsg(`Open check-in for ${o.groupname} discarded.`);
+                                loadOpenGroups();
+                              } catch (err: any) {
+                                setError(err.message || 'Failed to discard the open group.');
+                              }
+                            }}
+                            className="text-slate-500 hover:text-red-400 p-1 rounded shrink-0"
+                            aria-label={`Discard open check-in for ${o.groupname}`}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { setIsAccountOnly(false); setIsCustomCharge(false); setResumeRequest(o); }}
+                          className="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-1.5 rounded-lg"
+                        >
+                          Open & Close Group
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <div className="bg-slate-950 border border-slate-800 p-3 rounded-lg"><p className="text-xs text-slate-400">User Session:</p><p className="text-sm font-semibold text-blue-400">{user.employeeemail}</p></div>
             </div>
@@ -2546,6 +2858,70 @@ export default function App() {
               );
             })()}
 
+            {waitBypassPrompt && (
+              <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="wait-bypass-title">
+                <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
+                  <div>
+                    <h3 id="wait-bypass-title" className="font-semibold text-white">Bypass Polygraph Waiting Period?</h3>
+                    <p className="text-xs text-slate-400 mt-1">
+                      <span className="text-emerald-400 font-semibold">{waitBypassPrompt.clientName}</span>'s last polygraph
+                      ({waitBypassPrompt.lastPolyDate}) was No Deception Indicated. The next one normally cannot be before {waitBypassPrompt.earliestDate} (5 months and 2 weeks).
+                    </p>
+                  </div>
+                  <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                    As a Business Administrator you can schedule this polygraph anyway. The override is recorded in the client's case notes and the system log.
+                  </p>
+                  <label className="flex items-start gap-2.5 cursor-pointer text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={waitBypassConfirmed}
+                      onChange={e => setWaitBypassConfirmed(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 accent-amber-500"
+                    />
+                    <span>I confirm I want to schedule this polygraph before {waitBypassPrompt.earliestDate}, bypassing the waiting period.</span>
+                  </label>
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setWaitBypassPrompt(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Cancel</button>
+                    <button
+                      type="button"
+                      disabled={!waitBypassConfirmed || loading}
+                      onClick={async () => {
+                        const { slotId } = waitBypassPrompt;
+                        setWaitBypassPrompt(null);
+                        await handleAssignSlotToClient(slotId, true);
+                      }}
+                      className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded text-xs font-semibold"
+                    >
+                      Bypass &amp; Assign
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {polyPaymentPrompt && (
+              <ClientPaymentDialog
+                client={polyPaymentPrompt.client}
+                balance={Number(polyPaymentPrompt.client.accountbalance) || 0}
+                noteLabel="Poly fee payment"
+                initialAmount={polyPaymentPrompt.amountDue}
+                initialApplyToPolyFee={polySchedulingNeeds(polyPaymentPrompt.client).polyDue > 0}
+                lockApplyToPolyFee
+                notice={polyPaymentPrompt.notice}
+                createdBy={user.employeeemail}
+                onClose={() => setPolyPaymentPrompt(null)}
+                onSuccess={setSuccessMsg}
+                onError={setError}
+                onProcessed={(newBalance, polyFeePaid, polyFeeVoucher) => {
+                  const updated = { ...polyPaymentPrompt.client, accountbalance: newBalance, polyfeepaid: polyFeePaid, polyfeevoucher: polyFeeVoucher };
+                  setClients(prev => prev.map(c => c.clientid === updated.clientid ? { ...c, ...updated } : c));
+                  if (polySchedulingNeeds(updated).met) {
+                    setSuccessMsg(`${POLY_VOUCHER_MAX}/${POLY_VOUCHER_MAX} poly fee vouchers and the account is paid up. Click Confirm & Assign Slot to schedule.`);
+                  }
+                }}
+              />
+            )}
+
             {reopenTarget && (
               <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
                 <form onSubmit={confirmReopenSlot} className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
@@ -2554,10 +2930,13 @@ export default function App() {
                     <p className="text-xs text-slate-400 mt-1">
                       {reopenTarget.assignedClientName ?`${reopenTarget.assignedClientName} will be notified in their case notes.` : 'The slot will be reopened for new bookings.'}
                     </p>
+                    {reopenPassed && (
+                      <p className="text-xs text-amber-400 mt-1">The appointment time has passed, so the slot will be closed instead of reopened.</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs text-slate-400 uppercase mb-1">Cancellation Reason *</label>
-                    <select required value={reopenReason} onChange={(e) => setReopenReason(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm">
+                    <select required value={reopenReason} onChange={(e) => { setReopenReason(e.target.value); setReopenVoucherOverride(false); }} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm">
                       <option value="">Select a reason...</option>
                       {POLY_CANCEL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
@@ -2566,9 +2945,44 @@ export default function App() {
                     <label className="block text-xs text-slate-400 uppercase mb-1">Notes <span className="normal-case text-slate-500">(optional)</span></label>
                     <textarea value={reopenNotes} onChange={(e) => setReopenNotes(e.target.value)} rows={3} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" placeholder="Add details for the case note..." />
                   </div>
+                  {(() => {
+                    const reasonRule = polyVoucherReturnRule(reopenReason, reopenTarget);
+                    const voucherRule = reopenVoucherOverride ? null : reasonRule;
+                    return (
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <label className={`flex items-center gap-2 text-slate-200 ${voucherRule === null ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                            <input type="checkbox" checked={voucherRule ?? reopenReturnVouchers} disabled={voucherRule !== null} onChange={(e) => setReopenReturnVouchers(e.target.checked)} className="accent-amber-500 disabled:opacity-60" />
+                            Poly Vouchers Return
+                          </label>
+                          {role === 'Business Administrator' && reasonRule !== null && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!reopenVoucherOverride) setReopenReturnVouchers(reasonRule);
+                                setReopenVoucherOverride(!reopenVoucherOverride);
+                              }}
+                              className="text-xs font-semibold px-2 py-1 rounded border border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                            >
+                              {reopenVoucherOverride ? 'Undo Override' : 'Override'}
+                            </button>
+                          )}
+                        </div>
+                        {reasonRule !== null && (
+                          <p className="text-xs text-slate-500 mt-1 ml-6">
+                            {reopenVoucherOverride
+                              ? 'Business Administrator override: the choice will be recorded in the case note.'
+                              : reopenReason === 'Client requested cancellation'
+                                ? `Locked: cancelled ${reasonRule ? 'more' : 'less'} than ${POLY_CANCEL_NOTICE_HOURS} hours before the appointment.`
+                                : `Locked by the cancellation reason.`}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <div className="flex justify-end gap-2">
                     <button type="button" onClick={() => setReopenTarget(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Keep Reservation</button>
-                    <button type="submit" disabled={loading || !reopenReason} className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-4 py-2 rounded text-xs font-semibold">Cancel Reservation & Reopen</button>
+                    <button type="submit" disabled={loading || !reopenReason} className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-4 py-2 rounded text-xs font-semibold">{reopenPassed ? 'Cancel Reservation' : 'Cancel Reservation & Reopen'}</button>
                   </div>
                 </form>
               </div>
@@ -2585,8 +2999,8 @@ export default function App() {
                       <div key={slot.slotid} className={`bg-slate-950 border ${slot.status === 'Assigned' ? 'border-emerald-500/40 bg-emerald-950/10' : 'border-slate-800'} p-4 rounded-xl text-sm space-y-3`}>
                         <div className="flex justify-between font-semibold text-white">
                           <span>{slot.location}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded ${slot.status === 'Assigned' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-blue-500/10 text-blue-400'}`}>
-                            {slot.status === 'Assigned' ? 'Assigned' : '1 Open Slot'}
+                          <span className={`text-xs px-2 py-0.5 rounded ${slot.status === 'Assigned' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : slot.status === 'Closed' ? 'bg-slate-800 text-slate-400 border border-slate-700' : 'bg-blue-500/10 text-blue-400'}`}>
+                            {slot.status === 'Assigned' ? 'Assigned' : slot.status === 'Closed' ? 'Closed' : '1 Open Slot'}
                           </span>
                         </div>
                         <p className="text-xs text-slate-400">Date: {new Date(slot.date).toLocaleDateString()} @ {formatDisplayTime(slot.time)}</p>
@@ -2606,6 +3020,18 @@ export default function App() {
                                 <RotateCcw size={13} /> Cancel Reservation & Reopen
                               </button>
                             </div>
+                          </div>
+                        ) : slot.status === 'Closed' ? (
+                          <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2">
+                            <p className="text-xs text-slate-400 italic">Reservation cancelled after the appointment time. This slot was not reopened.</p>
+                            {role === 'Business Administrator' && (
+                              <button
+                                onClick={() => handleDeleteSlot(slot.slotid)}
+                                title="Delete closed slot"
+                                className="bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 px-3 py-2 rounded text-xs font-semibold flex items-center justify-center gap-1 transition">
+                                <Trash2 size={13} /> Delete
+                              </button>
+                            )}
                           </div>
                         ) : role === 'Business Administrator' ? (
                           <div className="pt-2 border-t border-slate-800 space-y-3">
@@ -2687,7 +3113,7 @@ export default function App() {
                     {assignedSlots.map(slot => (
                       <div 
                         key={slot.slotid} 
-                        onClick={() => setSelectedSlotForResults(slot)}
+                        onClick={() => { setSelectedSlotForResults(slot); setResIncentiveContinued(false); setResIncentiveOverride(false); }}
                         className={`cursor-pointer transition border p-4 rounded-xl text-sm space-y-2 ${
                           selectedSlotForResults?.slotid === slot.slotid 
                             ? 'bg-blue-950/30 border-blue-500 text-white shadow-lg shadow-blue-500/10' 
@@ -2716,13 +3142,42 @@ export default function App() {
 
                     <div>
                       <label className="block text-xs text-slate-400 uppercase mb-1">Polygraph Examination Result</label>
-                      <select value={resResultType} onChange={(e) => setResResultType(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm">
+                      <select value={resResultType} onChange={(e) => { setResResultType(e.target.value); setResIncentiveContinued(false); setResIncentiveOverride(false); }} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm">
                         <option value="No Deception Indicated">No Deception Indicated (NDI)</option>
                         <option value="Deception Indicated">Deception Indicated (DI)</option>
                         <option value="Inconclusive">Inconclusive (INC)</option>
                         <option value="No Opinion">No Opinion (NO)</option>
+                        <option value="No Significant Response">No Significant Response (NSR)</option>
                       </select>
                     </div>
+
+                    {POLY_INCENTIVE_OVERRIDE_RESULTS.includes(resResultType) && (
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <label className={`flex items-center gap-2 text-sm text-slate-200 ${resIncentiveOverride ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                            <input type="checkbox" checked={resIncentiveOverride && resIncentiveContinued} disabled={!resIncentiveOverride} onChange={(e) => setResIncentiveContinued(e.target.checked)} className="accent-blue-500 disabled:opacity-60" />
+                            Incentive Program Continuation
+                          </label>
+                          {role === 'Business Administrator' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (resIncentiveOverride) setResIncentiveContinued(false);
+                                setResIncentiveOverride(!resIncentiveOverride);
+                              }}
+                              className="text-xs font-semibold px-2 py-1 rounded border border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
+                            >
+                              {resIncentiveOverride ? 'Undo Override' : 'Override'}
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1 ml-6">
+                          {resIncentiveOverride
+                            ? 'Business Administrator override: checked keeps the client earning poly fee vouchers as if the result were NDI.'
+                            : `Locked unchecked for ${resResultType} results.`}
+                        </p>
+                      </div>
+                    )}
 
                     <div>
                       <label className="block text-xs text-slate-400 uppercase mb-1">Examiner Clinical Notes & Observations</label>
