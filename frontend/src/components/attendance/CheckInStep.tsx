@@ -59,7 +59,7 @@ function RosterSkeleton() {
 }
 
 export default function CheckInStep({ group, wf, onOpenSearch }: Props) {
-  // SO groups show the phase fee schedule for State and Federal SO clients
+  // SO groups show the phase fee schedule for State, Federal and Voluntary SO clients
   const showPhaseFees = ['SO', 'FED SO'].includes((group.programtype || '').trim().toUpperCase());
   const selectableSelected = wf.selectableRoster.filter(c => wf.selectedIds.has(c.clientid)).length;
   const rosterReady = wf.rosterStatus === 'ready';
@@ -92,7 +92,7 @@ export default function CheckInStep({ group, wf, onOpenSearch }: Props) {
       {/* Each client is charged the treatment fee on their own account; this is the reference schedule for SO groups */}
       {showPhaseFees && (
         <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-300">
-          <p className="text-slate-500 uppercase text-[10px] font-semibold tracking-wide mb-1">State / Federal SO phase fees</p>
+          <p className="text-slate-500 uppercase text-[10px] font-semibold tracking-wide mb-1">State / Federal / Voluntary SO phase fees</p>
           <ul className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
             {SO_PHASES.map(phase => (
               <li key={phase} className="flex justify-between gap-4 text-slate-300">

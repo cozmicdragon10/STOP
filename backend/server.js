@@ -82,6 +82,126 @@ app.get('/api/clients', async (req, res) => {
     }
 });
 
+// No Poly Required: off by default; only a Business Administrator can change it. The change is noted on the client's case notes.
+app.put('/api/clients/:id/no-poly-required', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { noPolyRequired, user } = req.body;
+        if (typeof noPolyRequired !== 'boolean') {
+            return res.status(400).json({ error: 'noPolyRequired must be true or false.' });
+        }
+        const roleRes = await pool.query('SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [user]);
+        if (roleRes.rows[0]?.role !== 'Business Administrator') {
+            return res.status(403).json({ error: 'Only Business Administrators can change No Poly Required.' });
+        }
+        const beforeRes = await pool.query('SELECT NoPolyRequired FROM Clients WHERE ClientId = $1', [id]);
+        const result = await pool.query('UPDATE Clients SET NoPolyRequired = $1 WHERE ClientId = $2 RETURNING NoPolyRequired', [noPolyRequired, id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Client not found.' });
+        }
+        if (beforeRes.rows[0]?.nopolyrequired !== noPolyRequired) {
+            await logClientChange(pool, {
+                clientId: id, changedBy: user, changeType: 'No Poly Required',
+                oldValue: beforeRes.rows[0]?.nopolyrequired ? 'Checked' : 'Unchecked', newValue: noPolyRequired ? 'Checked' : 'Unchecked',
+                details: 'Business Administrator override.',
+            });
+        }
+        await pool.query(
+            `INSERT INTO Notes (Client, Date, "User", Comments, Category) VALUES ($1, NOW(), $2, $3, 'Polygraph')`,
+            [id, user, `No Poly Required ${noPolyRequired ? 'checked' : 'unchecked'} by Business Administrator override.`]
+        );
+        await logAction(user, 'No Poly Required Changed', `Client ID ${id}: No Poly Required set to ${noPolyRequired}`);
+        res.json({ success: true, noPolyRequired: result.rows[0].nopolyrequired });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Statuses that can be set when adding or editing a client; the discharge statuses below are only set through discharge
+const EDITABLE_PROGRAM_STATUSES = ['Active', 'Inactive'];
+
+// Discharge types a Business Administrator can pick; each becomes the client's program status
+const DISCHARGE_STATUSES = ['Completed', 'Deceased', 'Discharged Supervision', 'Program Failed', 'Revoked', 'Transferred', 'Terminated'];
+// Discharge types that require a subcategory; each discharge is kept in ClientDischarges for recidivism reporting
+const DISCHARGE_SUBCATEGORIES = {
+    'Program Failed': ['Attendance', 'Polys', 'Not Amenable'],
+    'Revoked': ['Non Compliance', 'New SO Charge', 'New Criminal Charge'],
+    'Terminated': ['Violence', 'New Criminal Charge'],
+};
+
+// Discharge (Business Administrators, from a non-discharged status) and Activate (any active employee, from a discharged status).
+// Each sets the program status, adds a case note, and records the change log entry together.
+const STATUS_ACTIONS = {
+    discharge: {
+        statuses: DISCHARGE_STATUSES, fromDischarged: false, adminOnly: true, recordsDischarge: true,
+        category: 'Discharge', label: 'Discharge', details: 'Client discharged.', logAction: 'Client Discharged',
+    },
+    activate: {
+        statuses: EDITABLE_PROGRAM_STATUSES, fromDischarged: true, adminOnly: false,
+        category: 'Activation', label: 'Activation', details: 'Client activated.', logAction: 'Client Activated',
+    },
+};
+
+const changeProgramStatus = (action) => async (req, res) => {
+    const { id } = req.params;
+    const { status, subcategory, note, user } = req.body;
+    if (!action.statuses.includes(status)) {
+        return res.status(400).json({ error: `Choose one of: ${action.statuses.join(', ')}.` });
+    }
+    const subcategories = action.recordsDischarge ? DISCHARGE_SUBCATEGORIES[status] : undefined;
+    if (subcategories ? !subcategories.includes(subcategory) : subcategory) {
+        return res.status(400).json({ error: subcategories ? `Choose a ${status} subcategory: ${subcategories.join(', ')}.` : `${status} has no subcategories.` });
+    }
+    if (typeof note !== 'string' || !note.trim()) {
+        return res.status(400).json({ error: `A ${action.label.toLowerCase()} note is required.` });
+    }
+    const db = await pool.connect();
+    try {
+        const roleRes = await db.query('SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [user]);
+        if (!roleRes.rows[0] || (action.adminOnly && roleRes.rows[0].role !== 'Business Administrator')) {
+            return res.status(403).json({ error: action.adminOnly ? 'Only Business Administrators can discharge clients.' : 'Only active employees can activate clients.' });
+        }
+        await db.query('BEGIN');
+        const beforeRes = await db.query('SELECT ProgramStatus FROM Clients WHERE ClientId = $1 FOR UPDATE', [id]);
+        if (beforeRes.rows.length === 0) {
+            await db.query('ROLLBACK');
+            return res.status(404).json({ error: 'Client not found.' });
+        }
+        const oldStatus = beforeRes.rows[0].programstatus;
+        if (DISCHARGE_STATUSES.includes(oldStatus) !== action.fromDischarged) {
+            await db.query('ROLLBACK');
+            return res.status(409).json({ error: action.fromDischarged ? 'Only discharged clients can be activated.' : 'This client is already discharged.' });
+        }
+        await db.query('UPDATE Clients SET ProgramStatus = $1 WHERE ClientId = $2', [status, id]);
+        const statusLabel = subcategory ? `${status} (${subcategory})` : status;
+        await db.query(
+            `INSERT INTO Notes (Client, Date, "User", Comments, Category) VALUES ($1, NOW(), $2, $3, $4)`,
+            [id, user, `${action.label} - ${statusLabel}: ${note.trim()}`, action.category]
+        );
+        if (action.recordsDischarge) {
+            await db.query(
+                `INSERT INTO ClientDischarges (ClientId, DischargeType, Subcategory, Note, DischargedBy) VALUES ($1, $2, $3, $4, $5)`,
+                [id, status, subcategory || null, note.trim(), user]
+            );
+        }
+        await logClientChange(db, {
+            clientId: id, changedBy: user, changeType: 'Program Status',
+            oldValue: oldStatus || 'None', newValue: status, details: subcategory ? `${action.details} Subcategory: ${subcategory}.` : action.details,
+        });
+        await db.query('COMMIT');
+        await logAction(user, action.logAction, `Client ID ${id}: ${oldStatus || 'None'} to ${statusLabel}`);
+        res.json({ success: true, programStatus: status });
+    } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
+        res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
+    }
+};
+
+app.post('/api/clients/:id/discharge', changeProgramStatus(STATUS_ACTIONS.discharge));
+app.post('/api/clients/:id/activate', changeProgramStatus(STATUS_ACTIONS.activate));
+
 app.get('/api/clients/:id/attendance', async (req, res) => {
     try {
         const { id } = req.params;
@@ -148,6 +268,124 @@ app.get('/api/clients/:id/polygraphs', async (req, res) => {
     }
 });
 
+// --- CLIENT ATTACHMENTS ---
+// Files are stored in the database. Uploads arrive as raw bytes (application/octet-stream, so the global JSON parser
+// leaves them alone) with the name and real type in headers.
+const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+
+app.get('/api/clients/:id/attachments', async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT AttachmentId, ClientId, FileName, ContentType, FileSize, UploadedBy, UploadedOn
+             FROM ClientAttachments WHERE ClientId = $1 ORDER BY UploadedOn DESC, AttachmentId DESC`,
+            [req.params.id]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/clients/:id/attachments', express.raw({ type: 'application/octet-stream', limit: ATTACHMENT_MAX_BYTES }), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const user = req.get('X-User') || '';
+        const fileName = decodeURIComponent(req.get('X-File-Name') || '').trim();
+        const contentType = req.get('X-File-Type') || 'application/octet-stream';
+        if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+            return res.status(400).json({ error: 'Choose a file to upload.' });
+        }
+        if (!fileName) {
+            return res.status(400).json({ error: 'The file needs a name.' });
+        }
+        const roleRes = await pool.query('SELECT 1 FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [user]);
+        if (roleRes.rows.length === 0) {
+            return res.status(403).json({ error: 'Only active employees can add attachments.' });
+        }
+        const result = await pool.query(
+            `INSERT INTO ClientAttachments (ClientId, FileName, ContentType, FileSize, Data, UploadedBy)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING AttachmentId, ClientId, FileName, ContentType, FileSize, UploadedBy, UploadedOn`,
+            [id, fileName.slice(0, 255), contentType.slice(0, 255), req.body.length, req.body, user]
+        );
+        await logAction(user, 'Add Attachment', `Client ID ${id}: ${fileName}`);
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Always sent as a download with nosniff; the browser decides whether to show it from the blob it builds
+app.get('/api/attachments/:attachmentId', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT FileName, ContentType, Data FROM ClientAttachments WHERE AttachmentId = $1', [req.params.attachmentId]);
+        const file = result.rows[0];
+        if (!file) {
+            return res.status(404).json({ error: 'Attachment not found.' });
+        }
+        res.set({
+            'Content-Type': file.contenttype,
+            'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.filename)}`,
+            'X-Content-Type-Options': 'nosniff',
+        });
+        res.send(file.data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Rename (any active employee). The original extension is kept so downloads still open in the right program.
+app.patch('/api/attachments/:attachmentId', async (req, res) => {
+    try {
+        const { user } = req.body;
+        let fileName = String(req.body.fileName || '').trim();
+        if (!fileName) {
+            return res.status(400).json({ error: 'Enter a name for the attachment.' });
+        }
+        const roleRes = await pool.query('SELECT 1 FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [user]);
+        if (roleRes.rows.length === 0) {
+            return res.status(403).json({ error: 'Only active employees can rename attachments.' });
+        }
+        const beforeRes = await pool.query('SELECT ClientId, FileName FROM ClientAttachments WHERE AttachmentId = $1', [req.params.attachmentId]);
+        const before = beforeRes.rows[0];
+        if (!before) {
+            return res.status(404).json({ error: 'Attachment not found.' });
+        }
+        const extension = before.filename.match(/\.[^.\s]{1,10}$/)?.[0];
+        if (extension && !fileName.toLowerCase().endsWith(extension.toLowerCase())) {
+            fileName += extension;
+        }
+        const result = await pool.query(
+            `UPDATE ClientAttachments SET FileName = $1 WHERE AttachmentId = $2
+             RETURNING AttachmentId, ClientId, FileName, ContentType, FileSize, UploadedBy, UploadedOn`,
+            [fileName.slice(0, 255), req.params.attachmentId]
+        );
+        await logAction(user, 'Rename Attachment', `Client ID ${before.clientid}: ${before.filename} to ${result.rows[0].filename}`);
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Business Administrators only, so client records aren't lost by mistake
+app.delete('/api/attachments/:attachmentId', async (req, res) => {
+    try {
+        const user = req.get('X-User') || '';
+        const roleRes = await pool.query('SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [user]);
+        if (roleRes.rows[0]?.role !== 'Business Administrator') {
+            return res.status(403).json({ error: 'Only Business Administrators can delete attachments.' });
+        }
+        const result = await pool.query('DELETE FROM ClientAttachments WHERE AttachmentId = $1 RETURNING ClientId, FileName', [req.params.attachmentId]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Attachment not found.' });
+        }
+        await logAction(user, 'Delete Attachment', `Client ID ${result.rows[0].clientid}: ${result.rows[0].filename}`);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // A client's poly fee voucher runs 0 to this; paying the poly fee in full fills it
 const POLY_VOUCHER_MAX = 6;
 
@@ -177,12 +415,24 @@ app.put('/api/clients/:id', async (req, res) => {
             treatmentfee, accountbalance, vouchers, polyfeevoucher, polyfeepaid, polyfee,
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
-            comments, programtype
+            comments, programtype, updatedBy
         } = req.body;
 
         const polyVoucher = polyfeevoucher !== undefined && polyfeevoucher !== null && polyfeevoucher !== '' ? Number(polyfeevoucher) : null;
         if (polyVoucher !== null && (!Number.isInteger(polyVoucher) || polyVoucher < 0 || polyVoucher > POLY_VOUCHER_MAX)) {
             return res.status(400).json({ error: `Poly fee voucher must be a whole number from 0 to ${POLY_VOUCHER_MAX}.` });
+        }
+
+        // Tracked fields before the edit, for the change log
+        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId FROM Clients WHERE ClientId = $1', [id]);
+        const before = beforeRes.rows[0];
+        if (programstatus && programstatus !== before?.programstatus) {
+            if (DISCHARGE_STATUSES.includes(before?.programstatus)) {
+                return res.status(400).json({ error: 'Program status is locked while the client is discharged. Use the Activate button.' });
+            }
+            if (!EDITABLE_PROGRAM_STATUSES.includes(programstatus)) {
+                return res.status(400).json({ error: `Program status can only be changed to ${EDITABLE_PROGRAM_STATUSES.join(' or ')} here. Use the Discharge button for ${programstatus}.` });
+            }
         }
 
         await pool.query(
@@ -243,6 +493,27 @@ app.put('/api/clients/:id', async (req, res) => {
             [id]
         );
 
+        if (before && updated.rows[0]) {
+            const after = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId FROM Clients WHERE ClientId = $1', [id]);
+            const now = after.rows[0];
+            const tracked = [
+                ['Program Status', before.programstatus, now.programstatus],
+                ['Program Type', before.programtype, now.programtype],
+                ['Supervising Agent', before.supervisingagent, now.supervisingagent],
+            ];
+            for (const [changeType, oldValue, newValue] of tracked) {
+                if ((oldValue || '') !== (newValue || '')) {
+                    await logClientChange(pool, { clientId: id, changedBy: updatedBy, changeType, oldValue: oldValue || 'None', newValue: newValue || 'None' });
+                }
+            }
+            if ((before.groupid || null) !== (now.groupid || null)) {
+                await logClientChange(pool, {
+                    clientId: id, changedBy: updatedBy, changeType: 'Group',
+                    oldValue: await groupNameFor(before.groupid), newValue: await groupNameFor(now.groupid),
+                });
+            }
+        }
+
         res.json({ success: true, client: updated.rows[0] });
     } catch (err) {
         console.error('Error updating client:', err);
@@ -258,7 +529,7 @@ app.post('/api/clients', async (req, res) => {
             programstartdate, programstatus, phase, groupid,
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
-            comments, programtype, treatmentfee, vouchers
+            comments, programtype, treatmentfee, vouchers, createdBy
         } = req.body;
 
         // BIP clients have no phase; they store a whole-number week in the same column. New BIP clients always start at week 0.
@@ -272,6 +543,9 @@ app.post('/api/clients', async (req, res) => {
         const missing = Object.entries(required).filter(([, value]) => !String(value || '').trim()).map(([label]) => label);
         if (missing.length > 0) {
             return res.status(400).json({ error: `Required: ${missing.join(', ')}.` });
+        }
+        if (!EDITABLE_PROGRAM_STATUSES.includes(programstatus)) {
+            return res.status(400).json({ error: `New clients must be ${EDITABLE_PROGRAM_STATUSES.join(' or ')}.` });
         }
 
         const result = await pool.query(
@@ -298,6 +572,11 @@ app.post('/api/clients', async (req, res) => {
                 vouchers !== undefined && vouchers !== null && vouchers !== '' ? Number(vouchers) : null
             ]
         );
+        await logClientChange(pool, {
+            clientId: result.rows[0].clientid, changedBy: createdBy, changeType: 'Client Created',
+            details: `Created as ${programtype}, ${programstatus}, group: ${await groupNameFor(groupid ? Number(groupid) : null)}`
+                + `${supervisingagent?.trim() ? `, agent: ${supervisingagent.trim()}` : ''}.`,
+        });
         res.status(201).json({ success: true, clientId: result.rows[0].clientid, message: 'Client added successfully.' });
     } catch (err) {
         // 23505 = unique_violation: DOC # is already on file
@@ -342,6 +621,65 @@ app.delete('/api/clients/:id', async (req, res) => {
     }
 });
 
+// --- CLIENT CHANGE LOG ---
+// History of account changes shown on the client's Change Log tab (Business Administrators only).
+// Fee Override rows keep ExpiresOn so the expiration can be listed once the date passes.
+pool.query(`
+    CREATE TABLE IF NOT EXISTS ClientChangeLog (
+        ChangeId SERIAL PRIMARY KEY,
+        ClientId INT NOT NULL REFERENCES Clients(ClientId) ON DELETE CASCADE,
+        ChangedOn TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        ChangedBy VARCHAR(255),
+        ChangeType VARCHAR(50) NOT NULL,
+        OldValue TEXT,
+        NewValue TEXT,
+        Details TEXT,
+        ExpiresOn DATE
+    )
+`).catch(err => console.error('Could not create ClientChangeLog table:', err.message));
+
+const logClientChange = (db, { clientId, changedBy, changeType, oldValue = null, newValue = null, details = null, expiresOn = null }) =>
+    db.query(
+        `INSERT INTO ClientChangeLog (ClientId, ChangedBy, ChangeType, OldValue, NewValue, Details, ExpiresOn)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [clientId, changedBy || 'Unknown', changeType, oldValue, newValue, details, expiresOn]
+    );
+
+const groupNameFor = async (groupId) => {
+    if (!groupId) return 'None';
+    const res = await pool.query('SELECT GroupName FROM Groups WHERE GroupId = $1', [groupId]);
+    return res.rows[0]?.groupname || `Group ${groupId}`;
+};
+
+// Fee override expirations are not stored; each one is listed the day after its ExpiresOn,
+// unless the override was changed or removed before then.
+app.get('/api/clients/:id/change-log', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const roleRes = await pool.query('SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [req.query.user]);
+        if (roleRes.rows[0]?.role !== 'Business Administrator') {
+            return res.status(403).json({ error: 'Only Business Administrators can view the change log.' });
+        }
+        const result = await pool.query(
+            `SELECT ChangeId, ChangedOn, ChangedBy, ChangeType, OldValue, NewValue, Details
+             FROM ClientChangeLog WHERE ClientId = $1
+             UNION ALL
+             SELECT NULL, (x.ExpiresOn + 1)::timestamp, 'System', 'Fee Override', x.NewValue, 'Expired',
+                    'Temporary fee override expired; the regular treatment fee applies again.'
+             FROM (
+                 SELECT ExpiresOn, NewValue, LEAD(ChangedOn) OVER (ORDER BY ChangedOn, ChangeId) AS NextChange
+                 FROM ClientChangeLog WHERE ClientId = $1 AND ChangeType = 'Fee Override'
+             ) x
+             WHERE x.ExpiresOn IS NOT NULL AND x.ExpiresOn < CURRENT_DATE AND (x.NextChange IS NULL OR x.NextChange::date > x.ExpiresOn)
+             ORDER BY ChangedOn DESC, ChangeId DESC NULLS LAST`,
+            [id]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // --- TEMPORARY FEE OVERRIDES ---
 // A reduced treatment fee that applies through ExpirationDate (inclusive); after that the client's regular TreatmentFee applies again.
 pool.query(`
@@ -381,14 +719,29 @@ app.post('/api/clients/:id/fee-override', async (req, res) => {
             return res.status(400).json({ error: 'A reduced fee (0 or more) and an expiration date are required.' });
         }
 
+        // An override still in effect is being changed; otherwise this activates a new one
+        const priorRes = await pool.query(
+            `SELECT ReducedFee, to_char(ExpirationDate, 'MM/DD/YYYY') AS Expires FROM TemporaryFeeOverrides
+             WHERE ClientId = $1 AND ExpirationDate >= CURRENT_DATE ORDER BY CreatedOn DESC LIMIT 1`,
+            [id]
+        );
+        const prior = priorRes.rows[0];
+
         await pool.query('DELETE FROM TemporaryFeeOverrides WHERE ClientId = $1', [id]);
         const result = await pool.query(
             `INSERT INTO TemporaryFeeOverrides (ClientId, ReducedFee, ExpirationDate, CreatedBy)
-             VALUES ($1, $2, $3, $4) RETURNING *`,
+             VALUES ($1, $2, $3, $4) RETURNING *, to_char(ExpirationDate, 'MM/DD/YYYY') AS ExpiresText`,
             [id, Number(reducedFee), expirationDate, createdBy]
         );
 
         await logAction(createdBy, 'Fee Override Set', `Set temporary fee override for Client ID ${id}: $${reducedFee} until ${expirationDate}`);
+        await logClientChange(pool, {
+            clientId: id, changedBy: createdBy, changeType: 'Fee Override',
+            oldValue: prior ? `$${Number(prior.reducedfee).toFixed(2)} through ${prior.expires}` : null,
+            newValue: `$${Number(reducedFee).toFixed(2)} through ${result.rows[0].expirestext}`,
+            details: prior ? 'Temporary fee override changed.' : 'Temporary fee override activated.',
+            expiresOn: expirationDate,
+        });
         res.status(201).json({ override: result.rows[0] });
     } catch (err) {
         console.error('Error setting fee override:', err);
@@ -401,7 +754,19 @@ app.delete('/api/clients/:id/fee-override', async (req, res) => {
         const { id } = req.params;
         const { removedBy } = req.body;
 
-        await pool.query('DELETE FROM TemporaryFeeOverrides WHERE ClientId = $1', [id]);
+        const removed = await pool.query(
+            `DELETE FROM TemporaryFeeOverrides WHERE ClientId = $1
+             RETURNING ReducedFee, ExpirationDate >= CURRENT_DATE AS StillActive, to_char(ExpirationDate, 'MM/DD/YYYY') AS Expires`,
+            [id]
+        );
+        const active = removed.rows.find(r => r.stillactive);
+        if (active) {
+            await logClientChange(pool, {
+                clientId: id, changedBy: removedBy, changeType: 'Fee Override',
+                oldValue: `$${Number(active.reducedfee).toFixed(2)} through ${active.expires}`, newValue: 'Removed',
+                details: 'Temporary fee override removed before it expired.',
+            });
+        }
 
         if (removedBy) {
             await logAction(removedBy, 'Fee Override Removed', `Removed temporary fee override for Client ID ${id}`);
@@ -513,8 +878,17 @@ app.delete('/api/groups/:id', async (req, res) => {
 app.post('/api/groups/:id/assign', async (req, res) => {
     try {
         const { id } = req.params;
-        const { clientId } = req.body;
+        const { clientId, assignedBy } = req.body;
+        const beforeRes = await pool.query('SELECT GroupId FROM Clients WHERE ClientId = $1', [clientId]);
         await pool.query('UPDATE Clients SET GroupId = $1 WHERE ClientId = $2', [id, clientId]);
+        const oldGroupId = beforeRes.rows[0]?.groupid || null;
+        if (beforeRes.rows.length > 0 && oldGroupId !== Number(id)) {
+            await logClientChange(pool, {
+                clientId, changedBy: assignedBy, changeType: 'Group',
+                oldValue: await groupNameFor(oldGroupId), newValue: await groupNameFor(Number(id)),
+                details: 'Reassigned from Manage Group.',
+            });
+        }
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -524,9 +898,10 @@ app.post('/api/groups/:id/assign', async (req, res) => {
 // --- ATTENDANCE & PAYMENTS ---
 // Writes one attendance row, its ledger entry, and the client's balance.
 // Takes the caller's transaction client so batch check-ins stay all-or-nothing.
-// State SO Phase 1 (weekly) and Phase 2 (monthly) clients are charged the treatment fee once per calendar month, on their first attendance.
-// Mirrors isMonthlyFeeClient in frontend/src/utils/soPhases.ts.
-const isMonthlyFeeClient = (row) => row.programtype === 'State SO' && (row.phase === 'Phase 1 - Weekly' || row.phase === 'Phase 2 - Monthly');
+// State SO and Voluntary SO Phase 1 (weekly) and Phase 2 (monthly) clients are charged the treatment fee once per calendar month,
+// on their first attendance. Mirrors isMonthlyFeeClient in frontend/src/utils/soPhases.ts.
+const isMonthlyFeeClient = (row) => (row.programtype === 'State SO' || row.programtype === 'Voluntary SO')
+    && (row.phase === 'Phase 1 - Weekly' || row.phase === 'Phase 2 - Monthly');
 
 // A client's first group check-in of a calendar month needs a balance of -$180.00 or better, i.e. owing at most this much
 // (stored sign: positive = owes) after any payment taken at check-in. BIP clients are exempt. Mirrors FIRST_CHECKIN_MAX_OWED in frontend/src/utils/balance.ts.
@@ -976,6 +1351,14 @@ app.get('/api/polygraphs/slots', async (req, res) => {
 app.post('/api/polygraphs/slots', async (req, res) => {
     try {
         const { location, address, date, time, polygrapher, type, comments, slots } = req.body;
+
+        // The examiner must be an active Polygrapher
+        const examinerRes = await pool.query(
+            "SELECT 1 FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Role = 'Polygrapher' AND Active = TRUE", [polygrapher]
+        );
+        if (examinerRes.rows.length === 0) {
+            return res.status(400).json({ error: 'Choose an active polygrapher as the examiner.' });
+        }
 
         if (date && time) {
             const todayStr = new Date().toLocaleDateString('en-CA');

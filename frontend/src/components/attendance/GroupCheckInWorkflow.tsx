@@ -53,7 +53,7 @@ function StepIndicator({ current }: { current: number }) {
 }
 
 function filterSearchableClients(clients: ClientRecord[], groupType: string | null | undefined, currentGroupName: string | null | undefined): ClientRecord[] {
-  // Groups store 'SO' / 'FED SO'; clients store 'State SO' / 'Federal SO'
+  // Groups store 'SO' / 'FED SO'; clients store 'State SO' / 'Federal SO' / 'Voluntary SO'
   const normalizedGroupType = (groupType || '').trim().toUpperCase();
   const isSOGroup = ['SO', 'FED SO'].includes(normalizedGroupType);
   const isBIPGroup = normalizedGroupType === 'BIP';
@@ -65,10 +65,10 @@ function filterSearchableClients(clients: ClientRecord[], groupType: string | nu
     // Don't show clients already in the current group
     if (c.groupname === currentGroupName) return false;
 
-    // If it's an SO group, only show State SO/Federal SO clients
+    // If it's an SO group, only show State SO/Federal SO/Voluntary SO clients
     if (isSOGroup) {
       const clientType = (c.programtype || '').trim();
-      return ['State SO', 'Federal SO'].includes(clientType);
+      return ['State SO', 'Federal SO', 'Voluntary SO'].includes(clientType);
     }
 
     // If it's a BIP group, only show BIP clients

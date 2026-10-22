@@ -2,19 +2,21 @@ import React, { Fragment, useState, useEffect, useRef } from 'react';
 import { 
   Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
   DollarSign, Calendar, PlusCircle, Activity, PhoneCall, ShieldAlert, 
-  Layers, CheckSquare, BarChart3, Settings, CheckCircle2, Trash2, RotateCcw, Home
+  Layers, CheckSquare, BarChart3, Settings, CheckCircle2, Trash2, RotateCcw, Home, History,
+  Paperclip, Eye, Download, Printer, Upload, Pencil
 } from 'lucide-react';
 import {
   loginUser, getClients, getGroups, submitAccountPayment, submitCustomCharge,
   submitClientCallIn, submitGroupCallIn, getPolygraphSlots, createPolygraphSlot,
   submitPolygraphResult, deletePolygraphSlot, assignPolygraphSlot, reopenPolygraphSlot,
   getClientAttendance, getClientFinancials,
-  getClientNotes, addClientNote, getClientPolygraphs, getGroupClients, updateGroup, updateClient,
+  getClientNotes, addClientNote, getClientPolygraphs, getGroupClients, updateGroup, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
   assignClientToGroup, createClient, createGroup, deleteGroup, deleteClient, updateEmployee, getClientTests, submitTestResult, getAgentReport,
   getDepositReport, getEmployees, addEmployee, getSystemLogs, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
-  getOpenGroups, deleteOpenGroup
+  getOpenGroups, deleteOpenGroup, getClientChangeLog,
+  getClientAttachments, uploadClientAttachment, fetchClientAttachment, renameClientAttachment, deleteClientAttachment, ATTACHMENT_MAX_BYTES
 } from './api';
-import type { OpenGroupSession } from './api';
+import type { ClientAttachment, ClientChange, OpenGroupSession } from './api';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
@@ -23,7 +25,17 @@ import CardPaymentFields from './components/payments/CardPaymentFields';
 import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
 
 // Client program statuses. 'Active' is used by group call-ins and the group roster, so keep that exact spelling.
-const PROGRAM_STATUSES = ['Active', 'Completed', 'Deceased', 'Discharged', 'Failed - Non Attendance', 'Failed - Non Compliance', 'Inactive', 'Revoked', 'Transfered'];
+const PROGRAM_STATUSES = ['Active', 'Completed', 'Deceased', 'Discharged Supervision', 'Inactive', 'Program Failed', 'Revoked', 'Terminated', 'Transferred'];
+// Statuses that can be picked when adding or editing a client; the rest are only set through the Discharge button
+const EDITABLE_PROGRAM_STATUSES = ['Active', 'Inactive'];
+// Discharge types a Business Administrator can pick; each becomes the client's program status
+const DISCHARGE_STATUSES = ['Completed', 'Deceased', 'Discharged Supervision', 'Program Failed', 'Revoked', 'Transferred', 'Terminated'];
+// Discharge types that require a subcategory (recorded on the case note and kept for recidivism reporting)
+const DISCHARGE_SUBCATEGORIES: Record<string, string[]> = {
+  'Program Failed': ['Attendance', 'Polys', 'Not Amenable'],
+  'Revoked': ['Non Compliance', 'New SO Charge', 'New Criminal Charge'],
+  'Terminated': ['Violence', 'New Criminal Charge'],
+};
 
 // Group call-in notes are saved as "[Group Call-In Log] (For: YYYY-MM-DD) (Reason: …): …". No "For" date means the day it was submitted.
 const parseGroupCallInNote = (text: string) => {
@@ -115,16 +127,53 @@ const attendanceBalanceChange = (att: any) => {
   };
 };
 
+// Change Log filter choices: the stored change type and how it is labelled
+const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
+  { type: 'Client Created', label: 'Client Created' },
+  { type: 'Program Status', label: 'Program Status' },
+  { type: 'Program Type', label: 'Program Type' },
+  { type: 'Supervising Agent', label: 'Supervising Agent' },
+  { type: 'Group', label: 'Group' },
+  { type: 'No Poly Required', label: 'No Poly Required' },
+  { type: 'Fee Override', label: 'Temporary Fee Override' },
+];
+
 // Programs that use the SO phase schedule and show the last polygraph date
-const SO_PROGRAM_TYPES = ['State SO', 'Federal SO'];
+const SO_PROGRAM_TYPES = ['State SO', 'Federal SO', 'Voluntary SO'];
+// Programs that start at the State SO default treatment fee (Phase 1 - Weekly)
+const STATE_FEE_PROGRAM_TYPES = ['State SO', 'Voluntary SO'];
 // BIP clients store a whole-number week (starting at 0) in the phase column instead of an SO phase
 const isWholeNumber = (value: unknown) => /^\d+$/.test(String(value ?? '').trim());
 const formatPhase = (programtype?: string | null, phase?: string | null) =>
   programtype === 'BIP' && isWholeNumber(phase) ? `Week ${phase}` : phase;
+// Reads the calendar date of a date-only or ISO value as a local date, ignoring any time zone shift
+const toLocalDay = (value: unknown) => {
+  const [y, m, d] = String(value).split('T')[0].split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+const POLY_OVERDUE_MONTHS = 6;
+// Red polygraph notice for a client's account, or null when none applies. BIP clients don't take polygraphs.
+const polygraphNotice = (client: any, polygraphs: any[], today = new Date()) => {
+  if (client.programtype === 'BIP' || client.nopolyrequired) return null;
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  // Use the actual polygraph date, falling back to the recorded date for older results without one
+  const taken = polygraphs
+    .map(p => p.polygraphdatetime ? new Date(p.polygraphdatetime) : p.date ? toLocalDay(p.date) : null)
+    .filter((d): d is Date => !!d && !isNaN(d.getTime()));
+  if (taken.length) {
+    const last = new Date(Math.max(...taken.map(d => d.getTime())));
+    const due = new Date(last.getFullYear(), last.getMonth() + POLY_OVERDUE_MONTHS, last.getDate());
+    return startOfToday >= due ? 'Client is overdue for their next Polygraph' : null;
+  }
+  if (!client.lastdateattended) return null;
+  const days = Math.round((startOfToday.getTime() - toLocalDay(client.lastdateattended).getTime()) / 86400000);
+  return `Client hasn't taken their first polygraph in ${days} day${days === 1 ? '' : 's'}`;
+};
 // Group program types offered for each client program type. Programs not listed see every group.
 const GROUP_TYPES_BY_PROGRAM: Record<string, string[]> = {
   'State SO': ['SO', 'FED SO'],
   'Federal SO': ['SO', 'FED SO'],
+  'Voluntary SO': ['SO', 'FED SO'],
   'BIP': ['BIP'],
 };
 
@@ -256,11 +305,17 @@ export default function App() {
   // Selected Client Details Drawer State
   const [selectedClientDetail, setSelectedClientDetail] = useState<any>(null);
   const [showClientPayment, setShowClientPayment] = useState(false);
-  const [clientTab, setClientTab] = useState<'information' | 'attendance' | 'financials' | 'notes' | 'polygraphs'>('information');
+  const [clientTab, setClientTab] = useState<'information' | 'attendance' | 'financials' | 'notes' | 'polygraphs' | 'attachments' | 'changelog'>('information');
+  // Change Log tab (Business Administrators only); filter '' shows every type
+  const [clientChangeLog, setClientChangeLog] = useState<ClientChange[]>([]);
+  const [changeLogFilter, setChangeLogFilter] = useState('');
+  const [changeLogStatus, setChangeLogStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [clientAttendance, setClientAttendance] = useState<any[]>([]);
   const [clientFinancials, setClientFinancials] = useState<any[]>([]);
   const [clientNotes, setClientNotes] = useState<any[]>([]);
   const [clientPolygraphs, setClientPolygraphs] = useState<any[]>([]);
+  // Client whose polygraphs are loaded, so the notice never uses the previous client's results
+  const [clientPolygraphsFor, setClientPolygraphsFor] = useState<number | null>(null);
   const [newNoteText, setNewNoteText] = useState('');
   const [newNoteCategory] = useState('Therapist');
   const [editingClientInfo, setEditingClientInfo] = useState(false);
@@ -856,7 +911,7 @@ export default function App() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await createClient({ ...newClient, groupid: newClient.groupid || null });
+      const res = await createClient({ ...newClient, groupid: newClient.groupid || null, createdBy: user.employeeemail });
       setSuccessMsg(res.message || 'Client added successfully!');
       setNewClient(getEmptyNewClient());
       setShowNewClientForm(false);
@@ -905,7 +960,7 @@ export default function App() {
 
   const handleAssignClient = async (clientId: number) => {
     if (!selectedGroupDetail) return;
-    await assignClientToGroup(selectedGroupDetail.groupid, clientId);
+    await assignClientToGroup(selectedGroupDetail.groupid, clientId, user.employeeemail);
     const updatedRoster = await getGroupClients(selectedGroupDetail.groupid);
     setGroupRoster(updatedRoster);
     setAssignClientSearch('');
@@ -993,8 +1048,94 @@ export default function App() {
     }
   };
 
+  // No Poly Required stays locked until a Business Administrator overrides it; each change is saved right away
+  const [noPolyOverride, setNoPolyOverride] = useState(false);
+  const [noPolySaving, setNoPolySaving] = useState(false);
+  const handleNoPolyRequiredChange = async (checked: boolean) => {
+    if (!selectedClientDetail) return;
+    const clientid = selectedClientDetail.clientid;
+    setNoPolySaving(true);
+    try {
+      const saved = await setClientNoPolyRequired(clientid, checked, user.employeeemail);
+      setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, nopolyrequired: saved } : c));
+      setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, nopolyrequired: saved } : c));
+      setClientNotes(await getClientNotes(clientid));
+      setNoPolyOverride(false);
+      setSuccessMsg(`No Poly Required ${saved ? 'checked' : 'unchecked'} for ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}.`);
+    } catch (err: any) {
+      setError(err.message || 'Failed to update No Poly Required.');
+    } finally {
+      setNoPolySaving(false);
+    }
+  };
+
+  // A discharged client's program status is locked; only the Activate button changes it
+  const clientIsDischarged = DISCHARGE_STATUSES.includes(selectedClientDetail?.programstatus);
+
+  // Program status dialog: Discharge (Business Administrators only) or Activate (any account type, discharged clients only).
+  // Pick a status and write a note, Proceed, then confirm.
+  const [statusDialog, setStatusDialog] = useState<'discharge' | 'activate' | null>(null);
+  const [statusDialogChoice, setStatusDialogChoice] = useState('');
+  const [statusDialogSubcategory, setStatusDialogSubcategory] = useState('');
+  const [statusDialogNote, setStatusDialogNote] = useState('');
+  const [statusDialogConfirming, setStatusDialogConfirming] = useState(false);
+  const [statusDialogSaving, setStatusDialogSaving] = useState(false);
+  const [statusDialogError, setStatusDialogError] = useState('');
+  const openStatusDialog = (action: 'discharge' | 'activate') => {
+    setStatusDialogError('');
+    setStatusDialogChoice('');
+    setStatusDialogSubcategory('');
+    setStatusDialogNote('');
+    setStatusDialogConfirming(false);
+    setStatusDialog(action);
+  };
+  const handleStatusDialogConfirm = async () => {
+    if (!selectedClientDetail || !statusDialog) return;
+    const clientid = selectedClientDetail.clientid;
+    setStatusDialogSaving(true);
+    setStatusDialogError('');
+    try {
+      const programstatus = await changeClientProgramStatus(statusDialog, clientid, statusDialogChoice, statusDialogSubcategory || null, statusDialogNote.trim(), user.employeeemail);
+      setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, programstatus } : c));
+      setClientInfoForm((f: any) => (f && f.clientid === clientid ? { ...f, programstatus } : f));
+      setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, programstatus } : c));
+      setClientNotes(await getClientNotes(clientid));
+      if (clientTab === 'changelog') await openChangeLog();
+      setStatusDialog(null);
+      setSuccessMsg(`${selectedClientDetail.firstname} ${selectedClientDetail.lastname} ${statusDialog === 'activate' ? 'set to' : 'discharged as'} ${programstatus}.`);
+    } catch (err: any) {
+      // Shown inside the dialog, which stays on the confirm step so it can be retried
+      setStatusDialogError(err.message || `Failed to ${statusDialog} client.`);
+    } finally {
+      setStatusDialogSaving(false);
+    }
+  };
+
+  // Loaded each time the tab is opened so it includes changes made since the drawer opened
+  const openChangeLog = async () => {
+    if (!selectedClientDetail) return;
+    setClientTab('changelog');
+    setChangeLogStatus('loading');
+    try {
+      setClientChangeLog(await getClientChangeLog(selectedClientDetail.clientid, user.employeeemail));
+      setChangeLogStatus('ready');
+    } catch (err: any) {
+      setClientChangeLog([]);
+      setChangeLogStatus('error');
+      setError(err.message || 'Failed to load the change log.');
+    }
+  };
+
   // Drawer Log Loading
   const openClientLogs = async (client: any) => {
+    setNoPolyOverride(false);
+    setStatusDialog(null);
+    setClientAttachments([]);
+    setAttachmentsStatus('idle');
+    setAttachmentError('');
+    setChangeLogFilter('');
+    setClientChangeLog([]);
+    setChangeLogStatus('idle');
     setSelectedClientDetail(client);
     setClientTab('information');
     setEditingClientInfo(false);
@@ -1013,11 +1154,138 @@ export default function App() {
     setClientFinancials(fin);
     setClientNotes(notes);
     setClientPolygraphs(polys);
+    setClientPolygraphsFor(client.clientid);
     try {
       const { override } = await fetchClientFeeOverride(client.clientid);
       setClientFeeOverride(override);
     } catch (err: any) {
       setClientInfoError(err.message || 'Could not load the temporary fee override.');
+    }
+  };
+
+  // Attachments: loaded each time the tab is opened. View/Print only open types the browser can show safely;
+  // everything else (and anything that could run script, like HTML or SVG) is download only.
+  const [clientAttachments, setClientAttachments] = useState<ClientAttachment[]>([]);
+  const [attachmentsStatus, setAttachmentsStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState('');
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const VIEWABLE_ATTACHMENT_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'text/plain'];
+  const canViewAttachment = (a: ClientAttachment) => VIEWABLE_ATTACHMENT_TYPES.includes(a.contenttype);
+  const formatFileSize = (bytes: number) =>
+    bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+  const openAttachments = async () => {
+    if (!selectedClientDetail) return;
+    setClientTab('attachments');
+    setAttachmentError('');
+    setAttachmentsStatus('loading');
+    try {
+      setClientAttachments(await getClientAttachments(selectedClientDetail.clientid));
+      setAttachmentsStatus('ready');
+    } catch (err: any) {
+      setClientAttachments([]);
+      setAttachmentsStatus('error');
+      setAttachmentError(err.message || 'Could not load attachments.');
+    }
+  };
+
+  const handleAttachmentUpload = async (files: FileList | null) => {
+    if (!selectedClientDetail || !files || files.length === 0) return;
+    const clientid = selectedClientDetail.clientid;
+    const tooBig = Array.from(files).filter(f => f.size > ATTACHMENT_MAX_BYTES);
+    if (tooBig.length > 0) {
+      setAttachmentError(`Larger than 25 MB: ${tooBig.map(f => f.name).join(', ')}`);
+      return;
+    }
+    setAttachmentUploading(true);
+    setAttachmentError('');
+    try {
+      for (const file of Array.from(files)) {
+        await uploadClientAttachment(clientid, file, user.employeeemail);
+      }
+      setClientAttachments(await getClientAttachments(clientid));
+      setSuccessMsg(files.length === 1 ? `Attached ${files[0].name}.` : `Attached ${files.length} files.`);
+    } catch (err: any) {
+      setAttachmentError(err.message || 'Upload failed.');
+      setClientAttachments(await getClientAttachments(clientid).catch(() => clientAttachments));
+    } finally {
+      setAttachmentUploading(false);
+      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
+    }
+  };
+
+  // mode: view opens a new tab, download saves the file, print sends it to a hidden frame's print dialog
+  const handleAttachmentOpen = async (attachment: ClientAttachment, mode: 'view' | 'download' | 'print') => {
+    setAttachmentError('');
+    // Opened before the fetch so the browser doesn't treat it as a blocked popup
+    const viewer = mode === 'view' ? window.open('', '_blank') : null;
+    try {
+      const url = URL.createObjectURL(await fetchClientAttachment(attachment));
+      if (mode === 'view') {
+        if (viewer) viewer.location.href = url; else window.open(url, '_blank');
+      } else if (mode === 'download') {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = attachment.filename;
+        link.click();
+      } else {
+        const frame = document.createElement('iframe');
+        frame.style.position = 'fixed';
+        frame.style.width = '0';
+        frame.style.height = '0';
+        frame.style.border = '0';
+        frame.onload = () => {
+          frame.contentWindow?.focus();
+          frame.contentWindow?.print();
+          setTimeout(() => frame.remove(), 60000);
+        };
+        frame.src = url;
+        document.body.appendChild(frame);
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (err: any) {
+      viewer?.close();
+      setAttachmentError(err.message || 'Could not open the attachment.');
+    }
+  };
+
+  // Rename happens in place on the attachment row; Enter saves, Escape cancels
+  const [renamingAttachmentId, setRenamingAttachmentId] = useState<number | null>(null);
+  const [attachmentRenameValue, setAttachmentRenameValue] = useState('');
+  const [attachmentRenameSaving, setAttachmentRenameSaving] = useState(false);
+  const startAttachmentRename = (attachment: ClientAttachment) => {
+    setAttachmentError('');
+    setRenamingAttachmentId(attachment.attachmentid);
+    setAttachmentRenameValue(attachment.filename);
+  };
+  const handleAttachmentRename = async (attachment: ClientAttachment) => {
+    const name = attachmentRenameValue.trim();
+    if (!name || name === attachment.filename) {
+      setRenamingAttachmentId(null);
+      return;
+    }
+    setAttachmentRenameSaving(true);
+    setAttachmentError('');
+    try {
+      const saved = await renameClientAttachment(attachment.attachmentid, name, user.employeeemail);
+      setClientAttachments(prev => prev.map(a => a.attachmentid === saved.attachmentid ? saved : a));
+      setRenamingAttachmentId(null);
+    } catch (err: any) {
+      setAttachmentError(err.message || 'Failed to rename the attachment.');
+    } finally {
+      setAttachmentRenameSaving(false);
+    }
+  };
+
+  const handleAttachmentDelete = async (attachment: ClientAttachment) => {
+    if (!window.confirm(`Delete ${attachment.filename}? This cannot be undone.`)) return;
+    setAttachmentError('');
+    try {
+      await deleteClientAttachment(attachment.attachmentid, user.employeeemail);
+      setClientAttachments(prev => prev.filter(a => a.attachmentid !== attachment.attachmentid));
+    } catch (err: any) {
+      setAttachmentError(err.message || 'Failed to delete the attachment.');
     }
   };
 
@@ -1154,7 +1422,7 @@ export default function App() {
   const clientSearchTerm = clientSearch.trim().toLowerCase();
   const clientFilterActive = Object.values(clientFilters).some(Boolean);
   const distinctClientValues = (key: 'agent' | 'programtype' | 'currentgroup' | 'status') => {
-    if (key === 'status') return ['Active', 'Completed', 'Deceased', 'Discharged', 'Failed - Non Attendance', 'Failed - Non Compliance', 'Inactive', 'Revoked', 'Transfered'];
+    if (key === 'status') return PROGRAM_STATUSES;
     if (key === 'agent') return Array.from(new Set(clients.map(c => c.supervisingagent).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
     if (key === 'programtype') return Array.from(new Set(clients.map(c => c.programtype).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
     if (key === 'currentgroup') return Array.from(new Set(clients.map(c => c.groupname).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
@@ -1184,11 +1452,8 @@ export default function App() {
   // Filter assigned slots for Poly Results tab
   const assignedSlots = polySlots.filter(s => s.status === 'Assigned' || s.assignedClientId);
 
-  // Filter examiners from employees
-  const polyExaminers = employees.filter(e => 
-    e.role === 'Polygrapher' || /polygraph|examiner/i.test(e.role || '') || /examiner/i.test(e.displayname || '')
-  );
-  const otherStaff = employees.filter(e => !polyExaminers.some(ex => ex.employeeemail === e.employeeemail));
+  // Only active Polygraphers can be picked as the examiner for a new slot
+  const activePolygraphers = employees.filter(e => e.role === 'Polygrapher' && e.active !== false);
   const getExaminerDisplayName = (email: string) => 
     employees.find(e => e.employeeemail === email)?.displayname || email;
 
@@ -1396,7 +1661,7 @@ export default function App() {
                   <div>
                     <label className="block text-xs text-slate-400 mb-1">Program Status *</label>
                     <select required value={newClient.programstatus} onChange={(e) => setNewClient({ ...newClient, programstatus: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm">
-                      {PROGRAM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                      {EDITABLE_PROGRAM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
                   </div>
                 </div>
@@ -1415,14 +1680,14 @@ export default function App() {
                         ...newClient,
                         programtype: programType,
                         phase: SO_PROGRAM_TYPES.includes(programType) ? 'Phase 1 - Weekly' : programType === 'BIP' ? '0' : '',
-                        treatmentfee: programType === 'BIP' ? 35 : (programType === 'State SO' ? 180 : 0)
+                        treatmentfee: programType === 'BIP' ? 35 : (STATE_FEE_PROGRAM_TYPES.includes(programType) ? SO_TREATMENT_FEES['Phase 1 - Weekly'] : 0)
                       });
                     }} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm">
                       <option value="">Select a program type...</option>
                       <option value="State SO">State SO</option>
                       <option value="Federal SO">Federal SO</option>
                       <option value="BIP">BIP</option>
-                      <option value="Private Pay">Private Pay</option>
+                      <option value="Voluntary SO">Voluntary SO</option>
                       <option value="Poly Only">Poly Only</option>
                     </select>
                   </div>
@@ -1516,7 +1781,7 @@ export default function App() {
                       <td className="p-3 text-slate-300 text-xs">{c.groupname || 'Unassigned'}</td>
                       <td className="p-3 text-slate-400 text-xs">{c.lastattended ? new Date(c.lastattended).toLocaleDateString() : 'Never'}</td>
                       <td className="p-3 text-slate-400 text-xs">{c.lastpoly ? new Date(c.lastpoly).toLocaleDateString() : 'None'}</td>
-                      <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${c.programstatus === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>{c.programstatus}</span></td>
+                      <td className="p-3"><span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium ${c.programstatus === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`} title={c.programstatus}>{c.programstatus === 'Discharged Supervision' ? 'Discharged' : c.programstatus}</span></td>
                       <td className={`p-3 font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</td>
                     </tr>
                   ))}
@@ -1572,6 +1837,24 @@ export default function App() {
                   >
                     <DollarSign size={14} /> Make Payment
                   </button>
+                  {/* Discharged clients get Activate (any account type); everyone else gets Discharge (Business Administrators only) */}
+                  {clientIsDischarged ? (
+                    <button
+                      type="button"
+                      onClick={() => openStatusDialog('activate')}
+                      className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
+                    >
+                      <RotateCcw size={14} /> Activate
+                    </button>
+                  ) : role === 'Business Administrator' && (
+                    <button
+                      type="button"
+                      onClick={() => openStatusDialog('discharge')}
+                      className="bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
+                    >
+                      <LogOut size={14} /> Discharge
+                    </button>
+                  )}
                   {role === 'Business Administrator' && (
                     <button
                       onClick={async () => {
@@ -1597,12 +1880,120 @@ export default function App() {
                 </div>
               </div>
 
+              {statusDialog && (statusDialog === 'activate' || role === 'Business Administrator') && (() => {
+                const activating = statusDialog === 'activate';
+                const label = activating ? 'Activation' : 'Discharge';
+                const choices = activating ? EDITABLE_PROGRAM_STATUSES : DISCHARGE_STATUSES;
+                const actionButton = activating ? 'bg-blue-600 hover:bg-blue-500' : 'bg-amber-600 hover:bg-amber-500';
+                const subcategories = activating ? undefined : DISCHARGE_SUBCATEGORIES[statusDialogChoice];
+                const choiceLabel = statusDialogSubcategory ? `${statusDialogChoice} (${statusDialogSubcategory})` : statusDialogChoice;
+                return (
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="status-dialog-title">
+                  <div className={`bg-slate-900 border rounded-xl p-6 w-full max-w-md space-y-4 text-sm ${activating ? 'border-blue-500/40' : 'border-amber-500/40'}`}>
+                    <div>
+                      <h3 id="status-dialog-title" className="font-semibold text-white">{activating ? 'Activate Client' : 'Discharge Client'}</h3>
+                      <p className="text-xs text-slate-400 mt-1">
+                        <span className="text-emerald-400 font-semibold">{selectedClientDetail.firstname} {selectedClientDetail.lastname}</span> · Current status: {selectedClientDetail.programstatus || 'None'}
+                      </p>
+                    </div>
+                    {!statusDialogConfirming ? (
+                      <>
+                        <div>
+                          <p className="block text-xs text-slate-400 uppercase mb-2">{activating ? 'New Status' : 'Discharge Type'}</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            {choices.map(s => (
+                              <label key={s} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-xs ${statusDialogChoice === s ? (activating ? 'border-blue-500 bg-blue-500/10 text-white' : 'border-amber-500 bg-amber-500/10 text-white') : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}>
+                                <input type="radio" name="status-dialog-choice" value={s} checked={statusDialogChoice === s} onChange={() => { setStatusDialogChoice(s); setStatusDialogSubcategory(''); }} className={activating ? 'accent-blue-500' : 'accent-amber-500'} />
+                                {s}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                        {subcategories && (
+                          <div>
+                            <p className="block text-xs text-slate-400 uppercase mb-2">{statusDialogChoice} Subcategory</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              {subcategories.map(s => (
+                                <label key={s} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-xs ${statusDialogSubcategory === s ? 'border-amber-500 bg-amber-500/10 text-white' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}>
+                                  <input type="radio" name="status-dialog-subcategory" value={s} checked={statusDialogSubcategory === s} onChange={() => setStatusDialogSubcategory(s)} className="accent-amber-500" />
+                                  {s}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <div>
+                          <label htmlFor="status-dialog-note" className="block text-xs text-slate-400 uppercase mb-1">{label} Note</label>
+                          <textarea
+                            id="status-dialog-note"
+                            rows={4}
+                            value={statusDialogNote}
+                            onChange={e => setStatusDialogNote(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
+                          />
+                        </div>
+                        <div className="flex justify-end gap-2">
+                          <button type="button" onClick={() => setStatusDialog(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Cancel</button>
+                          <button
+                            type="button"
+                            disabled={!statusDialogChoice || (!!subcategories && !statusDialogSubcategory) || !statusDialogNote.trim()}
+                            onClick={() => setStatusDialogConfirming(true)}
+                            className={`${actionButton} disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded text-xs font-semibold`}
+                          >
+                            Proceed
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className={`text-xs rounded-lg p-3 border ${activating ? 'text-blue-300 bg-blue-500/10 border-blue-500/30' : 'text-amber-300 bg-amber-500/10 border-amber-500/30'}`}>
+                          The program status will change from <span className="font-semibold">{selectedClientDetail.programstatus || 'None'}</span> to <span className="font-semibold">{choiceLabel}</span>, and this note will be added to the case notes.
+                        </p>
+                        <p className="text-xs text-slate-300 bg-slate-950 border border-slate-800 rounded-lg p-3 whitespace-pre-wrap">{label} - {choiceLabel}: {statusDialogNote.trim()}</p>
+                        {statusDialogError && (
+                          <p role="alert" className="text-xs text-red-400 bg-red-500/10 border border-red-500 rounded-lg p-3">{statusDialogError}</p>
+                        )}
+                        <div className="flex justify-end gap-2">
+                          <button type="button" disabled={statusDialogSaving} onClick={() => { setStatusDialogError(''); setStatusDialogConfirming(false); }} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Back</button>
+                          <button
+                            type="button"
+                            disabled={statusDialogSaving}
+                            onClick={handleStatusDialogConfirm}
+                            className={`${actionButton} disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded text-xs font-semibold`}
+                          >
+                            {statusDialogSaving ? 'Saving...' : activating ? 'Confirm Activation' : 'Confirm Discharge'}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+                );
+              })()}
+
+              {(() => {
+                const notice = clientPolygraphsFor === selectedClientDetail.clientid
+                  ? polygraphNotice(selectedClientDetail, clientPolygraphs)
+                  : null;
+                return notice && (
+                  <div className="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-sm font-semibold flex items-center gap-2 mb-6">
+                    <ShieldAlert size={16} /> {notice}
+                  </div>
+                );
+              })()}
+
               <div className="flex border-b border-slate-800 gap-4 mb-6">
                 <button onClick={() => setClientTab('information')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'information' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Users size={14} /> Information</button>
                 <button onClick={() => setClientTab('attendance')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'attendance' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Calendar size={14} /> Attendance</button>
                 <button onClick={() => setClientTab('financials')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'financials' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><DollarSign size={14} /> Financial Ledger</button>
                 <button onClick={() => setClientTab('notes')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'notes' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><FileText size={14} /> Case Notes</button>
-                <button onClick={() => setClientTab('polygraphs')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'polygraphs' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Activity size={14} /> Polygraphs</button>
+                {selectedClientDetail.programtype !== 'BIP' && (
+                  <button onClick={() => setClientTab('polygraphs')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'polygraphs' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Activity size={14} /> Polygraphs</button>
+                )}
+                <button onClick={openAttachments} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'attachments' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Paperclip size={14} /> Attachments</button>
+                {role === 'Business Administrator' && (
+                  <button onClick={openChangeLog} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'changelog' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><History size={14} /> Change Log</button>
+                )}
               </div>
 
               {clientTab === 'information' && (
@@ -1635,7 +2026,7 @@ export default function App() {
                             setSavingClientInfo(true);
                             setClientInfoError('');
                             try {
-                              const res = await updateClient(selectedClientDetail.clientid, clientInfoForm);
+                              const res = await updateClient(selectedClientDetail.clientid, { ...clientInfoForm, updatedBy: user.employeeemail });
                               // Prefer the row the server returned (includes joined group name); fall back to the form values
                               const saved = { ...selectedClientDetail, ...clientInfoForm, ...(res.client ?? {}) };
                               setSelectedClientDetail(saved);
@@ -1667,52 +2058,26 @@ export default function App() {
                         { label: 'DOC #', field: 'docnumber' },
                         { label: 'Supervising Agent', field: 'supervisingagent' },
                         { label: 'Program Status', field: 'programstatus' },
-                        { label: (editingClientInfo ? clientInfoForm.programtype : selectedClientDetail.programtype) === 'BIP' ? 'Week' : 'Phase', field: 'phase' },
                         { label: 'Program Start Date', field: 'programstartdate' },
                         { label: 'Last Date Attended', field: 'lastdateattended' },
                       ].map(({ label, field }) => (
                         <div key={field}>
                           <p className="text-xs text-slate-500 mb-0.5">{label}</p>
-                          {editingClientInfo && field === 'programstatus' ? (
+                          {editingClientInfo && field === 'programstatus' && clientIsDischarged ? (
+                            // Locked while discharged; the Activate button is the only way out
+                            <div>
+                              <p className="w-full bg-slate-900/50 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-400 text-sm cursor-not-allowed">{selectedClientDetail.programstatus}</p>
+                              <p className="text-xs text-slate-500 mt-1">Locked while discharged. Use Activate to change it.</p>
+                            </div>
+                          ) : editingClientInfo && field === 'programstatus' ? (
                             <select
                               value={clientInfoForm.programstatus || ''}
                               onChange={e => setClientInfoForm((f: any) => ({ ...f, programstatus: e.target.value }))}
                               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
                             >
                               <option value="">-- Select status --</option>
-                              {PROGRAM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                              {clientInfoForm.programstatus && !PROGRAM_STATUSES.includes(clientInfoForm.programstatus) && (
-                                <option value={clientInfoForm.programstatus}>{clientInfoForm.programstatus} (current)</option>
-                              )}
+                              {EDITABLE_PROGRAM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                             </select>
-                          ) : editingClientInfo && field === 'phase' && SO_PROGRAM_TYPES.includes(clientInfoForm.programtype || '') ? (
-                            <select
-                              value={clientInfoForm.phase || ''}
-                              onChange={e => {
-                                const phase = e.target.value;
-                                setClientInfoForm((f: any) => ({
-                                  ...f,
-                                  phase,
-                                  ...(SO_TREATMENT_FEES[phase] !== undefined ? { treatmentfee: SO_TREATMENT_FEES[phase] } : {}),
-                                }));
-                              }}
-                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                            >
-                              <option value="">-- Select phase --</option>
-                              {SO_PHASES.map(p => <option key={p} value={p}>{p}</option>)}
-                              {clientInfoForm.phase && !SO_PHASES.includes(clientInfoForm.phase) && (
-                                <option value={clientInfoForm.phase}>{clientInfoForm.phase} (current)</option>
-                              )}
-                            </select>
-                          ) : editingClientInfo && field === 'phase' && clientInfoForm.programtype === 'BIP' ? (
-                            <input
-                              type="number"
-                              min={0}
-                              step={1}
-                              value={clientInfoForm.phase ?? ''}
-                              onChange={e => setClientInfoForm((f: any) => ({ ...f, phase: e.target.value }))}
-                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                            />
                           ) : editingClientInfo ? (
                             <input
                               type={field.includes('date') || field.includes('Date') ? 'date' : 'text'}
@@ -1724,7 +2089,7 @@ export default function App() {
                             <p className="text-white font-medium">
                               {field.includes('date') || field.includes('Date')
                                 ? (selectedClientDetail[field] ? new Date(selectedClientDetail[field]).toLocaleDateString() : '—')
-                                : ((field === 'phase' ? formatPhase(selectedClientDetail.programtype, selectedClientDetail.phase) : selectedClientDetail[field]) || '—')}
+                                : (selectedClientDetail[field] || '—')}
                             </p>
                           )}
                         </div>
@@ -1810,11 +2175,53 @@ export default function App() {
                             <option value="State SO">State SO</option>
                             <option value="Federal SO">Federal SO</option>
                             <option value="BIP">BIP</option>
-                            <option value="Private Pay">Private Pay</option>
+                            <option value="Voluntary SO">Voluntary SO</option>
                             <option value="Poly Only">Poly Only</option>
                           </select>
                         ) : (
                           <p className="text-white font-medium">{selectedClientDetail.programtype || '—'}</p>
+                        )}
+                      </div>
+                      {/* SO programs pick a phase (which sets the treatment fee); BIP clients store a whole-number week */}
+                      <div>
+                        <p className="text-xs text-slate-500 mb-0.5">{(editingClientInfo ? clientInfoForm.programtype : selectedClientDetail.programtype) === 'BIP' ? 'Week' : 'Phase'}</p>
+                        {editingClientInfo && SO_PROGRAM_TYPES.includes(clientInfoForm.programtype || '') ? (
+                          <select
+                            value={clientInfoForm.phase || ''}
+                            onChange={e => {
+                              const phase = e.target.value;
+                              setClientInfoForm((f: any) => ({
+                                ...f,
+                                phase,
+                                ...(SO_TREATMENT_FEES[phase] !== undefined ? { treatmentfee: SO_TREATMENT_FEES[phase] } : {}),
+                              }));
+                            }}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
+                          >
+                            <option value="">-- Select phase --</option>
+                            {SO_PHASES.map(p => <option key={p} value={p}>{p}</option>)}
+                            {clientInfoForm.phase && !SO_PHASES.includes(clientInfoForm.phase) && (
+                              <option value={clientInfoForm.phase}>{clientInfoForm.phase} (current)</option>
+                            )}
+                          </select>
+                        ) : editingClientInfo && clientInfoForm.programtype === 'BIP' ? (
+                          <input
+                            type="number"
+                            min={0}
+                            step={1}
+                            value={clientInfoForm.phase ?? ''}
+                            onChange={e => setClientInfoForm((f: any) => ({ ...f, phase: e.target.value }))}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
+                          />
+                        ) : editingClientInfo ? (
+                          <input
+                            type="text"
+                            value={clientInfoForm.phase || ''}
+                            onChange={e => setClientInfoForm((f: any) => ({ ...f, phase: e.target.value }))}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
+                          />
+                        ) : (
+                          <p className="text-white font-medium">{formatPhase(selectedClientDetail.programtype, selectedClientDetail.phase) || '—'}</p>
                         )}
                       </div>
                       <div>
@@ -2113,8 +2520,40 @@ export default function App() {
                 </div>
               )}
 
-              {clientTab === 'polygraphs' && (
-                <div className="space-y-3">{clientPolygraphs.map(poly => (
+              {clientTab === 'polygraphs' && selectedClientDetail.programtype !== 'BIP' && (
+                <div className="space-y-3">
+                  <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <label className={`flex items-center gap-2 text-slate-200 ${noPolyOverride && !noPolySaving ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                        <input
+                          type="checkbox"
+                          checked={!!selectedClientDetail.nopolyrequired}
+                          disabled={!noPolyOverride || noPolySaving}
+                          onChange={e => handleNoPolyRequiredChange(e.target.checked)}
+                          className="accent-blue-500 disabled:opacity-60"
+                        />
+                        No Poly Required
+                      </label>
+                      {role === 'Business Administrator' && (
+                        <button
+                          type="button"
+                          disabled={noPolySaving}
+                          onClick={() => setNoPolyOverride(o => !o)}
+                          className="text-xs font-semibold px-2 py-1 rounded border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
+                        >
+                          {noPolyOverride ? 'Cancel Override' : 'Override'}
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1 ml-6">
+                      {noPolySaving
+                        ? 'Saving...'
+                        : noPolyOverride
+                          ? 'Business Administrator override: check or uncheck to save. The change is recorded in the case notes.'
+                          : 'Locked. A Business Administrator can override it.'}
+                    </p>
+                  </div>
+                  {clientPolygraphs.map(poly => (
                   <div key={poly.resultid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex gap-5">
                     <div className="shrink-0 w-28 flex flex-col justify-center border-r border-slate-800 pr-5">
                       <p className="text-2xl font-bold text-white leading-tight">{formatLogMonthDay(poly.date)}</p>
@@ -2138,8 +2577,140 @@ export default function App() {
                       </p>
                     </div>
                   </div>
-                ))}</div>
+                  ))}
+                </div>
               )}
+
+              {clientTab === 'attachments' && (
+                <div className="space-y-3">
+                  <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex items-center justify-between gap-3">
+                    <p className="text-xs text-slate-400">Save documents to this client's account. Up to 25 MB per file.</p>
+                    <input
+                      ref={attachmentInputRef}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={e => handleAttachmentUpload(e.target.files)}
+                    />
+                    <button
+                      type="button"
+                      disabled={attachmentUploading}
+                      onClick={() => attachmentInputRef.current?.click()}
+                      className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 shrink-0"
+                    >
+                      <Upload size={14} /> {attachmentUploading ? 'Uploading...' : 'Add Attachment'}
+                    </button>
+                  </div>
+                  {attachmentError && (
+                    <div role="alert" className="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-sm flex justify-between items-center gap-3">
+                      <span>{attachmentError}</span>
+                      <button onClick={() => setAttachmentError('')} className="text-red-400 hover:text-red-200"><X size={14} /></button>
+                    </div>
+                  )}
+                  {attachmentsStatus === 'loading' && <p className="text-sm text-slate-400">Loading attachments...</p>}
+                  {attachmentsStatus === 'ready' && clientAttachments.length === 0 && (
+                    <p className="text-sm text-slate-400">No attachments yet.</p>
+                  )}
+                  {clientAttachments.map(a => (
+                    <div key={a.attachmentid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex items-center gap-4">
+                      <Paperclip size={18} className="text-slate-500 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        {renamingAttachmentId === a.attachmentid ? (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              autoFocus
+                              aria-label="New attachment name"
+                              value={attachmentRenameValue}
+                              disabled={attachmentRenameSaving}
+                              onChange={e => setAttachmentRenameValue(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') handleAttachmentRename(a);
+                                if (e.key === 'Escape') setRenamingAttachmentId(null);
+                              }}
+                              className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-white text-sm"
+                            />
+                            <button type="button" disabled={attachmentRenameSaving} onClick={() => handleAttachmentRename(a)} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-2.5 py-1 rounded-lg text-xs font-semibold">{attachmentRenameSaving ? 'Saving...' : 'Save'}</button>
+                            <button type="button" disabled={attachmentRenameSaving} onClick={() => setRenamingAttachmentId(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg text-xs font-semibold">Cancel</button>
+                          </div>
+                        ) : (
+                          <p className="font-semibold text-white truncate" title={a.filename}>{a.filename}</p>
+                        )}
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {formatFileSize(a.filesize)} · Added {new Date(a.uploadedon).toLocaleDateString()} by {a.uploadedby || 'Unknown'}
+                        </p>
+                      </div>
+                      <div className="flex gap-1.5 shrink-0">
+                        {canViewAttachment(a) && (
+                          <>
+                            <button type="button" onClick={() => handleAttachmentOpen(a, 'view')} title="View" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"><Eye size={13} /> View</button>
+                            <button type="button" onClick={() => handleAttachmentOpen(a, 'print')} title="Print" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"><Printer size={13} /> Print</button>
+                          </>
+                        )}
+                        <button type="button" onClick={() => startAttachmentRename(a)} title="Rename" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"><Pencil size={13} /> Rename</button>
+                        <button type="button" onClick={() => handleAttachmentOpen(a, 'download')} title="Download" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"><Download size={13} /> Download</button>
+                        {role === 'Business Administrator' && (
+                          <button type="button" onClick={() => handleAttachmentDelete(a)} title="Delete" aria-label={`Delete ${a.filename}`} className="text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2 py-1.5 rounded-lg bg-red-500/5 border border-red-500/20"><Trash2 size={13} /></button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {clientTab === 'changelog' && role === 'Business Administrator' && (() => {
+                const shown = clientChangeLog.filter(c => !changeLogFilter || c.changetype === changeLogFilter);
+                const labelFor = (type: string) => CHANGE_LOG_TYPES.find(t => t.type === type)?.label || type;
+                return (
+                  <div className="space-y-3">
+                    {/* One filter per change type; counts reflect the whole log */}
+                    <div className="flex flex-wrap gap-2">
+                      {[{ type: '', label: 'All' }, ...CHANGE_LOG_TYPES].map(({ type, label }) => {
+                        const count = type ? clientChangeLog.filter(c => c.changetype === type).length : clientChangeLog.length;
+                        const active = changeLogFilter === type;
+                        return (
+                          <button
+                            key={type || 'all'}
+                            type="button"
+                            onClick={() => setChangeLogFilter(type)}
+                            className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition ${active ? 'border-blue-500 bg-blue-500/15 text-blue-300' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'}`}
+                          >
+                            {label} <span className="text-slate-500">({count})</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {changeLogStatus === 'loading' ? (
+                      <p className="text-sm text-slate-500">Loading change log...</p>
+                    ) : changeLogStatus === 'error' ? (
+                      <button type="button" onClick={openChangeLog} className="text-sm text-blue-400 hover:underline">Could not load the change log. Retry</button>
+                    ) : shown.length === 0 ? (
+                      <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-xl p-6 text-center">
+                        {changeLogFilter ? `No ${labelFor(changeLogFilter)} changes recorded.` : 'No changes recorded for this client yet.'}
+                      </p>
+                    ) : shown.map((c, i) => (
+                      <div key={c.changeid ?? `expired-${i}`} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex gap-5">
+                        <div className="shrink-0 w-28 flex flex-col justify-center border-r border-slate-800 pr-5">
+                          <p className="text-2xl font-bold text-white leading-tight">{formatLogMonthDay(c.changedon)}</p>
+                          <p className="text-sm text-slate-400 mt-0.5">{formatLogYear(c.changedon)}</p>
+                          <p className="text-xs text-slate-500 mt-1">{formatLogTime(c.changedon)}</p>
+                        </div>
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <span className="text-xs text-blue-400 font-semibold">{labelFor(c.changetype)}</span>
+                          {(c.oldvalue || c.newvalue) && (
+                            <p className="text-slate-200">
+                              {c.oldvalue && <><span className="text-slate-400 line-through">{c.oldvalue}</span><span className="text-slate-500"> → </span></>}
+                              <span className="font-semibold text-white">{c.newvalue}</span>
+                            </p>
+                          )}
+                          {c.details && <p className="text-xs text-slate-400">{c.details}</p>}
+                          <p className="text-xs text-slate-500 text-right">— {c.changedby}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -2764,28 +3335,15 @@ export default function App() {
                       required
                     >
                       <option value="">-- Choose Examiner --</option>
-                      {polyExaminers.length > 0 && (
-                        <optgroup label="Polygraph Examiners">
-                          {polyExaminers.map(e => (
-                            <option key={e.employeeemail} value={e.employeeemail}>
-                              {e.displayname} ({e.employeeemail})
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {otherStaff.length > 0 && (
-                        <optgroup label="Other Staff">
-                          {otherStaff.map(e => (
-                            <option key={e.employeeemail} value={e.employeeemail}>
-                              {e.displayname} - {e.role} ({e.employeeemail})
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {employees.length === 0 && (
-                        <option value="jvance@chandlercbt.com">Examiner J. Vance (jvance@chandlercbt.com)</option>
-                      )}
+                      {activePolygraphers.map(e => (
+                        <option key={e.employeeemail} value={e.employeeemail}>
+                          {e.displayname} ({e.employeeemail})
+                        </option>
+                      ))}
                     </select>
+                    {activePolygraphers.length === 0 && (
+                      <p className="text-xs text-amber-400 mt-1">No active polygraphers. Add or reactivate one under Admin.</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-xs text-slate-400 uppercase mb-1">Slot Type</label>

@@ -36,6 +36,56 @@ export async function getGroupAttendedClients(groupId: number, date: string): Pr
     return body.map(Number);
 }
 
+// Business Administrators only; the server checks the role
+export async function setClientNoPolyRequired(clientId: number, noPolyRequired: boolean, user: string): Promise<boolean> {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/no-poly-required`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ noPolyRequired, user }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+        throw new Error(body.error || 'Failed to update No Poly Required.');
+    }
+    return body.noPolyRequired;
+}
+
+// 'discharge' is Business Administrators only (the server checks the role); 'activate' sets a discharged client
+// back to Active or Inactive. Returns the client's new program status.
+export async function changeClientProgramStatus(action: 'discharge' | 'activate', clientId: number, status: string, subcategory: string | null, note: string, user: string): Promise<string> {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, subcategory, note, user }),
+    });
+    // An outdated server answers with an HTML error page, not JSON
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(body.error || `Failed to ${action} client (server responded ${res.status}).`);
+    }
+    return body.programStatus;
+}
+
+export interface ClientChange {
+    changeid: number | null;
+    changedon: string;
+    changedby: string;
+    changetype: string;
+    oldvalue: string | null;
+    newvalue: string | null;
+    details: string | null;
+}
+
+// Business Administrators only; the server checks the role
+export async function getClientChangeLog(clientId: number, user: string): Promise<ClientChange[]> {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/change-log?user=${encodeURIComponent(user)}`);
+    const body = await res.json();
+    if (!res.ok || !Array.isArray(body)) {
+        throw new Error(body?.error || 'Failed to load the change log.');
+    }
+    return body;
+}
+
 export async function updateClient(clientId: number, data: any) {
     const res = await fetch(`${API_BASE}/clients/${clientId}`, {
         method: 'PUT',
@@ -146,11 +196,11 @@ export async function deleteGroup(groupId: number) {
     return body as { success: true; message: string };
 }
 
-export async function assignClientToGroup(groupId: number, clientId: number) {
+export async function assignClientToGroup(groupId: number, clientId: number, assignedBy: string) {
     const res = await fetch(`${API_BASE}/groups/${groupId}/assign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId }),
+        body: JSON.stringify({ clientId, assignedBy }),
     });
     return res.json();
 }
@@ -387,6 +437,83 @@ export async function addClientNote(clientId: number, data: { user: string; comm
 export async function getClientPolygraphs(clientId: number) {
     const res = await fetch(`${API_BASE}/clients/${clientId}/polygraphs`);
     return res.json();
+}
+
+export interface ClientAttachment {
+    attachmentid: number;
+    clientid: number;
+    filename: string;
+    contenttype: string;
+    filesize: number;
+    uploadedby: string | null;
+    uploadedon: string;
+}
+
+// Matches the server's upload limit
+export const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+
+export async function getClientAttachments(clientId: number): Promise<ClientAttachment[]> {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/attachments`);
+    const body = await res.json();
+    if (!res.ok || !Array.isArray(body)) {
+        throw new Error(body?.error || 'Could not load attachments.');
+    }
+    return body;
+}
+
+// Sent as raw bytes; the name and real type travel in headers
+export async function uploadClientAttachment(clientId: number, file: File, user: string): Promise<ClientAttachment> {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/attachments`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/octet-stream',
+            'X-File-Name': encodeURIComponent(file.name),
+            'X-File-Type': file.type || 'application/octet-stream',
+            'X-User': user,
+        },
+        body: file,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(body.error || (res.status === 413 ? 'File is larger than 25 MB.' : `Upload failed (server responded ${res.status}).`));
+    }
+    return body;
+}
+
+// The file as a Blob typed with its saved content type, for viewing, downloading, or printing
+export async function fetchClientAttachment(attachment: ClientAttachment): Promise<Blob> {
+    const res = await fetch(`${API_BASE}/attachments/${attachment.attachmentid}`);
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Could not open the attachment.');
+    }
+    return new Blob([await res.arrayBuffer()], { type: attachment.contenttype });
+}
+
+// The server keeps the original extension if the new name drops it; returns the saved attachment
+export async function renameClientAttachment(attachmentId: number, fileName: string, user: string): Promise<ClientAttachment> {
+    const res = await fetch(`${API_BASE}/attachments/${attachmentId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName, user }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(body.error || 'Failed to rename the attachment.');
+    }
+    return body;
+}
+
+// Business Administrators only; the server checks the role
+export async function deleteClientAttachment(attachmentId: number, user: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/attachments/${attachmentId}`, {
+        method: 'DELETE',
+        headers: { 'X-User': user },
+    });
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to delete the attachment.');
+    }
 }
 
 // bypassWaitPeriod: a Business Administrator's confirmed choice to schedule inside the post-NDI waiting period
