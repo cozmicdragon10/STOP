@@ -405,6 +405,10 @@ const LAST_POLY_RESULT_SQL = (clientParam) => `
     FROM PolygraphResults WHERE Client = ${clientParam}
     ORDER BY COALESCE(PolygraphDateTime, Date::timestamp) DESC, ResultId DESC LIMIT 1`;
 
+// Choices for the client's Race and Sex fields (both optional)
+const CLIENT_RACES = ['American Indian or Alaska Native', 'Asian', 'Black or African American', 'Hispanic or Latino', 'Native Hawaiian or Other Pacific Islander', 'White', 'Two or More Races', 'Other'];
+const CLIENT_SEXES = ['Male', 'Female'];
+
 // Update Client Information
 app.put('/api/clients/:id', async (req, res) => {
     try {
@@ -415,8 +419,18 @@ app.put('/api/clients/:id', async (req, res) => {
             treatmentfee, accountbalance, vouchers, polyfeevoucher, polyfeepaid, polyfee,
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
-            comments, programtype, updatedBy
+            comments, programtype, race, dateofbirth, sex, updatedBy
         } = req.body;
+
+        if (race && !CLIENT_RACES.includes(race)) {
+            return res.status(400).json({ error: `Race must be one of: ${CLIENT_RACES.join(', ')}.` });
+        }
+        if (sex && !CLIENT_SEXES.includes(sex)) {
+            return res.status(400).json({ error: `Sex must be one of: ${CLIENT_SEXES.join(', ')}.` });
+        }
+        if (dateofbirth && String(dateofbirth).split('T')[0] > new Date().toISOString().split('T')[0]) {
+            return res.status(400).json({ error: 'Date of birth cannot be in the future.' });
+        }
 
         const polyVoucher = polyfeevoucher !== undefined && polyfeevoucher !== null && polyfeevoucher !== '' ? Number(polyfeevoucher) : null;
         if (polyVoucher !== null && (!Number.isInteger(polyVoucher) || polyVoucher < 0 || polyVoucher > POLY_VOUCHER_MAX)) {
@@ -466,7 +480,10 @@ app.put('/api/clients/:id', async (req, res) => {
                     ELSE COALESCE($25, PolyFeeVoucher)
                 END,
                 PolyFeePaid = COALESCE($26, PolyFeePaid),
-                PolyFee = COALESCE($27, PolyFee)
+                PolyFee = COALESCE($27, PolyFee),
+                Race = $28,
+                DateOfBirth = $29,
+                Sex = $30
             WHERE ClientId = $24`,
             [
                 firstname || null, middlename || null, lastname || null, docnumber || null, supervisingagent || null,
@@ -479,7 +496,8 @@ app.put('/api/clients/:id', async (req, res) => {
                 comments || null, programtype || null, id,
                 polyVoucher,
                 polyfeepaid !== undefined && polyfeepaid !== null && polyfeepaid !== '' ? Number(polyfeepaid) : null,
-                polyfee !== undefined && polyfee !== null && polyfee !== '' ? Number(polyfee) : null
+                polyfee !== undefined && polyfee !== null && polyfee !== '' ? Number(polyfee) : null,
+                race || null, dateofbirth || null, sex || null
             ]
         );
 
@@ -912,20 +930,25 @@ const SO_GROUP_TYPES = ['SO', 'FED SO'];
 
 // awardNdiVoucher: when set (closing an SO group), a client charged the group fee whose most recent
 // polygraph earns vouchers (POLY_VOUCHER_EARNING_RESULTS, or kept in the incentive by override) earns one poly fee voucher, up to POLY_VOUCHER_MAX.
-const recordAttendance = async (db, { client, group, date, paid, groupFee, accountPaid, paymentMethod, voucherUsed, type, comments, createdBy, awardNdiVoucher }) => {
+// sessionNumber: which session of the group that day (1 for the first); a group can meet again after its earlier session was closed
+const recordAttendance = async (db, { client, group, date, sessionNumber, paid, groupFee, accountPaid, paymentMethod, voucherUsed, type, comments, createdBy, awardNdiVoucher }) => {
     const clientRes = await db.query('SELECT AccountBalance, ProgramType, Phase, FirstName, LastName FROM Clients WHERE ClientId = $1 FOR UPDATE', [client]);
     if (clientRes.rows.length === 0) {
         throw new Error(`Client ${client} not found.`);
     }
 
     const sessionDate = date || new Date().toISOString().split('T')[0];
+    const sessionNum = Number(sessionNumber) > 0 ? Math.floor(Number(sessionNumber)) : 1;
 
-    // A client can attend a given group only once per day
+    // A client can attend a given session of a group only once
     if (group) {
-        const dupRes = await db.query('SELECT 1 FROM Attendance WHERE Client = $1 AND "Group" = $2 AND Date = $3 LIMIT 1', [client, group, sessionDate]);
+        const dupRes = await db.query(
+            'SELECT 1 FROM Attendance WHERE Client = $1 AND "Group" = $2 AND Date = $3 AND SessionNumber = $4 LIMIT 1',
+            [client, group, sessionDate, sessionNum]
+        );
         if (dupRes.rows.length > 0) {
             const { lastname, firstname } = clientRes.rows[0];
-            throw new Error(`${lastname}, ${firstname} already attended this group on ${sessionDate} and cannot be checked in to it again that day.`);
+            throw new Error(`${lastname}, ${firstname} already attended this group session on ${sessionDate} and cannot be checked in to it again.`);
         }
     }
     const oldBalance = Number(clientRes.rows[0].accountbalance || 0);
@@ -963,9 +986,9 @@ const recordAttendance = async (db, { client, group, date, paid, groupFee, accou
     }
 
     const attRes = await db.query(
-        `INSERT INTO Attendance (Client, "Group", Date, Paid, GroupFee, AccountPaid, AccountTotal, VoucherUsed, Type, Comments, CreatedBy)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING AttendanceId;`,
-        [client, group || null, sessionDate, paid, feeNum, paidNum, newBalance, voucherUsed, type, comments || null, createdBy]
+        `INSERT INTO Attendance (Client, "Group", Date, Paid, GroupFee, AccountPaid, AccountTotal, VoucherUsed, Type, Comments, CreatedBy, PaymentMethod, SessionNumber)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING AttendanceId;`,
+        [client, group || null, sessionDate, paid, feeNum, paidNum, newBalance, voucherUsed, type, comments || null, createdBy, paidNum > 0 ? paymentMethod : null, sessionNum]
     );
 
     if (paidNum > 0) {
@@ -1025,16 +1048,29 @@ app.post('/api/attendance', async (req, res) => {
     }
 });
 
-// Clients who already have attendance for a group on a date (YYYY-MM-DD); they cannot be checked in to it again that day
-app.get('/api/groups/:groupId/attended', async (req, res) => {
+// Sessions of a group on a date (YYYY-MM-DD), oldest first. Closed sessions list the ids of the clients who attended;
+// open ones (saved with Finish Check-In, not yet closed) have no attendance yet and are listed so their numbers aren't reused.
+// A client cannot be checked in to the same session twice, but can attend a later session that day.
+app.get('/api/groups/:groupId/sessions', async (req, res) => {
     try {
         const { groupId } = req.params;
         const { date } = req.query;
         if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
             return res.status(400).json({ error: 'A session date (YYYY-MM-DD) is required.' });
         }
-        const result = await pool.query('SELECT DISTINCT Client FROM Attendance WHERE "Group" = $1 AND Date = $2', [groupId, date]);
-        res.json(result.rows.map(r => r.client));
+        const result = await pool.query(
+            `SELECT SessionNumber, TRUE AS Closed, array_agg(DISTINCT Client) AS Clients
+             FROM Attendance WHERE "Group" = $1 AND Date = $2
+             GROUP BY SessionNumber
+             UNION ALL
+             SELECT o.SessionNumber, FALSE, ARRAY[]::int[]
+             FROM OpenGroupSessions o
+             WHERE o.GroupId = $1 AND o.SessionDate = $2
+               AND NOT EXISTS (SELECT 1 FROM Attendance a WHERE a."Group" = $1 AND a.Date = $2 AND a.SessionNumber = o.SessionNumber)
+             ORDER BY SessionNumber`,
+            [groupId, date]
+        );
+        res.json(result.rows.map(r => ({ sessionNumber: r.sessionnumber, closed: r.closed, clients: r.clients })));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -1042,7 +1078,8 @@ app.get('/api/groups/:groupId/attended', async (req, res) => {
 
 // Group check-in: every client on the session sheet is saved in one transaction
 app.post('/api/attendance/batch', async (req, res) => {
-    const { group, date, type, createdBy, entries } = req.body;
+    const { group, date, sessionNumber, type, createdBy, entries } = req.body;
+    const sessionNum = Number(sessionNumber) > 0 ? Math.floor(Number(sessionNumber)) : 1;
 
     if (!Array.isArray(entries) || entries.length === 0) {
         return res.status(400).json({ error: 'No clients were provided for check-in.' });
@@ -1061,12 +1098,12 @@ app.post('/api/attendance/batch', async (req, res) => {
         const results = [];
         for (const entry of entries) {
             const { attendanceId, newBalance, polyVoucherAwarded } = await recordAttendance(clientDb, {
-                ...entry, group, date, type: type || 'Group', createdBy, paid: true, awardNdiVoucher: isSoGroup
+                ...entry, group, date, sessionNumber: sessionNum, type: type || 'Group', createdBy, paid: true, awardNdiVoucher: isSoGroup
             });
             results.push({ client: entry.client, attendanceId, newBalance, polyVoucherAwarded });
         }
-        // Closing the group clears its saved open sheet for this session date
-        await clientDb.query('DELETE FROM OpenGroupSessions WHERE GroupId = $1 AND SessionDate = $2', [group, date]);
+        // Closing the group clears its saved open sheet for this session
+        await clientDb.query('DELETE FROM OpenGroupSessions WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3', [group, date, sessionNum]);
         await clientDb.query('COMMIT');
         res.status(201).json({ success: true, count: results.length, results, polyVouchersAwarded: results.filter(r => r.polyVoucherAwarded).length });
     } catch (error) {
@@ -1079,8 +1116,17 @@ app.post('/api/attendance/batch', async (req, res) => {
 
 // --- OPEN GROUPS ---
 // Group check-ins saved with Finish Check-In so they can be closed later
+
+// Session numbers let a group meet more than once a day. Existing rows are session 1. Open sheets become unique per
+// group, date, and session (was per group and date).
+pool.query('ALTER TABLE Attendance ADD COLUMN IF NOT EXISTS SessionNumber INT NOT NULL DEFAULT 1')
+    .then(() => pool.query('ALTER TABLE OpenGroupSessions ADD COLUMN IF NOT EXISTS SessionNumber INT NOT NULL DEFAULT 1'))
+    .then(() => pool.query('ALTER TABLE OpenGroupSessions DROP CONSTRAINT IF EXISTS opengroupsessions_groupid_sessiondate_key'))
+    .then(() => pool.query('CREATE UNIQUE INDEX IF NOT EXISTS OpenGroupSessions_Session_Key ON OpenGroupSessions (GroupId, SessionDate, SessionNumber)'))
+    .catch(err => console.error('Could not add group session numbers:', err.message));
+
 const OPEN_GROUP_COLUMNS = `o.OpenSessionId, o.GroupId, g.GroupName, to_char(o.SessionDate, 'YYYY-MM-DD') AS SessionDate,
-    o.Entries, o.CreatedBy, o.UpdatedOn`;
+    o.SessionNumber, o.Entries, o.CreatedBy, o.UpdatedOn`;
 
 app.get('/api/open-groups', async (req, res) => {
     try {
@@ -1098,17 +1144,18 @@ app.get('/api/open-groups', async (req, res) => {
 // Saves the sheet for a group and session date, replacing any earlier save of the same session
 app.put('/api/open-groups', async (req, res) => {
     try {
-        const { group, date, entries, createdBy } = req.body;
+        const { group, date, sessionNumber, entries, createdBy } = req.body;
         if (!group || !date || !Array.isArray(entries) || entries.length === 0) {
             return res.status(400).json({ error: 'A group, session date, and at least one checked-in client are required.' });
         }
+        const sessionNum = Number(sessionNumber) > 0 ? Math.floor(Number(sessionNumber)) : 1;
         const saved = await pool.query(
-            `INSERT INTO OpenGroupSessions (GroupId, SessionDate, Entries, CreatedBy, UpdatedOn)
-             VALUES ($1, $2, $3, $4, NOW())
-             ON CONFLICT (GroupId, SessionDate)
+            `INSERT INTO OpenGroupSessions (GroupId, SessionDate, SessionNumber, Entries, CreatedBy, UpdatedOn)
+             VALUES ($1, $2, $3, $4, $5, NOW())
+             ON CONFLICT (GroupId, SessionDate, SessionNumber)
              DO UPDATE SET Entries = EXCLUDED.Entries, CreatedBy = EXCLUDED.CreatedBy, UpdatedOn = NOW()
              RETURNING OpenSessionId`,
-            [group, date, JSON.stringify(entries), createdBy]
+            [group, date, sessionNum, JSON.stringify(entries), createdBy]
         );
         const result = await pool.query(
             `SELECT ${OPEN_GROUP_COLUMNS} FROM OpenGroupSessions o
@@ -1481,6 +1528,48 @@ app.get('/api/reports/agent', async (req, res) => {
     }
 });
 
+// Payment method (Cash or Credit Card) taken at check-in, for the group income report. Rows saved before this column
+// existed are filled in from the payment ledger when exactly one payment matches; the rest stay unrecorded.
+pool.query('ALTER TABLE Attendance ADD COLUMN IF NOT EXISTS PaymentMethod TEXT')
+    .then(() => pool.query(`
+        UPDATE Attendance a SET PaymentMethod = m.PaymentMethod
+        FROM (
+            SELECT a2.AttendanceId, MIN(f.PaymentMethod) AS PaymentMethod
+            FROM Attendance a2
+            JOIN FinancialTransactions f ON f.Client = a2.Client AND f.Type = 'Payment'
+                AND f.Comments = 'Payment applied during ' || a2.Type || ' session on ' || to_char(a2.Date, 'YYYY-MM-DD') || '.'
+            WHERE a2.AccountPaid > 0 AND a2.PaymentMethod IS NULL
+            GROUP BY a2.AttendanceId
+            HAVING COUNT(*) = 1
+        ) m
+        WHERE a.AttendanceId = m.AttendanceId AND m.PaymentMethod IS NOT NULL
+    `))
+    .catch(err => console.error('Could not add Attendance.PaymentMethod:', err.message));
+
+// Every attendance row in the date range (YYYY-MM-DD, inclusive) with its group and client; the page totals them per group
+app.get('/api/reports/groups', async (req, res) => {
+    try {
+        const { from, to } = req.query;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(from || '')) || !/^\d{4}-\d{2}-\d{2}$/.test(String(to || ''))) {
+            return res.status(400).json({ error: 'A start and end date (YYYY-MM-DD) are required.' });
+        }
+        const result = await pool.query(
+            `SELECT a.AttendanceId, a."Group" AS GroupId, COALESCE(g.GroupName, 'No Group') AS GroupName, g.Counselor,
+                    to_char(a.Date, 'YYYY-MM-DD') AS Date, a.SessionNumber, a.Type, a.GroupFee, a.AccountPaid, a.PaymentMethod, a.VoucherUsed,
+                    c.ClientId, c.FirstName, c.LastName, c.DOCNumber
+             FROM Attendance a
+             JOIN Clients c ON c.ClientId = a.Client
+             LEFT JOIN Groups g ON g.GroupId = a."Group"
+             WHERE a.Date BETWEEN $1 AND $2
+             ORDER BY GroupName, a.Date DESC, a.SessionNumber DESC, c.LastName, c.FirstName`,
+            [from, to]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.get('/api/reports/deposit', async (req, res) => {
     try {
         const payments = await pool.query("SELECT SUM(Amount) FROM FinancialTransactions WHERE Type = 'Payment'");
@@ -1562,6 +1651,139 @@ app.get('/api/admin/logs', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM SystemLogs ORDER BY Timestamp DESC LIMIT 100');
         res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- SUPERVISING AGENTS ---
+// Probation officer directory. Clients link to an agent by name through Clients.SupervisingAgent (case and spacing ignored).
+pool.query(`
+    CREATE TABLE IF NOT EXISTS SupervisingAgents (
+        AgentId SERIAL PRIMARY KEY,
+        Name VARCHAR(255) NOT NULL,
+        Phone VARCHAR(50),
+        Email VARCHAR(255),
+        CreatedBy VARCHAR(255),
+        CreatedOn TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+`).then(() => pool.query(`
+    -- Older databases already had this table without the audit columns
+    ALTER TABLE SupervisingAgents
+        ADD COLUMN IF NOT EXISTS CreatedBy VARCHAR(255),
+        ADD COLUMN IF NOT EXISTS CreatedOn TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+`)).then(() => pool.query('CREATE UNIQUE INDEX IF NOT EXISTS SupervisingAgents_Name_Key ON SupervisingAgents (LOWER(TRIM(Name)))'))
+  .catch(err => console.error('Could not create SupervisingAgents table:', err.message));
+
+const AGENT_EDIT_ROLES = ['Business Administrator', 'Office Admin'];
+
+const activeRoleFor = async (email) => {
+    const roleRes = await pool.query('SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [email]);
+    return roleRes.rows[0]?.role || null;
+};
+
+app.get('/api/agents', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT AgentId, Name, Phone, Email FROM SupervisingAgents ORDER BY Name ASC');
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/agents', async (req, res) => {
+    try {
+        const { name, phone, email, user } = req.body;
+        if (!AGENT_EDIT_ROLES.includes(await activeRoleFor(user))) {
+            return res.status(403).json({ error: 'Only Business Administrators and Office Admins can add supervising agents.' });
+        }
+        if (!String(name || '').trim()) {
+            return res.status(400).json({ error: 'A name is required.' });
+        }
+        const result = await pool.query(
+            `INSERT INTO SupervisingAgents (Name, Phone, Email, CreatedBy) VALUES ($1, $2, $3, $4)
+             RETURNING AgentId, Name, Phone, Email`,
+            [name.trim(), phone?.trim() || null, email?.trim() || null, user]
+        );
+        await logAction(user, 'Agent Added', `Added supervising agent ${name.trim()}.`, 'Admin');
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        if (err.code === '23505') return res.status(409).json({ error: 'A supervising agent with that name already exists.' });
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// A name change is carried to every client assigned under the old name, so they stay linked to the agent
+app.put('/api/agents/:id', async (req, res) => {
+    const db = await pool.connect();
+    try {
+        const { id } = req.params;
+        const { name, phone, email, user } = req.body;
+        if (!AGENT_EDIT_ROLES.includes(await activeRoleFor(user))) {
+            return res.status(403).json({ error: 'Only Business Administrators and Office Admins can edit supervising agents.' });
+        }
+        if (!String(name || '').trim()) {
+            return res.status(400).json({ error: 'A name is required.' });
+        }
+        const newName = name.trim();
+
+        await db.query('BEGIN');
+        const before = await db.query('SELECT Name FROM SupervisingAgents WHERE AgentId = $1 FOR UPDATE', [id]);
+        if (before.rows.length === 0) {
+            await db.query('ROLLBACK');
+            return res.status(404).json({ error: 'Supervising agent not found.' });
+        }
+        const oldName = before.rows[0].name;
+        const result = await db.query(
+            `UPDATE SupervisingAgents SET Name = $1, Phone = $2, Email = $3 WHERE AgentId = $4
+             RETURNING AgentId, Name, Phone, Email`,
+            [newName, phone?.trim() || null, email?.trim() || null, id]
+        );
+
+        let clientsRenamed = 0;
+        if (oldName !== newName) {
+            const moved = await db.query(
+                `UPDATE Clients SET SupervisingAgent = $1
+                 WHERE LOWER(TRIM(SupervisingAgent)) = LOWER(TRIM($2)) AND SupervisingAgent <> $1
+                 RETURNING ClientId`,
+                [newName, oldName]
+            );
+            for (const row of moved.rows) {
+                await logClientChange(db, {
+                    clientId: row.clientid, changedBy: user, changeType: 'Supervising Agent',
+                    oldValue: oldName, newValue: newName, details: 'Agent renamed in the Supervising Agents directory.',
+                });
+            }
+            clientsRenamed = moved.rows.length;
+        }
+        await db.query('COMMIT');
+
+        await logAction(user, 'Agent Updated',
+            `Updated supervising agent ${oldName}${oldName !== newName ? ` → ${newName} (${clientsRenamed} client(s) updated)` : ''}.`, 'Admin');
+        res.json({ agent: result.rows[0], clientsRenamed });
+    } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
+        if (err.code === '23505') return res.status(409).json({ error: 'A supervising agent with that name already exists.' });
+        res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
+    }
+});
+
+// Clients keep the agent's name on their record; only the directory entry is removed
+app.delete('/api/agents/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { user } = req.body;
+        if (await activeRoleFor(user) !== 'Business Administrator') {
+            return res.status(403).json({ error: 'Only Business Administrators can delete supervising agents.' });
+        }
+        const removed = await pool.query('DELETE FROM SupervisingAgents WHERE AgentId = $1 RETURNING Name', [id]);
+        if (removed.rows.length === 0) {
+            return res.status(404).json({ error: 'Supervising agent not found.' });
+        }
+        await logAction(user, 'Agent Deleted', `Deleted supervising agent ${removed.rows[0].name}.`, 'Admin');
+        res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

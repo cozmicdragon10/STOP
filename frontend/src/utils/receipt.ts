@@ -16,7 +16,7 @@ export interface Receipt {
   polyFee?: number;
 }
 
-const escapeHtml = (value: string) =>
+export const escapeHtml = (value: string) =>
   value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
 // Opens a small receipt window and prints it. Pop-ups must be allowed for this site.

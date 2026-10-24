@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { getGroupAttendedClients, getGroupClients, saveOpenGroup, submitBatchAttendance } from '../api';
+import { getGroupClients, getGroupSessions, saveOpenGroup, submitBatchAttendance } from '../api';
+import type { GroupDaySession } from '../api';
 import type { OpenGroupSession } from '../api';
 import { isMonthlyFeeClient } from '../utils/soPhases';
 
@@ -140,8 +141,12 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   // Clients waiting on the check-in details dialog. fromSelection tells confirm whether to clear the roster selection.
   // makeupIds are clients confirmed as approved make-ups for this week.
   const [pendingCheckIn, setPendingCheckIn] = useState<{ clients: ClientRecord[]; fromSelection: boolean; makeupIds: Set<number> } | null>(null);
-  // Clients who already attended this group on the session date; a client can attend a group only once per day
+  // Clients who already attended this session of the group; a client can attend a session only once
   const [attendedIds, setAttendedIds] = useState<Set<number>>(() => new Set());
+  // Which session of the group on the session date this sheet is for (1 = the day's first)
+  const [sessionNumber, setSessionNumber] = useState(1);
+  // Set when the picked group already has a closed session today: the user chooses a new session or adding to that one
+  const [sessionChoice, setSessionChoice] = useState<{ latestClosed: GroupDaySession; nextNumber: number } | null>(null);
 
   // Guards against a slow response for a previous group overwriting the current roster.
   const rosterRequestId = useRef(0);
@@ -156,20 +161,33 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
 
   const allSelected = selectableRoster.length > 0 && selectableRoster.every(c => selectedIds.has(c.clientid));
 
-  // date is the session date (YYYY-MM-DD) used to find who already attended the group that day
-  const loadRoster = useCallback(async (id: number, date: string) => {
+  // date is the session date (YYYY-MM-DD). session is the session the sheet is for; when omitted (a group was just picked)
+  // and the group already has a closed session that day, the user is asked whether this is a new session.
+  const loadRoster = useCallback(async (id: number, date: string, session?: number) => {
     const requestId = ++rosterRequestId.current;
     setRosterStatus('loading');
     setRosterError('');
     try {
-      const [data, attended]: [unknown, number[]] = await Promise.all([getGroupClients(id), getGroupAttendedClients(id, date)]);
+      const [data, sessions]: [unknown, GroupDaySession[]] = await Promise.all([getGroupClients(id), getGroupSessions(id, date)]);
       if (requestId !== rosterRequestId.current) return;
       if (!Array.isArray(data)) {
         const serverError = (data as { error?: string } | null)?.error;
         throw new Error(serverError || 'Unexpected response from server.');
       }
       setRoster(data as ClientRecord[]);
-      setAttendedIds(new Set(attended));
+      const closed = sessions.filter(s => s.closed);
+      if (session === undefined && closed.length > 0) {
+        const latestClosed = closed[closed.length - 1];
+        const nextNumber = Math.max(...sessions.map(s => s.sessionNumber)) + 1;
+        // Until the user answers, treat it as the closed session so nobody from it can be checked in again by accident
+        setSessionNumber(latestClosed.sessionNumber);
+        setAttendedIds(new Set(latestClosed.clients));
+        setSessionChoice({ latestClosed, nextNumber });
+      } else {
+        const current = session ?? 1;
+        setSessionNumber(current);
+        setAttendedIds(new Set(sessions.find(s => s.sessionNumber === current)?.clients ?? []));
+      }
       setRosterStatus('ready');
     } catch (err: unknown) {
       if (requestId !== rosterRequestId.current) return;
@@ -193,11 +211,25 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     setSessionDate(null);
     setPendingCheckIn(null);
     setAttendedIds(new Set());
+    setSessionNumber(1);
+    setSessionChoice(null);
+  };
+
+  // Answer to the "already held today" question. 'new' starts another session, so everyone can be checked in again;
+  // 'existing' adds clients to the closed session, so those who attended it stay blocked.
+  const chooseSession = (choice: 'new' | 'existing') => {
+    if (!sessionChoice) return;
+    if (choice === 'new') {
+      setSessionNumber(sessionChoice.nextNumber);
+      setAttendedIds(new Set());
+    }
+    setSessionChoice(null);
   };
 
   // Loads a saved open group onto the sheet, ready to review and close
   const resumeOpenGroup = (open: OpenGroupSession) => {
-    if (groupId === open.groupid && sessionDate === open.sessiondate) {
+    const openSession = open.sessionnumber ?? 1;
+    if (groupId === open.groupid && sessionDate === open.sessiondate && sessionNumber === openSession) {
       setView('review');
       return;
     }
@@ -210,7 +242,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     setSessionDate(open.sessiondate);
     setSession(open.entries);
     setView('review');
-    loadRoster(open.groupid, open.sessiondate);
+    setSessionNumber(openSession);
+    loadRoster(open.groupid, open.sessiondate, openSession);
   };
 
   // Finish Check-In: saves the sheet as an open group so it can be closed later, then clears the screen
@@ -218,7 +251,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     if (groupId === null || session.length === 0) return;
     setSubmitting(true);
     try {
-      await saveOpenGroup({ group: groupId, date: sessionDate ?? todayLocal(), entries: session, createdBy });
+      await saveOpenGroup({ group: groupId, date: sessionDate ?? todayLocal(), sessionNumber, entries: session, createdBy });
       notify.onSuccess(`Check-in saved for ${session.length} client(s). Close the group from Open Groups when you're ready.`);
       clearWorkflow();
       notify.onOpenGroupsChanged?.();
@@ -242,7 +275,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   };
 
   const reloadRoster = () => {
-    if (groupId !== null) loadRoster(groupId, sessionDate ?? todayLocal());
+    if (groupId !== null) loadRoster(groupId, sessionDate ?? todayLocal(), sessionChoice ? undefined : sessionNumber);
   };
 
   const toggleSelect = (clientId: number) => {
@@ -297,7 +330,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   const addExternalClients = (clients: ClientRecord[]) => {
     const alreadyAttended = clients.filter(c => attendedIds.has(c.clientid));
     if (alreadyAttended.length > 0) {
-      notify.onError(`${alreadyAttended.map(c => `${c.lastname}, ${c.firstname}`).join('; ')} already attended this group today and cannot be checked in to it again.`);
+      notify.onError(`${alreadyAttended.map(c => `${c.lastname}, ${c.firstname}`).join('; ')} already attended this group session and cannot be checked in to it again.`);
     }
     const fresh = clients.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid));
     if (fresh.length === 0) return;
@@ -352,6 +385,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
       const res = await submitBatchAttendance({
         group: groupId,
         date: sessionDate ?? todayLocal(),
+        sessionNumber,
         type: 'Group',
         createdBy,
         entries: session.map(e => ({
@@ -406,6 +440,9 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     submitSession,
     submitting,
     sessionDate,
+    sessionNumber,
+    sessionChoice,
+    chooseSession,
     resumeOpenGroup,
     finishCheckIn,
   };

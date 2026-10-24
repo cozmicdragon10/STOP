@@ -26,14 +26,24 @@ export async function getGroupClients(groupId: number) {
     return res.json();
 }
 
-// Ids of clients who already attended the group on the date (YYYY-MM-DD)
-export async function getGroupAttendedClients(groupId: number, date: string): Promise<number[]> {
-    const res = await fetch(`${API_BASE}/groups/${groupId}/attended?date=${encodeURIComponent(date)}`);
-    const body = await res.json();
+// A session of a group on a date: session 1 is the day's first, a later number means the group met again.
+// closed: attendance was saved; otherwise it is an open sheet (Finish Check-In) and clients is empty.
+export interface GroupDaySession {
+    sessionNumber: number;
+    closed: boolean;
+    clients: number[];
+}
+
+// Sessions of the group on the date (YYYY-MM-DD), oldest first
+export async function getGroupSessions(groupId: number, date: string): Promise<GroupDaySession[]> {
+    const res = await fetch(`${API_BASE}/groups/${groupId}/sessions?date=${encodeURIComponent(date)}`);
+    const body = await res.json().catch(() => null);
     if (!res.ok || !Array.isArray(body)) {
-        throw new Error(body?.error || 'Could not check who already attended this group today.');
+        throw new Error(body?.error || (res.status === 404
+            ? 'The server needs a restart (node server.js) before group sessions can be checked.'
+            : 'Could not check who already attended this group today.'));
     }
-    return body.map(Number);
+    return body.map(s => ({ sessionNumber: Number(s.sessionNumber), closed: s.closed !== false, clients: (s.clients || []).map(Number) }));
 }
 
 // Business Administrators only; the server checks the role
@@ -226,6 +236,7 @@ export interface BatchAttendanceEntry {
 export interface BatchAttendancePayload {
     group: number;
     date: string;
+    sessionNumber: number;
     type: string;
     createdBy: string;
     entries: BatchAttendanceEntry[];
@@ -254,6 +265,7 @@ export interface OpenGroupSession {
     groupid: number;
     groupname: string;
     sessiondate: string;
+    sessionnumber: number;
     entries: SessionEntry[];
     createdby: string | null;
     updatedon: string;
@@ -268,7 +280,7 @@ export async function getOpenGroups(): Promise<OpenGroupSession[]> {
     return body;
 }
 
-export async function saveOpenGroup(data: { group: number; date: string; entries: SessionEntry[]; createdBy: string }): Promise<OpenGroupSession> {
+export async function saveOpenGroup(data: { group: number; date: string; sessionNumber: number; entries: SessionEntry[]; createdBy: string }): Promise<OpenGroupSession> {
     const res = await fetch(`${API_BASE}/open-groups`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -373,6 +385,39 @@ export async function getAgentReport() {
     return res.json();
 }
 
+export interface GroupReportRow {
+    attendanceid: number;
+    groupid: number | null;
+    groupname: string;
+    counselor: string | null;
+    date: string;
+    sessionnumber: number;
+    type: string;
+    groupfee: string | number;
+    accountpaid: string | number;
+    // null when nothing was paid, or for older rows the payment ledger couldn't match
+    paymentmethod: 'Cash' | 'Credit Card' | null;
+    voucherused: boolean;
+    clientid: number;
+    firstname: string;
+    lastname: string;
+    docnumber: string | null;
+}
+
+// from and to are YYYY-MM-DD, inclusive
+export async function getGroupReport(from: string, to: string): Promise<GroupReportRow[]> {
+    const res = await fetch(`${API_BASE}/reports/groups?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    const text = await res.text();
+    let body: any;
+    try {
+        body = JSON.parse(text);
+    } catch {
+        throw new Error(`The server returned an unexpected response (HTTP ${res.status}). Restart the backend (node server.js) and try again.`);
+    }
+    if (!res.ok) throw new Error(body.error || 'Failed to load the group report.');
+    return body;
+}
+
 export async function getDepositReport() {
     const res = await fetch(`${API_BASE}/reports/deposit`);
     return res.json();
@@ -408,6 +453,52 @@ export async function addEmployee(data: any) {
 export async function getSystemLogs() {
     const res = await fetch(`${API_BASE}/admin/logs`);
     return res.json();
+}
+
+export interface SupervisingAgent {
+    agentid: number;
+    name: string;
+    phone: string | null;
+    email: string | null;
+}
+
+// Reads the JSON body and throws the server's error message on failure.
+// An HTML body means the route is missing, which usually means the backend needs a restart.
+async function agentResponse(res: Response, fallback: string) {
+    const text = await res.text();
+    let body: any;
+    try {
+        body = JSON.parse(text);
+    } catch {
+        throw new Error(`The server returned an unexpected response (HTTP ${res.status}). Restart the backend (node server.js) and try again.`);
+    }
+    if (!res.ok) throw new Error(body.error || fallback);
+    return body;
+}
+
+export async function getSupervisingAgents(): Promise<SupervisingAgent[]> {
+    const res = await fetch(`${API_BASE}/agents`);
+    return agentResponse(res, 'Failed to load supervising agents.');
+}
+
+// Business Administrators and Office Admins only; the server checks the role
+export async function saveSupervisingAgent(agentId: number | null, data: { name: string; phone: string; email: string; user: string }) {
+    const res = await fetch(agentId ? `${API_BASE}/agents/${agentId}` : `${API_BASE}/agents`, {
+        method: agentId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return agentResponse(res, 'Failed to save the supervising agent.');
+}
+
+// Business Administrators only; the server checks the role
+export async function deleteSupervisingAgent(agentId: number, user: string) {
+    const res = await fetch(`${API_BASE}/agents/${agentId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user }),
+    });
+    return agentResponse(res, 'Failed to delete the supervising agent.');
 }
 
 export async function getClientAttendance(clientId: number) {

@@ -108,9 +108,11 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, onSuc
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resumeRequest]);
 
-  // Picking a group that already has an open check-in today picks up that sheet instead of starting over
+  // Picking a group that already has an open check-in today picks up that sheet (its latest session) instead of starting over
   const pickGroup = (id: number | null) => {
-    const open = id === null ? undefined : openGroups.find(o => o.groupid === id && o.sessiondate === todayLocal());
+    const open = id === null ? undefined : openGroups
+      .filter(o => o.groupid === id && o.sessiondate === todayLocal())
+      .sort((a, b) => (b.sessionnumber ?? 1) - (a.sessionnumber ?? 1))[0];
     if (open) resume(open);
     else wf.selectGroup(id);
   };
@@ -144,7 +146,34 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, onSuc
             Open check-in from {new Date(`${wf.sessionDate}T00:00:00`).toLocaleDateString()}. Attendance will be saved for that date.
           </p>
         )}
+        {group && !wf.sessionChoice && wf.sessionNumber > 1 && (
+          <p className="text-xs text-blue-400">Session {wf.sessionNumber} of {group.groupname} today.</p>
+        )}
       </section>
+
+      {/* The group was already opened and closed today: a new session, or more clients for the closed one */}
+      {group && wf.sessionChoice && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="session-choice-title" className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+            <h3 id="session-choice-title" className="text-lg font-bold text-white">{group.groupname} was already held today</h3>
+            <p className="text-sm text-slate-300">
+              {wf.sessionChoice.latestClosed.sessionNumber > 1 ? `Session ${wf.sessionChoice.latestClosed.sessionNumber}` : 'A session'} of this group was
+              closed today with {wf.sessionChoice.latestClosed.clients.length} client(s). Is this a new group session, or are you adding clients to the one that was closed?
+            </p>
+            <div className="space-y-2">
+              <button type="button" onClick={() => wf.chooseSession('new')} className="w-full text-left bg-blue-600 hover:bg-blue-500 text-white rounded-lg p-3">
+                <p className="font-semibold text-sm">New Group Session</p>
+                <p className="text-xs text-blue-100 mt-0.5">Starts session {wf.sessionChoice.nextNumber}. Clients from the earlier session can be checked in again.</p>
+              </button>
+              <button type="button" onClick={() => wf.chooseSession('existing')} className="w-full text-left bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 rounded-lg p-3">
+                <p className="font-semibold text-sm">Add to Closed Session</p>
+                <p className="text-xs text-slate-400 mt-0.5">Adds clients to the session already closed. Clients who attended it can't be checked in again.</p>
+              </button>
+              <button type="button" onClick={() => pickGroup(null)} className="w-full text-center text-xs text-slate-400 hover:text-slate-200 py-2">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Steps 2 and 3 stay hidden until a group is chosen */}
       {group && wf.view === 'checkin' && (

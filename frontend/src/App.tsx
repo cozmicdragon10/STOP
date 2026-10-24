@@ -3,7 +3,7 @@ import {
   Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
   DollarSign, Calendar, PlusCircle, Activity, PhoneCall, ShieldAlert, 
   Layers, CheckSquare, BarChart3, Settings, CheckCircle2, Trash2, RotateCcw, Home, History,
-  Paperclip, Eye, Download, Printer, Upload, Pencil
+  Paperclip, Eye, Download, Printer, Upload, Pencil, SlidersHorizontal, UserCheck
 } from 'lucide-react';
 import {
   loginUser, getClients, getGroups, submitAccountPayment, submitCustomCharge,
@@ -13,16 +13,21 @@ import {
   getClientNotes, addClientNote, getClientPolygraphs, getGroupClients, updateGroup, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
   assignClientToGroup, createClient, createGroup, deleteGroup, deleteClient, updateEmployee, getClientTests, submitTestResult, getAgentReport,
   getDepositReport, getEmployees, addEmployee, getSystemLogs, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
-  getOpenGroups, deleteOpenGroup, getClientChangeLog,
+  getOpenGroups, deleteOpenGroup, getClientChangeLog, getSupervisingAgents,
   getClientAttachments, uploadClientAttachment, fetchClientAttachment, renameClientAttachment, deleteClientAttachment, ATTACHMENT_MAX_BYTES
 } from './api';
-import type { ClientAttachment, ClientChange, OpenGroupSession } from './api';
+import type { ClientAttachment, ClientChange, OpenGroupSession, SupervisingAgent } from './api';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
 import { SO_PHASES, SO_TREATMENT_FEES } from './utils/soPhases';
 import CardPaymentFields from './components/payments/CardPaymentFields';
 import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
+import SupervisingAgentsTab from './components/agents/SupervisingAgentsTab';
+import AgentPicker from './components/agents/AgentPicker';
+import ClientPicker from './components/ClientPicker';
+import RecordFilterBar from './components/clients/RecordFilterBar';
+import GroupIncomeReport from './components/reports/GroupIncomeReport';
 
 // Client program statuses. 'Active' is used by group call-ins and the group roster, so keep that exact spelling.
 const PROGRAM_STATUSES = ['Active', 'Completed', 'Deceased', 'Discharged Supervision', 'Inactive', 'Program Failed', 'Revoked', 'Terminated', 'Transferred'];
@@ -44,6 +49,18 @@ const parseGroupCallInNote = (text: string) => {
 };
 
 // Label shown above a case note. Group call-ins read "<date> · Group Call-In"; everything else keeps its category.
+// Group Directory filters; '' means all. Status starts on Active so inactive groups are hidden until asked for.
+const DEFAULT_GROUP_FILTERS = { location: '', counselor: '', programtype: '', status: 'Active' };
+// Client drawer list filters. Dates are YYYY-MM-DD, inclusive; '' means no filter.
+const EMPTY_NOTE_FILTERS = { search: '', category: '', from: '', to: '', sort: 'newest' };
+const EMPTY_LEDGER_FILTERS = { search: '', type: '', feeType: '', method: '', from: '', to: '', sort: 'newest' };
+// A timestamp's calendar day in the browser's time zone, as YYYY-MM-DD
+const localYmd = (value: unknown) => {
+  const d = new Date(String(value));
+  return isNaN(d.getTime()) ? '' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const sortedUnique = (values: unknown[]) => Array.from(new Set(values.filter(Boolean).map(String))).sort((a, b) => a.localeCompare(b));
+
 const caseNoteLabel = (note: any) => {
   const groupCallIn = note.category === 'Call-In' ? parseGroupCallInNote(note.comments) : null;
   if (!groupCallIn) return note.category;
@@ -150,6 +167,22 @@ const formatPhase = (programtype?: string | null, phase?: string | null) =>
 const toLocalDay = (value: unknown) => {
   const [y, m, d] = String(value).split('T')[0].split('-').map(Number);
   return new Date(y, m - 1, d);
+};
+// Whole years since the birth date, or null when there is no valid date
+const ageFromBirthDate = (value: unknown, today = new Date()) => {
+  if (!value) return null;
+  const born = toLocalDay(value);
+  if (isNaN(born.getTime())) return null;
+  const hadBirthday = today.getMonth() > born.getMonth() || (today.getMonth() === born.getMonth() && today.getDate() >= born.getDate());
+  const age = today.getFullYear() - born.getFullYear() - (hadBirthday ? 0 : 1);
+  return age >= 0 ? age : null;
+};
+// Client Roster filters start on active clients only
+const DEFAULT_CLIENT_FILTERS = { agent: '', programtype: '', currentgroup: '', status: 'Active', feeoverride: '' };
+// Dropdown choices for client Information fields; must match the server's lists
+const CLIENT_FIELD_OPTIONS: Record<string, string[]> = {
+  race: ['American Indian or Alaska Native', 'Asian', 'Black or African American', 'Hispanic or Latino', 'Native Hawaiian or Other Pacific Islander', 'White', 'Two or More Races', 'Other'],
+  sex: ['Male', 'Female'],
 };
 const POLY_OVERDUE_MONTHS = 6;
 // Red polygraph notice for a client's account, or null when none applies. BIP clients don't take polygraphs.
@@ -288,7 +321,18 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [clients, setClients] = useState<any[]>([]);
   const [clientSearch, setClientSearch] = useState('');
-  const [clientFilters, setClientFilters] = useState({ agent: '', programtype: '', currentgroup: '', status: 'Active', feeoverride: '' });
+  const [clientFilters, setClientFilters] = useState(DEFAULT_CLIENT_FILTERS);
+  // Filter row is hidden until toggled; the choice is remembered in this browser. Filters still apply while hidden.
+  const [showClientFilters, setShowClientFilters] = useState(() => {
+    try { return localStorage.getItem('showClientFilters') === 'true'; } catch { return false; }
+  });
+  const toggleClientFilters = () => setShowClientFilters(show => {
+    try { localStorage.setItem('showClientFilters', String(!show)); } catch { /* storage unavailable */ }
+    return !show;
+  });
+  // Filters changed from the defaults, shown on the Filters button so hidden filters aren't forgotten
+  const changedClientFilterCount = (Object.keys(DEFAULT_CLIENT_FILTERS) as (keyof typeof DEFAULT_CLIENT_FILTERS)[])
+    .filter(key => clientFilters[key] !== DEFAULT_CLIENT_FILTERS[key]).length;
   const [groups, setGroups] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -313,6 +357,9 @@ export default function App() {
   const [clientAttendance, setClientAttendance] = useState<any[]>([]);
   const [clientFinancials, setClientFinancials] = useState<any[]>([]);
   const [clientNotes, setClientNotes] = useState<any[]>([]);
+  // Case Notes and Financial Ledger filters in the client drawer; reset whenever a client is opened
+  const [noteFilters, setNoteFilters] = useState(EMPTY_NOTE_FILTERS);
+  const [ledgerFilters, setLedgerFilters] = useState(EMPTY_LEDGER_FILTERS);
   const [clientPolygraphs, setClientPolygraphs] = useState<any[]>([]);
   // Client whose polygraphs are loaded, so the notice never uses the previous client's results
   const [clientPolygraphsFor, setClientPolygraphsFor] = useState<number | null>(null);
@@ -368,6 +415,12 @@ export default function App() {
 
   // Polygraph State
   const [polySubTab, setPolySubTab] = useState<'admin' | 'schedule' | 'results'>('schedule');
+  // Poly Schedule and Poly Results filters; '' means no filter. Dates are YYYY-MM-DD, inclusive.
+  const [polyExaminerFilter, setPolyExaminerFilter] = useState('');
+  const [polyLocationFilter, setPolyLocationFilter] = useState('');
+  const [polyDateFrom, setPolyDateFrom] = useState('');
+  const [polyDateTo, setPolyDateTo] = useState('');
+  const [polyDateSort, setPolyDateSort] = useState<'asc' | 'desc'>('asc');
   const [polySlots, setPolySlots] = useState<any[]>([]);
   const [polyLocation, setPolyLocation] = useState('Oklahoma City Office');
   const [polyAddress, setPolyAddress] = useState('123 Main St, OKC');
@@ -418,14 +471,14 @@ export default function App() {
   const [editAddress, setEditAddress] = useState('');
   // Inactive groups stay in the directory but are hidden from every picker for new assignments and sessions
   const activeGroups = groups.filter(g => g.active !== false);
-  const [showInactiveGroups, setShowInactiveGroups] = useState(false);
   // Normalize location names (e.g., "Oklahoma City" → "OKC")
   const normalizeLocation = (loc: string) => loc === 'Oklahoma City' ? 'OKC' : loc;
   // Reverse normalization for storage (e.g., "OKC" → "Oklahoma City")
   const denormalizeLocation = (loc: string) => loc === 'OKC' ? 'Oklahoma City' : loc;
-  // Directory filters; an empty string means "all"
-  const [groupFilters, setGroupFilters] = useState({ location: '', counselor: '', programtype: '', status: '' });
-  const groupFilterActive = Object.values(groupFilters).some(Boolean);
+  // Directory filters; an empty string means "all". The list starts on active groups only.
+  const [groupFilters, setGroupFilters] = useState(DEFAULT_GROUP_FILTERS);
+  const groupFilterActive = (Object.keys(DEFAULT_GROUP_FILTERS) as (keyof typeof DEFAULT_GROUP_FILTERS)[])
+    .some(k => groupFilters[k] !== DEFAULT_GROUP_FILTERS[k]);
   const distinctGroupValues = (key: 'location' | 'counselor' | 'programtype' | 'status') => {
     if (key === 'status') return ['Active', 'Inactive'];
     const values = Array.from(new Set(groups.map(g => {
@@ -437,7 +490,6 @@ export default function App() {
   const emptyNewGroup = { groupName: '', location: '', counselor: '', programType: '', schedule: '', address: '' };
   const [showNewGroupForm, setShowNewGroupForm] = useState(false);
   const [newGroup, setNewGroup] = useState(emptyNewGroup);
-  const inactiveGroupCount = groups.length - activeGroups.length;
   type GroupSortKey = 'groupname' | 'location' | 'counselor' | 'programtype' | 'schedule' | 'clientcount' | 'active';
   const [groupSort, setGroupSort] = useState<{ key: GroupSortKey; dir: 'asc' | 'desc' }>({ key: 'groupname', dir: 'asc' });
   const toggleGroupSort = (key: GroupSortKey) => {
@@ -445,7 +497,6 @@ export default function App() {
   };
   const groupSortArrow = (key: GroupSortKey) => (groupSort.key === key ? (groupSort.dir === 'asc' ? ' ▲' : ' ▼') : '');
   const sortedDirectoryGroups = groups
-    .filter(g => showInactiveGroups || g.active !== false)
     .filter(g => (!groupFilters.location || normalizeLocation(g.location) === groupFilters.location)
       && (!groupFilters.counselor || g.counselor === groupFilters.counselor)
       && (!groupFilters.programtype || g.programtype === groupFilters.programtype)
@@ -472,10 +523,15 @@ export default function App() {
   // Reports State
   const [agentReportData, setAgentReportData] = useState<any[]>([]);
   const [depositReportData, setDepositReportData] = useState<any>(null);
+  const [showGroupReport, setShowGroupReport] = useState(false);
 
   // Admin Module State
   const [employees, setEmployees] = useState<any[]>([]);
   const [systemLogs, setSystemLogs] = useState<any[]>([]);
+  // Supervising agent directory, suggested in the client forms' agent field
+  const [directoryAgents, setDirectoryAgents] = useState<SupervisingAgent[]>([]);
+  // System audit logs stay collapsed until requested
+  const [showSystemLogs, setShowSystemLogs] = useState(false);
   const [empEmail, setEmpEmail] = useState('');
   const [empName, setEmpName] = useState('');
   const [empRole, setEmpRole] = useState('Counselor');
@@ -537,6 +593,12 @@ export default function App() {
       setSystemLogs(logData);
     } catch (err) {
       console.error('Failed to load data', err);
+    }
+    // Loaded on its own so an agent directory problem never blocks the rest of the dashboard
+    try {
+      setDirectoryAgents(await getSupervisingAgents());
+    } catch (err) {
+      console.error('Failed to load supervising agents', err);
     }
   };
 
@@ -994,8 +1056,13 @@ export default function App() {
   };
 
   // Reports Generators
+  // Each report button opens its report, or closes it if it's already open
   const handleLoadReports = async (type: string) => {
-    if (type === 'agent') {
+    if (type === 'agent' && agentReportData.length > 0) {
+      setAgentReportData([]);
+    } else if (type === 'deposit' && depositReportData) {
+      setDepositReportData(null);
+    } else if (type === 'agent') {
       const data = await getAgentReport();
       setAgentReportData(data);
     } else if (type === 'deposit') {
@@ -1136,6 +1203,8 @@ export default function App() {
     setChangeLogFilter('');
     setClientChangeLog([]);
     setChangeLogStatus('idle');
+    setNoteFilters(EMPTY_NOTE_FILTERS);
+    setLedgerFilters(EMPTY_LEDGER_FILTERS);
     setSelectedClientDetail(client);
     setClientTab('information');
     setEditingClientInfo(false);
@@ -1410,10 +1479,8 @@ export default function App() {
   const canDeleteGroups = role === 'Business Administrator';
   const isAllowed = (tab: string) => {
     if (role === 'Office Admin' || role === 'Business Administrator') return true;
-    if (role === 'Counselor' || role === 'Therapist') return ['clients', 'attendance', 'callin', 'polygraph', 'groups', 'testing'].includes(tab);
-    if (role === 'Billing') return ['clients', 'attendance', 'reports'].includes(tab);
+    if (role === 'Counselor' || role === 'Therapist') return ['clients', 'attendance', 'callin', 'polygraph', 'groups', 'testing', 'agents'].includes(tab);
     if (role === 'Polygrapher') return ['polygraph'].includes(tab);
-    if (role === 'Supervisor' || role === 'PO') return ['clients', 'reports'].includes(tab);
     // Unknown roles get no sections, rather than full access
     return false;
   };
@@ -1445,17 +1512,71 @@ export default function App() {
       return true;
     });
 
+  // Client drawer: Case Notes and Financial Ledger after filters and sort
+  const byDate = (sort: string) => (a: any, b: any) => {
+    const diff = new Date(a.date).getTime() - new Date(b.date).getTime();
+    return sort === 'oldest' ? diff : -diff;
+  };
+  const noteSearch = noteFilters.search.trim().toLowerCase();
+  const shownNotes = clientNotes.filter(n => {
+    const day = localYmd(n.date);
+    if (noteFilters.category && n.category !== noteFilters.category) return false;
+    if (noteFilters.from && day < noteFilters.from) return false;
+    if (noteFilters.to && day > noteFilters.to) return false;
+    if (noteSearch && ![n.comments, n.User, caseNoteLabel(n)].some(v => String(v ?? '').toLowerCase().includes(noteSearch))) return false;
+    return true;
+  }).sort(byDate(noteFilters.sort));
+
+  const ledgerSearch = ledgerFilters.search.trim().toLowerCase();
+  const shownLedger = clientFinancials.filter(f => {
+    const day = localYmd(f.date);
+    if (ledgerFilters.type && f.type !== ledgerFilters.type) return false;
+    if (ledgerFilters.feeType && f.feetype !== ledgerFilters.feeType) return false;
+    if (ledgerFilters.method && f.paymentmethod !== ledgerFilters.method) return false;
+    if (ledgerFilters.from && day < ledgerFilters.from) return false;
+    if (ledgerFilters.to && day > ledgerFilters.to) return false;
+    if (ledgerSearch && ![f.comments, f.feetype, f.type, f.paymentmethod, Number(f.amount).toFixed(2)].some(v => String(v ?? '').toLowerCase().includes(ledgerSearch))) return false;
+    return true;
+  }).sort((a, b) => {
+    if (ledgerFilters.sort === 'amount-high') return Number(b.amount) - Number(a.amount);
+    if (ledgerFilters.sort === 'amount-low') return Number(a.amount) - Number(b.amount);
+    return byDate(ledgerFilters.sort)(a, b);
+  });
+
   // A reservation cancelled after its appointment time closes the slot instead of reopening it
   const reopenStart = reopenTarget ? slotStart(reopenTarget) : null;
   const reopenPassed = reopenStart !== null && reopenStart.getTime() <= Date.now();
 
-  // Filter assigned slots for Poly Results tab
-  const assignedSlots = polySlots.filter(s => s.status === 'Assigned' || s.assignedClientId);
-
   // Only active Polygraphers can be picked as the examiner for a new slot
   const activePolygraphers = employees.filter(e => e.role === 'Polygrapher' && e.active !== false);
-  const getExaminerDisplayName = (email: string) => 
+  const getExaminerDisplayName = (email: string) =>
     employees.find(e => e.employeeemail === email)?.displayname || email;
+
+  // Examiner filter choices: every examiner with a slot on the schedule, listed by name
+  const polyExaminerChoices = Array.from(new Set(polySlots.map(s => s.polygrapher).filter(Boolean) as string[]))
+    .map(email => ({ email, name: getExaminerDisplayName(email) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const polyLocationChoices = Array.from(new Set(polySlots.map(s => s.location).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
+  const polyFiltersActive = !!(polyExaminerFilter || polyLocationFilter || polyDateFrom || polyDateTo);
+  const examinerSlots = polySlots.filter(s => {
+    const day = String(s.date || '').split('T')[0];
+    if (polyExaminerFilter && s.polygrapher !== polyExaminerFilter) return false;
+    if (polyLocationFilter && s.location !== polyLocationFilter) return false;
+    if (polyDateFrom && day < polyDateFrom) return false;
+    if (polyDateTo && day > polyDateTo) return false;
+    return true;
+  }).sort((a, b) => {
+    // By appointment date and time; slots without a readable time go last
+    const ta = slotStart(a)?.getTime() ?? Infinity;
+    const tb = slotStart(b)?.getTime() ?? Infinity;
+    if (ta === tb) return 0;
+    if (ta === Infinity) return 1;
+    if (tb === Infinity) return -1;
+    return polyDateSort === 'asc' ? ta - tb : tb - ta;
+  });
+
+  // Filter assigned slots for Poly Results tab
+  const assignedSlots = examinerSlots.filter(s => s.status === 'Assigned' || s.assignedClientId);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -1469,6 +1590,7 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          {isAllowed('admin') && <button onClick={() => setActiveTab('admin')} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'admin' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30' : 'bg-slate-800 border border-transparent text-slate-400 hover:bg-slate-700 hover:text-white'}`}><Settings size={16} /> Admin</button>}
           <div className="text-right">
             <p className="text-sm font-medium text-white">{user.displayname}</p>
             <span className="text-xs bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/20 font-semibold">{user.role}</span>
@@ -1487,7 +1609,7 @@ export default function App() {
         {isAllowed('testing') && <button onClick={() => setActiveTab('testing')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'testing' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><CheckSquare size={16} /> Testing</button>}
         {isAllowed('polygraph') && <button onClick={() => setActiveTab('polygraph')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'polygraph' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><ShieldAlert size={16} /> Polygraphs</button>}
         {isAllowed('reports') && <button onClick={() => setActiveTab('reports')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'reports' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><BarChart3 size={16} /> Reports</button>}
-        {isAllowed('admin') && <button onClick={() => setActiveTab('admin')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'admin' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><Settings size={16} /> Admin</button>}
+        {isAllowed('agents') && <button onClick={() => setActiveTab('agents')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'agents' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><UserCheck size={16} /> Supervising Agents</button>}
       </nav>
 
       {/* Main Content Area */}
@@ -1539,6 +1661,7 @@ export default function App() {
                   { tab: 'testing', icon: CheckSquare, label: 'Testing', description: 'Record and review test results.' },
                   { tab: 'polygraph', icon: ShieldAlert, label: 'Polygraphs', description: 'Schedule polygraph slots and record results.' },
                   { tab: 'reports', icon: BarChart3, label: 'Reports', description: 'Agent and deposit reports.' },
+                  { tab: 'agents', icon: UserCheck, label: 'Supervising Agents', description: 'Probation officer contacts and their assigned clients.' },
                   { tab: 'admin', icon: Settings, label: 'Admin', description: 'Employees, roles, and system logs.' },
                 ].filter(s => isAllowed(s.tab)).map(s => (
                   <button key={s.tab} onClick={() => setActiveTab(s.tab)} className="text-left bg-slate-900 hover:bg-slate-800/70 border border-slate-800 hover:border-slate-700 rounded-xl p-5 transition">
@@ -1571,12 +1694,24 @@ export default function App() {
                     placeholder="Search name, DOC #, agent, group..."
                     className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs w-64 max-w-full"
                   />
+                  <button
+                    type="button"
+                    onClick={toggleClientFilters}
+                    aria-expanded={showClientFilters}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border ${showClientFilters ? 'bg-slate-700 border-slate-600 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+                  >
+                    <SlidersHorizontal size={13} /> Filters
+                    {changedClientFilterCount > 0 && (
+                      <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{changedClientFilterCount}</span>
+                    )}
+                  </button>
                   <span className="text-xs bg-slate-800 px-3 py-1 rounded-full text-slate-300 whitespace-nowrap">
                     {filteredClients.length === clients.length ? `${clients.length} Registered Clients` : `${filteredClients.length} of ${clients.length} Clients`}
                   </span>
                 </div>
               </div>
 
+              {showClientFilters && (
               <div className="flex gap-3 flex-wrap">
                 <select
                   value={clientFilters.agent}
@@ -1635,13 +1770,14 @@ export default function App() {
                 {clientFilterActive && (
                   <button
                     type="button"
-                    onClick={() => setClientFilters({ agent: '', programtype: '', currentgroup: '', status: 'Active', feeoverride: '' })}
+                    onClick={() => setClientFilters(DEFAULT_CLIENT_FILTERS)}
                     className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap"
                   >
                     Reset Filters
                   </button>
                 )}
               </div>
+              )}
             </div>
 
             {showNewClientForm && (
@@ -1655,7 +1791,10 @@ export default function App() {
                   {newClientField('Middle Name', 'middlename')}
                   {newClientField('Last Name', 'lastname', 'text', true)}
                   {newClientField('DOC #', 'docnumber')}
-                  {newClientField('Supervising Agent', 'supervisingagent')}
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Supervising Agent</label>
+                    <AgentPicker value={newClient.supervisingagent} onChange={v => setNewClient({ ...newClient, supervisingagent: v })} agents={directoryAgents} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
+                  </div>
                   {newClientField('Program Start Date', 'programstartdate', 'date', true)}
 
                   <div>
@@ -1794,6 +1933,25 @@ export default function App() {
               </table>
             </div>
           </div>
+        )}
+
+        {activeTab === 'agents' && (
+          <SupervisingAgentsTab
+            clients={clients}
+            user={user}
+            dischargeStatuses={DISCHARGE_STATUSES}
+            onOpenClient={openClientLogs}
+            onSuccess={setSuccessMsg}
+            onError={setError}
+            onAgentsLoaded={setDirectoryAgents}
+            onClientsChanged={async () => {
+              try {
+                setClients(await getClients());
+              } catch (err) {
+                console.error('Failed to refresh clients', err);
+              }
+            }}
+          />
         )}
 
         {/* Account payment from the client details drawer (Cash or Credit Card) */}
@@ -2056,6 +2214,9 @@ export default function App() {
                         { label: 'Last Name', field: 'lastname' },
                         { label: 'Middle Name', field: 'middlename' },
                         { label: 'DOC #', field: 'docnumber' },
+                        { label: 'Date of Birth', field: 'dateofbirth' },
+                        { label: 'Sex', field: 'sex' },
+                        { label: 'Race', field: 'race' },
                         { label: 'Supervising Agent', field: 'supervisingagent' },
                         { label: 'Program Status', field: 'programstatus' },
                         { label: 'Program Start Date', field: 'programstartdate' },
@@ -2078,16 +2239,42 @@ export default function App() {
                               <option value="">-- Select status --</option>
                               {EDITABLE_PROGRAM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                             </select>
-                          ) : editingClientInfo ? (
-                            <input
-                              type={field.includes('date') || field.includes('Date') ? 'date' : 'text'}
-                              value={clientInfoForm[field] ? (field.includes('date') || field.includes('Date') ? String(clientInfoForm[field]).split('T')[0] : clientInfoForm[field]) : ''}
+                          ) : editingClientInfo && CLIENT_FIELD_OPTIONS[field] ? (
+                            <select
+                              value={clientInfoForm[field] || ''}
                               onChange={e => setClientInfoForm((f: any) => ({ ...f, [field]: e.target.value }))}
                               className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
+                            >
+                              <option value="">-- Select {label.toLowerCase()} --</option>
+                              {CLIENT_FIELD_OPTIONS[field].map(o => <option key={o} value={o}>{o}</option>)}
+                            </select>
+                          ) : editingClientInfo && field === 'supervisingagent' ? (
+                            <AgentPicker
+                              value={clientInfoForm.supervisingagent || ''}
+                              onChange={v => setClientInfoForm((f: any) => ({ ...f, supervisingagent: v }))}
+                              agents={directoryAgents}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
                             />
+                          ) : editingClientInfo ? (
+                            <div className="flex items-center gap-3">
+                              <input
+                                type={field.includes('date') || field.includes('Date') ? 'date' : 'text'}
+                                value={clientInfoForm[field] ? (field.includes('date') || field.includes('Date') ? String(clientInfoForm[field]).split('T')[0] : clientInfoForm[field]) : ''}
+                                max={field === 'dateofbirth' ? todayLocal() : undefined}
+                                onChange={e => setClientInfoForm((f: any) => ({ ...f, [field]: e.target.value }))}
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
+                              />
+                              {field === 'dateofbirth' && ageFromBirthDate(clientInfoForm.dateofbirth) !== null && (
+                                <span className="text-xs text-slate-400 whitespace-nowrap">Age {ageFromBirthDate(clientInfoForm.dateofbirth)}</span>
+                              )}
+                            </div>
                           ) : (
                             <p className="text-white font-medium">
-                              {field.includes('date') || field.includes('Date')
+                              {field === 'dateofbirth'
+                                ? (selectedClientDetail.dateofbirth
+                                    ? <>{toLocalDay(selectedClientDetail.dateofbirth).toLocaleDateString()} <span className="text-slate-400 font-normal">(Age {ageFromBirthDate(selectedClientDetail.dateofbirth)})</span></>
+                                    : '—')
+                                : field.includes('date') || field.includes('Date')
                                 ? (selectedClientDetail[field] ? new Date(selectedClientDetail[field]).toLocaleDateString() : '—')
                                 : (selectedClientDetail[field] || '—')}
                             </p>
@@ -2482,7 +2669,36 @@ export default function App() {
               )}
 
               {clientTab === 'financials' && (
-                <div className="space-y-3">{clientFinancials.map(fin => (<div key={fin.transactionid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl flex justify-between items-center text-sm"><div><p className="font-semibold text-white">
+                <div className="space-y-3">
+                  <RecordFilterBar
+                    search={ledgerFilters.search}
+                    onSearch={v => setLedgerFilters(f => ({ ...f, search: v }))}
+                    searchPlaceholder="Comments, fee type, amount..."
+                    selects={[
+                      { label: 'Type', value: ledgerFilters.type, onChange: v => setLedgerFilters(f => ({ ...f, type: v })), allLabel: 'All Types', options: sortedUnique(clientFinancials.map(f => f.type)) },
+                      { label: 'Fee Type', value: ledgerFilters.feeType, onChange: v => setLedgerFilters(f => ({ ...f, feeType: v })), allLabel: 'All Fee Types', options: sortedUnique(clientFinancials.map(f => f.feetype)) },
+                      { label: 'Method', value: ledgerFilters.method, onChange: v => setLedgerFilters(f => ({ ...f, method: v })), allLabel: 'All Methods', options: sortedUnique(clientFinancials.map(f => f.paymentmethod)) },
+                    ]}
+                    from={ledgerFilters.from}
+                    to={ledgerFilters.to}
+                    onFrom={v => setLedgerFilters(f => ({ ...f, from: v }))}
+                    onTo={v => setLedgerFilters(f => ({ ...f, to: v }))}
+                    sort={ledgerFilters.sort}
+                    onSort={v => setLedgerFilters(f => ({ ...f, sort: v }))}
+                    sortOptions={[
+                      { value: 'newest', label: 'Newest First' },
+                      { value: 'oldest', label: 'Oldest First' },
+                      { value: 'amount-high', label: 'Amount: High to Low' },
+                      { value: 'amount-low', label: 'Amount: Low to High' },
+                    ]}
+                    shown={shownLedger.length}
+                    total={clientFinancials.length}
+                    onClear={() => setLedgerFilters(f => ({ ...EMPTY_LEDGER_FILTERS, sort: f.sort }))}
+                  />
+                  {shownLedger.length === 0 && clientFinancials.length > 0 && (
+                    <p className="text-center text-slate-500 text-sm py-4">No ledger entries match these filters.</p>
+                  )}
+                  {shownLedger.map(fin => (<div key={fin.transactionid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl flex justify-between items-center text-sm"><div><p className="font-semibold text-white">
                       {fin.feetype || fin.type}
                       {fin.type === 'Payment' && fin.paymentmethod && (
                         <span className="ml-2 align-middle text-[10px] uppercase tracking-wide bg-slate-800 text-slate-300 px-2 py-0.5 rounded">{fin.paymentmethod}</span>
@@ -2503,7 +2719,31 @@ export default function App() {
                     <textarea value={newNoteText} onChange={(e) => setNewNoteText(e.target.value)} placeholder="Type case note..." rows={2} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required />
                     <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-semibold ml-auto flex items-center gap-1"><PlusCircle size={14} /> Save Note</button>
                   </form>
-                  {clientNotes.map(n => (
+                  <RecordFilterBar
+                    search={noteFilters.search}
+                    onSearch={v => setNoteFilters(f => ({ ...f, search: v }))}
+                    searchPlaceholder="Note text or author..."
+                    selects={[
+                      { label: 'Category', value: noteFilters.category, onChange: v => setNoteFilters(f => ({ ...f, category: v })), allLabel: 'All Categories', options: sortedUnique(clientNotes.map(n => n.category)) },
+                    ]}
+                    from={noteFilters.from}
+                    to={noteFilters.to}
+                    onFrom={v => setNoteFilters(f => ({ ...f, from: v }))}
+                    onTo={v => setNoteFilters(f => ({ ...f, to: v }))}
+                    sort={noteFilters.sort}
+                    onSort={v => setNoteFilters(f => ({ ...f, sort: v }))}
+                    sortOptions={[
+                      { value: 'newest', label: 'Newest First' },
+                      { value: 'oldest', label: 'Oldest First' },
+                    ]}
+                    shown={shownNotes.length}
+                    total={clientNotes.length}
+                    onClear={() => setNoteFilters(f => ({ ...EMPTY_NOTE_FILTERS, sort: f.sort }))}
+                  />
+                  {shownNotes.length === 0 && clientNotes.length > 0 && (
+                    <p className="text-center text-slate-500 text-sm py-4">No case notes match these filters.</p>
+                  )}
+                  {shownNotes.map(n => (
                     <div key={n.noteid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex gap-5">
                       <div className="shrink-0 w-28 flex flex-col justify-center border-r border-slate-800 pr-5">
                         <p className="text-2xl font-bold text-white leading-tight">{formatLogMonthDay(n.date)}</p>
@@ -2905,7 +3145,7 @@ export default function App() {
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-white truncate">{o.groupname}</p>
                             <p className={`text-xs ${o.sessiondate === todayLocal() ? 'text-slate-400' : 'text-amber-400'}`}>
-                              {o.sessiondate === todayLocal() ? 'Today' : new Date(`${o.sessiondate}T00:00:00`).toLocaleDateString()} · {o.entries.length} client(s)
+                              {o.sessiondate === todayLocal() ? 'Today' : new Date(`${o.sessiondate}T00:00:00`).toLocaleDateString()}{(o.sessionnumber ?? 1) > 1 ? ` · Session ${o.sessionnumber}` : ''} · {o.entries.length} client(s)
                             </p>
                             <p className="text-[11px] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${o.createdby}` : ''}</p>
                           </div>
@@ -3016,10 +3256,6 @@ export default function App() {
                   <h2 className="font-semibold text-white">Group Directory</h2>
                   <button type="button" onClick={() => setShowNewGroupForm(s => !s)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-semibold">+ New Group</button>
                 </div>
-                <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
-                  <input type="checkbox" checked={showInactiveGroups} onChange={(e) => setShowInactiveGroups(e.target.checked)} className="accent-blue-600" />
-                  Show inactive groups ({inactiveGroupCount})
-                </label>
               </div>
 
               <div className="flex flex-wrap items-end gap-3 mb-4 text-xs">
@@ -3038,7 +3274,7 @@ export default function App() {
                   </div>
                 ))}
                 {groupFilterActive && (
-                  <button type="button" onClick={() => setGroupFilters({ location: '', counselor: '', programtype: '', status: '' })} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs font-semibold">Clear filters</button>
+                  <button type="button" onClick={() => setGroupFilters(DEFAULT_GROUP_FILTERS)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs font-semibold">Clear filters</button>
                 )}
               </div>
 
@@ -3266,6 +3502,44 @@ export default function App() {
                 <button onClick={() => setPolySubTab('results')} className={`px-3 py-1.5 rounded text-xs font-semibold ${polySubTab === 'results' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Poly Results</button>
               </div>
             </div>
+
+            {polySubTab !== 'admin' && (
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="text-xs text-slate-400">Polygrapher
+                  <select value={polyExaminerFilter} onChange={(e) => setPolyExaminerFilter(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
+                    <option value="">All Polygraphers</option>
+                    {polyExaminerChoices.map(p => <option key={p.email} value={p.email}>{p.name}</option>)}
+                  </select>
+                </label>
+                <label className="text-xs text-slate-400">Location
+                  <select value={polyLocationFilter} onChange={(e) => setPolyLocationFilter(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
+                    <option value="">All Locations</option>
+                    {polyLocationChoices.map(l => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                </label>
+                <label className="text-xs text-slate-400">From
+                  <input type="date" value={polyDateFrom} max={polyDateTo || undefined} onChange={(e) => setPolyDateFrom(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200" />
+                </label>
+                <label className="text-xs text-slate-400">To
+                  <input type="date" value={polyDateTo} min={polyDateFrom || undefined} onChange={(e) => setPolyDateTo(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200" />
+                </label>
+                <label className="text-xs text-slate-400">Sort
+                  <select value={polyDateSort} onChange={(e) => setPolyDateSort(e.target.value as 'asc' | 'desc')} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
+                    <option value="asc">Date: Soonest First</option>
+                    <option value="desc">Date: Latest First</option>
+                  </select>
+                </label>
+                {polyFiltersActive && (
+                  <button
+                    type="button"
+                    onClick={() => { setPolyExaminerFilter(''); setPolyLocationFilter(''); setPolyDateFrom(''); setPolyDateTo(''); }}
+                    className="flex items-center gap-1 text-xs text-slate-400 hover:text-white px-2 py-2"
+                  >
+                    <X size={12} /> Clear Filters
+                  </button>
+                )}
+              </div>
+            )}
 
             {polySubTab === 'admin' && (
               <>
@@ -3549,35 +3823,37 @@ export default function App() {
             {polySubTab === 'schedule' && (
               <div className="space-y-4">
                 <h3 className="text-sm font-semibold text-blue-400">Available Polygraph Slots & Client Assignment</h3>
-                {polySlots.length === 0 ? (
-                  <p className="text-xs text-slate-500 italic">No available slots scheduled.</p>
+                {examinerSlots.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic">{polyFiltersActive ? 'No slots match these filters.' : 'No available slots scheduled.'}</p>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {polySlots.map(slot => (
-                      <div key={slot.slotid} className={`bg-slate-950 border ${slot.status === 'Assigned' ? 'border-emerald-500/40 bg-emerald-950/10' : 'border-slate-800'} p-4 rounded-xl text-sm space-y-3`}>
-                        <div className="flex justify-between font-semibold text-white">
-                          <span>{slot.location}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded ${slot.status === 'Assigned' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : slot.status === 'Closed' ? 'bg-slate-800 text-slate-400 border border-slate-700' : 'bg-blue-500/10 text-blue-400'}`}>
+                  <div className="flex flex-col gap-3">
+                    {examinerSlots.map(slot => (
+                      <div key={slot.slotid} className={`bg-slate-950 border ${slot.status === 'Assigned' ? 'border-emerald-500/40 bg-emerald-950/10' : 'border-slate-800'} px-4 py-3 rounded-xl text-sm space-y-2`}>
+                        <div className="flex justify-between items-start gap-3">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-white">{slot.location}</p>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              {new Date(slot.date).toLocaleDateString()} @ {formatDisplayTime(slot.time)}
+                              <span className="text-slate-600"> · </span>{slot.address || 'Address not set'}
+                              <span className="text-slate-600"> · </span>Examiner: {getExaminerDisplayName(slot.polygrapher)}
+                            </p>
+                          </div>
+                          <span className={`shrink-0 text-xs px-2 py-0.5 rounded ${slot.status === 'Assigned' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : slot.status === 'Closed' ? 'bg-slate-800 text-slate-400 border border-slate-700' : 'bg-blue-500/10 text-blue-400'}`}>
                             {slot.status === 'Assigned' ? 'Assigned' : slot.status === 'Closed' ? 'Closed' : '1 Open Slot'}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-400">Date: {new Date(slot.date).toLocaleDateString()} @ {formatDisplayTime(slot.time)}</p>
-                        <p className="text-xs text-slate-400">Address: {slot.address || 'Not set'}</p>
-                        <p className="text-xs text-slate-400">Examiner: {getExaminerDisplayName(slot.polygrapher)}</p>
 
                         {slot.status === 'Assigned' ? (
-                          <div className="pt-2 border-t border-slate-800/80 space-y-2.5">
-                            <div className="flex justify-between items-center text-xs">
+                          <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+                            <div className="flex items-center gap-2">
                               <span className="text-slate-300 font-medium">Assigned Client: <strong className="text-emerald-400">{slot.assignedClientName}</strong></span>
-                              <span className="bg-slate-800 text-slate-300 px-2 py-1 rounded text-xs">{slot.type}</span>
+                              <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded">{slot.type}</span>
                             </div>
-                            <div className="flex gap-2 pt-1">
-                              <button
-                                onClick={() => handleReopenSlot(slot.slotid)}
-                                className="flex-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-600/40 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition">
-                                <RotateCcw size={13} /> Cancel Reservation & Reopen
-                              </button>
-                            </div>
+                            <button
+                              onClick={() => handleReopenSlot(slot.slotid)}
+                              className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-600/40 px-3 py-1.5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition">
+                              <RotateCcw size={13} /> Cancel Reservation & Reopen
+                            </button>
                           </div>
                         ) : slot.status === 'Closed' ? (
                           <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2">
@@ -3592,19 +3868,16 @@ export default function App() {
                             )}
                           </div>
                         ) : role === 'Business Administrator' ? (
-                          <div className="pt-2 border-t border-slate-800 space-y-3">
-                            <div className="grid grid-cols-2 gap-2">
+                          <div className="pt-2 border-t border-slate-800 space-y-2">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                               <div>
                                 <label className="block text-xs text-slate-400 uppercase mb-1">Assign Client</label>
-                                <select 
-                                  value={slotAssignments[slot.slotid] || ''} 
-                                  onChange={(e) => setSlotAssignments({ ...slotAssignments, [slot.slotid]: e.target.value })}
-                                  className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-xs">
-                                  <option value="">-- Choose Client --</option>
-                                  {clients.map(c => (
-                                    <option key={c.clientid} value={c.clientid}>{c.lastname}, {c.firstname}</option>
-                                  ))}
-                                </select>
+                                <ClientPicker
+                                  clients={clients}
+                                  value={slotAssignments[slot.slotid] || ''}
+                                  onChange={(id) => setSlotAssignments({ ...slotAssignments, [slot.slotid]: id })}
+                                  className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-xs placeholder-slate-500"
+                                />
                               </div>
                               <div>
                                 <label className="block text-xs text-slate-400 uppercase mb-1">Poly Type</label>
@@ -3619,26 +3892,26 @@ export default function App() {
                                   <option value="Monitoring">Monitoring</option>
                                 </select>
                               </div>
+                              <div className="md:col-span-2">
+                                <label className="block text-xs text-slate-400 uppercase mb-1">Comment <span className="normal-case text-slate-500">(optional)</span></label>
+                                <input
+                                  type="text"
+                                  value={slotComments[slot.slotid] || ''}
+                                  onChange={(e) => setSlotComments({ ...slotComments, [slot.slotid]: e.target.value })}
+                                  placeholder="Added to the client's case note when assigned..."
+                                  className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-xs" />
+                              </div>
                             </div>
-                            <div>
-                              <label className="block text-xs text-slate-400 uppercase mb-1">Comment <span className="normal-case text-slate-500">(optional)</span></label>
-                              <textarea
-                                value={slotComments[slot.slotid] || ''}
-                                onChange={(e) => setSlotComments({ ...slotComments, [slot.slotid]: e.target.value })}
-                                rows={2}
-                                placeholder="Added to the client's case note when assigned..."
-                                className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-xs" />
-                            </div>
-                            <div className="flex gap-2">
+                            <div className="flex justify-end gap-2">
                               <button
                                 onClick={() => openAssignConfirm(slot.slotid)}
-                                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded text-xs font-semibold">
+                                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-xs font-semibold">
                                 Confirm & Assign Slot
                               </button>
                               <button 
                                 onClick={() => handleDeleteSlot(slot.slotid)}
                                 title="Delete open slot"
-                                className="bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 px-3 py-2 rounded text-xs font-semibold flex items-center justify-center gap-1 transition">
+                                className="bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 px-3 py-1.5 rounded text-xs font-semibold flex items-center justify-center gap-1 transition">
                                 <Trash2 size={13} /> Delete
                               </button>
                             </div>
@@ -3767,9 +4040,24 @@ export default function App() {
         {activeTab === 'reports' && (
           <div className="space-y-6">
             <div className="flex gap-4 border-b border-slate-800 pb-4">
-              <button onClick={() => handleLoadReports('agent')} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-xs font-semibold">Weekly Agent Report</button>
-              <button onClick={() => handleLoadReports('deposit')} className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-xs font-semibold">Monthly Deposit Report</button>
+              {[
+                { label: 'Weekly Agent Report', open: agentReportData.length > 0, onClick: () => handleLoadReports('agent') },
+                { label: 'Monthly Deposit Report', open: !!depositReportData, onClick: () => handleLoadReports('deposit') },
+                { label: 'Group Income Report', open: showGroupReport, onClick: () => setShowGroupReport(!showGroupReport) },
+              ].map(b => (
+                <button
+                  key={b.label}
+                  onClick={b.onClick}
+                  aria-pressed={b.open}
+                  title={b.open ? 'Click to close this report' : undefined}
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded text-xs font-semibold border ${b.open ? 'bg-blue-500/10 text-blue-300 border-blue-500 hover:bg-blue-500/20' : 'bg-blue-600 hover:bg-blue-500 text-white border-transparent'}`}
+                >
+                  {b.label}{b.open && <X size={12} />}
+                </button>
+              ))}
             </div>
+
+            {showGroupReport && <GroupIncomeReport />}
 
             {agentReportData.length > 0 && (
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
@@ -3818,9 +4106,7 @@ export default function App() {
                   <option value="Office Admin">Office Admin</option>
                   <option value="Business Administrator">Business Administrator</option>
                   <option value="Counselor">Counselor</option>
-                  <option value="Billing">Billing</option>
                   <option value="Polygrapher">Polygrapher</option>
-                  <option value="Supervisor">Supervisor / PO</option>
                 </select>
                 {editingEmail && (
                   <label className="flex items-center gap-2 text-xs text-slate-300">
@@ -3882,7 +4168,11 @@ export default function App() {
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
-              <h2 className="text-lg font-bold text-white border-b border-slate-800 pb-3">System Audit & Activity Logs</h2>
+              <div className="flex justify-between items-center gap-3 border-b border-slate-800 pb-3">
+                <h2 className="text-lg font-bold text-white">System Audit & Activity Logs</h2>
+                <button type="button" onClick={() => setShowSystemLogs(!showSystemLogs)} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded font-semibold text-xs shrink-0"><Activity size={14} /> {showSystemLogs ? 'Hide Logs' : 'Show Logs'}</button>
+              </div>
+              {showSystemLogs && (
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {systemLogs.map(l => (
                   <div key={l.logid} className="bg-slate-950 border border-slate-800 p-3 rounded text-xs space-y-1">
@@ -3892,6 +4182,7 @@ export default function App() {
                   </div>
                 ))}
               </div>
+              )}
             </div>
           </div>
         )}
