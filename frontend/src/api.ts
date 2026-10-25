@@ -282,6 +282,29 @@ export async function getOpenGroups(user: string): Promise<OpenGroupSession[]> {
     return body;
 }
 
+// A closed group session, built from its attendance rows. openedby falls back to the closer for older sessions.
+export interface ClosedGroupSession {
+    groupid: number;
+    groupname: string;
+    counselor: string | null;
+    sessiondate: string;
+    sessionnumber: number;
+    openedby: string | null;
+    closedby: string | null;
+    closedon: string | null;
+    entries: { client: number; name: string; groupFee: number; accountPaid: number; paymentMethod: string | null }[];
+}
+
+// Only the closed sessions this user may see: Business Administrators see all; others see their groups' and the ones they opened
+export async function getClosedGroups(user: string): Promise<ClosedGroupSession[]> {
+    const res = await fetch(`${API_BASE}/closed-groups?user=${encodeURIComponent(user)}`);
+    const body = await res.json();
+    if (!res.ok) {
+        throw new Error(body.error || 'Failed to load closed groups.');
+    }
+    return body;
+}
+
 export async function saveOpenGroup(data: { group: number; date: string; sessionNumber: number; entries: SessionEntry[]; createdBy: string }): Promise<OpenGroupSession> {
     const res = await fetch(`${API_BASE}/open-groups`, {
         method: 'PUT',

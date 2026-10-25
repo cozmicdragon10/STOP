@@ -14,10 +14,10 @@ import {
   assignClientToGroup, createClient, createGroup, deleteGroup, deleteClient, updateEmployee, getClientTests, submitTestResult, getAgentReport,
   getDepositReport, getEmployees, addEmployee, getSystemLogs, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
   fetchPolyFeeOverride, savePolyFeeOverride, deletePolyFeeOverride,
-  getOpenGroups, deleteOpenGroup, getClientChangeLog, getSupervisingAgents,
+  getOpenGroups, deleteOpenGroup, getClosedGroups, getClientChangeLog, getSupervisingAgents,
   getClientAttachments, uploadClientAttachment, fetchClientAttachment, renameClientAttachment, deleteClientAttachment, ATTACHMENT_MAX_BYTES
 } from './api';
-import type { CardPaymentAction, ClientAttachment, ClientChange, OpenGroupSession, PaymentChangeResult, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
+import type { CardPaymentAction, ClientAttachment, ClientChange, ClosedGroupSession, OpenGroupSession, PaymentChangeResult, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
@@ -526,6 +526,11 @@ export default function App() {
   // Group check-ins saved with Finish Check-In and not yet closed
   const [openGroups, setOpenGroups] = useState<OpenGroupSession[]>([]);
   const [openGroupsError, setOpenGroupsError] = useState('');
+  // Closed group sessions shown on the panel's Closed tab; the expanded one lists its clients
+  const [groupPanelTab, setGroupPanelTab] = useState<'open' | 'closed'>('open');
+  const [closedGroups, setClosedGroups] = useState<ClosedGroupSession[]>([]);
+  const [closedGroupsError, setClosedGroupsError] = useState('');
+  const [expandedClosedGroup, setExpandedClosedGroup] = useState<string | null>(null);
   // Open group picked in the Open Groups panel, handed to the check-in workflow to load
   const [resumeRequest, setResumeRequest] = useState<OpenGroupSession | null>(null);
   const [chargeClient, setChargeClient] = useState('');
@@ -624,8 +629,17 @@ export default function App() {
   const denormalizeLocation = (loc: string) => loc === 'OKC' ? 'Oklahoma City' : loc;
   // Directory filters; an empty string means "all". The list starts on active groups only.
   const [groupFilters, setGroupFilters] = useState(DEFAULT_GROUP_FILTERS);
-  const groupFilterActive = (Object.keys(DEFAULT_GROUP_FILTERS) as (keyof typeof DEFAULT_GROUP_FILTERS)[])
-    .some(k => groupFilters[k] !== DEFAULT_GROUP_FILTERS[k]);
+  const changedGroupFilterCount = (Object.keys(DEFAULT_GROUP_FILTERS) as (keyof typeof DEFAULT_GROUP_FILTERS)[])
+    .filter(k => groupFilters[k] !== DEFAULT_GROUP_FILTERS[k]).length;
+  const groupFilterActive = changedGroupFilterCount > 0;
+  // Same behavior as the Client Roster Filters button: hidden until toggled, remembered in this browser.
+  const [showGroupFilters, setShowGroupFilters] = useState(() => {
+    try { return localStorage.getItem('showGroupFilters') === 'true'; } catch { return false; }
+  });
+  const toggleGroupFilters = () => setShowGroupFilters(show => {
+    try { localStorage.setItem('showGroupFilters', String(!show)); } catch { /* storage unavailable */ }
+    return !show;
+  });
   const distinctGroupValues = (key: 'location' | 'counselor' | 'programtype' | 'status') => {
     if (key === 'status') return ['Active', 'Inactive'];
     const values = Array.from(new Set(groups.map(g => {
@@ -774,6 +788,13 @@ export default function App() {
       setOpenGroupsError('');
     } catch (err: any) {
       setOpenGroupsError(err.message || 'Failed to load open groups.');
+    }
+    // Closing an open group moves it to the Closed tab, so both lists refresh together
+    try {
+      setClosedGroups(await getClosedGroups(user.employeeemail));
+      setClosedGroupsError('');
+    } catch (err: any) {
+      setClosedGroupsError(err.message || 'Failed to load closed groups.');
     }
   };
 
@@ -4215,7 +4236,67 @@ export default function App() {
 
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
               <div>
-                <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><ClipboardCheck size={18} className="text-blue-400" /> Open Groups</h3>
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <h3 className="font-semibold text-white flex items-center gap-2"><ClipboardCheck size={18} className="text-blue-400" /> {groupPanelTab === 'open' ? 'Open Groups' : 'Closed Groups'}</h3>
+                  <div className="flex bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+                    {(['open', 'closed'] as const).map(t => (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => setGroupPanelTab(t)}
+                        className={`px-3 py-1 rounded text-xs font-semibold transition ${groupPanelTab === t ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                      >
+                        {t === 'open' ? `Open${openGroups.length ? ` (${openGroups.length})` : ''}` : 'Closed'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {groupPanelTab === 'closed' ? (
+                  <>
+                    <p className="text-xs text-slate-400 leading-relaxed mb-4">{role === 'Business Administrator' ? 'Recently closed group sessions.' : 'Recently closed group sessions for groups you counsel or opened.'} Select one to see who attended.</p>
+                    {closedGroupsError ? (
+                      <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{closedGroupsError}</p>
+                    ) : closedGroups.length === 0 ? (
+                      <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">No closed groups.</p>
+                    ) : (
+                      <ul className="space-y-2 max-h-[32rem] overflow-y-auto pr-1">
+                        {closedGroups.map(c => {
+                          const key = `${c.groupid}-${c.sessiondate}-${c.sessionnumber}`;
+                          const expanded = expandedClosedGroup === key;
+                          const collected = c.entries.reduce((sum, e) => sum + Number(e.accountPaid || 0), 0);
+                          return (
+                            <li key={key} className={`bg-slate-950 border rounded-lg ${expanded ? 'border-blue-500/40' : 'border-slate-800'}`}>
+                              <button type="button" onClick={() => setExpandedClosedGroup(expanded ? null : key)} aria-expanded={expanded} className="w-full text-left p-3">
+                                <p className="text-sm font-semibold text-white truncate">{c.groupname}</p>
+                                <p className="text-xs text-slate-400">
+                                  {c.sessiondate === todayLocal() ? 'Today' : new Date(`${c.sessiondate}T00:00:00`).toLocaleDateString()}{(c.sessionnumber ?? 1) > 1 ? ` · Session ${c.sessionnumber}` : ''} · {c.entries.length} client(s)
+                                </p>
+                                <p className="text-[11px] text-slate-500 truncate">
+                                  Closed{c.closedon ? ` ${new Date(c.closedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}{c.closedby ? ` by ${c.closedby}` : ''}
+                                </p>
+                                {c.openedby && c.openedby !== c.closedby && <p className="text-[11px] text-slate-500 truncate">Opened by {c.openedby}</p>}
+                              </button>
+                              {expanded && (
+                                <div className="border-t border-slate-800 px-3 py-2 text-xs">
+                                  <ul className="divide-y divide-slate-800">
+                                    {c.entries.map(e => (
+                                      <li key={e.client} className="flex justify-between gap-2 py-1.5">
+                                        <span className="text-slate-200 truncate">{e.name}</span>
+                                        <span className="text-slate-400 shrink-0">{Number(e.accountPaid) > 0 ? `$${Number(e.accountPaid).toFixed(2)} ${e.paymentMethod || ''}`.trim() : 'No payment'}</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                  <p className="text-right text-slate-300 font-semibold pt-1.5 border-t border-slate-800">Collected ${collected.toFixed(2)}</p>
+                                </div>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </>
+                ) : (
+                <>
                 <p className="text-xs text-slate-400 leading-relaxed mb-4">Check-ins saved with Finish Check-In. Open one to review and close the group.</p>
                 {openGroupsError ? (
                   <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{openGroupsError}</p>
@@ -4261,6 +4342,8 @@ export default function App() {
                       </li>
                     ))}
                   </ul>
+                )}
+                </>
                 )}
               </div>
             </div>
@@ -4345,8 +4428,20 @@ export default function App() {
                   <h2 className="font-semibold text-white">Group Directory</h2>
                   <button type="button" onClick={() => setShowNewGroupForm(s => !s)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-semibold">+ New Group</button>
                 </div>
+                <button
+                  type="button"
+                  onClick={toggleGroupFilters}
+                  aria-expanded={showGroupFilters}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border ${showGroupFilters ? 'bg-slate-700 border-slate-600 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+                >
+                  <SlidersHorizontal size={13} /> Filters
+                  {changedGroupFilterCount > 0 && (
+                    <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{changedGroupFilterCount}</span>
+                  )}
+                </button>
               </div>
 
+              {showGroupFilters && (
               <div className="flex flex-wrap items-end gap-3 mb-4 text-xs">
                 {([
                   ['location', 'Location', 'All locations'],
@@ -4366,6 +4461,7 @@ export default function App() {
                   <button type="button" onClick={() => setGroupFilters(DEFAULT_GROUP_FILTERS)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs font-semibold">Clear filters</button>
                 )}
               </div>
+              )}
 
               {showNewGroupForm && (
                 <form onSubmit={handleCreateGroup} className="bg-slate-950 border border-slate-800 rounded-lg p-4 mb-5 grid grid-cols-2 gap-4 text-sm">
@@ -4950,27 +5046,32 @@ export default function App() {
                     <p className="text-xs text-slate-500 mt-1">Assign clients to open slots under the Poly Schedule tab first.</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {assignedSlots.map(slot => (
-                      <div 
-                        key={slot.slotid} 
-                        onClick={() => { setSelectedSlotForResults(slot); setResIncentiveContinued(false); setResIncentiveOverride(false); }}
-                        className={`cursor-pointer transition border p-4 rounded-xl text-sm space-y-2 ${
-                          selectedSlotForResults?.slotid === slot.slotid 
-                            ? 'bg-blue-950/30 border-blue-500 text-white shadow-lg shadow-blue-500/10' 
-                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-300'
-                        }`}>
-                        <div className="flex justify-between items-center font-bold">
-                          <span className="text-white text-base">{slot.assignedClientName}</span>
-                          <span className="text-xs bg-blue-500/20 text-blue-400 px-2.5 py-0.5 rounded-full border border-blue-500/30 font-semibold">{slot.type || 'Polygraph'}</span>
-                        </div>
-                        <div className="text-xs text-slate-400 space-y-0.5">
-                          <p>Location: <span className="text-slate-300">{slot.location}</span></p>
-                          <p>Scheduled: <span className="text-slate-300">{new Date(slot.date).toLocaleDateString()} @ {formatDisplayTime(slot.time)}</span></p>
-                          <p>Examiner: <span className="text-slate-300">{getExaminerDisplayName(slot.polygrapher)}</span></p>
-                        </div>
-                      </div>
-                    ))}
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
+                      <thead>
+                        <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                          <th className="p-3">Client</th>
+                          <th className="p-3">Type</th>
+                          <th className="p-3">Location</th>
+                          <th className="p-3">Scheduled</th>
+                          <th className="p-3">Examiner</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800 text-sm">
+                        {assignedSlots.map(slot => (
+                          <tr
+                            key={slot.slotid}
+                            onClick={() => { setSelectedSlotForResults(slot); setResIncentiveContinued(false); setResIncentiveOverride(false); }}
+                            className={`transition cursor-pointer ${selectedSlotForResults?.slotid === slot.slotid ? 'bg-blue-500/10' : 'hover:bg-slate-800/50'}`}>
+                            <td className="p-3 font-medium text-white">{slot.assignedClientName}</td>
+                            <td className="p-3"><span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-xs">{slot.type || 'Polygraph'}</span></td>
+                            <td className="p-3 text-slate-400">{slot.location}</td>
+                            <td className="p-3 text-slate-300">{new Date(slot.date).toLocaleDateString()} @ {formatDisplayTime(slot.time)}</td>
+                            <td className="p-3 text-slate-300">{getExaminerDisplayName(slot.polygrapher)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 )}
 

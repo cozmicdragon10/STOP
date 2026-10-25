@@ -1319,8 +1319,17 @@ app.post('/api/attendance/batch', async (req, res) => {
             });
             results.push({ client: entry.client, attendanceId, newBalance, polyVoucherAwarded });
         }
-        // Closing the group clears its saved open sheet for this session
-        await clientDb.query('DELETE FROM OpenGroupSessions WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3', [group, date, sessionNum]);
+        // Closing the group clears its saved open sheet for this session. Who opened it is kept on the attendance rows
+        // so the closed group stays visible to them; a group closed without being opened first was opened by the closer.
+        const openedRes = await clientDb.query(
+            'DELETE FROM OpenGroupSessions WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3 RETURNING CreatedBy',
+            [group, date, sessionNum]
+        );
+        const openedBy = openedRes.rows[0]?.createdby || createdBy;
+        await clientDb.query(
+            'UPDATE Attendance SET OpenedBy = $1 WHERE AttendanceId = ANY($2::int[])',
+            [openedBy, results.map(r => r.attendanceId)]
+        );
         await clientDb.query('COMMIT');
         res.status(201).json({ success: true, count: results.length, results, polyVouchersAwarded: results.filter(r => r.polyVoucherAwarded).length });
     } catch (error) {
@@ -1340,6 +1349,8 @@ pool.query('ALTER TABLE Attendance ADD COLUMN IF NOT EXISTS SessionNumber INT NO
     .then(() => pool.query('ALTER TABLE OpenGroupSessions ADD COLUMN IF NOT EXISTS SessionNumber INT NOT NULL DEFAULT 1'))
     .then(() => pool.query('ALTER TABLE OpenGroupSessions DROP CONSTRAINT IF EXISTS opengroupsessions_groupid_sessiondate_key'))
     .then(() => pool.query('CREATE UNIQUE INDEX IF NOT EXISTS OpenGroupSessions_Session_Key ON OpenGroupSessions (GroupId, SessionDate, SessionNumber)'))
+    // Employee who opened the group check-in this attendance was closed from; NULL on older rows (treated as CreatedBy)
+    .then(() => pool.query('ALTER TABLE Attendance ADD COLUMN IF NOT EXISTS OpenedBy VARCHAR(255)'))
     .catch(err => console.error('Could not add group session numbers:', err.message));
 
 const OPEN_GROUP_COLUMNS = `o.OpenSessionId, o.GroupId, g.GroupName, to_char(o.SessionDate, 'YYYY-MM-DD') AS SessionDate,
@@ -1368,6 +1379,38 @@ app.get('/api/open-groups', async (req, res) => {
              ORDER BY o.SessionDate DESC, g.GroupName ASC`
         );
         res.json(result.rows.filter(row => canSeeOpenGroup(viewer, row)));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Closed group sessions, newest first. Only Business Administrators see all of them; others see the sessions of groups
+// they counsel and the ones they opened.
+app.get('/api/closed-groups', async (req, res) => {
+    try {
+        const viewer = await openGroupViewer(req.query.user);
+        if (!viewer) return res.json([]);
+        const isAdmin = viewer.role === 'Business Administrator';
+        const result = await pool.query(
+            `SELECT a."Group" AS GroupId, g.GroupName, g.Counselor, to_char(a.Date, 'YYYY-MM-DD') AS SessionDate, a.SessionNumber,
+                    MIN(COALESCE(a.OpenedBy, a.CreatedBy)) AS OpenedBy, MIN(a.CreatedBy) AS ClosedBy, MAX(a.CreatedOn) AS ClosedOn,
+                    json_agg(json_build_object(
+                        'client', a.Client, 'name', c.LastName || ', ' || c.FirstName,
+                        'groupFee', a.GroupFee, 'accountPaid', a.AccountPaid, 'paymentMethod', a.PaymentMethod
+                    ) ORDER BY c.LastName, c.FirstName) AS Entries
+             FROM Attendance a
+             JOIN Groups g ON g.GroupId = a."Group"
+             JOIN Clients c ON c.ClientId = a.Client
+             WHERE a.Type = 'Group'
+             GROUP BY a."Group", g.GroupName, g.Counselor, a.Date, a.SessionNumber
+             HAVING $1::boolean
+                 OR ($3 <> '' AND LOWER(TRIM(g.Counselor)) = LOWER(TRIM($3)))
+                 OR bool_or(LOWER(COALESCE(a.OpenedBy, a.CreatedBy)) = LOWER($2))
+             ORDER BY a.Date DESC, MAX(a.CreatedOn) DESC NULLS LAST
+             LIMIT 100`,
+            [isAdmin, viewer.employeeemail, viewer.displayname || '']
+        );
+        res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
