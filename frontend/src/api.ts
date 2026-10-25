@@ -136,10 +136,11 @@ export async function createClient(data: Record<string, any>) {
     return body as { success: true; clientId: number; message: string };
 }
 
-export async function deleteClient(clientId: number) {
+// The server only lets Business Administrators delete clients, and reads who is asking from X-User-Email
+export async function deleteClient(clientId: number, userEmail: string) {
     const res = await fetch(`${API_BASE}/clients/${clientId}`, {
         method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-User-Email': userEmail },
     });
     const body = await res.json();
     if (!res.ok) {
@@ -271,8 +272,9 @@ export interface OpenGroupSession {
     updatedon: string;
 }
 
-export async function getOpenGroups(): Promise<OpenGroupSession[]> {
-    const res = await fetch(`${API_BASE}/open-groups`);
+// Only the open check-ins this user may see: administrators see all; counselors see their groups' and the ones they opened
+export async function getOpenGroups(user: string): Promise<OpenGroupSession[]> {
+    const res = await fetch(`${API_BASE}/open-groups?user=${encodeURIComponent(user)}`);
     const body = await res.json();
     if (!res.ok) {
         throw new Error(body.error || 'Failed to load open groups.');

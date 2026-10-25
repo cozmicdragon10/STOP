@@ -211,13 +211,31 @@ const ageFromBirthDate = (value: unknown, today = new Date()) => {
   return age >= 0 ? age : null;
 };
 // Client Roster filters start on active clients only
-const DEFAULT_CLIENT_FILTERS = { agent: '', programtype: '', currentgroup: '', status: 'Active', feeoverride: '' };
+const DEFAULT_CLIENT_FILTERS = { agent: '', programtype: '', phase: '', currentgroup: '', status: 'Active', feeoverride: '' };
 // Dropdown choices for client Information fields; must match the server's lists
 const CLIENT_FIELD_OPTIONS: Record<string, string[]> = {
   race: ['American Indian or Alaska Native', 'Asian', 'Black or African American', 'Hispanic or Latino', 'Native Hawaiian or Other Pacific Islander', 'White', 'Two or More Races', 'Other'],
   sex: ['Male', 'Female'],
 };
 const POLY_OVERDUE_MONTHS = 6;
+// SO clients are overdue to attend once this many months have passed since their last attendance, by phase
+const SO_ATTENDANCE_LIMIT_MONTHS: Record<string, number> = {
+  'Phase 1 - Weekly': 1,
+  'Phase 2 - Monthly': 2,
+  'Phase 3 - Quarterly': 4,
+  'Phase 4 - Semi Anual': 7,
+};
+// True when an SO client's last attendance is more than their phase allows. Clients who never attended, or without an SO phase, aren't flagged.
+const isAttendanceOverdue = (client: any, today = new Date()) => {
+  const limit = SO_ATTENDANCE_LIMIT_MONTHS[client.phase];
+  // The latest attendance row's date, or the stored last date attended when that isn't loaded
+  const lastValue = client.lastattended ?? client.lastdateattended;
+  if (!SO_PROGRAM_TYPES.includes(client.programtype) || !limit || !lastValue) return false;
+  const last = new Date(lastValue);
+  if (isNaN(last.getTime())) return false;
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return startOfToday > new Date(last.getFullYear(), last.getMonth() + limit, last.getDate());
+};
 // When the client's most recent polygraph was taken: the actual polygraph date, falling back to the recorded date for older results without one
 const lastPolygraphTaken = (polygraphs: any[]): Date | null => {
   const taken = polygraphs
@@ -751,7 +769,7 @@ export default function App() {
 
   const loadOpenGroups = async () => {
     try {
-      setOpenGroups(await getOpenGroups());
+      setOpenGroups(await getOpenGroups(user.employeeemail));
       setOpenGroupsError('');
     } catch (err: any) {
       setOpenGroupsError(err.message || 'Failed to load open groups.');
@@ -1751,8 +1769,14 @@ export default function App() {
   // Client directory search: matches name, DOC #, agent, group, program, phase, and status
   const clientSearchTerm = clientSearch.trim().toLowerCase();
   const clientFilterActive = Object.values(clientFilters).some(Boolean);
-  const distinctClientValues = (key: 'agent' | 'programtype' | 'currentgroup' | 'status') => {
+  const distinctClientValues = (key: 'agent' | 'programtype' | 'phase' | 'currentgroup' | 'status') => {
     if (key === 'status') return PROGRAM_STATUSES;
+    if (key === 'phase') {
+      // SO phases in phase order, then BIP weeks by number, then anything else
+      const rank = (p: string) => SO_PHASES.includes(p) ? SO_PHASES.indexOf(p) : isWholeNumber(p) ? 100 + Number(p) : Infinity;
+      return Array.from(new Set(clients.map(c => String(c.phase ?? '').trim()).filter(Boolean)))
+        .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+    }
     if (key === 'agent') return Array.from(new Set(clients.map(c => c.supervisingagent).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
     if (key === 'programtype') return Array.from(new Set(clients.map(c => c.programtype).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
     if (key === 'currentgroup') return Array.from(new Set(clients.map(c => c.groupname).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
@@ -1767,6 +1791,7 @@ export default function App() {
 
       if (clientFilters.agent && c.supervisingagent !== clientFilters.agent) return false;
       if (clientFilters.programtype && c.programtype !== clientFilters.programtype) return false;
+      if (clientFilters.phase && String(c.phase ?? '').trim() !== clientFilters.phase) return false;
       if (clientFilters.currentgroup && c.groupname !== clientFilters.currentgroup) return false;
       if (clientFilters.status && c.programstatus !== clientFilters.status) return false;
       if (clientFilters.feeoverride === 'active' && (c.activefeeoverride === null || c.activefeeoverride === undefined)) return false;
@@ -2031,6 +2056,18 @@ export default function App() {
                 </select>
 
                 <select
+                  value={clientFilters.phase}
+                  onChange={(e) => setClientFilters({ ...clientFilters, phase: e.target.value })}
+                  className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+                >
+                  <option value="">Phase: All</option>
+                  {distinctClientValues('phase').map(phase => (
+                    // BIP clients store a week number as their phase
+                    <option key={phase} value={phase}>{isWholeNumber(phase) ? `Week ${phase} (BIP)` : phase}</option>
+                  ))}
+                </select>
+
+                <select
                   value={clientFilters.currentgroup}
                   onChange={(e) => setClientFilters({ ...clientFilters, currentgroup: e.target.value })}
                   className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
@@ -2213,7 +2250,12 @@ export default function App() {
                       <td className="p-3"><span className="bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2 py-0.5 rounded text-xs font-semibold">{c.programtype || 'State SO'}</span></td>
                       <td className="p-3 text-xs"><span className="bg-slate-800 px-2 py-0.5 rounded text-slate-300">{formatPhase(c.programtype, c.phase) || 'N/A'}</span></td>
                       <td className="p-3 text-slate-300 text-xs">{c.groupname || 'Unassigned'}</td>
-                      <td className="p-3 text-slate-400 text-xs">{c.lastattended ? new Date(c.lastattended).toLocaleDateString() : 'Never'}</td>
+                      <td
+                        className={`p-3 text-xs ${isAttendanceOverdue(c) ? 'text-red-400 font-semibold' : 'text-slate-400'}`}
+                        title={isAttendanceOverdue(c) ? `Overdue: more than ${SO_ATTENDANCE_LIMIT_MONTHS[c.phase]} month${SO_ATTENDANCE_LIMIT_MONTHS[c.phase] === 1 ? '' : 's'} since last attended for ${c.phase}` : undefined}
+                      >
+                        {c.lastattended ? new Date(c.lastattended).toLocaleDateString() : 'Never'}
+                      </td>
                       <td className="p-3 text-slate-400 text-xs">{c.lastpoly ? new Date(c.lastpoly).toLocaleDateString() : 'None'}</td>
                       <td className="p-3"><span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium ${c.programstatus === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`} title={c.programstatus}>{c.programstatus === 'Discharged Supervision' ? 'Discharged' : c.programstatus}</span></td>
                       <td className={`p-3 font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</td>
@@ -2324,7 +2366,7 @@ export default function App() {
                         if (!window.confirm(`Delete client ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}? This action cannot be undone.`)) return;
                         setLoading(true);
                         try {
-                          await deleteClient(selectedClientDetail.clientid);
+                          await deleteClient(selectedClientDetail.clientid, user.employeeemail);
                           setSuccessMsg('Client deleted successfully!');
                           setSelectedClientDetail(null);
                           loadDashboardData();
@@ -2593,7 +2635,12 @@ export default function App() {
                               )}
                             </div>
                           ) : (
-                            <p className="text-white font-medium">
+                            <p
+                              className={field === 'lastdateattended' && isAttendanceOverdue(selectedClientDetail) ? 'text-red-400 font-semibold' : 'text-white font-medium'}
+                              title={field === 'lastdateattended' && isAttendanceOverdue(selectedClientDetail)
+                                ? `Overdue: more than ${SO_ATTENDANCE_LIMIT_MONTHS[selectedClientDetail.phase]} month${SO_ATTENDANCE_LIMIT_MONTHS[selectedClientDetail.phase] === 1 ? '' : 's'} since last attended for ${selectedClientDetail.phase}`
+                                : undefined}
+                            >
                               {field === 'dateofbirth'
                                 ? (selectedClientDetail.dateofbirth
                                     ? <>{toLocalDay(selectedClientDetail.dateofbirth).toLocaleDateString()} <span className="text-slate-400 font-normal">(Age {ageFromBirthDate(selectedClientDetail.dateofbirth)})</span></>
@@ -4060,7 +4107,7 @@ export default function App() {
               )}
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl flex flex-col justify-between gap-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
               <div>
                 <h3 className="font-semibold text-white mb-1 flex items-center gap-2"><ClipboardCheck size={18} className="text-blue-400" /> Open Groups</h3>
                 <p className="text-xs text-slate-400 leading-relaxed mb-4">Check-ins saved with Finish Check-In. Open one to review and close the group.</p>
@@ -4110,7 +4157,6 @@ export default function App() {
                   </ul>
                 )}
               </div>
-              <div className="bg-slate-950 border border-slate-800 p-3 rounded-lg"><p className="text-xs text-slate-400">User Session:</p><p className="text-sm font-semibold text-blue-400">{user.employeeemail}</p></div>
             </div>
           </div>
         )}
