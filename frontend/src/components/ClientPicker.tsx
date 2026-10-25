@@ -14,6 +14,7 @@ interface Props {
   onChange: (clientId: string) => void;
   placeholder?: string;
   className?: string;
+  required?: boolean;
 }
 
 const MAX_RESULTS = 50;
@@ -21,7 +22,7 @@ const labelFor = (c: PickerClient) => `${c.lastname}, ${c.firstname}`;
 
 // Type a name or DOC # to find a client. Only a client picked from the list counts as a selection;
 // leaving the box with unmatched text puts back the current selection.
-export default function ClientPicker({ clients, value, onChange, placeholder = 'Search name or DOC #...', className }: Props) {
+export default function ClientPicker({ clients, value, onChange, placeholder = 'Search name or DOC #...', className, required }: Props) {
   const selected = clients.find(c => String(c.clientid) === value) ?? null;
   const [text, setText] = useState(selected ? labelFor(selected) : '');
   const [open, setOpen] = useState(false);
@@ -69,6 +70,7 @@ export default function ClientPicker({ clients, value, onChange, placeholder = '
         type="text"
         value={text}
         autoComplete="off"
+        required={required}
         placeholder={placeholder}
         onFocus={(e) => { setOpen(true); setHighlight(0); e.target.select(); }}
         onBlur={() => { setOpen(false); setText(selected ? labelFor(selected) : ''); }}

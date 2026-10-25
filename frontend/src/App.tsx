@@ -9,14 +9,14 @@ import {
   loginUser, getClients, getGroups, submitAccountPayment, submitCustomCharge,
   submitClientCallIn, submitGroupCallIn, getPolygraphSlots, createPolygraphSlot,
   submitPolygraphResult, deletePolygraphSlot, assignPolygraphSlot, reopenPolygraphSlot,
-  getClientAttendance, getClientFinancials,
-  getClientNotes, addClientNote, getClientPolygraphs, getGroupClients, updateGroup, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
+  getClientAttendance, getClientFinancials, adjustCashPayment, recordCardPaymentAction,
+  getClientNotes, addClientNote, updateClientNote, deleteClientNote, getClientPolygraphs, getGroupClients, updateGroup, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
   assignClientToGroup, createClient, createGroup, deleteGroup, deleteClient, updateEmployee, getClientTests, submitTestResult, getAgentReport,
   getDepositReport, getEmployees, addEmployee, getSystemLogs, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
   getOpenGroups, deleteOpenGroup, getClientChangeLog, getSupervisingAgents,
   getClientAttachments, uploadClientAttachment, fetchClientAttachment, renameClientAttachment, deleteClientAttachment, ATTACHMENT_MAX_BYTES
 } from './api';
-import type { ClientAttachment, ClientChange, OpenGroupSession, SupervisingAgent } from './api';
+import type { CardPaymentAction, ClientAttachment, ClientChange, OpenGroupSession, PaymentChangeResult, SupervisingAgent } from './api';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
@@ -26,7 +26,9 @@ import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
 import SupervisingAgentsTab from './components/agents/SupervisingAgentsTab';
 import AgentPicker from './components/agents/AgentPicker';
 import ClientPicker from './components/ClientPicker';
+import GroupPicker from './components/GroupPicker';
 import RecordFilterBar from './components/clients/RecordFilterBar';
+import MonthHeader from './components/clients/MonthHeader';
 import GroupIncomeReport from './components/reports/GroupIncomeReport';
 
 // Client program statuses. 'Active' is used by group call-ins and the group roster, so keep that exact spelling.
@@ -53,12 +55,37 @@ const parseGroupCallInNote = (text: string) => {
 const DEFAULT_GROUP_FILTERS = { location: '', counselor: '', programtype: '', status: 'Active' };
 // Client drawer list filters. Dates are YYYY-MM-DD, inclusive; '' means no filter.
 const EMPTY_NOTE_FILTERS = { search: '', category: '', from: '', to: '', sort: 'newest' };
-const EMPTY_LEDGER_FILTERS = { search: '', type: '', feeType: '', method: '', from: '', to: '', sort: 'newest' };
+const EMPTY_ATTENDANCE_FILTERS = { search: '', group: '', type: '', payment: '', from: '', to: '', sort: 'newest' };
+const EMPTY_LEDGER_FILTERS ={ search: '', type: '', feeType: '', method: '', from: '', to: '', sort: 'newest' };
 // A timestamp's calendar day in the browser's time zone, as YYYY-MM-DD
 const localYmd = (value: unknown) => {
   const d = new Date(String(value));
   return isNaN(d.getTime()) ? '' : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
+// Calendar time between two YYYY-MM-DD days as "Same day", "5 days", "2 weeks, 3 days", or "3 months, 1 week"
+const timeBetween = (fromYmd: string, toYmd: string) => {
+  const [a, b] = [fromYmd, toYmd].sort();
+  const [ay, am, ad] = a.split('-').map(Number);
+  const [by, bm, bd] = b.split('-').map(Number);
+  const start = new Date(ay, am - 1, ad);
+  const end = new Date(by, bm - 1, bd);
+  const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'}`;
+  const totalDays = Math.round((end.getTime() - start.getTime()) / 86400000);
+  if (totalDays === 0) return 'Same day';
+  if (totalDays < 14) return plural(totalDays, 'day');
+  // Whole calendar months first, then the leftover days as weeks
+  let months = (by - ay) * 12 + (bm - am);
+  if (new Date(ay, am - 1 + months, ad) > end) months--;
+  const leftover = Math.round((end.getTime() - new Date(ay, am - 1 + months, ad).getTime()) / 86400000);
+  if (months < 2) {
+    const weeks = Math.floor(totalDays / 7);
+    return [plural(weeks, 'week'), totalDays % 7 ? plural(totalDays % 7, 'day') : ''].filter(Boolean).join(', ');
+  }
+  const years = Math.floor(months / 12);
+  const parts = [years ? plural(years, 'year') : '', months % 12 ? plural(months % 12, 'month') : '', leftover >= 7 ? plural(Math.floor(leftover / 7), 'week') : ''];
+  return parts.filter(Boolean).join(', ');
+};
+
 const sortedUnique = (values: unknown[]) => Array.from(new Set(values.filter(Boolean).map(String))).sort((a, b) => a.localeCompare(b));
 
 const caseNoteLabel = (note: any) => {
@@ -153,6 +180,9 @@ const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
   { type: 'Group', label: 'Group' },
   { type: 'No Poly Required', label: 'No Poly Required' },
   { type: 'Fee Override', label: 'Temporary Fee Override' },
+  { type: 'Payment Adjusted', label: 'Payment Adjusted' },
+  { type: 'Payment Refunded', label: 'Payment Refunded' },
+  { type: 'Payment Disputed', label: 'Payment Disputed' },
 ];
 
 // Programs that use the SO phase schedule and show the last polygraph date
@@ -214,13 +244,67 @@ const GROUP_TYPES_BY_PROGRAM: Record<string, string[]> = {
 // A client's poly fee voucher runs 0 to this; the server fills it when the poly fee is paid in full
 const POLY_VOUCHER_MAX = 6;
 
+// Splits dated records into months (YYYY-MM), newest month first unless sorting oldest first; rows keep their order within a month
+const groupByMonth = <T extends { date: string }>(rows: T[], sort: string) => {
+  const byMonth = new Map<string, T[]>();
+  for (const row of rows) {
+    const key = localYmd(row.date).slice(0, 7);
+    if (!byMonth.has(key)) byMonth.set(key, []);
+    byMonth.get(key)!.push(row);
+  }
+  return Array.from(byMonth.entries())
+    .sort(([a], [b]) => (sort === 'oldest' ? a.localeCompare(b) : b.localeCompare(a)))
+    .map(([key, list]) => {
+      const [y, m] = key.split('-').map(Number);
+      return { key, label: new Date(y, m - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }), rows: list };
+    });
+};
+
+const toggleInSet = (set: Set<string>, key: string) => {
+  const next = new Set(set);
+  if (next.has(key)) next.delete(key); else next.add(key);
+  return next;
+};
+
+// Refunds and disputes take money back off a credit card payment, so like a charge they add to what the client owes
+const PAYMENT_REVERSAL_TYPES = ['Refund', 'Dispute'];
+const addsToOwed = (fin: any) => fin.type === 'Charge' || PAYMENT_REVERSAL_TYPES.includes(fin.type);
+
+// Financial Ledger row colors: fees red, refunds and disputes amber, payments green
+const LEDGER_TONES = {
+  charge: { text: 'text-red-400', badge: 'text-red-400 bg-red-500/10 border-red-500/30' },
+  reversal: { text: 'text-amber-400', badge: 'text-amber-400 bg-amber-500/10 border-amber-500/30' },
+  payment: { text: 'text-emerald-400', badge: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' },
+};
+
+// What's left of a credit card payment after its refunds and disputes (a won dispute puts its amount back),
+// and how much is in dispute while one is open
+const cardPaymentStatus = (payment: any, ledger: any[]) => {
+  let refunded = 0;
+  let kept = Number(payment.amount || 0);
+  let lastDispute = 0;
+  for (const row of ledger) {
+    if (row.relatedtransactionid !== payment.transactionid) continue;
+    const amount = Number(row.amount || 0);
+    if (row.type === 'Refund') refunded += amount;
+    if (PAYMENT_REVERSAL_TYPES.includes(row.type)) kept -= amount;
+    else if (row.type === 'Dispute Won') kept += amount;
+    if (row.type === 'Dispute') lastDispute = amount;
+  }
+  return {
+    refunded,
+    kept: Math.round(kept * 100) / 100,
+    openDispute: payment.disputestatus === 'Open' ? lastDispute : 0,
+  };
+};
+
 const ledgerBalanceChange = (fin: any) => {
   if (fin.finalbalance === null || fin.finalbalance === undefined) return null;
   const amount = Number(fin.amount || 0);
   const after = Number(fin.finalbalance);
   // Poly fee payments are tracked apart from the account, so they leave the balance where it was
   const changesBalance = fin.feetype !== 'Poly Fee';
-  const before = !changesBalance ? after : fin.type === 'Charge' ? after - amount : after + amount;
+  const before = !changesBalance ? after : addsToOwed(fin) ? after - amount : after + amount;
   return { before: toDisplayBalance(before), after: toDisplayBalance(after), changesBalance };
 };
 
@@ -359,6 +443,25 @@ export default function App() {
   const [clientNotes, setClientNotes] = useState<any[]>([]);
   // Case Notes and Financial Ledger filters in the client drawer; reset whenever a client is opened
   const [noteFilters, setNoteFilters] = useState(EMPTY_NOTE_FILTERS);
+  // The new-note form and the filter row stay closed until their buttons open them
+  const [showNoteForm, setShowNoteForm] = useState(false);
+  const [showNoteFilters, setShowNoteFilters] = useState(false);
+  // Inline edit of one case note; noteError is shown under the note it belongs to
+  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
+  // Payment being corrected in the Financial Ledger (Business Administrators only): a cash adjustment, or a refund or dispute step on a card payment
+  const [paymentAction, setPaymentAction] = useState<{ id: number; kind: 'adjust' | CardPaymentAction; amount: string; reason: string } | null>(null);
+  const [paymentActionError, setPaymentActionError] = useState('');
+  // Shown in the ledger after a poly fee payment change when the client is already booked into a polygraph with vouchers
+  const [scheduledPolyNotice, setScheduledPolyNotice] = useState<{ slotId: number; text: string } | null>(null);
+  const [editNoteText, setEditNoteText] = useState('');
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState<{ noteId: number; message: string } | null>(null);
+  const [attendanceFilters, setAttendanceFilters] = useState(EMPTY_ATTENDANCE_FILTERS);
+  const [showAttendanceFilters, setShowAttendanceFilters] = useState(false);
+  const [showLedgerFilters, setShowLedgerFilters] = useState(false);
+  // Attendance and ledger months (YYYY-MM) the user has collapsed
+  const [collapsedAttendanceMonths, setCollapsedAttendanceMonths] = useState<Set<string>>(() => new Set());
+  const [collapsedLedgerMonths, setCollapsedLedgerMonths] = useState<Set<string>>(() => new Set());
   const [ledgerFilters, setLedgerFilters] = useState(EMPTY_LEDGER_FILTERS);
   const [clientPolygraphs, setClientPolygraphs] = useState<any[]>([]);
   // Client whose polygraphs are loaded, so the notice never uses the previous client's results
@@ -422,6 +525,8 @@ export default function App() {
   const [polyDateTo, setPolyDateTo] = useState('');
   const [polyDateSort, setPolyDateSort] = useState<'asc' | 'desc'>('asc');
   const [polySlots, setPolySlots] = useState<any[]>([]);
+  // Slot opened from a client's account; outlined on the Poly Schedule for a few seconds
+  const [highlightedSlotId, setHighlightedSlotId] = useState<number | null>(null);
   const [polyLocation, setPolyLocation] = useState('Oklahoma City Office');
   const [polyAddress, setPolyAddress] = useState('123 Main St, OKC');
   const [polyDate, setPolyDate] = useState(() => getLocalDateString());
@@ -542,6 +647,8 @@ export default function App() {
   const [accountFilter, setAccountFilter] = useState<'active' | 'inactive' | 'all'>('active');
   const [empPassword, setEmpPassword] = useState('');
   const [empSearch, setEmpSearch] = useState('');
+  // '' shows every user type
+  const [empRoleFilter, setEmpRoleFilter] = useState('');
 
   // Counselor dropdown choices: active employees with the Counselor role. A group's saved counselor is kept as an option even if that account is no longer listed
   const counselorOptions = employees.filter(e => e.role === 'Counselor' && e.active !== false).map(e => e.displayname as string).filter(Boolean);
@@ -1071,8 +1178,10 @@ export default function App() {
     }
   };
 
-  // Admin User Creation
+  // Admin User Creation. The form stays closed until New User or an account's Edit opens it.
+  const [showEmployeeForm, setShowEmployeeForm] = useState(false);
   const resetEmployeeForm = () => {
+    setShowEmployeeForm(false);
     setEditingEmail(null);
     setEmpEmail('');
     setEmpName('');
@@ -1082,6 +1191,7 @@ export default function App() {
   };
 
   const startEditEmployee = (emp: any) => {
+    setShowEmployeeForm(true);
     setEditingEmail(emp.employeeemail);
     setEmpEmail(emp.employeeemail);
     setEmpName(emp.displayname || '');
@@ -1204,7 +1314,20 @@ export default function App() {
     setClientChangeLog([]);
     setChangeLogStatus('idle');
     setNoteFilters(EMPTY_NOTE_FILTERS);
+    setShowNoteForm(false);
+    setShowNoteFilters(false);
+    setNewNoteText('');
+    setEditingNoteId(null);
+    setNoteError(null);
+    setAttendanceFilters(EMPTY_ATTENDANCE_FILTERS);
+    setShowAttendanceFilters(false);
+    setCollapsedAttendanceMonths(new Set());
+    setCollapsedLedgerMonths(new Set());
+    setShowLedgerFilters(false);
     setLedgerFilters(EMPTY_LEDGER_FILTERS);
+    setPaymentAction(null);
+    setPaymentActionError('');
+    setScheduledPolyNotice(null);
     setSelectedClientDetail(client);
     setClientTab('information');
     setEditingClientInfo(false);
@@ -1367,8 +1490,43 @@ export default function App() {
       category: newNoteCategory
     });
     setNewNoteText('');
+    setShowNoteForm(false);
     const updatedNotes = await getClientNotes(selectedClientDetail.clientid);
     setClientNotes(updatedNotes);
+  };
+
+  // Matches the server rule: the note's author or a Business Administrator
+  const canChangeNote = (note: any) =>
+    user?.role === 'Business Administrator' || String(note.User || '').trim().toLowerCase() === String(user?.employeeemail || '').trim().toLowerCase();
+
+  const handleSaveNoteEdit = async (noteId: number) => {
+    if (!editNoteText.trim()) {
+      setNoteError({ noteId, message: 'The note cannot be empty.' });
+      return;
+    }
+    setNoteSaving(true);
+    setNoteError(null);
+    try {
+      const saved = await updateClientNote(noteId, { user: user.employeeemail, comments: editNoteText });
+      setClientNotes(notes => notes.map(n => (n.noteid === noteId ? saved : n)));
+      setEditingNoteId(null);
+    } catch (err: any) {
+      setNoteError({ noteId, message: err.message || 'Failed to save the note.' });
+    } finally {
+      setNoteSaving(false);
+    }
+  };
+
+  const handleDeleteNote = async (noteId: number) => {
+    if (!window.confirm('Delete this case note? This cannot be undone.')) return;
+    setNoteError(null);
+    try {
+      await deleteClientNote(noteId, user.employeeemail);
+      setClientNotes(notes => notes.filter(n => n.noteid !== noteId));
+      if (editingNoteId === noteId) setEditingNoteId(null);
+    } catch (err: any) {
+      setNoteError({ noteId, message: err.message || 'Failed to delete the note.' });
+    }
   };
 
   const handleStandalonePaymentSubmit = async (e: React.FormEvent) => {
@@ -1425,8 +1583,60 @@ export default function App() {
     setLoading(false);
   };
 
+  const handlePaymentAction = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paymentAction || !selectedClientDetail) return;
+    const { id, kind } = paymentAction;
+    const reason = paymentAction.reason.trim();
+    const amount = Number(paymentAction.amount);
+    const needsAmount = kind === 'adjust' || kind === 'refund' || kind === 'dispute';
+    if ((needsAmount && !(amount > 0)) || !reason) return;
+    const clientid = selectedClientDetail.clientid;
+    setLoading(true);
+    setPaymentActionError('');
+    try {
+      const res: PaymentChangeResult = kind === 'adjust'
+        ? await adjustCashPayment(id, { amount, reason, user: user.employeeemail })
+        : await recordCardPaymentAction(id, { action: kind, amount: needsAmount ? amount : undefined, reason, user: user.employeeemail });
+      const changes: any = { accountbalance: res.newBalance };
+      if (res.polyFeePaid !== undefined) changes.polyfeepaid = res.polyFeePaid;
+      if (res.polyFeeVoucher !== undefined) changes.polyfeevoucher = res.polyFeeVoucher;
+      setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, ...changes } : c));
+      setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, ...changes } : c));
+      setPaymentAction(null);
+      const what = {
+        adjust: `Payment adjusted to ${formatMoney(amount)}.`,
+        refund: `Refund of ${formatMoney(amount)} recorded.`,
+        dispute: `Dispute of ${formatMoney(amount)} recorded; the amount is owed again until the dispute is won.`,
+        'dispute-won': 'Dispute marked won; the payment is applied again.',
+        'dispute-lost': 'Dispute marked lost.',
+      }[kind];
+      setSuccessMsg(`${what} Updated Balance: ${formatBalance(res.newBalance)}.`
+        + (res.vouchersRemoved ? ` ${res.vouchersRemoved} poly fee voucher(s) removed.` : '')
+        + (res.vouchersAdded ? ' Poly fee paid in full; vouchers filled.' : '')
+        + (res.attendanceUpdated ? ' The check-in it was taken at and the Group Income Report were updated too.' : ''));
+      if (res.scheduledPolygraph) {
+        const p = res.scheduledPolygraph;
+        setScheduledPolyNotice({
+          slotId: p.slotId,
+          text: `This client already has a polygraph scheduled ${new Date(`${p.date}T00:00:00`).toLocaleDateString()}${p.time ? ` @ ${formatDisplayTime(p.time)}` : ''}${p.location ? ` (${p.location})` : ''} using poly fee vouchers. Changing the poly fee payment did not cancel it or return the vouchers.`,
+        });
+      }
+      // Later ledger and attendance rows carry the new balance
+      const [att, fin] = await Promise.all([getClientAttendance(clientid), getClientFinancials(clientid)]);
+      setClientAttendance(att);
+      setClientFinancials(fin);
+    } catch (err: any) {
+      setPaymentActionError(err.message || 'Could not save the change.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleCallInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Typed text that was never picked from the list leaves no client or group selected
+    if (callInMode === 'client' ? !selectedClient : !selectedGroup) return;
     setLoading(true);
     if (callInMode === 'client') {
       await submitClientCallIn({ client: Number(selectedClient), date: new Date(), comment: callInComment, createdBy: user.employeeemail, reason: callInReason || null });
@@ -1442,6 +1652,14 @@ export default function App() {
     loadDashboardData();
     setLoading(false);
   };
+
+  // Scrolls to and briefly outlines a slot opened from a client's account. Kept above the sign-in return so the hook count never changes.
+  useEffect(() => {
+    if (highlightedSlotId === null || activeTab !== 'polygraph') return;
+    document.getElementById(`poly-slot-${highlightedSlotId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const timer = setTimeout(() => setHighlightedSlotId(null), 4000);
+    return () => clearTimeout(timer);
+  }, [highlightedSlotId, activeTab]);
 
   if (!user) {
     return (
@@ -1512,11 +1730,24 @@ export default function App() {
       return true;
     });
 
-  // Client drawer: Case Notes and Financial Ledger after filters and sort
+  // Client drawer: Attendance, Case Notes, and Financial Ledger after filters and sort
   const byDate = (sort: string) => (a: any, b: any) => {
     const diff = new Date(a.date).getTime() - new Date(b.date).getTime();
     return sort === 'oldest' ? diff : -diff;
   };
+  const attendanceSearch = attendanceFilters.search.trim().toLowerCase();
+  const shownAttendance = clientAttendance.filter(a => {
+    const day = localYmd(a.date);
+    const paid = Number(a.accountpaid || 0) > 0;
+    if (attendanceFilters.group && (a.groupname || 'Group Session') !== attendanceFilters.group) return false;
+    if (attendanceFilters.type && a.type !== attendanceFilters.type) return false;
+    if (attendanceFilters.payment === 'Paid' && !paid) return false;
+    if (attendanceFilters.payment === 'No Payment' && paid) return false;
+    if (attendanceFilters.from && day < attendanceFilters.from) return false;
+    if (attendanceFilters.to && day > attendanceFilters.to) return false;
+    if (attendanceSearch && ![a.groupname, a.groupschedule, a.type, a.comments, a.paymentmethod].some(v => String(v ?? '').toLowerCase().includes(attendanceSearch))) return false;
+    return true;
+  }).sort(byDate(attendanceFilters.sort));
   const noteSearch = noteFilters.search.trim().toLowerCase();
   const shownNotes = clientNotes.filter(n => {
     const day = localYmd(n.date);
@@ -1577,6 +1808,25 @@ export default function App() {
 
   // Filter assigned slots for Poly Results tab
   const assignedSlots = examinerSlots.filter(s => s.status === 'Assigned' || s.assignedClientId);
+
+  // The polygraph slot a client is booked into, if any
+  const assignedSlotFor = (clientId: number) =>
+    polySlots.find(s => s.status === 'Assigned' && Number(s.assignedClientId) === Number(clientId)) ?? null;
+
+  // Leaves the client account for the Poly Schedule with filters cleared, so the slot is in the list, and outlines it
+  const openPolySlot = (slotId: number) => {
+    setSelectedClientDetail(null);
+    setPolyExaminerFilter('');
+    setPolyLocationFilter('');
+    setPolyDateFrom('');
+    setPolyDateTo('');
+    setPolySubTab('schedule');
+    setActiveTab('polygraph');
+    setHighlightedSlotId(slotId);
+  };
+
+  const slotSummary = (slot: any) =>
+    `${new Date(slot.date).toLocaleDateString()} @ ${formatDisplayTime(slot.time)}${slot.location ? ` · ${slot.location}` : ''}`;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -1984,7 +2234,15 @@ export default function App() {
             <div className="bg-slate-900 w-full max-w-4xl h-full border-l border-slate-800 flex flex-col shadow-2xl p-6 overflow-y-auto">
               <div className="flex justify-between items-start border-b border-slate-800 pb-4 mb-6">
                 <div>
-                  <h2 className="text-xl font-bold text-white">{selectedClientDetail.firstname} {selectedClientDetail.lastname}</h2>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <h2 className="text-xl font-bold text-white">{selectedClientDetail.firstname} {selectedClientDetail.lastname}</h2>
+                    <span
+                      title="Account balance"
+                      className={`text-sm font-semibold px-2.5 py-0.5 rounded-full border ${toDisplayBalance(selectedClientDetail.accountbalance) < 0 ? 'text-red-400 bg-red-500/10 border-red-500/30' : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'}`}
+                    >
+                      {formatBalance(selectedClientDetail.accountbalance)} Balance
+                    </span>
+                  </div>
                   <p className="text-xs text-slate-400 mt-1">DOC #: <span className="text-slate-200 font-mono">{selectedClientDetail.docnumber}</span> | Program: <span className="text-blue-400 font-semibold">{selectedClientDetail.programtype || 'State SO'}</span> | Agent: {selectedClientDetail.supervisingagent}</p>
                 </div>
                 <div className="flex gap-2">
@@ -2629,48 +2887,154 @@ export default function App() {
 
               {clientTab === 'attendance' && (
 
-                <div className="space-y-3">{clientAttendance.map(att => (
-                  <div key={att.attendanceid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex gap-5">
-                    <div className="shrink-0 w-28 flex flex-col justify-center border-r border-slate-800 pr-5">
-                      <p className="text-2xl font-bold text-white leading-tight">{formatLogMonthDay(att.date)}</p>
-                      <p className="text-sm text-slate-400 mt-0.5">{formatLogYear(att.date)}</p>
+                <div className="space-y-3">
+                  {(() => {
+                    // Filters set but hidden are counted on the button so they aren't forgotten
+                    const activeAttendanceFilters = [attendanceFilters.search.trim(), attendanceFilters.group, attendanceFilters.type, attendanceFilters.payment, attendanceFilters.from, attendanceFilters.to].filter(Boolean).length;
+                    return (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowAttendanceFilters(show => !show)}
+                          aria-expanded={showAttendanceFilters}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border ${showAttendanceFilters ? 'bg-slate-700 border-slate-600 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+                        >
+                          <SlidersHorizontal size={13} /> Filters
+                          {activeAttendanceFilters > 0 && (
+                            <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{activeAttendanceFilters}</span>
+                          )}
+                        </button>
+                        <span className="ml-auto text-xs text-slate-500">
+                          {shownAttendance.length === clientAttendance.length ? `${clientAttendance.length} sessions` : `Showing ${shownAttendance.length} of ${clientAttendance.length}`}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                  {showAttendanceFilters && (
+                    <RecordFilterBar
+                      search={attendanceFilters.search}
+                      onSearch={v => setAttendanceFilters(f => ({ ...f, search: v }))}
+                      searchPlaceholder="Group, type, or comments..."
+                      selects={[
+                        { label: 'Group', value: attendanceFilters.group, onChange: v => setAttendanceFilters(f => ({ ...f, group: v })), allLabel: 'All Groups', options: sortedUnique(clientAttendance.map(a => a.groupname || 'Group Session')) },
+                        { label: 'Type', value: attendanceFilters.type, onChange: v => setAttendanceFilters(f => ({ ...f, type: v })), allLabel: 'All Types', options: sortedUnique(clientAttendance.map(a => a.type)) },
+                        { label: 'Payment', value: attendanceFilters.payment, onChange: v => setAttendanceFilters(f => ({ ...f, payment: v })), allLabel: 'All', options: ['Paid', 'No Payment'] },
+                      ]}
+                      from={attendanceFilters.from}
+                      to={attendanceFilters.to}
+                      onFrom={v => setAttendanceFilters(f => ({ ...f, from: v }))}
+                      onTo={v => setAttendanceFilters(f => ({ ...f, to: v }))}
+                      sort={attendanceFilters.sort}
+                      onSort={v => setAttendanceFilters(f => ({ ...f, sort: v }))}
+                      sortOptions={[
+                        { value: 'newest', label: 'Newest First' },
+                        { value: 'oldest', label: 'Oldest First' },
+                      ]}
+                      shown={shownAttendance.length}
+                      total={clientAttendance.length}
+                      onClear={() => setAttendanceFilters(f => ({ ...EMPTY_ATTENDANCE_FILTERS, sort: f.sort }))}
+                    />
+                  )}
+                  {shownAttendance.length === 0 && clientAttendance.length > 0 && (
+                    <p className="text-center text-slate-500 text-sm py-4">No attendance matches these filters.</p>
+                  )}
+                  {groupByMonth(shownAttendance, attendanceFilters.sort).map(month => {
+                      const totals = month.rows.reduce((t, att) => {
+                        const c = attendanceBalanceChange(att);
+                        return { fee: t.fee + c.fee, paid: t.paid + c.paid, change: t.change + (c.after - c.before) };
+                      }, { fee: 0, paid: 0, change: 0 });
+                      const change = Math.round(totals.change * 100) / 100;
+                      const collapsed = collapsedAttendanceMonths.has(month.key);
+                      return (
+                  <div key={month.key} className="space-y-2">
+                    <MonthHeader label={month.label} count={month.rows.length} noun="session" collapsed={collapsed} onToggle={() => setCollapsedAttendanceMonths(prev => toggleInSet(prev, month.key))}>
+                      <span className="text-slate-500">Fees <span className="text-red-400 font-semibold">{signedMoney(totals.fee)}</span></span>
+                      <span className="text-slate-500">Paid <span className="text-emerald-400 font-semibold">{signedMoney(totals.paid)}</span></span>
+                      <span className="text-slate-500">Change <span className={`font-semibold ${change > 0 ? 'text-emerald-400' : change < 0 ? 'text-red-400' : 'text-slate-400'}`}>{change > 0 ? '+' : ''}{signedMoney(change)}</span></span>
+                    </MonthHeader>
+                  {!collapsed && month.rows.map(att => (
+                  // One compact row per session: date, group, then fee, paid, and the balance before → after
+                  (() => { const c = attendanceBalanceChange(att); return (
+                  <div key={att.attendanceid} className="bg-slate-950 border border-slate-800 px-4 py-2.5 rounded-xl text-sm flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <div className="shrink-0 w-16 border-r border-slate-800 pr-4">
+                      <p className="font-bold text-white leading-tight">{formatLogMonthDay(att.date)}</p>
+                      <p className="text-[11px] text-slate-500">{formatLogYear(att.date)}</p>
                     </div>
-                    <div className="flex-1 min-w-0 space-y-3">
-                    <div className="flex justify-between items-start gap-3">
-                      <p className="font-semibold text-white">
+                    <div className="flex-1 min-w-[10rem]">
+                      <p className="font-semibold text-white truncate">
                         {att.groupname || 'Group Session'}
                         {att.groupschedule && <span className="ml-2 text-xs font-normal text-slate-400">{att.groupschedule}</span>}
                       </p>
-                      <span className={`text-xs font-semibold whitespace-nowrap ${toDisplayBalance(att.accounttotal) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(att.accounttotal)} Balance</span>
+                      {att.comments && <p className="text-xs text-slate-400 truncate" title={att.comments}>{att.comments}</p>}
                     </div>
-                    {(() => { const c = attendanceBalanceChange(att); return (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                      <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5">
-                        <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Fee Applied</p>
-                        <p className="text-red-400 font-semibold mt-0.5">{signedMoney(c.fee)}</p>
+                    <div className="shrink-0 flex gap-5 text-xs text-right">
+                      <div>
+                        <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Fee</p>
+                        <p className="text-red-400 font-semibold">{signedMoney(c.fee)}</p>
                       </div>
-                      <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5">
-                        <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Amount Paid</p>
-                        <p className="text-emerald-400 font-semibold mt-0.5">{signedMoney(c.paid)}</p>
+                      <div>
+                        <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Paid</p>
+                        <p className="text-emerald-400 font-semibold">{signedMoney(c.paid)}</p>
                       </div>
-                      <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 space-y-1">
-                        <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Balance Change</p>
-                        <div className="flex justify-between text-slate-300"><span>Previous</span><span>{signedMoney(c.before)}</span></div>
-                        <div className="flex justify-between text-red-400"><span>- Fee</span><span>{signedMoney(-c.fee)}</span></div>
-                        <div className="flex justify-between text-emerald-400"><span>+ Paid</span><span>{signedMoney(c.paid)}</span></div>
-                        <div className={`flex justify-between border-t border-slate-800 pt-1 font-semibold ${c.after < 0 ? 'text-red-400' : 'text-white'}`}><span>New</span><span>{signedMoney(c.after)}</span></div>
+                      {(() => { const change = Math.round((c.after - c.before) * 100) / 100; return (
+                        <div>
+                          <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Change</p>
+                          <p className={`font-semibold ${change > 0 ? 'text-emerald-400' : change < 0 ? 'text-red-400' : 'text-slate-400'}`}>{change > 0 ? '+' : ''}{signedMoney(change)}</p>
+                        </div>
+                      ); })()}
+                      <div>
+                        <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Balance</p>
+                        <p className="whitespace-nowrap">
+                          <span className="text-slate-400">{signedMoney(c.before)} → </span>
+                          <span className={`font-semibold ${c.after < 0 ? 'text-red-400' : 'text-white'}`}>{signedMoney(c.after)}</span>
+                        </p>
                       </div>
-                    </div>
-                    ); })()}
-                    <p className="text-xs text-slate-300">{att.comments || 'No comments'}</p>
                     </div>
                   </div>
-                ))}</div>
+                  ); })()
+                  ))}
+                  </div>
+                      );
+                  })}
+                </div>
               )}
 
               {clientTab === 'financials' && (
                 <div className="space-y-3">
-                  <RecordFilterBar
+                  {scheduledPolyNotice && (
+                    <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-3 text-sm text-amber-300 flex items-start justify-between gap-3">
+                      <p><AlertCircle size={15} className="inline mr-1.5 -mt-0.5" />{scheduledPolyNotice.text}</p>
+                      <div className="shrink-0 flex items-center gap-3">
+                        {isAllowed('polygraph') && (
+                          <button type="button" onClick={() => openPolySlot(scheduledPolyNotice.slotId)} className="text-xs font-semibold underline hover:text-white">View Slot</button>
+                        )}
+                        <button type="button" onClick={() => setScheduledPolyNotice(null)} aria-label="Dismiss" className="hover:text-white"><X size={15} /></button>
+                      </div>
+                    </div>
+                  )}
+                  {(() => {
+                    // Filters set but hidden are counted on the button so they aren't forgotten
+                    const activeLedgerFilters = [ledgerFilters.search.trim(), ledgerFilters.type, ledgerFilters.feeType, ledgerFilters.method, ledgerFilters.from, ledgerFilters.to].filter(Boolean).length;
+                    return (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowLedgerFilters(show => !show)}
+                          aria-expanded={showLedgerFilters}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border ${showLedgerFilters ? 'bg-slate-700 border-slate-600 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+                        >
+                          <SlidersHorizontal size={13} /> Filters
+                          {activeLedgerFilters > 0 && (
+                            <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{activeLedgerFilters}</span>
+                          )}
+                        </button>
+                        <span className="ml-auto text-xs text-slate-500">
+                          {shownLedger.length === clientFinancials.length ? `${clientFinancials.length} entries` : `Showing ${shownLedger.length} of ${clientFinancials.length}`}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                  {showLedgerFilters && <RecordFilterBar
                     search={ledgerFilters.search}
                     onSearch={v => setLedgerFilters(f => ({ ...f, search: v }))}
                     searchPlaceholder="Comments, fee type, amount..."
@@ -2694,32 +3058,234 @@ export default function App() {
                     shown={shownLedger.length}
                     total={clientFinancials.length}
                     onClear={() => setLedgerFilters(f => ({ ...EMPTY_LEDGER_FILTERS, sort: f.sort }))}
-                  />
+                  />}
                   {shownLedger.length === 0 && clientFinancials.length > 0 && (
                     <p className="text-center text-slate-500 text-sm py-4">No ledger entries match these filters.</p>
                   )}
-                  {shownLedger.map(fin => (<div key={fin.transactionid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl flex justify-between items-center text-sm"><div><p className="font-semibold text-white">
+                  {groupByMonth(shownLedger, ledgerFilters.sort).map(month => {
+                    const charges = month.rows.filter(f => f.type === 'Charge').reduce((t, f) => t + Number(f.amount || 0), 0);
+                    // Net of refunds and disputes
+                    const payments = month.rows.filter(f => f.type !== 'Charge')
+                      .reduce((t, f) => t + (PAYMENT_REVERSAL_TYPES.includes(f.type) ? -1 : 1) * Number(f.amount || 0), 0);
+                    const collapsed = collapsedLedgerMonths.has(month.key);
+                    return (
+                  <div key={month.key} className="space-y-2">
+                    <MonthHeader label={month.label} count={month.rows.length} noun="entry" collapsed={collapsed} onToggle={() => setCollapsedLedgerMonths(prev => toggleInSet(prev, month.key))}>
+                      <span className="text-slate-500">Fees <span className={`font-semibold ${charges > 0 ? 'text-red-400' : 'text-slate-400'}`}>{charges > 0 ? '-' : ''}{signedMoney(charges)}</span></span>
+                      <span className="text-slate-500">Payments <span className={`font-semibold ${payments > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>{payments > 0 ? '+' : ''}{signedMoney(payments)}</span></span>
+                    </MonthHeader>
+                  {!collapsed && month.rows.map(fin => {
+                    // Charges (fees) are red and refunds/disputes amber, both adding to what's owed; payments are green and take away from it
+                    const charge = fin.type === 'Charge';
+                    const reversal = PAYMENT_REVERSAL_TYPES.includes(fin.type);
+                    const minus = charge || reversal;
+                    const tone = charge ? LEDGER_TONES.charge : reversal ? LEDGER_TONES.reversal : LEDGER_TONES.payment;
+                    const badge = charge ? 'Fee' : fin.type === 'Payment' ? 'Payment' : fin.type;
+                    const isPoly = fin.feetype === 'Poly Fee';
+                    const isAdmin = role === 'Business Administrator';
+                    // Payments saved before the method was recorded were all cash
+                    const canAdjust = isAdmin && fin.type === 'Payment' && (!fin.paymentmethod || fin.paymentmethod === 'Cash');
+                    const card = fin.type === 'Payment' && fin.paymentmethod === 'Credit Card' ? cardPaymentStatus(fin, clientFinancials) : null;
+                    const disputeOpen = fin.disputestatus === 'Open';
+                    const action = paymentAction?.id === fin.transactionid ? paymentAction : null;
+                    const startAction = (kind: 'adjust' | CardPaymentAction, amount: number) => {
+                      setPaymentAction({ id: fin.transactionid, kind, amount: amount > 0 ? amount.toFixed(2) : '', reason: '' });
+                      setPaymentActionError('');
+                    };
+                    const linkClass = 'inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white';
+                    return (<div key={fin.transactionid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm"><div className="flex justify-between items-center"><div><p className="font-semibold text-white">
                       {fin.feetype || fin.type}
-                      {fin.type === 'Payment' && fin.paymentmethod && (
+                      <span className={`ml-2 align-middle text-[10px] uppercase tracking-wide px-2 py-0.5 rounded border ${tone.badge}`}>{badge}</span>
+                      {!charge && fin.paymentmethod && (
                         <span className="ml-2 align-middle text-[10px] uppercase tracking-wide bg-slate-800 text-slate-300 px-2 py-0.5 rounded">{fin.paymentmethod}</span>
                       )}
-                    </p><p className="text-xs text-slate-400">{new Date(fin.date).toLocaleString()} — {fin.comments}</p></div><div className="text-right">
-                  <p className={`font-bold ${fin.type === 'Charge' ? 'text-red-400' : 'text-emerald-400'}`}>${Number(fin.amount).toFixed(2)}</p>
+                      {fin.disputestatus && (
+                        <span className={`ml-2 align-middle text-[10px] uppercase tracking-wide px-2 py-0.5 rounded border ${disputeOpen ? 'text-amber-400 bg-amber-500/10 border-amber-500/30' : fin.disputestatus === 'Won' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-red-400 bg-red-500/10 border-red-500/30'}`}>Dispute {fin.disputestatus}</span>
+                      )}
+                    </p><p className="text-xs text-slate-400">{new Date(fin.date).toLocaleString()} — {fin.comments}</p>
+                    {fin.adjustedon && (
+                      <p className="text-xs text-amber-400 mt-1">
+                        Adjusted from {formatMoney(Number(fin.originalamount))} by {fin.adjustedby} on {new Date(fin.adjustedon).toLocaleDateString()}{fin.adjustmentreason ? `: ${fin.adjustmentreason}` : ''}
+                      </p>
+                    )}
+                    {card && card.kept < Number(fin.amount) && (
+                      <p className="text-xs text-amber-400 mt-1">
+                        {card.refunded > 0 && <>Refunded {formatMoney(card.refunded)}. </>}
+                        {card.openDispute > 0 && <>{formatMoney(card.openDispute)} in dispute. </>}
+                        Kept {formatMoney(card.kept)} of {formatMoney(Number(fin.amount))}.
+                      </p>
+                    )}
+                    </div><div className="text-right shrink-0 pl-4">
+                  <p className={`font-bold ${tone.text}`}>{minus ? '-' : '+'}${Number(fin.amount).toFixed(2)}</p>
                   {(() => { const b = ledgerBalanceChange(fin); return b && (
                     <p className={`text-xs mt-1 ${b.after < 0 ? 'text-red-400' : 'text-slate-400'}`}>
                       {b.changesBalance ? <>Balance {signedMoney(b.before)} → {signedMoney(b.after)}</> : <>Balance unchanged: {signedMoney(b.after)}</>}
                     </p>
                   ); })()}
-                </div></div>))}</div>
+                  {!action && (
+                    <div className="mt-1 flex justify-end gap-3">
+                      {canAdjust && <button type="button" onClick={() => startAction('adjust', Number(fin.amount))} className={linkClass}><Pencil size={12} /> Adjust</button>}
+                      {isAdmin && card && !disputeOpen && card.kept > 0 && (
+                        <>
+                          <button type="button" onClick={() => startAction('refund', card.kept)} className={linkClass}>Refund</button>
+                          <button type="button" onClick={() => startAction('dispute', card.kept)} className={linkClass}>Dispute</button>
+                        </>
+                      )}
+                      {isAdmin && card && disputeOpen && (
+                        <>
+                          <button type="button" onClick={() => startAction('dispute-won', 0)} className={linkClass}>Dispute Won</button>
+                          <button type="button" onClick={() => startAction('dispute-lost', 0)} className={linkClass}>Dispute Lost</button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div></div>
+                {action && (() => {
+                  const needsAmount = action.kind === 'adjust' || action.kind === 'refund' || action.kind === 'dispute';
+                  const entered = Number(action.amount) || 0;
+                  const max = action.kind === 'adjust' ? Infinity : card?.kept ?? 0;
+                  // Change to what was paid on this payment: positive means the client paid more
+                  const paidChange = action.kind === 'adjust' ? entered - Number(fin.amount)
+                    : action.kind === 'dispute-won' ? (card?.openDispute ?? 0)
+                    : action.kind === 'dispute-lost' ? 0
+                    : -entered;
+                  const amountOk = !needsAmount || (entered > 0 && entered <= max + 0.005 && (action.kind !== 'adjust' || Math.abs(paidChange) >= 0.005));
+                  let preview: React.ReactNode = null;
+                  if (action.kind === 'dispute-lost') {
+                    preview = <>The disputed {formatMoney(card?.openDispute ?? 0)} stays owed{isPoly ? ' on the poly fee' : ''}.</>;
+                  } else if (Math.abs(paidChange) >= 0.005 && isPoly) {
+                    const fee = Number(selectedClientDetail.polyfee || 0);
+                    const paidBefore = Number(selectedClientDetail.polyfeepaid || 0);
+                    const paidAfter = paidBefore + paidChange;
+                    const wasFull = fee > 0 && paidBefore >= fee;
+                    const isFull = fee > 0 && paidAfter >= fee;
+                    preview = <>
+                      Poly fee paid {formatMoney(paidBefore)} → {formatMoney(paidAfter)} of {formatMoney(fee)}.
+                      {wasFull && !isFull && <span className="text-amber-400"> No longer paid in full: the vouchers that paying in full added are removed.</span>}
+                      {!wasFull && isFull && <span className="text-emerald-400"> Paid in full: vouchers fill to {POLY_VOUCHER_MAX}.</span>}
+                    </>;
+                  } else if (Math.abs(paidChange) >= 0.005) {
+                    const newBalance = Number(selectedClientDetail.accountbalance || 0) - paidChange;
+                    preview = <>
+                      Balance {formatBalance(selectedClientDetail.accountbalance)} → {formatBalance(newBalance)}.
+                      {action.kind === 'adjust' ? ' Later ledger and attendance balances move by the same amount.' : fin.feetype === 'Group Fee' ? ' The check-in it was taken at and the Group Income Report are updated too.' : ''}
+                    </>;
+                  }
+                  const title = { adjust: 'Adjust cash payment', refund: 'Refund', dispute: 'Dispute (owed again until won)', 'dispute-won': 'Dispute won: apply the payment again', 'dispute-lost': 'Dispute lost' }[action.kind];
+                  const submitLabel = { adjust: 'Save Adjustment', refund: 'Record Refund', dispute: 'Record Dispute', 'dispute-won': 'Mark Won', 'dispute-lost': 'Mark Lost' }[action.kind];
+                  return (
+                  <form onSubmit={handlePaymentAction} className="mt-3 pt-3 border-t border-slate-800 space-y-2">
+                    <p className="text-xs font-semibold text-slate-300">{title}</p>
+                    <div className="flex flex-wrap gap-2">
+                      {needsAmount && (
+                        <div className="relative w-36">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            max={Number.isFinite(max) ? max : undefined}
+                            value={action.amount}
+                            onKeyDown={(e) => { if (e.key === '-' || e.key === 'e' || e.key === 'E') e.preventDefault(); }}
+                            onChange={(e) => setPaymentAction({ ...action, amount: e.target.value.replace(/-/g, '') })}
+                            aria-label={action.kind === 'adjust' ? 'Correct payment amount' : 'Amount'}
+                            autoFocus
+                            required
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 pl-7 pr-3 text-white text-sm"
+                          />
+                        </div>
+                      )}
+                      <input
+                        type="text"
+                        value={action.reason}
+                        onChange={(e) => setPaymentAction({ ...action, reason: e.target.value })}
+                        placeholder="Reason…"
+                        autoFocus={!needsAmount}
+                        required
+                        className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-sm"
+                      />
+                    </div>
+                    {needsAmount && Number.isFinite(max) && <p className="text-xs text-slate-500">Up to {formatMoney(max)} (what's left of this payment).</p>}
+                    {preview && <p className="text-xs text-slate-400">{preview}</p>}
+                    {isPoly && action.kind !== 'dispute-lost' && (() => {
+                      // Booking the polygraph already used the vouchers, so changing this payment can't take them back
+                      const slot = assignedSlotFor(selectedClientDetail.clientid);
+                      return slot && (
+                        <div className="bg-amber-500/10 border border-amber-500/40 rounded-lg p-2.5 text-xs text-amber-300 flex items-start justify-between gap-3">
+                          <p>
+                            <AlertCircle size={13} className="inline mr-1 -mt-0.5" />
+                            This client already has a polygraph scheduled ({slotSummary(slot)}) using poly fee vouchers.
+                            Changing this payment won't cancel it or return those vouchers.
+                          </p>
+                          {isAllowed('polygraph') && (
+                            <button type="button" onClick={() => openPolySlot(slot.slotid)} className="shrink-0 underline hover:text-white">View Slot</button>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    {paymentActionError && <p className="text-xs text-red-400">{paymentActionError}</p>}
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={() => { setPaymentAction(null); setPaymentActionError(''); }} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Cancel</button>
+                      <button
+                        type="submit"
+                        disabled={loading || !amountOk || !action.reason.trim()}
+                        className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
+                      >
+                        {submitLabel}
+                      </button>
+                    </div>
+                  </form>
+                  );
+                })()}
+                </div>);
+                  })}
+                  </div>
+                    );
+                  })}</div>
               )}
 
               {clientTab === 'notes' && (
                 <div className="space-y-4">
-                  <form onSubmit={handleAddNote} className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-3">
-                    <textarea value={newNoteText} onChange={(e) => setNewNoteText(e.target.value)} placeholder="Type case note..." rows={2} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required />
-                    <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-semibold ml-auto flex items-center gap-1"><PlusCircle size={14} /> Save Note</button>
-                  </form>
-                  <RecordFilterBar
+                  {(() => {
+                    // Filters set but hidden are counted on the button so they aren't forgotten
+                    const activeNoteFilters = [noteFilters.search.trim(), noteFilters.category, noteFilters.from, noteFilters.to].filter(Boolean).length;
+                    return (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowNoteForm(show => !show)}
+                          aria-expanded={showNoteForm}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border ${showNoteForm ? 'bg-blue-500/10 border-blue-500 text-blue-300' : 'bg-blue-600 hover:bg-blue-500 border-transparent text-white'}`}
+                        >
+                          <PlusCircle size={14} /> New Note
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowNoteFilters(show => !show)}
+                          aria-expanded={showNoteFilters}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border ${showNoteFilters ? 'bg-slate-700 border-slate-600 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+                        >
+                          <SlidersHorizontal size={13} /> Filters
+                          {activeNoteFilters > 0 && (
+                            <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{activeNoteFilters}</span>
+                          )}
+                        </button>
+                        <span className="ml-auto text-xs text-slate-500">
+                          {shownNotes.length === clientNotes.length ? `${clientNotes.length} notes` : `Showing ${shownNotes.length} of ${clientNotes.length}`}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                  {showNoteForm && (
+                    <form onSubmit={handleAddNote} className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-3">
+                      <textarea value={newNoteText} onChange={(e) => setNewNoteText(e.target.value)} placeholder="Type case note..." rows={3} autoFocus className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required />
+                      <div className="flex justify-end gap-2">
+                        <button type="button" onClick={() => { setShowNoteForm(false); setNewNoteText(''); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg text-xs font-semibold">Cancel</button>
+                        <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1"><PlusCircle size={14} /> Save Note</button>
+                      </div>
+                    </form>
+                  )}
+                  {showNoteFilters && <RecordFilterBar
                     search={noteFilters.search}
                     onSearch={v => setNoteFilters(f => ({ ...f, search: v }))}
                     searchPlaceholder="Note text or author..."
@@ -2739,7 +3305,7 @@ export default function App() {
                     shown={shownNotes.length}
                     total={clientNotes.length}
                     onClear={() => setNoteFilters(f => ({ ...EMPTY_NOTE_FILTERS, sort: f.sort }))}
-                  />
+                  />}
                   {shownNotes.length === 0 && clientNotes.length > 0 && (
                     <p className="text-center text-slate-500 text-sm py-4">No case notes match these filters.</p>
                   )}
@@ -2751,9 +3317,31 @@ export default function App() {
                         <p className="text-xs text-slate-500 mt-1">{formatLogTime(n.date)}</p>
                       </div>
                       <div className="flex-1 min-w-0">
-                        <span className="text-xs text-blue-400 font-semibold">{caseNoteLabel(n)}</span>
-                        <p className="text-slate-200 mt-1 whitespace-pre-wrap">{n.comments}</p>
-                        <p className="text-xs text-slate-500 text-right mt-2">— {n.User}</p>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs text-blue-400 font-semibold">{caseNoteLabel(n)}</span>
+                          {canChangeNote(n) && editingNoteId !== n.noteid && (
+                            <span className="flex gap-3 text-xs">
+                              <button type="button" onClick={() => { setEditingNoteId(n.noteid); setEditNoteText(n.comments || ''); setNoteError(null); }} className="inline-flex items-center gap-1 text-slate-400 hover:text-white"><Pencil size={12} /> Edit</button>
+                              <button type="button" onClick={() => handleDeleteNote(n.noteid)} className="inline-flex items-center gap-1 text-slate-400 hover:text-red-400"><Trash2 size={12} /> Delete</button>
+                            </span>
+                          )}
+                        </div>
+                        {editingNoteId === n.noteid ? (
+                          <div className="mt-2 space-y-2">
+                            <textarea value={editNoteText} onChange={(e) => setEditNoteText(e.target.value)} rows={3} autoFocus className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm" />
+                            <div className="flex justify-end gap-2">
+                              <button type="button" onClick={() => { setEditingNoteId(null); setNoteError(null); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Cancel</button>
+                              <button type="button" onClick={() => handleSaveNoteEdit(n.noteid)} disabled={noteSaving} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">{noteSaving ? 'Saving…' : 'Save Changes'}</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-slate-200 mt-1 whitespace-pre-wrap">{n.comments}</p>
+                        )}
+                        {noteError && noteError.noteId === n.noteid && <p className="text-xs text-red-400 mt-1">{noteError.message}</p>}
+                        <p className="text-xs text-slate-500 text-right mt-2">
+                          — {n.User}
+                          {n.editedon && <span className="italic"> · edited {new Date(n.editedon).toLocaleString()}{n.editedby && n.editedby !== n.User ? ` by ${n.editedby}` : ''}</span>}
+                        </p>
                       </div>
                     </div>
                   ))}
@@ -2762,9 +3350,9 @@ export default function App() {
 
               {clientTab === 'polygraphs' && selectedClientDetail.programtype !== 'BIP' && (
                 <div className="space-y-3">
-                  <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <label className={`flex items-center gap-2 text-slate-200 ${noPolyOverride && !noPolySaving ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
+                  <div className="bg-slate-950 border border-slate-800 px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <label className={`flex items-center gap-1.5 text-slate-200 whitespace-nowrap ${noPolyOverride && !noPolySaving ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
                         <input
                           type="checkbox"
                           checked={!!selectedClientDetail.nopolyrequired}
@@ -2774,27 +3362,60 @@ export default function App() {
                         />
                         No Poly Required
                       </label>
-                      {role === 'Business Administrator' && (
-                        <button
-                          type="button"
-                          disabled={noPolySaving}
-                          onClick={() => setNoPolyOverride(o => !o)}
-                          className="text-xs font-semibold px-2 py-1 rounded border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
-                        >
-                          {noPolyOverride ? 'Cancel Override' : 'Override'}
-                        </button>
-                      )}
+                      <span className="text-slate-500 truncate">
+                        {noPolySaving
+                          ? 'Saving...'
+                          : noPolyOverride
+                            ? 'Override on: check or uncheck to save (recorded in case notes).'
+                            : 'Locked'}
+                      </span>
                     </div>
-                    <p className="text-xs text-slate-500 mt-1 ml-6">
-                      {noPolySaving
-                        ? 'Saving...'
-                        : noPolyOverride
-                          ? 'Business Administrator override: check or uncheck to save. The change is recorded in the case notes.'
-                          : 'Locked. A Business Administrator can override it.'}
-                    </p>
+                    {role === 'Business Administrator' && (
+                      <button
+                        type="button"
+                        disabled={noPolySaving}
+                        onClick={() => setNoPolyOverride(o => !o)}
+                        className="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
+                      >
+                        {noPolyOverride ? 'Cancel Override' : 'Override'}
+                      </button>
+                    )}
                   </div>
-                  {clientPolygraphs.map(poly => (
-                  <div key={poly.resultid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex gap-5">
+                  {(() => {
+                    const slot = assignedSlotFor(selectedClientDetail.clientid);
+                    return slot && (
+                      <div className="bg-blue-500/5 border border-blue-500/30 p-4 rounded-xl text-sm flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Scheduled Polygraph</p>
+                          <p className="text-white mt-0.5">{slotSummary(slot)}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">Examiner: {getExaminerDisplayName(slot.polygrapher)}{slot.type ? ` · ${slot.type}` : ''}</p>
+                        </div>
+                        {isAllowed('polygraph') && (
+                          <button type="button" onClick={() => openPolySlot(slot.slotid)} className="shrink-0 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">View Slot</button>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {clientPolygraphs.map((poly, i) => {
+                    // Gap to the previous card, by the polygraph date when one was recorded (the list is ordered the same way)
+                    const polyDay = (p: any) => localYmd(p.polygraphdatetime || p.date);
+                    const prev = clientPolygraphs[i - 1];
+                    const gap = prev && polyDay(prev) && polyDay(poly) ? timeBetween(polyDay(poly), polyDay(prev)) : null;
+                    // Above the newest polygraph: how long it has been since then
+                    const since = i === 0 && polyDay(poly) ? timeBetween(polyDay(poly), localYmd(new Date())) : null;
+                    const label = since
+                      ? (since === 'Same day' ? 'Last polygraph was today' : `${since} since last polygraph`)
+                      : gap && (gap === 'Same day' ? 'Same day' : `${gap} apart`);
+                    return (
+                  <Fragment key={poly.resultid}>
+                  {label && (
+                    <div className={`flex items-center gap-3 px-4 ${since ? '' : '-my-1'}`}>
+                      <div className="flex-1 border-t border-dashed border-slate-800" />
+                      <span className={`text-[11px] rounded-full px-2.5 py-0.5 whitespace-nowrap border ${since ? 'text-blue-300 bg-blue-500/10 border-blue-500/30 font-semibold' : 'text-slate-400 bg-slate-900 border-slate-800'}`}>{label}</span>
+                      <div className="flex-1 border-t border-dashed border-slate-800" />
+                    </div>
+                  )}
+                  <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex gap-5">
                     <div className="shrink-0 w-28 flex flex-col justify-center border-r border-slate-800 pr-5">
                       <p className="text-2xl font-bold text-white leading-tight">{formatLogMonthDay(poly.date)}</p>
                       <p className="text-sm text-slate-400 mt-0.5">{formatLogYear(poly.date)}</p>
@@ -2817,7 +3438,9 @@ export default function App() {
                       </p>
                     </div>
                   </div>
-                  ))}
+                  </Fragment>
+                    );
+                  })}
                 </div>
               )}
 
@@ -2956,8 +3579,9 @@ export default function App() {
         )}
 
         {/* FULL ATTENDANCE & SIGN-IN TAB */}
-        {activeTab === 'attendance' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Stays mounted on other tabs so a group check-in in progress isn't lost */}
+        {isAllowed('attendance') && (
+          <div className={`${activeTab === 'attendance' ? 'grid' : 'hidden'} grid-cols-1 lg:grid-cols-3 gap-6`}>
             <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
               <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
                 <div><h2 className="text-lg font-bold text-white">Attendance Sign-In & Payment Entry</h2><p className="text-xs text-slate-400 mt-0.5">Record attendance, cross-group makeups, or standalone ledger payments.</p></div>
@@ -2968,6 +3592,22 @@ export default function App() {
                     <button onClick={() => setIsCustomCharge(true)} className={`px-3 py-1.5 rounded text-xs font-semibold ${isCustomCharge ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Custom Charge</button>
                   )}
                 </div>
+              </div>
+
+              {/* Stays mounted while another mode is showing so a check-in in progress isn't lost */}
+              <div className={!isAccountOnly && !(isCustomCharge && role === 'Business Administrator') ? '' : 'hidden'}>
+                <GroupCheckInWorkflow
+                  groups={activeGroups}
+                  clients={clients}
+                  createdBy={user.employeeemail}
+                  onSuccess={setSuccessMsg}
+                  onError={setError}
+                  onSaved={loadDashboardData}
+                  openGroups={openGroups}
+                  onOpenGroupsChanged={loadOpenGroups}
+                  resumeRequest={resumeRequest}
+                  onResumeHandled={() => setResumeRequest(null)}
+                />
               </div>
 
               {isCustomCharge && role === 'Business Administrator' ? (
@@ -3015,20 +3655,7 @@ export default function App() {
                     <button type="submit" disabled={loading || !chargeNotes.trim()} className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">Charge Fee</button>
                   </div>
                 </form>
-              ) : !isAccountOnly ? (
-                <GroupCheckInWorkflow
-                  groups={activeGroups}
-                  clients={clients}
-                  createdBy={user.employeeemail}
-                  onSuccess={setSuccessMsg}
-                  onError={setError}
-                  onSaved={loadDashboardData}
-                  openGroups={openGroups}
-                  onOpenGroupsChanged={loadOpenGroups}
-                  resumeRequest={resumeRequest}
-                  onResumeHandled={() => setResumeRequest(null)}
-                />
-              ) : (
+              ) : !isAccountOnly ? null : (
                 <>
                 <form onSubmit={handleStandalonePaymentSubmit} className="space-y-5 max-w-xl">
                   <div>
@@ -3202,18 +3829,24 @@ export default function App() {
               {callInMode === 'client' ? (
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Client</label>
-                  <select value={selectedClient} onChange={(e) => setSelectedClient(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required>
-                    <option value="">Select a client…</option>
-                    {clients.map(c => <option key={c.clientid} value={c.clientid}>{c.lastname}, {c.firstname}</option>)}
-                  </select>
+                  <ClientPicker
+                    clients={clients}
+                    value={selectedClient}
+                    onChange={setSelectedClient}
+                    required
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm placeholder-slate-500"
+                  />
                 </div>
               ) : (
                 <div>
                   <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Group</label>
-                  <select value={selectedGroup} onChange={(e) => setSelectedGroup(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required>
-                    <option value="">Select a group…</option>
-                    {activeGroups.map(g => <option key={g.groupid} value={g.groupid}>{g.groupname}</option>)}
-                  </select>
+                  <GroupPicker
+                    groups={activeGroups}
+                    value={selectedGroup}
+                    onChange={setSelectedGroup}
+                    required
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm placeholder-slate-500"
+                  />
                   {selectedGroup && (
                     <p className="text-xs text-slate-500 mt-1.5">
                       Will be logged for {clients.filter(c => c.groupid === Number(selectedGroup) && c.programstatus === 'Active').length} active client(s) in this group.
@@ -3309,12 +3942,11 @@ export default function App() {
                     <th className="p-3"><button onClick={() => toggleGroupSort('schedule')} className="uppercase tracking-wider hover:text-slate-200">Schedule{groupSortArrow('schedule')}</button></th>
                     <th className="p-3"><button onClick={() => toggleGroupSort('clientcount')} className="uppercase tracking-wider hover:text-slate-200">Assigned Clients{groupSortArrow('clientcount')}</button></th>
                     <th className="p-3"><button onClick={() => toggleGroupSort('active')} className="uppercase tracking-wider hover:text-slate-200">Status{groupSortArrow('active')}</button></th>
-                    <th className="p-3 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800 text-sm">
                   {sortedDirectoryGroups.map(g => (
-                    <tr key={g.groupid} className="hover:bg-slate-800/50 transition">
+                    <tr key={g.groupid} onClick={() => handleOpenGroup(g)} className="hover:bg-slate-800/50 transition cursor-pointer">
                       <td className="p-3 font-medium text-white">{g.groupname}</td>
                       <td className="p-3 text-slate-400">{normalizeLocation(g.location)}</td>
                       <td className="p-3 text-slate-300">{g.counselor}</td>
@@ -3325,9 +3957,6 @@ export default function App() {
                         {g.active === false
                           ? <span className="bg-slate-700/50 text-slate-400 px-2 py-0.5 rounded text-xs">Inactive</span>
                           : <span className="bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded text-xs">Active</span>}
-                      </td>
-                      <td className="p-3 text-right">
-                        <button onClick={() => handleOpenGroup(g)} className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded-lg">Manage Group</button>
                       </td>
                     </tr>
                   ))}
@@ -3446,10 +4075,13 @@ export default function App() {
               <form onSubmit={handleTestSubmit} className="space-y-4">
                 <div>
                   <label className="block text-xs text-slate-400 uppercase mb-1">Select Client</label>
-                  <select value={testClient} onChange={(e) => handleSelectTestClient(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm" required>
-                    <option value="">-- Choose Client --</option>
-                    {clients.map(c => <option key={c.clientid} value={c.clientid}>{c.lastname}, {c.firstname}</option>)}
-                  </select>
+                  <ClientPicker
+                    clients={clients}
+                    value={testClient}
+                    onChange={handleSelectTestClient}
+                    required
+                    className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm placeholder-slate-500"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs text-slate-400 uppercase mb-1">Test Type</label>
@@ -3828,7 +4460,7 @@ export default function App() {
                 ) : (
                   <div className="flex flex-col gap-3">
                     {examinerSlots.map(slot => (
-                      <div key={slot.slotid} className={`bg-slate-950 border ${slot.status === 'Assigned' ? 'border-emerald-500/40 bg-emerald-950/10' : 'border-slate-800'} px-4 py-3 rounded-xl text-sm space-y-2`}>
+                      <div key={slot.slotid} id={`poly-slot-${slot.slotid}`} className={`bg-slate-950 border ${slot.status === 'Assigned' ? 'border-emerald-500/40 bg-emerald-950/10' : 'border-slate-800'} ${highlightedSlotId === slot.slotid ? 'ring-2 ring-blue-500' : ''} px-4 py-3 rounded-xl text-sm space-y-2 transition`}>
                         <div className="flex justify-between items-start gap-3">
                           <div className="min-w-0">
                             <p className="font-semibold text-white">{slot.location}</p>
@@ -4057,7 +4689,7 @@ export default function App() {
               ))}
             </div>
 
-            {showGroupReport && <GroupIncomeReport />}
+            {showGroupReport && <GroupIncomeReport userEmail={user.employeeemail} canRecordDeposits={user.role === 'Business Administrator'} />}
 
             {agentReportData.length > 0 && (
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
@@ -4089,15 +4721,23 @@ export default function App() {
         {activeTab === 'admin' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
-              <h2 className="text-lg font-bold text-white border-b border-slate-800 pb-3">User Management</h2>
+              <div className="flex justify-between items-center gap-3 border-b border-slate-800 pb-3">
+                <h2 className="text-lg font-bold text-white">User Management</h2>
+                {role === 'Business Administrator' && !showEmployeeForm && (
+                  <button type="button" onClick={() => { resetEmployeeForm(); setShowEmployeeForm(true); }} className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5">
+                    <PlusCircle size={14} /> New User
+                  </button>
+                )}
+              </div>
               {/* Only Business Administrators can create or edit accounts */}
               {role !== 'Business Administrator' && (
                 <p className="text-xs text-slate-500 bg-slate-950 border border-slate-800 rounded p-3">
                   Only Business Administrators can create or edit accounts.
                 </p>
               )}
-              {role === 'Business Administrator' && (
-              <form onSubmit={handleSaveEmployee} className="space-y-3">
+              {role === 'Business Administrator' && showEmployeeForm && (
+              <form onSubmit={handleSaveEmployee} className="space-y-3 bg-slate-950/50 border border-slate-800 rounded-lg p-4">
+                <p className="text-sm font-semibold text-white">{editingEmail ? 'Edit Account' : 'New User'}</p>
                 {editingEmail && <p className="text-xs text-blue-400">Editing {editingEmail}. Email can't be changed.</p>}
                 <input type="email" value={empEmail} onChange={(e) => setEmpEmail(e.target.value)} disabled={editingEmail !== null} placeholder="Employee Email" className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm disabled:opacity-50" required />
                 <input type="text" value={empName} onChange={(e) => setEmpName(e.target.value)} placeholder="Full Display Name" className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm" required />
@@ -4118,10 +4758,8 @@ export default function App() {
                   <p className="text-xs text-slate-500">You can change your own name here, but not your own role or active status.</p>
                 )}
                 <div className="flex gap-2">
-                  <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded text-xs">{editingEmail ? 'Save Changes' : 'Save User Role'}</button>
-                  {editingEmail && (
-                    <button type="button" onClick={resetEmployeeForm} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold px-4 py-2 rounded text-xs">Cancel</button>
-                  )}
+                  <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded text-xs">{editingEmail ? 'Save Changes' : 'Create User'}</button>
+                  <button type="button" onClick={resetEmployeeForm} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold px-4 py-2 rounded text-xs">Cancel</button>
                 </div>
               </form>
               )}
@@ -4142,14 +4780,27 @@ export default function App() {
                     ))}
                   </div>
                 </div>
-                <input
-                  type="search"
-                  value={empSearch}
-                  onChange={(e) => setEmpSearch(e.target.value)}
-                  placeholder="Search by name or email..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-xs placeholder-slate-500"
-                />
-                {employees.filter(e => (accountFilter === 'all' || (accountFilter === 'active' ? e.active !== false : e.active === false)) && (empSearch.trim() === '' || `${e.displayname} ${e.employeeemail} ${e.role}`.toLowerCase().includes(empSearch.toLowerCase()))).map(e => (
+                <div className="flex gap-2">
+                  <input
+                    type="search"
+                    value={empSearch}
+                    onChange={(e) => setEmpSearch(e.target.value)}
+                    placeholder="Search by name or email..."
+                    className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-xs placeholder-slate-500"
+                  />
+                  <select
+                    value={empRoleFilter}
+                    onChange={(e) => setEmpRoleFilter(e.target.value)}
+                    aria-label="Filter by user type"
+                    className={`shrink-0 bg-slate-950 border rounded px-2.5 text-xs ${empRoleFilter ? 'border-blue-500 text-white' : 'border-slate-700 text-slate-300'}`}
+                  >
+                    <option value="">All User Types</option>
+                    {sortedUnique(employees.map(e => e.role)).map(r => (
+                      <option key={r} value={r}>{r} ({employees.filter(e => e.role === r && (accountFilter === 'all' || (accountFilter === 'active' ? e.active !== false : e.active === false))).length})</option>
+                    ))}
+                  </select>
+                </div>
+                {employees.filter(e => (accountFilter === 'all' || (accountFilter === 'active' ? e.active !== false : e.active === false)) && (!empRoleFilter || e.role === empRoleFilter) && (empSearch.trim() === '' || `${e.displayname} ${e.employeeemail} ${e.role}`.toLowerCase().includes(empSearch.toLowerCase()))).map(e => (
                   <div key={e.employeeemail} className={`bg-slate-950 border p-3 rounded flex justify-between items-center gap-3 text-xs ${editingEmail === e.employeeemail ? 'border-blue-500' : 'border-slate-800'}`}>
                     <div className="min-w-0">
                       <p className="font-semibold text-white truncate">{e.displayname}</p>

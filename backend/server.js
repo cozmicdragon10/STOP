@@ -252,6 +252,57 @@ app.post('/api/clients/:id/notes', async (req, res) => {
     }
 });
 
+// Notes show "edited" once changed; the original text is kept in the system log
+pool.query('ALTER TABLE Notes ADD COLUMN IF NOT EXISTS EditedBy VARCHAR(255), ADD COLUMN IF NOT EXISTS EditedOn TIMESTAMP')
+    .catch(err => console.error('Could not add Notes edit columns:', err.message));
+
+// A note can be changed by its author or by a Business Administrator
+const noteForChange = async (noteId, user) => {
+    const role = await activeRoleFor(user);
+    const found = await pool.query('SELECT * FROM Notes WHERE NoteId = $1', [noteId]);
+    const note = found.rows[0];
+    if (!note) return { status: 404, error: 'Case note not found.' };
+    const isAuthor = String(note.User || '').trim().toLowerCase() === String(user || '').trim().toLowerCase();
+    if (!role || (role !== 'Business Administrator' && !isAuthor)) {
+        return { status: 403, error: "Only the note's author or a Business Administrator can change this note." };
+    }
+    return { note };
+};
+
+app.put('/api/notes/:noteId', async (req, res) => {
+    try {
+        const { noteId } = req.params;
+        const { user, comments } = req.body;
+        if (!String(comments || '').trim()) {
+            return res.status(400).json({ error: 'The note cannot be empty.' });
+        }
+        const check = await noteForChange(noteId, user);
+        if (check.error) return res.status(check.status).json({ error: check.error });
+        const result = await pool.query(
+            'UPDATE Notes SET Comments = $1, EditedBy = $2, EditedOn = NOW() WHERE NoteId = $3 RETURNING *',
+            [String(comments).trim(), user, noteId]
+        );
+        await logAction(user, 'Edit Note', `Edited note ${noteId} on Client ID ${check.note.client}. Previous text: ${check.note.comments}`);
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/notes/:noteId', async (req, res) => {
+    try {
+        const { noteId } = req.params;
+        const { user } = req.body;
+        const check = await noteForChange(noteId, user);
+        if (check.error) return res.status(check.status).json({ error: check.error });
+        await pool.query('DELETE FROM Notes WHERE NoteId = $1', [noteId]);
+        await logAction(user, 'Delete Note', `Deleted ${check.note.category || ''} note ${noteId} on Client ID ${check.note.client} by ${check.note.User}. Text: ${check.note.comments}`);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.get('/api/clients/:id/polygraphs', async (req, res) => {
     try {
         const { id } = req.params;
@@ -478,6 +529,10 @@ app.put('/api/clients/:id', async (req, res) => {
                 PolyFeeVoucher = CASE
                     WHEN PolyFeePaid < PolyFee AND COALESCE($26, PolyFeePaid) >= COALESCE($27, PolyFee) THEN ${POLY_VOUCHER_MAX}
                     ELSE COALESCE($25, PolyFeeVoucher)
+                END,
+                PolyVouchersBeforeFill = CASE
+                    WHEN PolyFeePaid < PolyFee AND COALESCE($26, PolyFeePaid) >= COALESCE($27, PolyFee) THEN PolyFeeVoucher
+                    ELSE PolyVouchersBeforeFill
                 END,
                 PolyFeePaid = COALESCE($26, PolyFeePaid),
                 PolyFee = COALESCE($27, PolyFee),
@@ -991,17 +1046,18 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         [client, group || null, sessionDate, paid, feeNum, paidNum, newBalance, voucherUsed, type, comments || null, createdBy, paidNum > 0 ? paymentMethod : null, sessionNum]
     );
 
+    const attendanceId = attRes.rows[0].attendanceid;
     if (paidNum > 0) {
         await db.query(
-            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod)
-             VALUES ($1, NOW(), 'Payment', $2, 'Group Fee', $3, $4, $5)`,
-            [client, paidNum, newBalance, `Payment applied during ${type} session on ${sessionDate}.`, paymentMethod]
+            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, AttendanceId)
+             VALUES ($1, NOW(), 'Payment', $2, 'Group Fee', $3, $4, $5, $6)`,
+            [client, paidNum, newBalance, `Payment applied during ${type} session on ${sessionDate}.`, paymentMethod, attendanceId]
         );
     } else if (feeNum > 0) {
         await db.query(
-            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments)
-             VALUES ($1, NOW(), 'Charge', $2, 'Group Fee', $3, $4)`,
-            [client, feeNum, newBalance, `${type} fee assessed on ${sessionDate}.`]
+            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, AttendanceId)
+             VALUES ($1, NOW(), 'Charge', $2, 'Group Fee', $3, $4, $5)`,
+            [client, feeNum, newBalance, `${type} fee assessed on ${sessionDate}.`, attendanceId]
         );
     }
 
@@ -1030,7 +1086,7 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         }
     }
 
-    return { attendanceId: attRes.rows[0].attendanceid, newBalance, polyVoucherAwarded };
+    return { attendanceId, newBalance, polyVoucherAwarded };
 };
 
 app.post('/api/attendance', async (req, res) => {
@@ -1229,9 +1285,14 @@ app.post('/api/financials/payment', async (req, res) => {
             );
         }
 
+        // Filling the vouchers remembers the count before (the right-hand PolyFeeVoucher is the pre-update value), so
+        // adjusting or refunding this payment later can take back only what the fill added
+        const fillsVouchers = polyAmount > 0 && polyAmount >= polyOwed;
         await clientDb.query(
-            'UPDATE Clients SET AccountBalance = $1, PolyFeePaid = $2, PolyFeeVoucher = $3 WHERE ClientId = $4',
-            [newBalance, newPolyPaid, newPolyVoucher, client]
+            `UPDATE Clients SET AccountBalance = $1, PolyFeePaid = $2, PolyFeeVoucher = $3,
+                 PolyVouchersBeforeFill = CASE WHEN $5 THEN PolyFeeVoucher ELSE PolyVouchersBeforeFill END
+             WHERE ClientId = $4`,
+            [newBalance, newPolyPaid, newPolyVoucher, client, fillsVouchers]
         );
 
         await clientDb.query('COMMIT');
@@ -1285,6 +1346,357 @@ app.post('/api/financials/charge', async (req, res) => {
         res.status(500).json({ error: error.message });
     } finally {
         clientDb.release();
+    }
+});
+
+// AttendanceId ties a check-in's ledger row to its attendance row (rows saved before it existed are matched by comment).
+// The Adjusted columns keep what a corrected payment was first recorded as, and who corrected it and why.
+// Attendance.CreatedOn orders check-ins against ledger rows; rows saved before it existed stay NULL.
+pool.query(`
+    ALTER TABLE FinancialTransactions
+        ADD COLUMN IF NOT EXISTS AttendanceId INT,
+        ADD COLUMN IF NOT EXISTS OriginalAmount NUMERIC(10, 2),
+        ADD COLUMN IF NOT EXISTS AdjustedBy VARCHAR(255),
+        ADD COLUMN IF NOT EXISTS AdjustedOn TIMESTAMP,
+        ADD COLUMN IF NOT EXISTS AdjustmentReason TEXT
+`)
+    .then(() => pool.query('ALTER TABLE Attendance ADD COLUMN IF NOT EXISTS CreatedOn TIMESTAMP'))
+    .then(() => pool.query('ALTER TABLE Attendance ALTER COLUMN CreatedOn SET DEFAULT CURRENT_TIMESTAMP'))
+    // Refund, Dispute, and Dispute Won rows point at the credit card payment they belong to; the payment keeps its dispute status
+    .then(() => pool.query(`
+        ALTER TABLE FinancialTransactions
+            ADD COLUMN IF NOT EXISTS RelatedTransactionId INT,
+            ADD COLUMN IF NOT EXISTS DisputeStatus VARCHAR(20)
+    `))
+    .then(() => pool.query(`
+        ALTER TABLE FinancialTransactions DROP CONSTRAINT IF EXISTS financialtransactions_type_check,
+            ADD CONSTRAINT financialtransactions_type_check
+                CHECK (Type IN ('Payment', 'Charge', 'Adjustment', 'Voucher', 'Refund', 'Dispute', 'Dispute Won'))
+    `))
+    // Vouchers the client had before paying the poly fee in full filled them; NULL while not filled by a payment
+    .then(() => pool.query('ALTER TABLE Clients ADD COLUMN IF NOT EXISTS PolyVouchersBeforeFill INT'))
+    .catch(err => console.error('Could not add payment adjustment columns:', err.message));
+
+// Ledger row types that take money back off a payment (the client owes it again), and the one that puts it back
+const PAYMENT_REVERSAL_TYPES = ['Refund', 'Dispute'];
+
+// Moves a client's PolyFeePaid by delta and keeps the vouchers in step. Becoming paid in full fills them and remembers the
+// count before; dropping below paid in full takes back only what that fill added, keeping incentive vouchers earned before it.
+// A fill from before PolyVouchersBeforeFill existed has no count saved, so those vouchers go to 0.
+const changePolyFeePaid = async (db, clientId, delta) => {
+    const r = await db.query('SELECT PolyFeePaid, PolyFee, PolyFeeVoucher, PolyVouchersBeforeFill FROM Clients WHERE ClientId = $1 FOR UPDATE', [clientId]);
+    const c = r.rows[0];
+    const fee = Number(c.polyfee || 0);
+    const paidBefore = Number(c.polyfeepaid || 0);
+    const paidAfter = Math.round((paidBefore + delta) * 100) / 100;
+    const vouchersBefore = Number(c.polyfeevoucher || 0);
+    let vouchers = vouchersBefore;
+    let beforeFill = c.polyvouchersbeforefill;
+    const wasFull = fee > 0 && paidBefore >= fee;
+    const isFull = fee > 0 && paidAfter >= fee;
+    if (!wasFull && isFull) {
+        beforeFill = vouchers;
+        vouchers = POLY_VOUCHER_MAX;
+    } else if (wasFull && !isFull) {
+        vouchers = Math.min(vouchers, Number(beforeFill ?? 0));
+        beforeFill = null;
+    }
+    await db.query(
+        'UPDATE Clients SET PolyFeePaid = $1, PolyFeeVoucher = $2, PolyVouchersBeforeFill = $3 WHERE ClientId = $4',
+        [paidAfter, vouchers, beforeFill, clientId]
+    );
+    return { polyFeePaid: paidAfter, polyFeeVoucher: vouchers, vouchersRemoved: Math.max(0, vouchersBefore - vouchers), vouchersAdded: Math.max(0, vouchers - vouchersBefore) };
+};
+
+// The polygraph a client is booked into with poly fee vouchers, if any. Changing a poly fee payment doesn't cancel it,
+// so the caller is told about it instead.
+const scheduledPolygraphFor = async (db, clientId) => {
+    const r = await db.query(
+        `SELECT s.SlotId, to_char(s.Date, 'YYYY-MM-DD') AS Date, s.Time, s.Location
+         FROM PolygraphAppointments a JOIN PolygraphSlots s ON s.SlotId = a.SlotId
+         WHERE a.Client = $1 AND a.Status = 'Scheduled' AND COALESCE(a.PolyVouchersUsed, 0) > 0
+         ORDER BY s.Date, s.Time LIMIT 1`,
+        [clientId]
+    );
+    const slot = r.rows[0];
+    return slot ? { slotId: slot.slotid, date: slot.date, time: slot.time, location: slot.location } : null;
+};
+
+const scheduledPolygraphText = (slot) => (slot
+    ? ` The client already has a polygraph scheduled ${slot.date}${slot.time ? ` at ${slot.time}` : ''}${slot.location ? ` (${slot.location})` : ''} using poly fee vouchers; it was not changed.`
+    : '');
+
+const voucherChangeText = (poly) => (poly.vouchersRemoved > 0 ? ` ${poly.vouchersRemoved} poly fee voucher(s) removed.` : '')
+    + (poly.vouchersAdded > 0 ? ` Poly fee paid in full: vouchers filled to ${POLY_VOUCHER_MAX}.` : '');
+
+// The check-in a ledger row was taken at: its AttendanceId, or for rows saved before that existed, the one attendance row
+// whose comment and paid amount match
+const checkInFor = async (db, tx) => {
+    if (tx.attendanceid) return tx.attendanceid;
+    if (tx.feetype !== 'Group Fee') return null;
+    const match = await db.query(
+        `SELECT AttendanceId FROM Attendance
+         WHERE Client = $1 AND AccountPaid = $2
+           AND 'Payment applied during ' || Type || ' session on ' || to_char(Date, 'YYYY-MM-DD') || '.' = $3`,
+        [tx.client, Number(tx.amount), tx.comments]
+    );
+    return match.rows.length === 1 ? match.rows[0].attendanceid : null;
+};
+
+// Corrects the amount of a cash payment (Business Administrators only). For an account payment the difference moves the
+// client's balance and the balance stored on this and every later ledger and attendance row, and a payment taken at
+// check-in also updates that attendance row's AccountPaid, which the group income report and its cash deposits use.
+// For a poly fee payment the difference moves PolyFeePaid instead, and the vouchers follow (see changePolyFeePaid).
+app.put('/api/financials/:id/adjust', async (req, res) => {
+    const { id } = req.params;
+    const { amount, reason, user } = req.body || {};
+    if (await activeRoleFor(user) !== 'Business Administrator') {
+        return res.status(403).json({ error: 'Only Business Administrators can adjust payments.' });
+    }
+    const newAmount = Math.round(Number(amount) * 100) / 100;
+    if (!(newAmount > 0)) {
+        return res.status(400).json({ error: 'The adjusted amount must be greater than zero.' });
+    }
+    const why = String(reason || '').trim();
+    if (!why) {
+        return res.status(400).json({ error: 'A reason is required to adjust a payment.' });
+    }
+
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        const txRes = await db.query('SELECT * FROM FinancialTransactions WHERE TransactionId = $1 FOR UPDATE', [id]);
+        const tx = txRes.rows[0];
+        if (!tx) {
+            await db.query('ROLLBACK');
+            return res.status(404).json({ error: 'That ledger entry no longer exists.' });
+        }
+        // Payments saved before the method was recorded were all cash; adjusting one records it as Cash.
+        // Credit card payments are corrected with a refund or dispute instead.
+        if (tx.type !== 'Payment' || (tx.paymentmethod && tx.paymentmethod !== 'Cash')) {
+            await db.query('ROLLBACK');
+            return res.status(400).json({ error: 'Only cash payments can be adjusted.' });
+        }
+        const clientRes = await db.query('SELECT AccountBalance FROM Clients WHERE ClientId = $1 FOR UPDATE', [tx.client]);
+        const isPoly = tx.feetype === 'Poly Fee';
+
+        const oldAmount = Number(tx.amount);
+        // Paying more lowers what the client owes (stored sign: positive = owes)
+        const delta = Math.round((newAmount - oldAmount) * 100) / 100;
+        if (delta === 0) {
+            await db.query('ROLLBACK');
+            return res.status(400).json({ error: `The payment is already $${newAmount.toFixed(2)}.` });
+        }
+
+        const paidOn = new Date(tx.date).toLocaleDateString('en-US');
+        if (isPoly) {
+            // Poly fee rows store the account balance, which this doesn't change
+            const poly = await changePolyFeePaid(db, tx.client, delta);
+            const scheduledPolygraph = await scheduledPolygraphFor(db, tx.client);
+            await db.query(
+                `UPDATE FinancialTransactions SET Amount = $1, PaymentMethod = 'Cash', OriginalAmount = COALESCE(OriginalAmount, $2), AdjustedBy = $3,
+                     AdjustedOn = NOW(), AdjustmentReason = $4
+                 WHERE TransactionId = $5`,
+                [newAmount, oldAmount, user, why, tx.transactionid]
+            );
+            await logClientChange(db, {
+                clientId: tx.client,
+                changedBy: user,
+                changeType: 'Payment Adjusted',
+                oldValue: `$${oldAmount.toFixed(2)}`,
+                newValue: `$${newAmount.toFixed(2)}`,
+                details: `Cash Poly Fee payment from ${paidOn}: ${why}. Poly fee paid now $${poly.polyFeePaid.toFixed(2)}.${voucherChangeText(poly)}${scheduledPolygraphText(scheduledPolygraph)}`,
+            });
+            await db.query('COMMIT');
+            await logAction(user, 'Payment Adjusted', `Client ID ${tx.client}: cash poly fee payment ${tx.transactionid} from ${paidOn} changed from $${oldAmount.toFixed(2)} to $${newAmount.toFixed(2)}: ${why}.${voucherChangeText(poly)}${scheduledPolygraphText(scheduledPolygraph)}`);
+            return res.json({ success: true, newBalance: Number(clientRes.rows[0].accountbalance), attendanceUpdated: false, ...poly, scheduledPolygraph });
+        }
+
+        const attendanceId = await checkInFor(db, tx);
+
+        // Compared in SQL so the stored timestamp keeps its full precision
+        await db.query(
+            `UPDATE FinancialTransactions SET FinalBalance = FinalBalance - $1
+             WHERE Client = $2 AND FinalBalance IS NOT NULL
+               AND (TransactionId = $3 OR (Date, TransactionId) > (SELECT Date, TransactionId FROM FinancialTransactions WHERE TransactionId = $3))`,
+            [delta, tx.client, tx.transactionid]
+        );
+        // Later check-ins: by CreatedOn when saved, otherwise after the linked check-in, otherwise on a later day
+        await db.query(
+            `UPDATE Attendance SET AccountTotal = AccountTotal - $1
+             WHERE Client = $2 AND (
+                 AttendanceId = $3
+                 OR CreatedOn > (SELECT Date FROM FinancialTransactions WHERE TransactionId = $4)
+                 OR (CreatedOn IS NULL AND CASE WHEN $3::int IS NULL
+                         THEN Date > (SELECT Date FROM FinancialTransactions WHERE TransactionId = $4)::date
+                         ELSE AttendanceId > $3 END)
+             )`,
+            [delta, tx.client, attendanceId || null, tx.transactionid]
+        );
+        if (attendanceId) {
+            await db.query(
+                `UPDATE Attendance SET AccountPaid = $1, PaymentMethod = COALESCE(PaymentMethod, 'Cash') WHERE AttendanceId = $2`,
+                [newAmount, attendanceId]
+            );
+        }
+        await db.query(
+            `UPDATE FinancialTransactions SET Amount = $1, PaymentMethod = 'Cash', OriginalAmount = COALESCE(OriginalAmount, $2), AdjustedBy = $3,
+                 AdjustedOn = NOW(), AdjustmentReason = $4, AttendanceId = COALESCE(AttendanceId, $5)
+             WHERE TransactionId = $6`,
+            [newAmount, oldAmount, user, why, attendanceId || null, tx.transactionid]
+        );
+        const balRes = await db.query(
+            'UPDATE Clients SET AccountBalance = AccountBalance - $1 WHERE ClientId = $2 RETURNING AccountBalance',
+            [delta, tx.client]
+        );
+        await logClientChange(db, {
+            clientId: tx.client,
+            changedBy: user,
+            changeType: 'Payment Adjusted',
+            oldValue: `$${oldAmount.toFixed(2)}`,
+            newValue: `$${newAmount.toFixed(2)}`,
+            details: `Cash ${tx.feetype || 'payment'} from ${paidOn}: ${why}`,
+        });
+
+        await db.query('COMMIT');
+        await logAction(user, 'Payment Adjusted', `Client ID ${tx.client}: cash payment ${tx.transactionid} from ${paidOn} changed from $${oldAmount.toFixed(2)} to $${newAmount.toFixed(2)}: ${why}`);
+        res.json({ success: true, newBalance: Number(balRes.rows[0].accountbalance), attendanceUpdated: Boolean(attendanceId) });
+    } catch (err) {
+        await db.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
+    }
+});
+
+// Refunds and disputes on a credit card payment (Business Administrators only). Each is its own ledger row pointing at the
+// payment. A refund or dispute takes that much back off the payment: the client owes it again (for a poly fee payment it
+// comes off PolyFeePaid instead), and a check-in payment's AccountPaid drops so the group income report shows what was kept.
+// A dispute reverses the payment as soon as it's opened; winning it puts the disputed amount back, losing it leaves it reversed.
+const CARD_ACTIONS = ['refund', 'dispute', 'dispute-won', 'dispute-lost'];
+app.post('/api/financials/:id/card-action', async (req, res) => {
+    const { id } = req.params;
+    const { action, amount, reason, user } = req.body || {};
+    if (await activeRoleFor(user) !== 'Business Administrator') {
+        return res.status(403).json({ error: 'Only Business Administrators can record refunds and disputes.' });
+    }
+    if (!CARD_ACTIONS.includes(action)) {
+        return res.status(400).json({ error: 'Unknown credit card action.' });
+    }
+    const why = String(reason || '').trim();
+    if (!why) {
+        return res.status(400).json({ error: 'A reason is required.' });
+    }
+
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        const txRes = await db.query('SELECT * FROM FinancialTransactions WHERE TransactionId = $1 FOR UPDATE', [id]);
+        const tx = txRes.rows[0];
+        if (!tx) {
+            await db.query('ROLLBACK');
+            return res.status(404).json({ error: 'That ledger entry no longer exists.' });
+        }
+        if (tx.type !== 'Payment' || tx.paymentmethod !== 'Credit Card') {
+            await db.query('ROLLBACK');
+            return res.status(400).json({ error: 'Refunds and disputes are only for credit card payments.' });
+        }
+        const clientRes = await db.query('SELECT AccountBalance FROM Clients WHERE ClientId = $1 FOR UPDATE', [tx.client]);
+
+        const related = await db.query(
+            'SELECT Type, Amount FROM FinancialTransactions WHERE RelatedTransactionId = $1 ORDER BY Date, TransactionId',
+            [tx.transactionid]
+        );
+        let kept = Number(tx.amount);
+        let openDispute = 0;
+        for (const r of related.rows) {
+            if (PAYMENT_REVERSAL_TYPES.includes(r.type)) kept -= Number(r.amount);
+            else if (r.type === 'Dispute Won') kept += Number(r.amount);
+            if (r.type === 'Dispute') openDispute = Number(r.amount);
+        }
+        kept = Math.round(kept * 100) / 100;
+
+        let rowType = null;
+        let rowAmount = 0;
+        if (action === 'refund' || action === 'dispute') {
+            if (tx.disputestatus === 'Open') {
+                await db.query('ROLLBACK');
+                return res.status(400).json({ error: 'Mark the open dispute on this payment won or lost first.' });
+            }
+            rowAmount = Math.round(Number(amount) * 100) / 100;
+            if (!(rowAmount > 0) || rowAmount > kept) {
+                await db.query('ROLLBACK');
+                return res.status(400).json({ error: kept > 0 ? `Enter an amount from $0.01 to $${kept.toFixed(2)}.` : 'Nothing is left on this payment to refund or dispute.' });
+            }
+            rowType = action === 'refund' ? 'Refund' : 'Dispute';
+        } else {
+            if (tx.disputestatus !== 'Open') {
+                await db.query('ROLLBACK');
+                return res.status(400).json({ error: 'This payment has no open dispute.' });
+            }
+            if (action === 'dispute-won') {
+                rowType = 'Dispute Won';
+                rowAmount = openDispute;
+            }
+        }
+
+        // Change to what was paid: negative takes money back, positive puts it back
+        const paidChange = rowType === 'Dispute Won' ? rowAmount : -rowAmount;
+        const isPoly = tx.feetype === 'Poly Fee';
+        let newBalance = Number(clientRes.rows[0].accountbalance || 0);
+        let poly = null;
+        const attendanceId = isPoly ? null : await checkInFor(db, tx);
+        if (rowType) {
+            if (isPoly) {
+                poly = await changePolyFeePaid(db, tx.client, paidChange);
+            } else {
+                const balRes = await db.query(
+                    'UPDATE Clients SET AccountBalance = AccountBalance - $1 WHERE ClientId = $2 RETURNING AccountBalance',
+                    [paidChange, tx.client]
+                );
+                newBalance = Number(balRes.rows[0].accountbalance);
+                if (attendanceId) {
+                    await db.query('UPDATE Attendance SET AccountPaid = GREATEST(AccountPaid + $1, 0) WHERE AttendanceId = $2', [paidChange, attendanceId]);
+                }
+            }
+        }
+
+        const paidOn = new Date(tx.date).toLocaleDateString('en-US');
+        const label = { refund: 'Refund', dispute: 'Dispute opened', 'dispute-won': 'Dispute won', 'dispute-lost': 'Dispute lost' }[action];
+        if (rowType) {
+            await db.query(
+                `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, AttendanceId, RelatedTransactionId)
+                 VALUES ($1, NOW(), $2, $3, $4, $5, $6, 'Credit Card', $7, $8)`,
+                [tx.client, rowType, rowAmount, tx.feetype, newBalance,
+                    `${label} on the $${Number(tx.amount).toFixed(2)} credit card payment from ${paidOn}: ${why} (${user})`,
+                    attendanceId, tx.transactionid]
+            );
+        }
+        const status = { dispute: 'Open', 'dispute-won': 'Won', 'dispute-lost': 'Lost' }[action] ?? tx.disputestatus ?? null;
+        await db.query(
+            'UPDATE FinancialTransactions SET DisputeStatus = $1, AttendanceId = COALESCE(AttendanceId, $2) WHERE TransactionId = $3',
+            [status, attendanceId, tx.transactionid]
+        );
+
+        const scheduledPolygraph = isPoly && rowType ? await scheduledPolygraphFor(db, tx.client) : null;
+        const details = `${label}${rowType ? ` of $${rowAmount.toFixed(2)}` : ''} on the $${Number(tx.amount).toFixed(2)} credit card ${tx.feetype || 'payment'} from ${paidOn}: ${why}.`
+            + (poly ? ` Poly fee paid now $${poly.polyFeePaid.toFixed(2)}.${voucherChangeText(poly)}` : '')
+            + scheduledPolygraphText(scheduledPolygraph);
+        await logClientChange(db, {
+            clientId: tx.client,
+            changedBy: user,
+            changeType: action === 'refund' ? 'Payment Refunded' : 'Payment Disputed',
+            details,
+        });
+
+        await db.query('COMMIT');
+        await logAction(user, action === 'refund' ? 'Payment Refunded' : 'Payment Disputed', `Client ID ${tx.client}, payment ${tx.transactionid}: ${details}`);
+        res.json({ success: true, newBalance, attendanceUpdated: Boolean(attendanceId && rowType), ...(poly || {}), scheduledPolygraph });
+    } catch (err) {
+        await db.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
     }
 });
 
@@ -1570,9 +1982,110 @@ app.get('/api/reports/groups', async (req, res) => {
     }
 });
 
+// --- GROUP CASH DEPOSITS ---
+// Confirms the cash collected at one group session was taken to the bank. Over/short is AmountDeposited minus the
+// session's cash; the report works it out from current attendance so later attendance edits show up as a difference.
+pool.query(`
+    CREATE TABLE IF NOT EXISTS GroupDeposits (
+        DepositId SERIAL PRIMARY KEY,
+        GroupId INT NOT NULL REFERENCES Groups(GroupId) ON DELETE CASCADE,
+        SessionDate DATE NOT NULL,
+        SessionNumber INT NOT NULL DEFAULT 1,
+        AmountDeposited NUMERIC(10, 2) NOT NULL,
+        DepositDate DATE NOT NULL,
+        Notes TEXT,
+        RecordedBy VARCHAR(255),
+        RecordedOn TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (GroupId, SessionDate, SessionNumber)
+    )
+`).catch(err => console.error('Could not create GroupDeposits table:', err.message));
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
+// Deposits for sessions in the date range (YYYY-MM-DD, inclusive)
+app.get('/api/reports/group-deposits', async (req, res) => {
+    try {
+        const { from, to } = req.query;
+        if (!YMD.test(String(from || '')) || !YMD.test(String(to || ''))) {
+            return res.status(400).json({ error: 'A start and end date (YYYY-MM-DD) are required.' });
+        }
+        const result = await pool.query(
+            `SELECT GroupId, to_char(SessionDate, 'YYYY-MM-DD') AS SessionDate, SessionNumber, AmountDeposited,
+                    to_char(DepositDate, 'YYYY-MM-DD') AS DepositDate, Notes, RecordedBy, RecordedOn
+             FROM GroupDeposits WHERE SessionDate BETWEEN $1 AND $2`,
+            [from, to]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Records or corrects the deposit for one session
+app.put('/api/reports/group-deposits', async (req, res) => {
+    try {
+        const { groupId, sessionDate, sessionNumber, amountDeposited, depositDate, notes, user } = req.body;
+        if (await activeRoleFor(user) !== 'Business Administrator') {
+            return res.status(403).json({ error: 'Only Business Administrators can record deposits.' });
+        }
+        const amount = Number(amountDeposited);
+        if (!groupId || !YMD.test(String(sessionDate || '')) || !YMD.test(String(depositDate || '')) || !Number.isFinite(amount) || amount < 0) {
+            return res.status(400).json({ error: 'A group session, deposit date, and an amount of $0.00 or more are required.' });
+        }
+        const session = Number(sessionNumber) || 1;
+        const cash = await pool.query(
+            `SELECT COALESCE(SUM(AccountPaid), 0) AS cash FROM Attendance
+             WHERE "Group" = $1 AND Date = $2 AND SessionNumber = $3 AND PaymentMethod = 'Cash'`,
+            [groupId, sessionDate, session]
+        );
+        const result = await pool.query(
+            `INSERT INTO GroupDeposits (GroupId, SessionDate, SessionNumber, AmountDeposited, DepositDate, Notes, RecordedBy)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (GroupId, SessionDate, SessionNumber) DO UPDATE SET AmountDeposited = EXCLUDED.AmountDeposited,
+                 DepositDate = EXCLUDED.DepositDate, Notes = EXCLUDED.Notes, RecordedBy = EXCLUDED.RecordedBy, RecordedOn = CURRENT_TIMESTAMP
+             RETURNING GroupId, to_char(SessionDate, 'YYYY-MM-DD') AS SessionDate, SessionNumber, AmountDeposited,
+                 to_char(DepositDate, 'YYYY-MM-DD') AS DepositDate, Notes, RecordedBy, RecordedOn`,
+            [groupId, sessionDate, session, amount.toFixed(2), depositDate, String(notes || '').trim() || null, user]
+        );
+        const variance = amount - Number(cash.rows[0].cash);
+        await logAction(
+            user,
+            'Group Deposit Recorded',
+            `${await groupNameFor(groupId)} session ${sessionDate} #${session}: deposited $${amount.toFixed(2)} on ${depositDate} against $${Number(cash.rows[0].cash).toFixed(2)} cash` +
+                (Math.abs(variance) < 0.005 ? ' (balanced).' : ` (${variance > 0 ? 'over' : 'short'} $${Math.abs(variance).toFixed(2)}).`),
+            'Audit'
+        );
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/reports/group-deposits', async (req, res) => {
+    try {
+        const { groupId, sessionDate, sessionNumber, user } = req.body;
+        if (await activeRoleFor(user) !== 'Business Administrator') {
+            return res.status(403).json({ error: 'Only Business Administrators can remove deposits.' });
+        }
+        const removed = await pool.query(
+            'DELETE FROM GroupDeposits WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3 RETURNING AmountDeposited',
+            [groupId, sessionDate, Number(sessionNumber) || 1]
+        );
+        if (removed.rows.length === 0) {
+            return res.status(404).json({ error: 'No deposit is recorded for that session.' });
+        }
+        await logAction(user, 'Group Deposit Removed', `${await groupNameFor(groupId)} session ${sessionDate} #${Number(sessionNumber) || 1}: removed the $${Number(removed.rows[0].amountdeposited).toFixed(2)} deposit.`, 'Audit');
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.get('/api/reports/deposit', async (req, res) => {
     try {
-        const payments = await pool.query("SELECT SUM(Amount) FROM FinancialTransactions WHERE Type = 'Payment'");
+        // Refunds and disputes take money back; a won dispute puts it back
+        const payments = await pool.query(`SELECT SUM(CASE WHEN Type IN ('Payment', 'Dispute Won') THEN Amount ELSE -Amount END)
+                                           FROM FinancialTransactions WHERE Type IN ('Payment', 'Dispute Won', 'Refund', 'Dispute')`);
         const charges = await pool.query("SELECT SUM(Amount) FROM FinancialTransactions WHERE Type = 'Charge'");
         const transactions = await pool.query("SELECT * FROM FinancialTransactions ORDER BY Date DESC LIMIT 50");
         res.json({
@@ -1909,7 +2422,8 @@ app.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
         await db.query(
             `UPDATE Clients SET
                 PolyFeeVoucher = PolyFeeVoucher - $1,
-                PolyFeePaid = CASE WHEN PolyFeePaid >= PolyFee THEN PolyFeePaid - PolyFee ELSE PolyFeePaid END
+                PolyFeePaid = CASE WHEN PolyFeePaid >= PolyFee THEN PolyFeePaid - PolyFee ELSE PolyFeePaid END,
+                PolyVouchersBeforeFill = NULL
              WHERE ClientId = $2`,
             [POLY_VOUCHER_MAX, clientId]
         );

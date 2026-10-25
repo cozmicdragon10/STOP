@@ -325,6 +325,41 @@ export async function submitCustomCharge(data: { client: number; amount: number;
     return res.json();
 }
 
+// What a payment correction changed. The poly fields come back only for poly fee payments.
+export interface PaymentChangeResult {
+    newBalance: number;
+    attendanceUpdated: boolean;
+    polyFeePaid?: number;
+    polyFeeVoucher?: number;
+    vouchersRemoved?: number;
+    vouchersAdded?: number;
+    // Polygraph the client is already booked into with poly fee vouchers; the change doesn't cancel it
+    scheduledPolygraph?: { slotId: number; date: string; time: string | null; location: string | null } | null;
+}
+
+// Corrects a cash payment's amount; the server carries the difference through the balance (or poly fee paid and vouchers),
+// later ledger and attendance rows, and the check-in it was taken at
+export async function adjustCashPayment(transactionId: number, data: { amount: number; reason: string; user: string }): Promise<PaymentChangeResult> {
+    const res = await fetch(`${API_BASE}/financials/${transactionId}/adjust`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return agentResponse(res, 'Failed to adjust the payment.');
+}
+
+export type CardPaymentAction = 'refund' | 'dispute' | 'dispute-won' | 'dispute-lost';
+
+// Refund (full or partial), dispute, or dispute outcome on a credit card payment
+export async function recordCardPaymentAction(transactionId: number, data: { action: CardPaymentAction; amount?: number; reason: string; user: string }): Promise<PaymentChangeResult> {
+    const res = await fetch(`${API_BASE}/financials/${transactionId}/card-action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return agentResponse(res, 'Failed to record the credit card change.');
+}
+
 export async function submitClientCallIn(data: any) {
     const res = await fetch(`${API_BASE}/callin/client`, {
         method: 'POST',
@@ -416,6 +451,47 @@ export async function getGroupReport(from: string, to: string): Promise<GroupRep
     }
     if (!res.ok) throw new Error(body.error || 'Failed to load the group report.');
     return body;
+}
+
+// Bank deposit of one group session's cash
+export interface GroupDeposit {
+    groupid: number;
+    sessiondate: string;
+    sessionnumber: number;
+    amountdeposited: string | number;
+    depositdate: string;
+    notes: string | null;
+    recordedby: string | null;
+    recordedon: string;
+}
+
+export interface GroupSessionRef {
+    groupId: number;
+    sessionDate: string;
+    sessionNumber: number;
+}
+
+export async function getGroupDeposits(from: string, to: string): Promise<GroupDeposit[]> {
+    const res = await fetch(`${API_BASE}/reports/group-deposits?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    return agentResponse(res, 'Failed to load group deposits.');
+}
+
+export async function saveGroupDeposit(data: GroupSessionRef & { amountDeposited: number; depositDate: string; notes: string; user: string }): Promise<GroupDeposit> {
+    const res = await fetch(`${API_BASE}/reports/group-deposits`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return agentResponse(res, 'Failed to save the deposit.');
+}
+
+export async function deleteGroupDeposit(data: GroupSessionRef & { user: string }) {
+    const res = await fetch(`${API_BASE}/reports/group-deposits`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return agentResponse(res, 'Failed to remove the deposit.');
 }
 
 export async function getDepositReport() {
@@ -523,6 +599,25 @@ export async function addClientNote(clientId: number, data: { user: string; comm
         body: JSON.stringify(data),
     });
     return res.json();
+}
+
+// The note's author or a Business Administrator only; the server checks
+export async function updateClientNote(noteId: number, data: { user: string; comments: string }) {
+    const res = await fetch(`${API_BASE}/notes/${noteId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return agentResponse(res, 'Failed to save the note.');
+}
+
+export async function deleteClientNote(noteId: number, user: string) {
+    const res = await fetch(`${API_BASE}/notes/${noteId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user }),
+    });
+    return agentResponse(res, 'Failed to delete the note.');
 }
 
 export async function getClientPolygraphs(clientId: number) {
