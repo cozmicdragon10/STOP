@@ -701,7 +701,8 @@ export default function App() {
   useEffect(() => {
     if (selectedGroupDetail && groupDetailRef.current) {
       setTimeout(() => {
-        groupDetailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // The panel opens under the clicked row, so only scroll as far as needed to show it
+        groupDetailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }, 0);
     }
   }, [selectedGroupDetail]);
@@ -1897,6 +1898,111 @@ export default function App() {
 
   const slotSummary = (slot: any) =>
     `${new Date(slot.date).toLocaleDateString()} @ ${formatDisplayTime(slot.time)}${slot.location ? ` · ${slot.location}` : ''}`;
+
+  // Roster, Assign Clients, and Group Details for the open group in the Group Directory. Shown under the group's row.
+  const renderGroupDetailPanel = () => selectedGroupDetail && (
+    <div ref={groupDetailRef} className="p-6 space-y-4 text-left">
+      <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+        <h3 className="text-lg font-bold text-white">Managing: {selectedGroupDetail.groupname}</h3>
+        <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
+          <button onClick={() => setGroupTab('roster')} className={`px-3 py-1 rounded text-xs font-semibold ${groupTab === 'roster' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Roster</button>
+          <button onClick={() => setGroupTab('assign')} className={`px-3 py-1 rounded text-xs font-semibold ${groupTab === 'assign' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Assign Clients</button>
+          <button onClick={() => setGroupTab('schedule')} className={`px-3 py-1 rounded text-xs font-semibold ${groupTab === 'schedule' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Group Details</button>
+        </div>
+        <div className="flex items-center gap-2">
+          {canDeleteGroups && (
+            <button onClick={handleDeleteGroup} disabled={loading} className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white px-3 py-1 rounded text-xs font-semibold">Delete Group</button>
+          )}
+          <button type="button" onClick={() => setSelectedGroupDetail(null)} aria-label="Close group" className="text-slate-400 hover:text-white p-1 rounded bg-slate-800"><X size={16} /></button>
+        </div>
+      </div>
+
+      {groupTab === 'roster' && (
+        <div className="space-y-2">
+          <p className="text-xs text-slate-400 uppercase font-semibold">Assigned Clients ({groupRoster.length})</p>
+          {groupRoster.map(c => (
+            <div key={c.clientid} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center text-sm">
+              <span className="font-medium text-white">{c.lastname}, {c.firstname} ({c.docnumber})</span>
+              <span className="text-xs text-slate-400">Balance: {formatBalance(c.accountbalance)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {groupTab === 'assign' && (
+        <div className="space-y-3">
+          <div className="flex justify-between items-center">
+            <p className="text-xs text-slate-400 uppercase font-semibold">Assign Client to this Group</p>
+            <input
+              type="search"
+              value={assignClientSearch}
+              onChange={(e) => setAssignClientSearch(e.target.value)}
+              placeholder="Search client name or DOC #..."
+              className="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white text-xs w-64 max-w-full"
+            />
+          </div>
+          {(() => {
+            const assignedClientIds = new Set(groupRoster.map(c => c.clientid));
+            const unassignedClients = clients.filter(c => !assignedClientIds.has(c.clientid));
+            const searchTerm = assignClientSearch.trim().toLowerCase();
+            const filteredClients = searchTerm
+              ? unassignedClients.filter(c => [
+                  c.firstname, c.lastname, `${c.firstname} ${c.lastname}`, `${c.lastname}, ${c.firstname}`, c.docnumber
+                ].some(v => String(v ?? '').toLowerCase().includes(searchTerm)))
+              : unassignedClients;
+
+            return (
+              <div className="grid grid-cols-2 gap-4">
+                {filteredClients.length > 0 ? (
+                  filteredClients.map(c => (
+                    <div key={c.clientid} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center text-xs">
+                      <span>{c.lastname}, {c.firstname} ({c.docnumber})</span>
+                      <button onClick={() => handleAssignClient(c.clientid)} className="bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded">Assign</button>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-xs text-slate-500 italic col-span-2">
+                    {searchTerm ? 'No clients match your search.' : 'All available clients are already assigned to this group.'}
+                  </p>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {groupTab === 'schedule' && (
+        <form onSubmit={handleUpdateGroup} className="space-y-4 max-w-2xl">
+          <datalist id="edit-group-locations">
+            {Array.from(new Set(groups.map(g => normalizeLocation(g.location)).filter(Boolean))).map(v => <option key={v} value={v} />)}
+          </datalist>
+          <datalist id="edit-group-program-types">
+            {Array.from(new Set(groups.map(g => g.programtype).filter(Boolean))).map(v => <option key={v} value={v} />)}
+          </datalist>
+          {!canEditGroupDetails && (
+            <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded p-2">Group details are view-only for your role.</p>
+          )}
+          <fieldset disabled={!canEditGroupDetails} className="space-y-4 disabled:opacity-70">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div><label className="block text-xs text-slate-400 mb-1">Group Name *</label><input type="text" required value={editGroupName} onChange={(e) => setEditGroupName(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Location *</label><input type="text" required list="edit-group-locations" value={editLocation} onChange={(e) => setEditLocation(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Counselor *</label><select required value={editCounselor} onChange={(e) => setEditCounselor(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm"><option value="">Select a counselor...</option>{counselorChoices(editCounselor).map(name => <option key={name} value={name}>{name}</option>)}</select></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Program Type *</label><input type="text" required list="edit-group-program-types" value={editProgramType} onChange={(e) => setEditProgramType(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Schedule *</label><ScheduleSelect value={editSchedule} onChange={setEditSchedule} className="bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Address</label><input type="text" value={editAddress} onChange={(e) => setEditAddress(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+            <input type="checkbox" checked={editActive} onChange={(e) => setEditActive(e.target.checked)} className="accent-blue-600" />
+            Active (uncheck to deactivate; hides the group from new assignments and sessions)
+          </label>
+          {canEditGroupDetails && (
+            <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-xs font-semibold">Save Group Settings</button>
+          )}
+          </fieldset>
+        </form>
+      )}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -4295,8 +4401,12 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800 text-sm">
-                  {sortedDirectoryGroups.map(g => (
-                    <tr key={g.groupid} onClick={() => handleOpenGroup(g)} className="hover:bg-slate-800/50 transition cursor-pointer">
+                  {sortedDirectoryGroups.map(g => {
+                    const open = selectedGroupDetail?.groupid === g.groupid;
+                    return (
+                    <Fragment key={g.groupid}>
+                    {/* Clicking the open group again closes it */}
+                    <tr onClick={() => (open ? setSelectedGroupDetail(null) : handleOpenGroup(g))} className={`transition cursor-pointer ${open ? 'bg-blue-500/10' : 'hover:bg-slate-800/50'}`}>
                       <td className="p-3 font-medium text-white">{g.groupname}</td>
                       <td className="p-3 text-slate-400">{normalizeLocation(g.location)}</td>
                       <td className="p-3 text-slate-300">{g.counselor}</td>
@@ -4309,110 +4419,23 @@ export default function App() {
                           : <span className="bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded text-xs">Active</span>}
                       </td>
                     </tr>
-                  ))}
+                    {open && (
+                      <tr>
+                        <td colSpan={7} className="p-0 whitespace-normal bg-slate-950/40 border-l-2 border-blue-500">
+                          {renderGroupDetailPanel()}
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
-            {selectedGroupDetail && (
-              <div ref={groupDetailRef} className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
-                <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-                  <h3 className="text-lg font-bold text-white">Managing: {selectedGroupDetail.groupname}</h3>
-                  <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
-                    <button onClick={() => setGroupTab('roster')} className={`px-3 py-1 rounded text-xs font-semibold ${groupTab === 'roster' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Roster</button>
-                    <button onClick={() => setGroupTab('assign')} className={`px-3 py-1 rounded text-xs font-semibold ${groupTab === 'assign' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Assign Clients</button>
-                    <button onClick={() => setGroupTab('schedule')} className={`px-3 py-1 rounded text-xs font-semibold ${groupTab === 'schedule' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Group Details</button>
-                  </div>
-                  {canDeleteGroups && (
-                    <button onClick={handleDeleteGroup} disabled={loading} className="ml-4 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white px-3 py-1 rounded text-xs font-semibold">Delete Group</button>
-                  )}
-                </div>
-
-                {groupTab === 'roster' && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-slate-400 uppercase font-semibold">Assigned Clients ({groupRoster.length})</p>
-                    {groupRoster.map(c => (
-                      <div key={c.clientid} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center text-sm">
-                        <span className="font-medium text-white">{c.lastname}, {c.firstname} ({c.docnumber})</span>
-                        <span className="text-xs text-slate-400">Balance: {formatBalance(c.accountbalance)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {groupTab === 'assign' && (
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <p className="text-xs text-slate-400 uppercase font-semibold">Assign Client to this Group</p>
-                      <input
-                        type="search"
-                        value={assignClientSearch}
-                        onChange={(e) => setAssignClientSearch(e.target.value)}
-                        placeholder="Search client name or DOC #..."
-                        className="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white text-xs w-64 max-w-full"
-                      />
-                    </div>
-                    {(() => {
-                      const assignedClientIds = new Set(groupRoster.map(c => c.clientid));
-                      const unassignedClients = clients.filter(c => !assignedClientIds.has(c.clientid));
-                      const searchTerm = assignClientSearch.trim().toLowerCase();
-                      const filteredClients = searchTerm
-                        ? unassignedClients.filter(c => [
-                            c.firstname, c.lastname, `${c.firstname} ${c.lastname}`, `${c.lastname}, ${c.firstname}`, c.docnumber
-                          ].some(v => String(v ?? '').toLowerCase().includes(searchTerm)))
-                        : unassignedClients;
-
-                      return (
-                        <div className="grid grid-cols-2 gap-4">
-                          {filteredClients.length > 0 ? (
-                            filteredClients.map(c => (
-                              <div key={c.clientid} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center text-xs">
-                                <span>{c.lastname}, {c.firstname} ({c.docnumber})</span>
-                                <button onClick={() => handleAssignClient(c.clientid)} className="bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded">Assign</button>
-                              </div>
-                            ))
-                          ) : (
-                            <p className="text-xs text-slate-500 italic col-span-2">
-                              {searchTerm ? 'No clients match your search.' : 'All available clients are already assigned to this group.'}
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-
-                {groupTab === 'schedule' && (
-                  <form onSubmit={handleUpdateGroup} className="space-y-4 max-w-2xl">
-                    <datalist id="edit-group-locations">
-                      {Array.from(new Set(groups.map(g => normalizeLocation(g.location)).filter(Boolean))).map(v => <option key={v} value={v} />)}
-                    </datalist>
-                    <datalist id="edit-group-program-types">
-                      {Array.from(new Set(groups.map(g => g.programtype).filter(Boolean))).map(v => <option key={v} value={v} />)}
-                    </datalist>
-                    {!canEditGroupDetails && (
-                      <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded p-2">Group details are view-only for your role.</p>
-                    )}
-                    <fieldset disabled={!canEditGroupDetails} className="space-y-4 disabled:opacity-70">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div><label className="block text-xs text-slate-400 mb-1">Group Name *</label><input type="text" required value={editGroupName} onChange={(e) => setEditGroupName(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
-                      <div><label className="block text-xs text-slate-400 mb-1">Location *</label><input type="text" required list="edit-group-locations" value={editLocation} onChange={(e) => setEditLocation(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
-                      <div><label className="block text-xs text-slate-400 mb-1">Counselor *</label><select required value={editCounselor} onChange={(e) => setEditCounselor(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm"><option value="">Select a counselor...</option>{counselorChoices(editCounselor).map(name => <option key={name} value={name}>{name}</option>)}</select></div>
-                      <div><label className="block text-xs text-slate-400 mb-1">Program Type *</label><input type="text" required list="edit-group-program-types" value={editProgramType} onChange={(e) => setEditProgramType(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
-                      <div><label className="block text-xs text-slate-400 mb-1">Schedule *</label><ScheduleSelect value={editSchedule} onChange={setEditSchedule} className="bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
-                      <div><label className="block text-xs text-slate-400 mb-1">Address</label><input type="text" value={editAddress} onChange={(e) => setEditAddress(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
-                    </div>
-                    <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-                      <input type="checkbox" checked={editActive} onChange={(e) => setEditActive(e.target.checked)} className="accent-blue-600" />
-                      Active (uncheck to deactivate; hides the group from new assignments and sessions)
-                    </label>
-                    {canEditGroupDetails && (
-                      <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-xs font-semibold">Save Group Settings</button>
-                    )}
-                    </fieldset>
-                  </form>
-                )}
-              </div>
+            {/* The open group is shown under its row; when filters hide that row (e.g. just set inactive), it's shown here instead */}
+            {selectedGroupDetail && !sortedDirectoryGroups.some(g => g.groupid === selectedGroupDetail.groupid) && (
+              <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-xl">{renderGroupDetailPanel()}</div>
             )}
           </div>
         )}
