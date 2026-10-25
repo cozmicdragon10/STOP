@@ -489,8 +489,13 @@ app.put('/api/clients/:id', async (req, res) => {
         }
 
         // Tracked fields before the edit, for the change log
-        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId FROM Clients WHERE ClientId = $1', [id]);
+        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, PolyFee, PolyFeePaid FROM Clients WHERE ClientId = $1', [id]);
         const before = beforeRes.rows[0];
+        // The poly fee total belongs to the override while one is active
+        const polyOverride = await activePolyFeeOverride(pool, id);
+        if (polyOverride && polyfee !== undefined && polyfee !== null && polyfee !== '' && Number(polyfee) !== Number(before?.polyfee)) {
+            return res.status(400).json({ error: 'A temporary poly fee override is active. Change or remove the override to change the poly fee total.' });
+        }
         if (programstatus && programstatus !== before?.programstatus) {
             if (DISCHARGE_STATUSES.includes(before?.programstatus)) {
                 return res.status(400).json({ error: 'Program status is locked while the client is discharged. Use the Activate button.' });
@@ -569,6 +574,10 @@ app.put('/api/clients/:id', async (req, res) => {
         if (before && updated.rows[0]) {
             const after = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId FROM Clients WHERE ClientId = $1', [id]);
             const now = after.rows[0];
+            // An edit that makes the poly fee paid in full filled the vouchers (see the CASE above); that counts toward an override
+            const wasFull = Number(before.polyfee) > 0 && Number(before.polyfeepaid) >= Number(before.polyfee);
+            const isFull = Number(updated.rows[0].polyfee) > 0 && Number(updated.rows[0].polyfeepaid) >= Number(updated.rows[0].polyfee);
+            if (!wasFull && isFull) await countPolyFeeFill(pool, id, 1);
             const tracked = [
                 ['Program Status', before.programstatus, now.programstatus],
                 ['Program Type', before.programtype, now.programtype],
@@ -849,6 +858,158 @@ app.delete('/api/clients/:id/fee-override', async (req, res) => {
     } catch (err) {
         console.error('Error removing fee override:', err);
         res.status(500).json({ error: err.message });
+    }
+});
+
+// --- TEMPORARY POLY FEE OVERRIDES ---
+// A reduced poly fee total for a set number of fills instead of a date. A fill is the poly fee being paid in full, which
+// fills the poly fee vouchers. While active, the client's PolyFee is the reduced fee and RegularFee keeps what it was.
+// The override ends once its last fill has been used (the vouchers spent scheduling a polygraph); PolyFee then goes back
+// to RegularFee. Ending it at the fill itself would leave that payment measured against the regular fee when it's spent.
+pool.query(`
+    CREATE TABLE IF NOT EXISTS PolyFeeOverrides (
+        OverrideId SERIAL PRIMARY KEY,
+        ClientId INT NOT NULL REFERENCES Clients(ClientId) ON DELETE CASCADE,
+        ReducedFee NUMERIC(10, 2) NOT NULL,
+        RegularFee NUMERIC(10, 2) NOT NULL,
+        FillsAllowed INT NOT NULL,
+        FillsUsed INT NOT NULL DEFAULT 0,
+        CreatedBy VARCHAR(255),
+        CreatedOn TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        EndedOn TIMESTAMP
+    )
+`).catch(err => console.error('Could not create PolyFeeOverrides table:', err.message));
+
+const POLY_OVERRIDE_MAX_FILLS = 20;
+
+const activePolyFeeOverride = async (db, clientId) => {
+    const r = await db.query('SELECT * FROM PolyFeeOverrides WHERE ClientId = $1 AND EndedOn IS NULL ORDER BY CreatedOn DESC LIMIT 1', [clientId]);
+    return r.rows[0] || null;
+};
+
+// One more (or one fewer) fill toward the client's active poly fee override, if they have one
+const countPolyFeeFill = (db, clientId, change) => db.query(
+    'UPDATE PolyFeeOverrides SET FillsUsed = GREATEST(FillsUsed + $1, 0) WHERE ClientId = $2 AND EndedOn IS NULL',
+    [change, clientId]
+);
+
+// Ends the client's active poly fee override and puts the regular poly fee back. Returns the ended override, if any.
+const endPolyFeeOverride = async (db, clientId) => {
+    const ended = await db.query(
+        'UPDATE PolyFeeOverrides SET EndedOn = NOW() WHERE ClientId = $1 AND EndedOn IS NULL RETURNING *',
+        [clientId]
+    );
+    const override = ended.rows[0];
+    if (!override) return null;
+    // Ended first, so a fill this causes isn't counted toward it
+    const poly = await changePolyFeePaid(db, clientId, 0, { fee: Number(override.regularfee) });
+    return { override, poly };
+};
+
+const polyOverrideText = (o) => `$${Number(o.reducedfee).toFixed(2)} for ${o.fillsallowed} fill${Number(o.fillsallowed) === 1 ? '' : 's'}`;
+
+app.get('/api/clients/:id/poly-fee-override', async (req, res) => {
+    try {
+        res.json({ override: await activePolyFeeOverride(pool, req.params.id) });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Sets or changes the override (Business Administrators only). Changing one keeps its fills used and regular fee.
+app.post('/api/clients/:id/poly-fee-override', async (req, res) => {
+    const { id } = req.params;
+    const { reducedFee, fills, user } = req.body || {};
+    if (await activeRoleFor(user) !== 'Business Administrator') {
+        return res.status(403).json({ error: 'Only Business Administrators can set a poly fee override.' });
+    }
+    const fee = Math.round(Number(reducedFee) * 100) / 100;
+    const fillsAllowed = Number(fills);
+    if (reducedFee === '' || reducedFee === null || reducedFee === undefined || !Number.isFinite(fee) || fee < 0) {
+        return res.status(400).json({ error: 'Enter a reduced poly fee of $0.00 or more.' });
+    }
+    if (!Number.isInteger(fillsAllowed) || fillsAllowed < 1 || fillsAllowed > POLY_OVERRIDE_MAX_FILLS) {
+        return res.status(400).json({ error: `Number of fills must be a whole number from 1 to ${POLY_OVERRIDE_MAX_FILLS}.` });
+    }
+
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        const clientRes = await db.query('SELECT PolyFee FROM Clients WHERE ClientId = $1 FOR UPDATE', [id]);
+        if (clientRes.rows.length === 0) {
+            await db.query('ROLLBACK');
+            return res.status(404).json({ error: 'Client not found.' });
+        }
+        const prior = await activePolyFeeOverride(db, id);
+        if (prior && fillsAllowed < Number(prior.fillsused)) {
+            await db.query('ROLLBACK');
+            return res.status(400).json({ error: `This override has already been filled ${prior.fillsused} time(s); allow at least that many.` });
+        }
+        let override;
+        if (prior) {
+            override = (await db.query(
+                'UPDATE PolyFeeOverrides SET ReducedFee = $1, FillsAllowed = $2 WHERE OverrideId = $3 RETURNING *',
+                [fee, fillsAllowed, prior.overrideid]
+            )).rows[0];
+        } else {
+            override = (await db.query(
+                `INSERT INTO PolyFeeOverrides (ClientId, ReducedFee, RegularFee, FillsAllowed, CreatedBy)
+                 VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+                [id, fee, Number(clientRes.rows[0].polyfee || 0), fillsAllowed, user]
+            )).rows[0];
+        }
+        // Lowering the fee can make what's already paid a full payment, which fills the vouchers and counts as a fill
+        const poly = await changePolyFeePaid(db, id, 0, { fee });
+        override = await activePolyFeeOverride(db, id);
+
+        await logClientChange(db, {
+            clientId: id, changedBy: user, changeType: 'Poly Fee Override',
+            oldValue: prior ? polyOverrideText(prior) : `$${Number(clientRes.rows[0].polyfee || 0).toFixed(2)} (regular)`,
+            newValue: polyOverrideText(override),
+            details: (prior ? 'Temporary poly fee override changed.' : `Temporary poly fee override activated; regular poly fee $${Number(override.regularfee).toFixed(2)} returns after the last fill is used.`)
+                + voucherChangeText(poly),
+        });
+        await db.query('COMMIT');
+        await logAction(user, 'Poly Fee Override Set', `Client ID ${id}: poly fee ${polyOverrideText(override)} (regular $${Number(override.regularfee).toFixed(2)}).${voucherChangeText(poly)}`);
+        res.status(201).json({ override, ...poly });
+    } catch (err) {
+        await db.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
+    }
+});
+
+// Removes the override early and puts the regular poly fee back (Business Administrators only)
+app.delete('/api/clients/:id/poly-fee-override', async (req, res) => {
+    const { id } = req.params;
+    const { user } = req.body || {};
+    if (await activeRoleFor(user) !== 'Business Administrator') {
+        return res.status(403).json({ error: 'Only Business Administrators can remove a poly fee override.' });
+    }
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        await db.query('SELECT 1 FROM Clients WHERE ClientId = $1 FOR UPDATE', [id]);
+        const result = await endPolyFeeOverride(db, id);
+        if (!result) {
+            await db.query('ROLLBACK');
+            return res.status(404).json({ error: 'No poly fee override is active.' });
+        }
+        const { override, poly } = result;
+        await logClientChange(db, {
+            clientId: id, changedBy: user, changeType: 'Poly Fee Override',
+            oldValue: polyOverrideText(override), newValue: 'Removed',
+            details: `Removed after ${override.fillsused} of ${override.fillsallowed} fill(s); poly fee back to $${Number(override.regularfee).toFixed(2)}.${voucherChangeText(poly)}`,
+        });
+        await db.query('COMMIT');
+        await logAction(user, 'Poly Fee Override Removed', `Client ID ${id}: removed poly fee override ${polyOverrideText(override)}.${voucherChangeText(poly)}`);
+        res.json({ success: true, ...poly });
+    } catch (err) {
+        await db.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
     }
 });
 
@@ -1294,6 +1455,7 @@ app.post('/api/financials/payment', async (req, res) => {
              WHERE ClientId = $4`,
             [newBalance, newPolyPaid, newPolyVoucher, client, fillsVouchers]
         );
+        if (fillsVouchers) await countPolyFeeFill(clientDb, client, 1);
 
         await clientDb.query('COMMIT');
         res.status(201).json({ success: true, newBalance, polyFeePaid: newPolyPaid, polyFeeVoucher: newPolyVoucher, polyApplied: polyAmount, accountApplied: accountAmount });
@@ -1380,32 +1542,36 @@ pool.query(`
 // Ledger row types that take money back off a payment (the client owes it again), and the one that puts it back
 const PAYMENT_REVERSAL_TYPES = ['Refund', 'Dispute'];
 
-// Moves a client's PolyFeePaid by delta and keeps the vouchers in step. Becoming paid in full fills them and remembers the
-// count before; dropping below paid in full takes back only what that fill added, keeping incentive vouchers earned before it.
-// A fill from before PolyVouchersBeforeFill existed has no count saved, so those vouchers go to 0.
-const changePolyFeePaid = async (db, clientId, delta) => {
+// Moves a client's PolyFeePaid by delta (and, with fee, sets a new poly fee total) and keeps the vouchers in step. Becoming
+// paid in full fills them and remembers the count before; dropping below paid in full takes back only what that fill added,
+// keeping incentive vouchers earned before it. A fill from before PolyVouchersBeforeFill existed has no count saved, so those
+// vouchers go to 0. Fills (and fills taken back) count toward an active poly fee override.
+const changePolyFeePaid = async (db, clientId, delta, { fee: newFee } = {}) => {
     const r = await db.query('SELECT PolyFeePaid, PolyFee, PolyFeeVoucher, PolyVouchersBeforeFill FROM Clients WHERE ClientId = $1 FOR UPDATE', [clientId]);
     const c = r.rows[0];
-    const fee = Number(c.polyfee || 0);
+    const feeBefore = Number(c.polyfee || 0);
+    const fee = newFee === undefined ? feeBefore : Number(newFee);
     const paidBefore = Number(c.polyfeepaid || 0);
     const paidAfter = Math.round((paidBefore + delta) * 100) / 100;
     const vouchersBefore = Number(c.polyfeevoucher || 0);
     let vouchers = vouchersBefore;
     let beforeFill = c.polyvouchersbeforefill;
-    const wasFull = fee > 0 && paidBefore >= fee;
+    const wasFull = feeBefore > 0 && paidBefore >= feeBefore;
     const isFull = fee > 0 && paidAfter >= fee;
     if (!wasFull && isFull) {
         beforeFill = vouchers;
         vouchers = POLY_VOUCHER_MAX;
+        await countPolyFeeFill(db, clientId, 1);
     } else if (wasFull && !isFull) {
         vouchers = Math.min(vouchers, Number(beforeFill ?? 0));
         beforeFill = null;
+        await countPolyFeeFill(db, clientId, -1);
     }
     await db.query(
-        'UPDATE Clients SET PolyFeePaid = $1, PolyFeeVoucher = $2, PolyVouchersBeforeFill = $3 WHERE ClientId = $4',
-        [paidAfter, vouchers, beforeFill, clientId]
+        'UPDATE Clients SET PolyFeePaid = $1, PolyFee = $2, PolyFeeVoucher = $3, PolyVouchersBeforeFill = $4 WHERE ClientId = $5',
+        [paidAfter, fee, vouchers, beforeFill, clientId]
     );
-    return { polyFeePaid: paidAfter, polyFeeVoucher: vouchers, vouchersRemoved: Math.max(0, vouchersBefore - vouchers), vouchersAdded: Math.max(0, vouchers - vouchersBefore) };
+    return { polyFeePaid: paidAfter, polyFee: fee, polyFeeVoucher: vouchers, vouchersRemoved: Math.max(0, vouchersBefore - vouchers), vouchersAdded: Math.max(0, vouchers - vouchersBefore) };
 };
 
 // The polygraph a client is booked into with poly fee vouchers, if any. Changing a poly fee payment doesn't cancel it,
@@ -2385,6 +2551,22 @@ app.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
             await db.query('ROLLBACK');
             return res.status(404).json({ error: 'Client not found.' });
         }
+
+        // One scheduled polygraph per client at a time. Checked after locking the client so two bookings can't race past it.
+        const existingRes = await db.query(
+            `SELECT s.SlotId FROM PolygraphAppointments a JOIN PolygraphSlots s ON s.SlotId = a.SlotId
+             WHERE a.Client = $1 AND a.Status = 'Scheduled' AND a.SlotId <> $2 LIMIT 1`,
+            [clientId, slotId]
+        );
+        if (existingRes.rows.length > 0) {
+            await db.query('ROLLBACK');
+            const existing = (await db.query('SELECT * FROM PolygraphSlots WHERE SlotId = $1', [existingRes.rows[0].slotid])).rows[0];
+            return res.status(409).json({
+                code: 'POLY_ALREADY_SCHEDULED',
+                slotId: existing.slotid,
+                error: `This client already has a polygraph scheduled ${await slotNoteContext(existing)}. Cancel that reservation before scheduling another.`,
+            });
+        }
         const vouchers = Number(clientRes.rows[0].polyfeevoucher || 0);
         // Stored sign: positive = owes
         const accountBalance = Number(clientRes.rows[0].accountbalance || 0);
@@ -2428,11 +2610,24 @@ app.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
             [POLY_VOUCHER_MAX, clientId]
         );
 
+        // Spending the last fill a poly fee override allows ends it and puts the regular poly fee back
+        let overrideText = '';
+        const polyOverride = await activePolyFeeOverride(db, clientId);
+        if (polyOverride && Number(polyOverride.fillsused) >= Number(polyOverride.fillsallowed)) {
+            const { override } = await endPolyFeeOverride(db, clientId);
+            overrideText = ` Temporary poly fee override (${polyOverrideText(override)}) used up; poly fee back to $${Number(override.regularfee).toFixed(2)}.`;
+            await logClientChange(db, {
+                clientId, changedBy: user, changeType: 'Poly Fee Override',
+                oldValue: polyOverrideText(override), newValue: 'Ended',
+                details: `All ${override.fillsallowed} fill(s) used; poly fee back to $${Number(override.regularfee).toFixed(2)}.`,
+            });
+        }
+
         // Record the appointment in the client's case notes
         const bypassText = waitBypassed
             ? `Scheduled inside the waiting period after the No Deception Indicated polygraph on ${waitBypassed.lasttaken} (earliest normal date ${waitBypassed.earliest}) by Business Administrator override.`
             : '';
-        const noteText = `Polygraph scheduled ${noteContext}. Used ${POLY_VOUCHER_MAX} poly fee vouchers.`
+        const noteText = `Polygraph scheduled ${noteContext}. Used ${POLY_VOUCHER_MAX} poly fee vouchers.${overrideText}`
             + (bypassText ? ` ${bypassText}` : '')
             + (String(comments || '').trim() ? ` Notes: ${String(comments).trim()}` : '');
         await db.query(

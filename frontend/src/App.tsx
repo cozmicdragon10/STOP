@@ -13,10 +13,11 @@ import {
   getClientNotes, addClientNote, updateClientNote, deleteClientNote, getClientPolygraphs, getGroupClients, updateGroup, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
   assignClientToGroup, createClient, createGroup, deleteGroup, deleteClient, updateEmployee, getClientTests, submitTestResult, getAgentReport,
   getDepositReport, getEmployees, addEmployee, getSystemLogs, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
+  fetchPolyFeeOverride, savePolyFeeOverride, deletePolyFeeOverride,
   getOpenGroups, deleteOpenGroup, getClientChangeLog, getSupervisingAgents,
   getClientAttachments, uploadClientAttachment, fetchClientAttachment, renameClientAttachment, deleteClientAttachment, ATTACHMENT_MAX_BYTES
 } from './api';
-import type { CardPaymentAction, ClientAttachment, ClientChange, OpenGroupSession, PaymentChangeResult, SupervisingAgent } from './api';
+import type { CardPaymentAction, ClientAttachment, ClientChange, OpenGroupSession, PaymentChangeResult, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
@@ -30,6 +31,7 @@ import GroupPicker from './components/GroupPicker';
 import RecordFilterBar from './components/clients/RecordFilterBar';
 import MonthHeader from './components/clients/MonthHeader';
 import GroupIncomeReport from './components/reports/GroupIncomeReport';
+import CounselorClientReport from './components/reports/CounselorClientReport';
 
 // Client program statuses. 'Active' is used by group call-ins and the group roster, so keep that exact spelling.
 const PROGRAM_STATUSES = ['Active', 'Completed', 'Deceased', 'Discharged Supervision', 'Inactive', 'Program Failed', 'Revoked', 'Terminated', 'Transferred'];
@@ -180,6 +182,7 @@ const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
   { type: 'Group', label: 'Group' },
   { type: 'No Poly Required', label: 'No Poly Required' },
   { type: 'Fee Override', label: 'Temporary Fee Override' },
+  { type: 'Poly Fee Override', label: 'Poly Fee Override' },
   { type: 'Payment Adjusted', label: 'Payment Adjusted' },
   { type: 'Payment Refunded', label: 'Payment Refunded' },
   { type: 'Payment Disputed', label: 'Payment Disputed' },
@@ -215,18 +218,29 @@ const CLIENT_FIELD_OPTIONS: Record<string, string[]> = {
   sex: ['Male', 'Female'],
 };
 const POLY_OVERDUE_MONTHS = 6;
+// When the client's most recent polygraph was taken: the actual polygraph date, falling back to the recorded date for older results without one
+const lastPolygraphTaken = (polygraphs: any[]): Date | null => {
+  const taken = polygraphs
+    .map(p => p.polygraphdatetime ? new Date(p.polygraphdatetime) : p.date ? toLocalDay(p.date) : null)
+    .filter((d): d is Date => !!d && !isNaN(d.getTime()));
+  return taken.length ? new Date(Math.max(...taken.map(d => d.getTime()))) : null;
+};
+const isPolygraphOverdue = (last: Date, today = new Date()) =>
+  new Date(today.getFullYear(), today.getMonth(), today.getDate()) >= new Date(last.getFullYear(), last.getMonth() + POLY_OVERDUE_MONTHS, last.getDate());
+// For a client booked into a polygraph: how long since their last one, or that they haven't taken one yet
+const polygraphHistoryText = (polygraphs: any[], today = new Date()) => {
+  const last = lastPolygraphTaken(polygraphs);
+  if (!last) return 'No polygraph taken yet.';
+  const since = timeBetween(localYmd(last), localYmd(today));
+  return `${since === 'Same day' ? 'Last polygraph was today' : `${since} since last polygraph`} (${last.toLocaleDateString()})${isPolygraphOverdue(last, today) ? ', overdue' : ''}.`;
+};
 // Red polygraph notice for a client's account, or null when none applies. BIP clients don't take polygraphs.
 const polygraphNotice = (client: any, polygraphs: any[], today = new Date()) => {
   if (client.programtype === 'BIP' || client.nopolyrequired) return null;
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  // Use the actual polygraph date, falling back to the recorded date for older results without one
-  const taken = polygraphs
-    .map(p => p.polygraphdatetime ? new Date(p.polygraphdatetime) : p.date ? toLocalDay(p.date) : null)
-    .filter((d): d is Date => !!d && !isNaN(d.getTime()));
-  if (taken.length) {
-    const last = new Date(Math.max(...taken.map(d => d.getTime())));
-    const due = new Date(last.getFullYear(), last.getMonth() + POLY_OVERDUE_MONTHS, last.getDate());
-    return startOfToday >= due ? 'Client is overdue for their next Polygraph' : null;
+  const last = lastPolygraphTaken(polygraphs);
+  if (last) {
+    return isPolygraphOverdue(last, today) ? 'Client is overdue for their next Polygraph' : null;
   }
   if (!client.lastdateattended) return null;
   const days = Math.round((startOfToday.getTime() - toLocalDay(client.lastdateattended).getTime()) / 86400000);
@@ -476,6 +490,16 @@ export default function App() {
   const [showFeeOverrideForm, setShowFeeOverrideForm] = useState(false);
   const [feeOverrideInput, setFeeOverrideInput] = useState('');
   const [feeOverrideDate, setFeeOverrideDate] = useState('');
+  // Temporary poly fee override: a reduced poly fee for a number of fills
+  const [clientPolyOverride, setClientPolyOverride] = useState<PolyFeeOverride | null>(null);
+  const [showPolyOverrideForm, setShowPolyOverrideForm] = useState(false);
+  const [polyOverrideFee, setPolyOverrideFee] = useState('');
+  const [polyOverrideFills, setPolyOverrideFills] = useState('1');
+  const [polyOverrideError, setPolyOverrideError] = useState('');
+  // Scheduling a polygraph from the client account's Polygraphs section
+  const [drawerPolySlot, setDrawerPolySlot] = useState('');
+  const [drawerPolyType, setDrawerPolyType] = useState('Maintenance');
+  const [drawerPolyComment, setDrawerPolyComment] = useState('');
 
   // Attendance State
   const [isAccountOnly, setIsAccountOnly] = useState(false);
@@ -629,6 +653,7 @@ export default function App() {
   const [agentReportData, setAgentReportData] = useState<any[]>([]);
   const [depositReportData, setDepositReportData] = useState<any>(null);
   const [showGroupReport, setShowGroupReport] = useState(false);
+  const [showCounselorReport, setShowCounselorReport] = useState(false);
 
   // Admin Module State
   const [employees, setEmployees] = useState<any[]>([]);
@@ -844,13 +869,14 @@ export default function App() {
     });
   };
 
-  // Opens the confirmation box; the assignment is only saved when it is accepted
-  const openAssignConfirm = (slotId: number) => {
-    if (!slotAssignments[slotId]) {
+  // Opens the confirmation box; the assignment is only saved when it is accepted.
+  // clientId is passed when the slot's choice was set in the same click (scheduling from a client's account).
+  const openAssignConfirm = (slotId: number, clientId = slotAssignments[slotId]) => {
+    if (!clientId) {
       setError('Please select a client to assign to this slot.');
       return;
     }
-    const client = clients.find(c => String(c.clientid) === slotAssignments[slotId]);
+    const client = clients.find(c => String(c.clientid) === clientId);
     if (client && !polySchedulingNeeds(client).met) {
       promptPolyPayment(client);
       return;
@@ -892,17 +918,16 @@ export default function App() {
         setError(res.error);
       } else {
         setSlotComments({ ...slotComments, [slotId]: '' });
-        // Mirror the server: the vouchers are used, and the paid-in-full poly fee is spent with them
-        if (client) {
-          const paid = Number(client.polyfeepaid ?? 0);
-          const fee = Number(client.polyfee ?? 0);
-          setClients(prev => prev.map(c => c.clientid === client.clientid
-            ? { ...c, polyfeevoucher: Number(c.polyfeevoucher ?? 0) - POLY_VOUCHER_MAX, polyfeepaid: paid >= fee ? paid - fee : paid }
-            : c));
-        }
         setSuccessMsg(`Assigned ${assignedType} Polygraph slot to ${client ? client.lastname + ', ' + client.firstname : 'Client'}!`);
-        const freshSlots = await getPolygraphSlots();
+        // Reloaded from the server: the vouchers and paid-in-full poly fee are spent, and spending the last fill of a
+        // poly fee override puts the regular poly fee back, which only the server knows about
+        const [freshSlots, freshClients] = await Promise.all([getPolygraphSlots(), getClients()]);
         setPolySlots(freshSlots);
+        setClients(freshClients);
+        // Scheduled from the client's account: show the booking and the spent vouchers there too
+        setSelectedClientDetail((c: any) => (c ? { ...c, ...(freshClients.find((fc: any) => fc.clientid === c.clientid) ?? {}) } : c));
+        setDrawerPolySlot('');
+        setDrawerPolyComment('');
       }
     } catch (err: any) {
       setError(err.message || 'Failed to assign client to slot.');
@@ -1336,6 +1361,12 @@ export default function App() {
     setFeeOverrideInput('');
     setFeeOverrideDate('');
     setClientFeeOverride(null);
+    setClientPolyOverride(null);
+    setShowPolyOverrideForm(false);
+    setPolyOverrideError('');
+    setDrawerPolySlot('');
+    setDrawerPolyType('Maintenance');
+    setDrawerPolyComment('');
     const [att, fin, notes, polys] = await Promise.all([
       getClientAttendance(client.clientid),
       getClientFinancials(client.clientid),
@@ -1353,6 +1384,19 @@ export default function App() {
     } catch (err: any) {
       setClientInfoError(err.message || 'Could not load the temporary fee override.');
     }
+    try {
+      const { override } = await fetchPolyFeeOverride(client.clientid);
+      setClientPolyOverride(override);
+    } catch (err: any) {
+      setPolyOverrideError(err.message || 'Could not load the poly fee override.');
+    }
+  };
+
+  // Poly fields changed by a poly fee override; applied to the open client and the client list
+  const applyPolyOverrideResult = (clientid: number, res: PolyFeeOverrideResult) => {
+    const changes = { polyfeepaid: res.polyFeePaid, polyfee: res.polyFee, polyfeevoucher: res.polyFeeVoucher };
+    setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, ...changes } : c));
+    setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, ...changes } : c));
   };
 
   // Attachments: loaded each time the tab is opened. View/Print only open types the browser can show safely;
@@ -1622,10 +1666,11 @@ export default function App() {
           text: `This client already has a polygraph scheduled ${new Date(`${p.date}T00:00:00`).toLocaleDateString()}${p.time ? ` @ ${formatDisplayTime(p.time)}` : ''}${p.location ? ` (${p.location})` : ''} using poly fee vouchers. Changing the poly fee payment did not cancel it or return the vouchers.`,
         });
       }
-      // Later ledger and attendance rows carry the new balance
-      const [att, fin] = await Promise.all([getClientAttendance(clientid), getClientFinancials(clientid)]);
+      // Later ledger and attendance rows carry the new balance; a poly fee change can add or take back an override fill
+      const [att, fin, poly] = await Promise.all([getClientAttendance(clientid), getClientFinancials(clientid), fetchPolyFeeOverride(clientid)]);
       setClientAttendance(att);
       setClientFinancials(fin);
+      setClientPolyOverride(poly.override);
     } catch (err: any) {
       setPaymentActionError(err.message || 'Could not save the change.');
     } finally {
@@ -2221,6 +2266,8 @@ export default function App() {
               setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, ...changes } : c));
               try {
                 setClientFinancials(await getClientFinancials(clientid));
+                // A poly fee payment can use up a fill of the poly fee override
+                setClientPolyOverride((await fetchPolyFeeOverride(clientid)).override);
               } catch {
                 // The payment is saved; the ledger refreshes the next time the client is opened
               }
@@ -2388,9 +2435,28 @@ export default function App() {
               })()}
 
               {(() => {
-                const notice = clientPolygraphsFor === selectedClientDetail.clientid
-                  ? polygraphNotice(selectedClientDetail, clientPolygraphs)
-                  : null;
+                if (clientPolygraphsFor !== selectedClientDetail.clientid) return null;
+                // Booked into a polygraph: the notice shows the appointment and how long since the last one, instead of the red warning
+                const slot = assignedSlotFor(selectedClientDetail.clientid);
+                if (slot) {
+                  const start = slotStart(slot);
+                  const upcoming = !start || start.getTime() > Date.now();
+                  return (
+                    <div className="bg-blue-500/10 border border-blue-500/50 text-blue-300 p-3 rounded-lg text-sm flex items-center justify-between gap-3 mb-6">
+                      <p className="flex items-center gap-2">
+                        <ShieldAlert size={16} className="shrink-0" />
+                        <span>
+                          <span className="font-semibold">{upcoming ? 'Polygraph scheduled' : 'Polygraph awaiting results'}: {slotSummary(slot)}.</span>{' '}
+                          {polygraphHistoryText(clientPolygraphs)}
+                        </span>
+                      </p>
+                      {isAllowed('polygraph') && (
+                        <button type="button" onClick={() => openPolySlot(slot.slotid)} className="shrink-0 text-xs font-semibold underline hover:text-white">View Slot</button>
+                      )}
+                    </div>
+                  );
+                }
+                const notice = polygraphNotice(selectedClientDetail, clientPolygraphs);
                 return notice && (
                   <div className="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-sm font-semibold flex items-center gap-2 mb-6">
                     <ShieldAlert size={16} /> {notice}
@@ -2605,14 +2671,18 @@ export default function App() {
                             value={clientInfoForm.programtype || ''}
                             onChange={e => {
                               const programType = e.target.value;
-                              setClientInfoForm((f: any) => ({
-                                ...f,
-                                programtype: programType,
-                                ...(programType === 'BIP' ? { treatmentfee: 35 } : {}),
+                              setClientInfoForm((f: any) => {
                                 // Switching programs resets the phase/week to one that fits the new program
-                                ...(SO_PROGRAM_TYPES.includes(programType) && !SO_PHASES.includes(f.phase) ? { phase: 'Phase 1 - Weekly' } : {}),
-                                ...(programType === 'BIP' && !isWholeNumber(f.phase) ? { phase: '0' } : {}),
-                              }));
+                                const phase = SO_PROGRAM_TYPES.includes(programType) && !SO_PHASES.includes(f.phase) ? 'Phase 1 - Weekly'
+                                  : programType === 'BIP' && !isWholeNumber(f.phase) ? '0'
+                                  : f.phase;
+                                // BIP is $35; Federal SO has no treatment fee; State and Voluntary SO take the fee for the phase
+                                const treatmentfee = programType === 'BIP' ? 35
+                                  : programType === 'Federal SO' ? 0
+                                  : STATE_FEE_PROGRAM_TYPES.includes(programType) && SO_TREATMENT_FEES[phase] !== undefined ? SO_TREATMENT_FEES[phase]
+                                  : f.treatmentfee;
+                                return { ...f, programtype: programType, phase, treatmentfee };
+                              });
                             }}
                             className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
                           >
@@ -2638,7 +2708,8 @@ export default function App() {
                               setClientInfoForm((f: any) => ({
                                 ...f,
                                 phase,
-                                ...(SO_TREATMENT_FEES[phase] !== undefined ? { treatmentfee: SO_TREATMENT_FEES[phase] } : {}),
+                                // Federal SO has no treatment fee, so its phase doesn't set one
+                                ...(STATE_FEE_PROGRAM_TYPES.includes(f.programtype) && SO_TREATMENT_FEES[phase] !== undefined ? { treatmentfee: SO_TREATMENT_FEES[phase] } : {}),
                               }));
                             }}
                             className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
@@ -2732,7 +2803,10 @@ export default function App() {
                                   aria-label={field === 'polyfeepaid' ? 'Poly fee paid' : 'Poly fee total'}
                                   value={clientInfoForm[field] ?? ''}
                                   onChange={e => setClientInfoForm((f: any) => ({ ...f, [field]: e.target.value }))}
-                                  className="w-full min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
+                                  // The total belongs to an active poly fee override; change it there
+                                  disabled={field === 'polyfee' && !!clientPolyOverride}
+                                  title={field === 'polyfee' && clientPolyOverride ? 'Set by the Temporary Poly Fee Override' : undefined}
+                                  className="w-full min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm disabled:opacity-50"
                                 />
                               </Fragment>
                             ))}
@@ -2867,6 +2941,155 @@ export default function App() {
                               setFeeOverrideInput('');
                               setFeeOverrideDate('');
                             }}
+                            className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={loading}
+                            className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
+                          >
+                            Set Override
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+
+                  {/* Section 5 – Temporary Poly Fee Override: a reduced poly fee for a number of fills, not a date */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
+                    <div className="flex justify-between items-start mb-4">
+                      <h3 className="text-xs font-bold uppercase text-blue-400 tracking-wider">Temporary Poly Fee Override</h3>
+                      {role === 'Business Administrator' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowPolyOverrideForm(!showPolyOverrideForm);
+                            setPolyOverrideError('');
+                            setPolyOverrideFee(clientPolyOverride ? Number(clientPolyOverride.reducedfee).toFixed(2) : '');
+                            setPolyOverrideFills(clientPolyOverride ? String(clientPolyOverride.fillsallowed) : '1');
+                          }}
+                          className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
+                        >
+                          {showPolyOverrideForm ? 'Cancel' : clientPolyOverride ? 'Change Poly Fee Override' : 'Set Poly Fee Override'}
+                        </button>
+                      )}
+                    </div>
+
+                    {clientPolyOverride ? (
+                      <div className="bg-slate-900 border border-emerald-500/30 rounded-lg p-4 mb-4">
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <p className="text-xs text-slate-500 mb-1">Reduced Poly Fee</p>
+                            <p className="text-white font-semibold text-lg">${Number(clientPolyOverride.reducedfee).toFixed(2)}</p>
+                            <p className="text-xs text-slate-500 mt-0.5">Regular poly fee: ${Number(clientPolyOverride.regularfee).toFixed(2)}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-slate-500 mb-1">Fills Used</p>
+                            <p className="text-white font-semibold text-lg">{clientPolyOverride.fillsused} of {clientPolyOverride.fillsallowed}</p>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {Number(clientPolyOverride.fillsused) >= Number(clientPolyOverride.fillsallowed)
+                                ? 'Last fill granted; the regular fee returns when its vouchers are used to schedule a polygraph.'
+                                : `${Number(clientPolyOverride.fillsallowed) - Number(clientPolyOverride.fillsused)} more fill(s) at the reduced fee.`}
+                            </p>
+                          </div>
+                        </div>
+                        {role === 'Business Administrator' && (
+                          <button
+                            type="button"
+                            disabled={loading}
+                            onClick={async () => {
+                              const clientid = selectedClientDetail.clientid;
+                              setLoading(true);
+                              setPolyOverrideError('');
+                              try {
+                                const res = await deletePolyFeeOverride(clientid, user.employeeemail);
+                                applyPolyOverrideResult(clientid, res);
+                                setClientPolyOverride(null);
+                                setShowPolyOverrideForm(false);
+                                setSuccessMsg(`Poly fee override removed. Poly fee is back to $${Number(res.polyFee).toFixed(2)}.`
+                                  + (res.vouchersRemoved ? ` ${res.vouchersRemoved} poly fee voucher(s) removed because the poly fee is no longer paid in full.` : ''));
+                              } catch (err: any) {
+                                setPolyOverrideError(err.message || 'Failed to remove the poly fee override.');
+                              } finally {
+                                setLoading(false);
+                              }
+                            }}
+                            className="mt-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 px-3 py-1.5 rounded-lg text-xs font-semibold w-full disabled:opacity-50"
+                          >
+                            Remove Override
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400">No poly fee override is active. Regular poly fee applies: ${Number(selectedClientDetail.polyfee ?? 250).toFixed(2)}</p>
+                    )}
+
+                    {polyOverrideError && <p className="text-xs text-red-400 mt-2">{polyOverrideError}</p>}
+
+                    {showPolyOverrideForm && role === 'Business Administrator' && (
+                      <form onSubmit={async (e) => {
+                        e.preventDefault();
+                        const fee = Number(polyOverrideFee);
+                        const fills = Number(polyOverrideFills);
+                        if (polyOverrideFee === '' || !(fee >= 0) || !Number.isInteger(fills) || fills < 1) {
+                          setPolyOverrideError('Enter a reduced poly fee and how many fills it applies to.');
+                          return;
+                        }
+                        const clientid = selectedClientDetail.clientid;
+                        setLoading(true);
+                        setPolyOverrideError('');
+                        try {
+                          const res = await savePolyFeeOverride(clientid, { reducedFee: fee, fills, user: user.employeeemail });
+                          applyPolyOverrideResult(clientid, res);
+                          setClientPolyOverride(res.override ?? null);
+                          setShowPolyOverrideForm(false);
+                          setSuccessMsg(`Poly fee set to $${fee.toFixed(2)} for ${fills} fill${fills === 1 ? '' : 's'}.`
+                            + (res.vouchersAdded ? ' What the client has already paid covers it, so the poly fee vouchers were filled.' : '')
+                            + (res.vouchersRemoved ? ` ${res.vouchersRemoved} poly fee voucher(s) removed because the poly fee is no longer paid in full.` : ''));
+                        } catch (err: any) {
+                          setPolyOverrideError(err.message || 'Failed to save the poly fee override.');
+                        } finally {
+                          setLoading(false);
+                        }
+                      }} className="space-y-3 border-t border-slate-800 pt-4 mt-4">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs text-slate-400 mb-1">Reduced Poly Fee *</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={polyOverrideFee}
+                              onChange={(e) => setPolyOverrideFee(e.target.value)}
+                              placeholder="e.g., 150.00"
+                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-slate-400 mb-1">Number of Fills *</label>
+                            <input
+                              type="number"
+                              step="1"
+                              min={Math.max(1, Number(clientPolyOverride?.fillsused ?? 0))}
+                              max={20}
+                              value={polyOverrideFills}
+                              onChange={(e) => setPolyOverrideFills(e.target.value)}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
+                              required
+                            />
+                          </div>
+                        </div>
+                        <p className="text-xs text-slate-500">
+                          A fill is the poly fee being paid in full, which fills the {POLY_VOUCHER_MAX} poly fee vouchers. The reduced fee applies until the last fill's vouchers
+                          are used to schedule a polygraph; then the regular fee (${Number(clientPolyOverride?.regularfee ?? selectedClientDetail.polyfee ?? 250).toFixed(2)}) returns.
+                        </p>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => { setShowPolyOverrideForm(false); setPolyOverrideError(''); }}
                             className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold"
                           >
                             Cancel
@@ -3383,7 +3606,88 @@ export default function App() {
                   </div>
                   {(() => {
                     const slot = assignedSlotFor(selectedClientDetail.clientid);
-                    return slot && (
+                    if (!slot) {
+                      // Not booked: open slots that haven't started yet, soonest first
+                      const openSlots = polySlots
+                        .filter(s => s.status === 'Open' && (slotStart(s)?.getTime() ?? Infinity) > Date.now())
+                        .sort((a, b) => (slotStart(a)?.getTime() ?? Infinity) - (slotStart(b)?.getTime() ?? Infinity));
+                      const needs = polySchedulingNeeds(selectedClientDetail);
+                      return (
+                        <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Schedule Polygraph</p>
+                            <p className={`text-xs ${needs.met ? 'text-emerald-400' : 'text-amber-400'}`}>
+                              Vouchers {Number(selectedClientDetail.polyfeevoucher ?? 0)}/{POLY_VOUCHER_MAX}
+                              {!needs.met && ' · payment needed before scheduling'}
+                            </p>
+                          </div>
+                          {role !== 'Business Administrator' ? (
+                            <p className="text-xs text-slate-400 italic">Only Business Administrators can assign polygraph slots to clients.</p>
+                          ) : openSlots.length === 0 ? (
+                            <p className="text-xs text-slate-400 italic">No open polygraph slots are coming up. Add slots under Polygraphs › Poly Admin.</p>
+                          ) : (
+                            <form
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                if (!drawerPolySlot) return;
+                                const slotId = Number(drawerPolySlot);
+                                const clientId = String(selectedClientDetail.clientid);
+                                // Same per-slot choices the Poly Schedule uses, so the confirmation, payment, and waiting-period prompts work unchanged
+                                setSlotAssignments(prev => ({ ...prev, [slotId]: clientId }));
+                                setSlotTypes(prev => ({ ...prev, [slotId]: drawerPolyType }));
+                                setSlotComments(prev => ({ ...prev, [slotId]: drawerPolyComment }));
+                                openAssignConfirm(slotId, clientId);
+                              }}
+                              className="grid grid-cols-1 md:grid-cols-2 gap-3"
+                            >
+                              <label className="md:col-span-2 text-xs text-slate-400">Open Slot
+                                <select
+                                  value={drawerPolySlot}
+                                  onChange={(e) => setDrawerPolySlot(e.target.value)}
+                                  required
+                                  className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-xs"
+                                >
+                                  <option value="">Choose a slot…</option>
+                                  {openSlots.map(s => (
+                                    <option key={s.slotid} value={s.slotid}>{slotSummary(s)} · {getExaminerDisplayName(s.polygrapher)}</option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="text-xs text-slate-400">Poly Type
+                                <select
+                                  value={drawerPolyType}
+                                  onChange={(e) => setDrawerPolyType(e.target.value)}
+                                  className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-xs"
+                                >
+                                  <option value="Instant">Instant Poly</option>
+                                  <option value="Maintenance">Maintenance</option>
+                                  <option value="Sexual History">Sexual History</option>
+                                  <option value="Specific">Specific Issue</option>
+                                  <option value="Monitoring">Monitoring</option>
+                                </select>
+                              </label>
+                              <label className="text-xs text-slate-400">Comment <span className="text-slate-500">(optional)</span>
+                                <input
+                                  type="text"
+                                  value={drawerPolyComment}
+                                  onChange={(e) => setDrawerPolyComment(e.target.value)}
+                                  placeholder="Added to the case note"
+                                  className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-xs"
+                                />
+                              </label>
+                              {/* The page's error banner is hidden behind the account drawer */}
+                              {error && <p className="md:col-span-2 text-xs text-red-400">{error}</p>}
+                              <div className="md:col-span-2 flex justify-end">
+                                <button type="submit" disabled={loading || !drawerPolySlot} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-xs font-semibold">
+                                  Schedule
+                                </button>
+                              </div>
+                            </form>
+                          )}
+                        </div>
+                      );
+                    }
+                    return (
                       <div className="bg-blue-500/5 border border-blue-500/30 p-4 rounded-xl text-sm flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <p className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Scheduled Polygraph</p>
@@ -4123,6 +4427,126 @@ export default function App() {
           </div>
         )}
 
+        {/* Polygraph assignment dialogs. Outside the Polygraph tab so they also open over a client's account,
+            which can schedule from its Polygraphs section. */}
+        {pendingAssignSlotId !== null && (() => {
+          const pendingSlot = polySlots.find(s => s.slotid === pendingAssignSlotId);
+          const pendingClient = clients.find(c => String(c.clientid) === slotAssignments[pendingAssignSlotId]);
+          const pendingComment = (slotComments[pendingAssignSlotId] || '').trim();
+          const details: [string, string][] = [
+            ['Client', pendingClient ? `${pendingClient.lastname}, ${pendingClient.firstname}` : 'Not selected'],
+            ['Poly Type', slotTypes[pendingAssignSlotId] || 'Maintenance'],
+            ['Location', pendingSlot?.location || '—'],
+            ['Address', pendingSlot?.address || 'Not set'],
+            ['Date', pendingSlot ? `${new Date(pendingSlot.date).toLocaleDateString()} @ ${formatDisplayTime(pendingSlot.time)}` : '—'],
+            ['Examiner', pendingSlot ? getExaminerDisplayName(pendingSlot.polygrapher) : '—'],
+          ];
+          return (
+            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+              <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
+                <div>
+                  <h3 className="font-semibold text-white">Confirm Polygraph Assignment</h3>
+                  <p className="text-xs text-slate-400 mt-1">Review the details below. This will be added to the client's case notes.</p>
+                </div>
+                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
+                  {details.map(([label, value]) => (
+                    <React.Fragment key={label}>
+                      <dt className="text-slate-400 uppercase">{label}</dt>
+                      <dd className={label === 'Client' ? 'text-emerald-400 font-semibold' : 'text-slate-200'}>{value}</dd>
+                    </React.Fragment>
+                  ))}
+                  {pendingComment && (
+                    <>
+                      <dt className="text-slate-400 uppercase">Comment</dt>
+                      <dd className="text-slate-200 whitespace-pre-wrap">{pendingComment}</dd>
+                    </>
+                  )}
+                </dl>
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setPendingAssignSlotId(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Go Back</button>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={async () => {
+                      const slotId = pendingAssignSlotId;
+                      setPendingAssignSlotId(null);
+                      await handleAssignSlotToClient(slotId);
+                    }}
+                    className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded text-xs font-semibold">
+                    Accept & Assign
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {waitBypassPrompt && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="wait-bypass-title">
+            <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
+              <div>
+                <h3 id="wait-bypass-title" className="font-semibold text-white">Bypass Polygraph Waiting Period?</h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  <span className="text-emerald-400 font-semibold">{waitBypassPrompt.clientName}</span>'s last polygraph
+                  ({waitBypassPrompt.lastPolyDate}) was No Deception Indicated. The next one normally cannot be before {waitBypassPrompt.earliestDate} (5 months and 2 weeks).
+                </p>
+              </div>
+              <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
+                As a Business Administrator you can schedule this polygraph anyway. The override is recorded in the client's case notes and the system log.
+              </p>
+              <label className="flex items-start gap-2.5 cursor-pointer text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={waitBypassConfirmed}
+                  onChange={e => setWaitBypassConfirmed(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-amber-500"
+                />
+                <span>I confirm I want to schedule this polygraph before {waitBypassPrompt.earliestDate}, bypassing the waiting period.</span>
+              </label>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setWaitBypassPrompt(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Cancel</button>
+                <button
+                  type="button"
+                  disabled={!waitBypassConfirmed || loading}
+                  onClick={async () => {
+                    const { slotId } = waitBypassPrompt;
+                    setWaitBypassPrompt(null);
+                    await handleAssignSlotToClient(slotId, true);
+                  }}
+                  className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded text-xs font-semibold"
+                >
+                  Bypass &amp; Assign
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {polyPaymentPrompt && (
+          <ClientPaymentDialog
+            client={polyPaymentPrompt.client}
+            balance={Number(polyPaymentPrompt.client.accountbalance) || 0}
+            noteLabel="Poly fee payment"
+            initialAmount={polyPaymentPrompt.amountDue}
+            initialApplyToPolyFee={polySchedulingNeeds(polyPaymentPrompt.client).polyDue > 0}
+            lockApplyToPolyFee
+            notice={polyPaymentPrompt.notice}
+            createdBy={user.employeeemail}
+            onClose={() => setPolyPaymentPrompt(null)}
+            onSuccess={setSuccessMsg}
+            onError={setError}
+            onProcessed={(newBalance, polyFeePaid, polyFeeVoucher) => {
+              const updated = { ...polyPaymentPrompt.client, accountbalance: newBalance, polyfeepaid: polyFeePaid, polyfeevoucher: polyFeeVoucher };
+              setClients(prev => prev.map(c => c.clientid === updated.clientid ? { ...c, ...updated } : c));
+              // The same client may be open in the account drawer
+              setSelectedClientDetail((c: any) => (c && c.clientid === updated.clientid ? { ...c, ...updated } : c));
+              if (polySchedulingNeeds(updated).met) {
+                setSuccessMsg(`${POLY_VOUCHER_MAX}/${POLY_VOUCHER_MAX} poly fee vouchers and the account is paid up. Click ${selectedClientDetail ? 'Schedule' : 'Confirm & Assign Slot'} to schedule.`);
+              }
+            }}
+          />
+        )}
+
         {/* POLYGRAPH TAB */}
         {activeTab === 'polygraph' && (
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-6">
@@ -4270,122 +4694,6 @@ export default function App() {
               </>
             )}
 
-            {pendingAssignSlotId !== null && (() => {
-              const pendingSlot = polySlots.find(s => s.slotid === pendingAssignSlotId);
-              const pendingClient = clients.find(c => String(c.clientid) === slotAssignments[pendingAssignSlotId]);
-              const pendingComment = (slotComments[pendingAssignSlotId] || '').trim();
-              const details: [string, string][] = [
-                ['Client', pendingClient ? `${pendingClient.lastname}, ${pendingClient.firstname}` : 'Not selected'],
-                ['Poly Type', slotTypes[pendingAssignSlotId] || 'Maintenance'],
-                ['Location', pendingSlot?.location || '—'],
-                ['Address', pendingSlot?.address || 'Not set'],
-                ['Date', pendingSlot ? `${new Date(pendingSlot.date).toLocaleDateString()} @ ${formatDisplayTime(pendingSlot.time)}` : '—'],
-                ['Examiner', pendingSlot ? getExaminerDisplayName(pendingSlot.polygrapher) : '—'],
-              ];
-              return (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-                  <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
-                    <div>
-                      <h3 className="font-semibold text-white">Confirm Polygraph Assignment</h3>
-                      <p className="text-xs text-slate-400 mt-1">Review the details below. This will be added to the client's case notes.</p>
-                    </div>
-                    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
-                      {details.map(([label, value]) => (
-                        <React.Fragment key={label}>
-                          <dt className="text-slate-400 uppercase">{label}</dt>
-                          <dd className={label === 'Client' ? 'text-emerald-400 font-semibold' : 'text-slate-200'}>{value}</dd>
-                        </React.Fragment>
-                      ))}
-                      {pendingComment && (
-                        <>
-                          <dt className="text-slate-400 uppercase">Comment</dt>
-                          <dd className="text-slate-200 whitespace-pre-wrap">{pendingComment}</dd>
-                        </>
-                      )}
-                    </dl>
-                    <div className="flex justify-end gap-2">
-                      <button type="button" onClick={() => setPendingAssignSlotId(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Go Back</button>
-                      <button
-                        type="button"
-                        disabled={loading}
-                        onClick={async () => {
-                          const slotId = pendingAssignSlotId;
-                          setPendingAssignSlotId(null);
-                          await handleAssignSlotToClient(slotId);
-                        }}
-                        className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded text-xs font-semibold">
-                        Accept & Assign
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {waitBypassPrompt && (
-              <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="wait-bypass-title">
-                <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
-                  <div>
-                    <h3 id="wait-bypass-title" className="font-semibold text-white">Bypass Polygraph Waiting Period?</h3>
-                    <p className="text-xs text-slate-400 mt-1">
-                      <span className="text-emerald-400 font-semibold">{waitBypassPrompt.clientName}</span>'s last polygraph
-                      ({waitBypassPrompt.lastPolyDate}) was No Deception Indicated. The next one normally cannot be before {waitBypassPrompt.earliestDate} (5 months and 2 weeks).
-                    </p>
-                  </div>
-                  <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
-                    As a Business Administrator you can schedule this polygraph anyway. The override is recorded in the client's case notes and the system log.
-                  </p>
-                  <label className="flex items-start gap-2.5 cursor-pointer text-slate-200">
-                    <input
-                      type="checkbox"
-                      checked={waitBypassConfirmed}
-                      onChange={e => setWaitBypassConfirmed(e.target.checked)}
-                      className="mt-0.5 h-4 w-4 accent-amber-500"
-                    />
-                    <span>I confirm I want to schedule this polygraph before {waitBypassPrompt.earliestDate}, bypassing the waiting period.</span>
-                  </label>
-                  <div className="flex justify-end gap-2">
-                    <button type="button" onClick={() => setWaitBypassPrompt(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Cancel</button>
-                    <button
-                      type="button"
-                      disabled={!waitBypassConfirmed || loading}
-                      onClick={async () => {
-                        const { slotId } = waitBypassPrompt;
-                        setWaitBypassPrompt(null);
-                        await handleAssignSlotToClient(slotId, true);
-                      }}
-                      className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded text-xs font-semibold"
-                    >
-                      Bypass &amp; Assign
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {polyPaymentPrompt && (
-              <ClientPaymentDialog
-                client={polyPaymentPrompt.client}
-                balance={Number(polyPaymentPrompt.client.accountbalance) || 0}
-                noteLabel="Poly fee payment"
-                initialAmount={polyPaymentPrompt.amountDue}
-                initialApplyToPolyFee={polySchedulingNeeds(polyPaymentPrompt.client).polyDue > 0}
-                lockApplyToPolyFee
-                notice={polyPaymentPrompt.notice}
-                createdBy={user.employeeemail}
-                onClose={() => setPolyPaymentPrompt(null)}
-                onSuccess={setSuccessMsg}
-                onError={setError}
-                onProcessed={(newBalance, polyFeePaid, polyFeeVoucher) => {
-                  const updated = { ...polyPaymentPrompt.client, accountbalance: newBalance, polyfeepaid: polyFeePaid, polyfeevoucher: polyFeeVoucher };
-                  setClients(prev => prev.map(c => c.clientid === updated.clientid ? { ...c, ...updated } : c));
-                  if (polySchedulingNeeds(updated).met) {
-                    setSuccessMsg(`${POLY_VOUCHER_MAX}/${POLY_VOUCHER_MAX} poly fee vouchers and the account is paid up. Click Confirm & Assign Slot to schedule.`);
-                  }
-                }}
-              />
-            )}
-
             {reopenTarget && (
               <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
                 <form onSubmit={confirmReopenSlot} className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
@@ -4505,7 +4813,8 @@ export default function App() {
                               <div>
                                 <label className="block text-xs text-slate-400 uppercase mb-1">Assign Client</label>
                                 <ClientPicker
-                                  clients={clients}
+                                  // One scheduled polygraph per client: clients already booked into a slot aren't offered
+                                  clients={clients.filter(c => !assignedSlotFor(c.clientid))}
                                   value={slotAssignments[slot.slotid] || ''}
                                   onChange={(id) => setSlotAssignments({ ...slotAssignments, [slot.slotid]: id })}
                                   className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-xs placeholder-slate-500"
@@ -4676,6 +4985,7 @@ export default function App() {
                 { label: 'Weekly Agent Report', open: agentReportData.length > 0, onClick: () => handleLoadReports('agent') },
                 { label: 'Monthly Deposit Report', open: !!depositReportData, onClick: () => handleLoadReports('deposit') },
                 { label: 'Group Income Report', open: showGroupReport, onClick: () => setShowGroupReport(!showGroupReport) },
+                { label: 'Counselor Client Report', open: showCounselorReport, onClick: () => setShowCounselorReport(!showCounselorReport) },
               ].map(b => (
                 <button
                   key={b.label}
@@ -4690,6 +5000,8 @@ export default function App() {
             </div>
 
             {showGroupReport && <GroupIncomeReport userEmail={user.employeeemail} canRecordDeposits={user.role === 'Business Administrator'} />}
+
+            {showCounselorReport && <CounselorClientReport clients={clients} groups={groups} statuses={PROGRAM_STATUSES} onOpenClient={openClientLogs} />}
 
             {agentReportData.length > 0 && (
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">

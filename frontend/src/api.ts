@@ -764,3 +764,47 @@ export async function deleteClientFeeOverride(clientId: number, removedBy: strin
     });
     return feeOverrideResponse(res);
 }
+
+// Reduced poly fee for a number of fills (times the poly fee is paid in full and the vouchers fill), not a date
+export interface PolyFeeOverride {
+    overrideid: number;
+    reducedfee: string | number;
+    regularfee: string | number;
+    fillsallowed: number;
+    fillsused: number;
+    createdby: string | null;
+    createdon: string;
+}
+
+// The client's poly fields after an override change; a lower fee can fill the vouchers, a higher one can take them back
+export interface PolyFeeOverrideResult {
+    override?: PolyFeeOverride;
+    polyFeePaid: number;
+    polyFee: number;
+    polyFeeVoucher: number;
+    vouchersRemoved: number;
+    vouchersAdded: number;
+}
+
+export async function fetchPolyFeeOverride(clientId: number) {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/poly-fee-override`);
+    return agentResponse(res, 'Failed to load the poly fee override.') as Promise<{ override: PolyFeeOverride | null }>;
+}
+
+export async function savePolyFeeOverride(clientId: number, data: { reducedFee: number; fills: number; user: string }): Promise<PolyFeeOverrideResult> {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/poly-fee-override`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return agentResponse(res, 'Failed to save the poly fee override.');
+}
+
+export async function deletePolyFeeOverride(clientId: number, user: string): Promise<PolyFeeOverrideResult> {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/poly-fee-override`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user }),
+    });
+    return agentResponse(res, 'Failed to remove the poly fee override.');
+}
