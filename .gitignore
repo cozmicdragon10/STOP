@@ -1,0 +1,12 @@
+# Dependencies are installed from package-lock.json (npm install)
+node_modules/
+
+# Build output and logs
+dist/
+*.log
+
+# Editor and OS files
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
