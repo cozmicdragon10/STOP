@@ -38,7 +38,7 @@ SSL_PFX_PASSWORD=your_ssl_password
 ```
 
 4. Set up the database:
-Run migrations to set up the PostgreSQL database schema. Ensure your database is running and the `DATABASE_URL` is configured correctly.
+Make sure PostgreSQL is running and `DATABASE_URL` points at the STOP database. Schema changes in `backend/migrations/` are applied automatically when the server starts (see [Database](#database)).
 
 ## Running the Application
 
@@ -48,10 +48,8 @@ Run migrations to set up the PostgreSQL database schema. Ensure your database is
 ```bash
 cd backend
 npm start
-# or
-node server.js
 ```
-The backend server will start on `https://localhost:5000`
+The backend applies any pending migrations, then starts on `https://localhost:5000` (or the `PORT` in `.env`).
 
 #### Start the Frontend Development Server
 In a new terminal:
@@ -79,11 +77,15 @@ npm start
 ## Available Scripts
 
 ### Backend
-- `npm start` - Start the server (defined in package.json if available, otherwise use `node server.js`)
+- `npm start` - Apply pending migrations and start the HTTPS server
+- `npm test` - Run the backend tests (Node's built-in test runner; no database needed)
+- `npm run migrate` - Apply pending migrations without starting the server
+- `npm run migrate:status` - List migrations that have not been applied yet
 
 ### Frontend
 - `npm run dev` - Start development server with Vite
 - `npm run build` - Build for production
+- `npm test` - Run the unit tests (Vitest)
 - `npm run lint` - Run ESLint to check code quality
 - `npm run preview` - Preview the production build locally
 
@@ -91,18 +93,28 @@ npm start
 
 ```
 STOP/
-├── backend/           # Express.js backend server
-│   ├── server.js      # Main server file
-│   ├── passwords.js   # Password hashing utilities
-│   ├── migrations/    # Database migrations
-│   ├── certs/         # SSL certificates
-│   └── package.json
-├── frontend/          # React frontend with Vite
-│   ├── src/           # React components and utilities
-│   ├── package.json
-│   └── tsconfig.json
+├── backend/              # Express.js backend server
+│   ├── server.js         # Startup: runs migrations, then serves app.js over HTTPS
+│   ├── app.js            # Express app; mounts every router in routes/
+│   ├── db.js             # PostgreSQL pool and the system log helper (logAction)
+│   ├── migrate.js        # Migration runner
+│   ├── routes/           # One router per API area (clients, groups, polygraphs, reports, ...)
+│   ├── lib/              # Logic shared between routers (attendance, poly vouchers, access, SQL fragments)
+│   ├── migrations/       # Numbered SQL migrations, applied in order
+│   ├── test/             # Backend tests
+│   ├── passwords.js      # Password hashing
+│   ├── dischargeSummary.js  # Discharge summary PDF
+│   └── certs/            # SSL certificate
+├── frontend/             # React frontend with Vite
+│   ├── src/App.tsx       # Main app shell and tabs
+│   ├── src/components/   # Tab and dialog components
+│   ├── src/utils/        # Business rules and formatting helpers (with *.test.ts tests)
+│   └── src/api.ts        # Calls to the backend
 └── README.md
 ```
+
+Some rules exist in both the backend and the frontend (the monthly fee rule, the first check-in limit, BIP check-in
+messages, call-in reasons). `backend/test/sharedRules.test.js` fails if the two copies drift apart.
 
 ## API Endpoints
 
@@ -120,7 +132,17 @@ The backend provides REST API endpoints for:
 
 ## Database
 
-The application uses PostgreSQL. Ensure the database is created and migrations are run before starting the application.
+The application uses PostgreSQL. Schema changes live in `backend/migrations/` as numbered files (`038_add_something.sql`).
+On startup the server applies every file not yet recorded in the `SchemaMigrations` table, in order, each in its own
+transaction; if one fails, the server does not start.
+
+To change the schema, add a new file with the next number. Never edit a migration that has already been applied.
+
+Migrations 001–027 were run by hand before migrations were tracked. The first time the runner sees an existing
+database, it records those as applied without running them again (several are not safe to repeat).
+
+Note: the migrations assume the original tables (Clients, Groups, Attendance, and so on) already exist; there is no
+migration that creates them from scratch yet.
 
 ## Troubleshooting
 

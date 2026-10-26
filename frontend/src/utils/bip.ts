@@ -1,7 +1,7 @@
 // Why a BIP client can't be checked into group yet, as sent by the server (BipCheckInBlock): 'intake' when no BIP Intake or
 // DV Assessment is on record (here or at another provider); 'our-intake' when they were discharged after an intake done at
 // another provider, so our own BIP Intake or DV Assessment is needed; 'reinstate' when they were discharged since their
-// last completed BIP intake or reinstate. Mirrors bipCheckInBlockMessage in backend/server.js.
+// last completed BIP intake or reinstate. Mirrors bipCheckInBlockMessage in backend/lib/sql.js.
 export type BipCheckInBlock = 'intake' | 'our-intake' | 'reinstate' | null | undefined;
 
 export const bipCheckInBlockMessage = (block: BipCheckInBlock, name: string): string => (block === 'intake'

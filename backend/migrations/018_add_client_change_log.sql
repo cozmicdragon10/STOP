@@ -1,5 +1,4 @@
--- History shown on the client Change Log tab (Business Administrators only). The server also creates this table at startup.
-CREATE TABLE IF NOT EXISTS ClientChangeLog (
+-- History shown on the client Change Log tab (Business Administrators only).CREATE TABLE IF NOT EXISTS ClientChangeLog (
     ChangeId SERIAL PRIMARY KEY,
     ClientId INT NOT NULL REFERENCES Clients(ClientId) ON DELETE CASCADE,
     ChangedOn TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

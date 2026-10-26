@@ -9,6 +9,6 @@ export const SO_TREATMENT_FEES: Record<string, number> = {
 };
 
 // State SO and Voluntary SO Phase 1 (weekly) and Phase 2 (monthly) clients pay the treatment fee once per calendar month, on their first attendance.
-// The server applies the same rule when saving (see isMonthlyFeeClient in backend/server.js).
+// The server applies the same rule when saving (see isMonthlyFeeClient in backend/lib/attendance.js).
 export const isMonthlyFeeClient = (programtype?: string | null, phase?: string | null): boolean =>
   (programtype === 'State SO' || programtype === 'Voluntary SO') && (phase === 'Phase 1 - Weekly' || phase === 'Phase 2 - Monthly');
