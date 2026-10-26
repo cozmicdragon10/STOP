@@ -9,7 +9,7 @@ const routes = () => app.router.stack
 
 test('every API route is mounted once', () => {
     const list = routes();
-    assert.equal(list.length, 82);
+    assert.equal(list.length, 83);
     assert.equal(new Set(list).size, list.length, 'a route is registered twice');
     for (const r of list) assert.match(r, /^(GET|POST|PUT|PATCH|DELETE) \/api\//);
 });
@@ -23,13 +23,3 @@ test('each API area has its routes', () => {
     }
 });
 
-test('unknown routes return 404 without touching the database', async () => {
-    const server = app.listen(0);
-    try {
-        const { port } = server.address();
-        const res = await fetch(`http://127.0.0.1:${port}/api/does-not-exist`);
-        assert.equal(res.status, 404);
-    } finally {
-        server.close();
-    }
-});

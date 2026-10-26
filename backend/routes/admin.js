@@ -1,8 +1,12 @@
 const express = require('express');
 const { hashPassword } = require('../passwords');
 const { logAction, pool } = require('../db');
+const { ADMIN_ROLES, endSessionsFor, requireRole } = require('../lib/auth');
 
 const router = express.Router();
+// Account changes and the system log are for the Admin tab's roles only. The employee list stays open to every
+// logged-in role because the other tabs use it to name counselors and polygraphers.
+const adminOnly = requireRole(...ADMIN_ROLES);
 
 router.get('/api/admin/employees', async (req, res) => {
     try {
@@ -15,7 +19,7 @@ router.get('/api/admin/employees', async (req, res) => {
 });
 
 // Edit an existing account's name, role, and active status. The email is the account key and cannot change.
-router.put('/api/admin/employees/:email', async (req, res) => {
+router.put('/api/admin/employees/:email', adminOnly, async (req, res) => {
     try {
         const email = req.params.email;
         const { displayName, role, active, updatedBy, password } = req.body;
@@ -35,6 +39,8 @@ router.put('/api/admin/employees/:email', async (req, res) => {
              WHERE EmployeeEmail = $5 RETURNING EmployeeEmail`,
             [displayName.trim(), role.trim(), active !== false, passwordHash, email]
         );
+        // A new password or a deactivated account signs that employee out everywhere
+        if (passwordHash || active === false) await endSessionsFor(email);
         const old = before.rows[0];
         await logAction(
             updatedBy || 'unknown',
@@ -48,7 +54,7 @@ router.put('/api/admin/employees/:email', async (req, res) => {
     }
 });
 
-router.post('/api/admin/employees', async (req, res) => {
+router.post('/api/admin/employees', adminOnly, async (req, res) => {
     try {
         const { employeeEmail, displayName, role, location, active, password } = req.body;
         if (!String(password || '').trim()) {
@@ -65,7 +71,7 @@ router.post('/api/admin/employees', async (req, res) => {
     }
 });
 
-router.get('/api/admin/logs', async (req, res) => {
+router.get('/api/admin/logs', adminOnly, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM SystemLogs ORDER BY Timestamp DESC LIMIT 100');
         res.json(result.rows);

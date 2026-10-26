@@ -6,7 +6,7 @@ import {
   Paperclip, Eye, Download, Printer, Upload, Pencil, SlidersHorizontal, UserCheck, ClipboardList
 } from 'lucide-react';
 import {
-  loginUser, getClients, getGroups, submitAccountPayment, submitCustomCharge,
+  loginUser, logoutUser, setSessionEndedHandler, getClients, getGroups, submitAccountPayment, submitCustomCharge,
   submitClientCallIn, submitGroupCallIn, getPolygraphSlots, createPolygraphSlot,
   submitPolygraphResult, deletePolygraphSlot, assignPolygraphSlot, reopenPolygraphSlot,
   getClientAttendance, getClientFinancials, adjustCashPayment, recordCardPaymentAction,
@@ -359,6 +359,20 @@ export default function App() {
       }, 0);
     }
   }, [selectedGroupDetail]);
+
+  // The server refused the session (expired after 12 hours, or the account was changed): back to the login screen
+  useEffect(() => {
+    setSessionEndedHandler(() => {
+      setUser(null);
+      setError('Your session has ended. Please log in again.');
+    });
+    return () => setSessionEndedHandler(null);
+  }, []);
+
+  const handleLogout = async () => {
+    await logoutUser();
+    setUser(null);
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1711,7 +1725,7 @@ export default function App() {
             <p className="text-sm font-medium text-white">{user.displayname}</p>
             <span className="text-xs bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/20 font-semibold">{user.role}</span>
           </div>
-          <button onClick={() => setUser(null)} className="bg-slate-800 hover:bg-slate-700 p-2 rounded-lg text-slate-400 hover:text-white transition"><LogOut size={18} /></button>
+          <button onClick={handleLogout} className="bg-slate-800 hover:bg-slate-700 p-2 rounded-lg text-slate-400 hover:text-white transition"><LogOut size={18} /></button>
         </div>
       </header>
 

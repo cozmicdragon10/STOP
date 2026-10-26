@@ -1,6 +1,10 @@
 # Dependencies are installed from package-lock.json (npm install)
 node_modules/
 
+# Secrets: database password, certificate private key and its password (see backend/.env.example)
+.env
+*.pfx
+
 # Build output and logs
 dist/
 *.log

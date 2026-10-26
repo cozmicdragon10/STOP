@@ -29,13 +29,11 @@ cd ../frontend
 npm install
 ```
 
-3. Set up environment variables:
-Create or configure the `.env` file in the `backend` directory with the following variables:
-```
-PORT=5000
-DATABASE_URL=postgresql://postgres:password@localhost:5432/stop_db
-SSL_PFX_PASSWORD=your_ssl_password
-```
+3. Set up environment variables and the certificate:
+Copy `backend/.env.example` to `backend/.env` and fill in the database URL and certificate password. Put the HTTPS
+certificate at `backend/certs/stop-server.pfx`. Neither `.env` nor the `.pfx` is committed to git; keep them only on
+the server. `backend/certs/stop-server.cer` is the public half of the certificate and can be installed on office PCs
+so browsers trust the site.
 
 4. Set up the database:
 Make sure PostgreSQL is running and `DATABASE_URL` points at the STOP database. Schema changes in `backend/migrations/` are applied automatically when the server starts (see [Database](#database)).
@@ -129,6 +127,19 @@ The backend provides REST API endpoints for:
 - Testing (`/api/testing/`)
 - Reports (`/api/reports/`)
 - Admin functions (`/api/admin/`)
+
+## Security
+
+- **Logins:** `POST /api/auth/login` returns a session token that the frontend sends as `Authorization: Bearer <token>`
+  on every other request. Sessions last `SESSION_HOURS` (default 12), and only a hash of the token is stored
+  (`Sessions` table). Logging out, changing an employee's password, or deactivating them ends their sessions.
+- **Identity:** the server takes the acting employee from the session, never from the request. Fields such as `user`,
+  `createdBy`, `updatedBy`, `?user=` and the `X-User` header are overwritten with the session's email
+  (`backend/lib/auth.js`).
+- **Admin-only routes:** account changes and the system log need an Office Admin or Business Administrator session;
+  deleting a group needs a Business Administrator.
+- **Login attempts:** 5 failed attempts for an email locks that email for 15 minutes.
+- **CORS:** only the addresses in `CORS_ORIGINS` can call the API from a browser.
 
 ## Database
 

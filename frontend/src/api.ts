@@ -2,27 +2,56 @@ import type { SessionEntry } from './hooks/useGroupCheckIn';
 
 const API_BASE = 'https://192.168.1.133:5000/api';
 
+// The login session token. Held in memory only, so reloading the page logs out (as before sessions existed).
+let sessionToken: string | null = null;
+let onSessionEnded: (() => void) | null = null;
+
+// Called when the server refuses the token (expired, logged out elsewhere, or account deactivated)
+export function setSessionEndedHandler(handler: (() => void) | null) {
+    onSessionEnded = handler;
+}
+
+// fetch with the session token attached. Every API call except login goes through this.
+async function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+    const headers = new Headers(init.headers);
+    if (sessionToken) headers.set('Authorization', `Bearer ${sessionToken}`);
+    const res = await fetch(url, { ...init, headers });
+    if (res.status === 401 && sessionToken) {
+        sessionToken = null;
+        onSessionEnded?.();
+    }
+    return res;
+}
+
 export async function loginUser(email: string, password: string) {
     const res = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
     });
-    return res.json();
+    const data = await res.json();
+    if (data?.success && data.token) sessionToken = data.token;
+    return data;
+}
+
+export async function logoutUser() {
+    if (!sessionToken) return;
+    await apiFetch(`${API_BASE}/auth/logout`, { method: 'POST' }).catch(() => {});
+    sessionToken = null;
 }
 
 export async function getClients() {
-    const res = await fetch(`${API_BASE}/clients`);
+    const res = await apiFetch(`${API_BASE}/clients`);
     return res.json();
 }
 
 export async function getGroups() {
-    const res = await fetch(`${API_BASE}/groups`);
+    const res = await apiFetch(`${API_BASE}/groups`);
     return res.json();
 }
 
 export async function getGroupClients(groupId: number) {
-    const res = await fetch(`${API_BASE}/groups/${groupId}/clients`);
+    const res = await apiFetch(`${API_BASE}/groups/${groupId}/clients`);
     return res.json();
 }
 
@@ -36,7 +65,7 @@ export interface GroupDaySession {
 
 // Sessions of the group on the date (YYYY-MM-DD), oldest first
 export async function getGroupSessions(groupId: number, date: string): Promise<GroupDaySession[]> {
-    const res = await fetch(`${API_BASE}/groups/${groupId}/sessions?date=${encodeURIComponent(date)}`);
+    const res = await apiFetch(`${API_BASE}/groups/${groupId}/sessions?date=${encodeURIComponent(date)}`);
     const body = await res.json().catch(() => null);
     if (!res.ok || !Array.isArray(body)) {
         throw new Error(body?.error || (res.status === 404
@@ -48,7 +77,7 @@ export async function getGroupSessions(groupId: number, date: string): Promise<G
 
 // Business Administrators only; the server checks the role
 export async function setClientNoPolyRequired(clientId: number, noPolyRequired: boolean, user: string): Promise<boolean> {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/no-poly-required`, {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/no-poly-required`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ noPolyRequired, user }),
@@ -63,7 +92,7 @@ export async function setClientNoPolyRequired(clientId: number, noPolyRequired: 
 // 'discharge' is Business Administrators only (the server checks the role); 'activate' sets a discharged client
 // back to Active or Inactive. Returns the client's new program status.
 export async function changeClientProgramStatus(action: 'discharge' | 'activate', clientId: number, status: string, subcategory: string | null, note: string, user: string): Promise<string> {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/${action}`, {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status, subcategory, note, user }),
@@ -88,7 +117,7 @@ export interface ClientChange {
 
 // Business Administrators only; the server checks the role
 export async function getClientChangeLog(clientId: number, user: string): Promise<ClientChange[]> {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/change-log?user=${encodeURIComponent(user)}`);
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/change-log?user=${encodeURIComponent(user)}`);
     const body = await res.json();
     if (!res.ok || !Array.isArray(body)) {
         throw new Error(body?.error || 'Failed to load the change log.');
@@ -97,7 +126,7 @@ export async function getClientChangeLog(clientId: number, user: string): Promis
 }
 
 export async function updateClient(clientId: number, data: any) {
-    const res = await fetch(`${API_BASE}/clients/${clientId}`, {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -117,7 +146,7 @@ export async function updateClient(clientId: number, data: any) {
 }
 
 export async function createClient(data: Record<string, any>) {
-    const res = await fetch(`${API_BASE}/clients`, {
+    const res = await apiFetch(`${API_BASE}/clients`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -138,7 +167,7 @@ export async function createClient(data: Record<string, any>) {
 
 // The server only lets Business Administrators delete clients, and reads who is asking from X-User-Email
 export async function deleteClient(clientId: number, userEmail: string) {
-    const res = await fetch(`${API_BASE}/clients/${clientId}`, {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', 'X-User-Email': userEmail },
     });
@@ -150,7 +179,7 @@ export async function deleteClient(clientId: number, userEmail: string) {
 }
 
 export async function updateGroup(groupId: number, data: any) {
-    const res = await fetch(`${API_BASE}/groups/${groupId}`, {
+    const res = await apiFetch(`${API_BASE}/groups/${groupId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -170,7 +199,7 @@ export async function updateGroup(groupId: number, data: any) {
 }
 
 export async function createGroup(data: { groupName: string; location: string; counselor: string; programType: string; schedule: string; address: string }) {
-    const res = await fetch(`${API_BASE}/groups`, {
+    const res = await apiFetch(`${API_BASE}/groups`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -190,7 +219,7 @@ export async function createGroup(data: { groupName: string; location: string; c
 }
 
 export async function deleteGroup(groupId: number) {
-    const res = await fetch(`${API_BASE}/groups/${groupId}`, {
+    const res = await apiFetch(`${API_BASE}/groups/${groupId}`, {
         method: 'DELETE',
     });
     const text = await res.text();
@@ -208,7 +237,7 @@ export async function deleteGroup(groupId: number) {
 }
 
 export async function assignClientToGroup(groupId: number, clientId: number, assignedBy: string) {
-    const res = await fetch(`${API_BASE}/groups/${groupId}/assign`, {
+    const res = await apiFetch(`${API_BASE}/groups/${groupId}/assign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientId, assignedBy }),
@@ -217,7 +246,7 @@ export async function assignClientToGroup(groupId: number, clientId: number, ass
 }
 
 export async function submitAttendance(data: any) {
-    const res = await fetch(`${API_BASE}/attendance`, {
+    const res = await apiFetch(`${API_BASE}/attendance`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -244,7 +273,7 @@ export interface BatchAttendancePayload {
 }
 
 export async function submitBatchAttendance(data: BatchAttendancePayload) {
-    const res = await fetch(`${API_BASE}/attendance/batch`, {
+    const res = await apiFetch(`${API_BASE}/attendance/batch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -274,7 +303,7 @@ export interface OpenGroupSession {
 
 // Only the open check-ins this user may see: administrators see all; counselors see their groups' and the ones they opened
 export async function getOpenGroups(user: string): Promise<OpenGroupSession[]> {
-    const res = await fetch(`${API_BASE}/open-groups?user=${encodeURIComponent(user)}`);
+    const res = await apiFetch(`${API_BASE}/open-groups?user=${encodeURIComponent(user)}`);
     const body = await res.json();
     if (!res.ok) {
         throw new Error(body.error || 'Failed to load open groups.');
@@ -297,7 +326,7 @@ export interface ClosedGroupSession {
 
 // Only the closed sessions this user may see: Business Administrators see all; others see their groups' and the ones they opened
 export async function getClosedGroups(user: string): Promise<ClosedGroupSession[]> {
-    const res = await fetch(`${API_BASE}/closed-groups?user=${encodeURIComponent(user)}`);
+    const res = await apiFetch(`${API_BASE}/closed-groups?user=${encodeURIComponent(user)}`);
     const body = await res.json();
     if (!res.ok) {
         throw new Error(body.error || 'Failed to load closed groups.');
@@ -306,7 +335,7 @@ export async function getClosedGroups(user: string): Promise<ClosedGroupSession[
 }
 
 export async function saveOpenGroup(data: { group: number; date: string; sessionNumber: number; entries: SessionEntry[]; createdBy: string }): Promise<OpenGroupSession> {
-    const res = await fetch(`${API_BASE}/open-groups`, {
+    const res = await apiFetch(`${API_BASE}/open-groups`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -319,7 +348,7 @@ export async function saveOpenGroup(data: { group: number; date: string; session
 }
 
 export async function deleteOpenGroup(openSessionId: number, removedBy: string) {
-    const res = await fetch(`${API_BASE}/open-groups/${openSessionId}`, {
+    const res = await apiFetch(`${API_BASE}/open-groups/${openSessionId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ removedBy }),
@@ -395,13 +424,13 @@ export interface ClientProgress {
 }
 
 export async function getClientProgress(clientId: number): Promise<ClientProgress> {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/progress`);
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/progress`);
     return agentResponse(res, 'Failed to load the client\'s progress.');
 }
 
 // Business Administrators and Office Admins; the server checks the role
 export async function recordOutsideBipAssessment(clientId: number, data: { assessmentType: 'BIP Intake' | 'DV Assessment'; assessmentDate: string; providerName: string; notes: string; user: string }) {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/outside-bip-assessments`, {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/outside-bip-assessments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -411,7 +440,7 @@ export async function recordOutsideBipAssessment(clientId: number, data: { asses
 
 // Business Administrators only; the server checks the role
 export async function deleteOutsideBipAssessment(id: number, user: string) {
-    const res = await fetch(`${API_BASE}/outside-bip-assessments/${id}`, {
+    const res = await apiFetch(`${API_BASE}/outside-bip-assessments/${id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user }),
@@ -420,12 +449,12 @@ export async function deleteOutsideBipAssessment(id: number, user: string) {
 }
 
 export async function getBipIntake(clientId: number, date: string): Promise<BipIntake | null> {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/bip-intake?date=${encodeURIComponent(date)}`);
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/bip-intake?date=${encodeURIComponent(date)}`);
     return agentResponse(res, 'Failed to look up the BIP intake.');
 }
 
 export async function getSessionTypes(): Promise<SessionType[]> {
-    const res = await fetch(`${API_BASE}/session-types`);
+    const res = await apiFetch(`${API_BASE}/session-types`);
     return agentResponse(res, 'Failed to load the price list.');
 }
 
@@ -433,7 +462,7 @@ export async function saveSessionType(data: {
     id?: number; category: IndividualCategory; name: string; fee: number; active: boolean;
     kind: SessionTypeKind; bipOnly: boolean; lateFee: number | null; user: string;
 }): Promise<SessionType> {
-    const res = await fetch(`${API_BASE}/session-types${data.id ? `/${data.id}` : ''}`, {
+    const res = await apiFetch(`${API_BASE}/session-types${data.id ? `/${data.id}` : ''}`, {
         method: data.id ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -503,17 +532,17 @@ export interface IndividualSessionPayload {
 }
 
 export async function getOpenIndividualSessions(user: string): Promise<OpenIndividualSession[]> {
-    const res = await fetch(`${API_BASE}/individual-sessions/open?user=${encodeURIComponent(user)}`);
+    const res = await apiFetch(`${API_BASE}/individual-sessions/open?user=${encodeURIComponent(user)}`);
     return agentResponse(res, 'Failed to load open sessions.');
 }
 
 export async function getClosedIndividualSessions(user: string): Promise<ClosedIndividualSession[]> {
-    const res = await fetch(`${API_BASE}/individual-sessions/closed?user=${encodeURIComponent(user)}`);
+    const res = await apiFetch(`${API_BASE}/individual-sessions/closed?user=${encodeURIComponent(user)}`);
     return agentResponse(res, 'Failed to load closed sessions.');
 }
 
 export async function saveOpenIndividualSession(data: IndividualSessionPayload): Promise<OpenIndividualSession> {
-    const res = await fetch(`${API_BASE}/individual-sessions/open`, {
+    const res = await apiFetch(`${API_BASE}/individual-sessions/open`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -522,7 +551,7 @@ export async function saveOpenIndividualSession(data: IndividualSessionPayload):
 }
 
 export async function deleteOpenIndividualSession(openSessionId: number, user: string) {
-    const res = await fetch(`${API_BASE}/individual-sessions/open/${openSessionId}`, {
+    const res = await apiFetch(`${API_BASE}/individual-sessions/open/${openSessionId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user }),
@@ -532,7 +561,7 @@ export async function deleteOpenIndividualSession(openSessionId: number, user: s
 
 // Records the attendance, fee, and payment; returns the client's new balance (stored sign: positive = owes)
 export async function closeIndividualSession(data: IndividualSessionPayload): Promise<{ attendanceId: number; newBalance: string | number }> {
-    const res = await fetch(`${API_BASE}/individual-sessions/close`, {
+    const res = await apiFetch(`${API_BASE}/individual-sessions/close`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -542,7 +571,7 @@ export async function closeIndividualSession(data: IndividualSessionPayload): Pr
 
 // applyToPolyFee: pay down the client's unpaid poly fee first; any excess goes to the account balance
 export async function submitAccountPayment(data: { client: number; amount: number; comments: string; createdBy: string; paymentMethod: 'Cash' | 'Credit Card'; applyToPolyFee?: boolean }) {
-    const res = await fetch(`${API_BASE}/financials/payment`, {
+    const res = await apiFetch(`${API_BASE}/financials/payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -551,7 +580,7 @@ export async function submitAccountPayment(data: { client: number; amount: numbe
 }
 
 export async function submitCustomCharge(data: { client: number; amount: number; comments: string; createdBy: string }) {
-    const res = await fetch(`${API_BASE}/financials/charge`, {
+    const res = await apiFetch(`${API_BASE}/financials/charge`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -574,7 +603,7 @@ export interface PaymentChangeResult {
 // Corrects a cash payment's amount; the server carries the difference through the balance (or poly fee paid and vouchers),
 // later ledger and attendance rows, and the check-in it was taken at
 export async function adjustCashPayment(transactionId: number, data: { amount: number; reason: string; user: string }): Promise<PaymentChangeResult> {
-    const res = await fetch(`${API_BASE}/financials/${transactionId}/adjust`, {
+    const res = await apiFetch(`${API_BASE}/financials/${transactionId}/adjust`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -586,7 +615,7 @@ export type CardPaymentAction = 'refund' | 'dispute' | 'dispute-won' | 'dispute-
 
 // Refund (full or partial), dispute, or dispute outcome on a credit card payment
 export async function recordCardPaymentAction(transactionId: number, data: { action: CardPaymentAction; amount?: number; reason: string; user: string }): Promise<PaymentChangeResult> {
-    const res = await fetch(`${API_BASE}/financials/${transactionId}/card-action`, {
+    const res = await apiFetch(`${API_BASE}/financials/${transactionId}/card-action`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -595,7 +624,7 @@ export async function recordCardPaymentAction(transactionId: number, data: { act
 }
 
 export async function submitClientCallIn(data: any) {
-    const res = await fetch(`${API_BASE}/callin/client`, {
+    const res = await apiFetch(`${API_BASE}/callin/client`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -604,7 +633,7 @@ export async function submitClientCallIn(data: any) {
 }
 
 export async function submitGroupCallIn(data: any) {
-    const res = await fetch(`${API_BASE}/callin/group`, {
+    const res = await apiFetch(`${API_BASE}/callin/group`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -613,12 +642,12 @@ export async function submitGroupCallIn(data: any) {
 }
 
 export async function getPolygraphSlots() {
-    const res = await fetch(`${API_BASE}/polygraphs/slots`);
+    const res = await apiFetch(`${API_BASE}/polygraphs/slots`);
     return res.json();
 }
 
 export async function createPolygraphSlot(data: any) {
-    const res = await fetch(`${API_BASE}/polygraphs/slots`, {
+    const res = await apiFetch(`${API_BASE}/polygraphs/slots`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -627,7 +656,7 @@ export async function createPolygraphSlot(data: any) {
 }
 
 export async function submitPolygraphResult(data: any) {
-    const res = await fetch(`${API_BASE}/polygraphs/results`, {
+    const res = await apiFetch(`${API_BASE}/polygraphs/results`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -636,12 +665,12 @@ export async function submitPolygraphResult(data: any) {
 }
 
 export async function getClientTests(clientId: number) {
-    const res = await fetch(`${API_BASE}/testing/${clientId}`);
+    const res = await apiFetch(`${API_BASE}/testing/${clientId}`);
     return res.json();
 }
 
 export async function submitTestResult(data: any) {
-    const res = await fetch(`${API_BASE}/testing`, {
+    const res = await apiFetch(`${API_BASE}/testing`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -650,7 +679,7 @@ export async function submitTestResult(data: any) {
 }
 
 export async function getAgentReport() {
-    const res = await fetch(`${API_BASE}/reports/agent`);
+    const res = await apiFetch(`${API_BASE}/reports/agent`);
     return res.json();
 }
 
@@ -675,7 +704,7 @@ export interface GroupReportRow {
 
 // from and to are YYYY-MM-DD, inclusive
 export async function getGroupReport(from: string, to: string): Promise<GroupReportRow[]> {
-    const res = await fetch(`${API_BASE}/reports/groups?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    const res = await apiFetch(`${API_BASE}/reports/groups?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
     const text = await res.text();
     let body: any;
     try {
@@ -706,12 +735,12 @@ export interface GroupSessionRef {
 }
 
 export async function getGroupDeposits(from: string, to: string): Promise<GroupDeposit[]> {
-    const res = await fetch(`${API_BASE}/reports/group-deposits?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    const res = await apiFetch(`${API_BASE}/reports/group-deposits?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
     return agentResponse(res, 'Failed to load group deposits.');
 }
 
 export async function saveGroupDeposit(data: GroupSessionRef & { amountDeposited: number; depositDate: string; notes: string; user: string }): Promise<GroupDeposit> {
-    const res = await fetch(`${API_BASE}/reports/group-deposits`, {
+    const res = await apiFetch(`${API_BASE}/reports/group-deposits`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -720,7 +749,7 @@ export async function saveGroupDeposit(data: GroupSessionRef & { amountDeposited
 }
 
 export async function deleteGroupDeposit(data: GroupSessionRef & { user: string }) {
-    const res = await fetch(`${API_BASE}/reports/group-deposits`, {
+    const res = await apiFetch(`${API_BASE}/reports/group-deposits`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -753,13 +782,13 @@ export interface GroupCashDepositRow extends GroupCashDropOff {
 
 // Business Administrators get every closed session that took cash; everyone else gets the ones they opened
 export async function getGroupCashDeposits(from: string, to: string, user: string): Promise<GroupCashDepositRow[]> {
-    const res = await fetch(`${API_BASE}/reports/group-cash-deposits?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&user=${encodeURIComponent(user)}`);
+    const res = await apiFetch(`${API_BASE}/reports/group-cash-deposits?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&user=${encodeURIComponent(user)}`);
     return agentResponse(res, 'Failed to load group cash deposits.');
 }
 
 // Returns the session's deposit after the change, or null when it has none
 export async function setGroupCashDroppedOff(data: GroupSessionRef & { droppedOff: boolean; depositDate: string; user: string }): Promise<GroupCashDropOff | null> {
-    const res = await fetch(`${API_BASE}/reports/group-cash-deposits`, {
+    const res = await apiFetch(`${API_BASE}/reports/group-cash-deposits`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -768,17 +797,17 @@ export async function setGroupCashDroppedOff(data: GroupSessionRef & { droppedOf
 }
 
 export async function getDepositReport() {
-    const res = await fetch(`${API_BASE}/reports/deposit`);
+    const res = await apiFetch(`${API_BASE}/reports/deposit`);
     return res.json();
 }
 
 export async function getEmployees() {
-    const res = await fetch(`${API_BASE}/admin/employees`);
+    const res = await apiFetch(`${API_BASE}/admin/employees`);
     return res.json();
 }
 
 export async function updateEmployee(email: string, data: { displayName: string; role: string; active: boolean; updatedBy: string; password?: string }) {
-    const res = await fetch(`${API_BASE}/admin/employees/${encodeURIComponent(email)}`, {
+    const res = await apiFetch(`${API_BASE}/admin/employees/${encodeURIComponent(email)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -791,7 +820,7 @@ export async function updateEmployee(email: string, data: { displayName: string;
 }
 
 export async function addEmployee(data: any) {
-    const res = await fetch(`${API_BASE}/admin/employees`, {
+    const res = await apiFetch(`${API_BASE}/admin/employees`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -800,7 +829,7 @@ export async function addEmployee(data: any) {
 }
 
 export async function getSystemLogs() {
-    const res = await fetch(`${API_BASE}/admin/logs`);
+    const res = await apiFetch(`${API_BASE}/admin/logs`);
     return res.json();
 }
 
@@ -826,13 +855,13 @@ async function agentResponse(res: Response, fallback: string) {
 }
 
 export async function getSupervisingAgents(): Promise<SupervisingAgent[]> {
-    const res = await fetch(`${API_BASE}/agents`);
+    const res = await apiFetch(`${API_BASE}/agents`);
     return agentResponse(res, 'Failed to load supervising agents.');
 }
 
 // Business Administrators and Office Admins only; the server checks the role
 export async function saveSupervisingAgent(agentId: number | null, data: { name: string; phone: string; email: string; user: string }) {
-    const res = await fetch(agentId ? `${API_BASE}/agents/${agentId}` : `${API_BASE}/agents`, {
+    const res = await apiFetch(agentId ? `${API_BASE}/agents/${agentId}` : `${API_BASE}/agents`, {
         method: agentId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -842,7 +871,7 @@ export async function saveSupervisingAgent(agentId: number | null, data: { name:
 
 // Business Administrators only; the server checks the role
 export async function deleteSupervisingAgent(agentId: number, user: string) {
-    const res = await fetch(`${API_BASE}/agents/${agentId}`, {
+    const res = await apiFetch(`${API_BASE}/agents/${agentId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user }),
@@ -851,22 +880,22 @@ export async function deleteSupervisingAgent(agentId: number, user: string) {
 }
 
 export async function getClientAttendance(clientId: number) {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/attendance`);
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/attendance`);
     return res.json();
 }
 
 export async function getClientFinancials(clientId: number) {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/financials`);
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/financials`);
     return res.json();
 }
 
 export async function getClientNotes(clientId: number) {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/notes`);
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/notes`);
     return res.json();
 }
 
 export async function addClientNote(clientId: number, data: { user: string; comments: string; category: string }) {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/notes`, {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -876,7 +905,7 @@ export async function addClientNote(clientId: number, data: { user: string; comm
 
 // The note's author or a Business Administrator only; the server checks
 export async function updateClientNote(noteId: number, data: { user: string; comments: string }) {
-    const res = await fetch(`${API_BASE}/notes/${noteId}`, {
+    const res = await apiFetch(`${API_BASE}/notes/${noteId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -885,7 +914,7 @@ export async function updateClientNote(noteId: number, data: { user: string; com
 }
 
 export async function deleteClientNote(noteId: number, user: string) {
-    const res = await fetch(`${API_BASE}/notes/${noteId}`, {
+    const res = await apiFetch(`${API_BASE}/notes/${noteId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user }),
@@ -894,7 +923,7 @@ export async function deleteClientNote(noteId: number, user: string) {
 }
 
 export async function getClientPolygraphs(clientId: number) {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/polygraphs`);
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/polygraphs`);
     return res.json();
 }
 
@@ -912,7 +941,7 @@ export interface ClientAttachment {
 export const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 
 export async function getClientAttachments(clientId: number): Promise<ClientAttachment[]> {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/attachments`);
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/attachments`);
     const body = await res.json();
     if (!res.ok || !Array.isArray(body)) {
         throw new Error(body?.error || 'Could not load attachments.');
@@ -922,7 +951,7 @@ export async function getClientAttachments(clientId: number): Promise<ClientAtta
 
 // Sent as raw bytes; the name and real type travel in headers
 export async function uploadClientAttachment(clientId: number, file: File, user: string): Promise<ClientAttachment> {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/attachments`, {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/attachments`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/octet-stream',
@@ -941,7 +970,7 @@ export async function uploadClientAttachment(clientId: number, file: File, user:
 
 // The file as a Blob typed with its saved content type, for viewing, downloading, or printing
 export async function fetchClientAttachment(attachment: ClientAttachment): Promise<Blob> {
-    const res = await fetch(`${API_BASE}/attachments/${attachment.attachmentid}`);
+    const res = await apiFetch(`${API_BASE}/attachments/${attachment.attachmentid}`);
     if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || 'Could not open the attachment.');
@@ -951,7 +980,7 @@ export async function fetchClientAttachment(attachment: ClientAttachment): Promi
 
 // The server keeps the original extension if the new name drops it; returns the saved attachment
 export async function renameClientAttachment(attachmentId: number, fileName: string, user: string): Promise<ClientAttachment> {
-    const res = await fetch(`${API_BASE}/attachments/${attachmentId}`, {
+    const res = await apiFetch(`${API_BASE}/attachments/${attachmentId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fileName, user }),
@@ -965,7 +994,7 @@ export async function renameClientAttachment(attachmentId: number, fileName: str
 
 // Business Administrators only; the server checks the role
 export async function deleteClientAttachment(attachmentId: number, user: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/attachments/${attachmentId}`, {
+    const res = await apiFetch(`${API_BASE}/attachments/${attachmentId}`, {
         method: 'DELETE',
         headers: { 'X-User': user },
     });
@@ -977,7 +1006,7 @@ export async function deleteClientAttachment(attachmentId: number, user: string)
 
 // bypassWaitPeriod: a Business Administrator's confirmed choice to schedule inside the post-NDI waiting period
 export async function assignPolygraphSlot(slotId: number, clientId: number, type: string, user: string, comments: string, bypassWaitPeriod = false) {
-    const res = await fetch(`${API_BASE}/polygraphs/slots/${slotId}/assign`, {
+    const res = await apiFetch(`${API_BASE}/polygraphs/slots/${slotId}/assign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientId, type, user, comments, bypassWaitPeriod }),
@@ -986,7 +1015,7 @@ export async function assignPolygraphSlot(slotId: number, clientId: number, type
 }
 
 export async function reopenPolygraphSlot(slotId: number, cancellation: { reason: string; notes: string; returnVouchers: boolean; overrideVoucherRule: boolean; user: string }) {
-    const res = await fetch(`${API_BASE}/polygraphs/slots/${slotId}/open`, {
+    const res = await apiFetch(`${API_BASE}/polygraphs/slots/${slotId}/open`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(cancellation),
@@ -995,7 +1024,7 @@ export async function reopenPolygraphSlot(slotId: number, cancellation: { reason
 }
 
 export async function deletePolygraphSlot(slotId: number) {
-    const res = await fetch(`${API_BASE}/polygraphs/slots/${slotId}`, {
+    const res = await apiFetch(`${API_BASE}/polygraphs/slots/${slotId}`, {
         method: 'DELETE',
     });
     return res.json();
@@ -1016,12 +1045,12 @@ async function feeOverrideResponse(res: Response) {
 }
 
 export async function fetchClientFeeOverride(clientId: number) {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/fee-override`);
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/fee-override`);
     return feeOverrideResponse(res) as Promise<{ override: any | null }>;
 }
 
 export async function saveClientFeeOverride(clientId: number, reducedFee: number, expirationDate: string, createdBy: string) {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/fee-override`, {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/fee-override`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reducedFee, expirationDate, createdBy }),
@@ -1030,7 +1059,7 @@ export async function saveClientFeeOverride(clientId: number, reducedFee: number
 }
 
 export async function deleteClientFeeOverride(clientId: number, removedBy: string) {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/fee-override`, {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/fee-override`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ removedBy }),
@@ -1060,12 +1089,12 @@ export interface PolyFeeOverrideResult {
 }
 
 export async function fetchPolyFeeOverride(clientId: number) {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/poly-fee-override`);
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/poly-fee-override`);
     return agentResponse(res, 'Failed to load the poly fee override.') as Promise<{ override: PolyFeeOverride | null }>;
 }
 
 export async function savePolyFeeOverride(clientId: number, data: { reducedFee: number; fills: number; user: string }): Promise<PolyFeeOverrideResult> {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/poly-fee-override`, {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/poly-fee-override`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -1074,7 +1103,7 @@ export async function savePolyFeeOverride(clientId: number, data: { reducedFee: 
 }
 
 export async function deletePolyFeeOverride(clientId: number, user: string): Promise<PolyFeeOverrideResult> {
-    const res = await fetch(`${API_BASE}/clients/${clientId}/poly-fee-override`, {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/poly-fee-override`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user }),

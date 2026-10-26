@@ -1,5 +1,6 @@
 const express = require('express');
 const { pool } = require('../db');
+const { requireRole } = require('../lib/auth');
 const { groupNameFor, logClientChange } = require('../lib/changeLog');
 const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, GROUP_ATTENDANCE } = require('../lib/sql');
 
@@ -80,7 +81,8 @@ router.post('/api/groups', async (req, res) => {
     }
 });
 
-router.delete('/api/groups/:id', async (req, res) => {
+// Business Administrators only, matching the Group Directory's delete button
+router.delete('/api/groups/:id', requireRole('Business Administrator'), async (req, res) => {
     try {
         const { id } = req.params;
         const assigned = await pool.query('SELECT COUNT(*) AS count FROM Clients WHERE GroupId = $1', [id]);

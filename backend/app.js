@@ -1,10 +1,17 @@
 // The Express app with every API route mounted. server.js runs migrations and starts HTTPS; tests use the app directly.
 const express = require('express');
 const cors = require('cors');
+const { requireSession } = require('./lib/auth');
+
+// Browser pages allowed to call the API, comma-separated in CORS_ORIGINS (.env)
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'https://192.168.1.133:5173,https://localhost:5173')
+    .split(',').map(o => o.trim()).filter(Boolean);
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: CORS_ORIGINS }));
 app.use(express.json());
+// Everything below needs a logged-in session, except POST /api/auth/login
+app.use(requireSession);
 
 // Mounted in the order the routes were originally declared, so matching is unchanged
 app.use(require('./routes/auth'));
