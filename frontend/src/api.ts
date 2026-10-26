@@ -331,6 +331,215 @@ export async function deleteOpenGroup(openSessionId: number, removedBy: string) 
     return body;
 }
 
+// --- Assessments & Individuals ---
+export type IndividualCategory = 'Assessment' | 'Individual';
+
+// 'BIP Intake' (BIP Intake, DV Assessment) starts the reinstate clock; a 'BIP Reinstate' costs fee under 6 months after
+// the client's last intake, latefee from 6 months to a year, and can't be done after a year
+export type SessionTypeKind = 'Standard' | 'BIP Intake' | 'BIP Reinstate';
+
+// A price list entry, kept by Business Administrators in Admin
+export interface SessionType {
+    sessiontypeid: number;
+    category: IndividualCategory;
+    name: string;
+    fee: string | number;
+    active: boolean;
+    kind: SessionTypeKind;
+    // Only BIP clients can have it (always set for BIP intakes and reinstates)
+    biponly: boolean;
+    latefee: string | number | null;
+}
+
+// A client's most recent closed BIP intake on or before a date, and where that date falls for a reinstate
+export interface BipIntake {
+    intakedate: string;
+    intakename: string;
+    window: 'early' | 'late' | 'expired';
+    // Discharged after an intake done at another provider: no reinstate; our own intake is needed
+    needsOurIntake?: boolean;
+}
+
+// A completed assessment: done here (an Attendance row) or a BIP intake done at another provider (an outside record)
+export interface CompletedAssessment {
+    source: 'here' | 'outside';
+    id: number;
+    name: string;
+    kind: SessionTypeKind;
+    date: string;
+    provider: string | null;
+    notes: string | null;
+    recordedby: string | null;
+    // Done here only
+    fee: string | number | null;
+    paid: string | number | null;
+    paymentmethod: string | null;
+}
+
+export interface OpenAssessment {
+    opensessionid: number;
+    name: string;
+    date: string;
+    provider: string | null;
+    fee: string | number;
+    createdby: string | null;
+}
+
+// The client's Progress tab. block and lastDischarge are for BIP clients' group check-in clearance.
+export interface ClientProgress {
+    isBip: boolean;
+    block: 'intake' | 'our-intake' | 'reinstate' | null;
+    lastDischarge: string | null;
+    completed: CompletedAssessment[];
+    open: OpenAssessment[];
+}
+
+export async function getClientProgress(clientId: number): Promise<ClientProgress> {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/progress`);
+    return agentResponse(res, 'Failed to load the client\'s progress.');
+}
+
+// Business Administrators and Office Admins; the server checks the role
+export async function recordOutsideBipAssessment(clientId: number, data: { assessmentType: 'BIP Intake' | 'DV Assessment'; assessmentDate: string; providerName: string; notes: string; user: string }) {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/outside-bip-assessments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return agentResponse(res, 'Failed to record the outside assessment.');
+}
+
+// Business Administrators only; the server checks the role
+export async function deleteOutsideBipAssessment(id: number, user: string) {
+    const res = await fetch(`${API_BASE}/outside-bip-assessments/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user }),
+    });
+    return agentResponse(res, 'Failed to remove the outside assessment.');
+}
+
+export async function getBipIntake(clientId: number, date: string): Promise<BipIntake | null> {
+    const res = await fetch(`${API_BASE}/clients/${clientId}/bip-intake?date=${encodeURIComponent(date)}`);
+    return agentResponse(res, 'Failed to look up the BIP intake.');
+}
+
+export async function getSessionTypes(): Promise<SessionType[]> {
+    const res = await fetch(`${API_BASE}/session-types`);
+    return agentResponse(res, 'Failed to load the price list.');
+}
+
+export async function saveSessionType(data: {
+    id?: number; category: IndividualCategory; name: string; fee: number; active: boolean;
+    kind: SessionTypeKind; bipOnly: boolean; lateFee: number | null; user: string;
+}): Promise<SessionType> {
+    const res = await fetch(`${API_BASE}/session-types${data.id ? `/${data.id}` : ''}`, {
+        method: data.id ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return agentResponse(res, 'Failed to save the price list entry.');
+}
+
+export interface OpenIndividualSession {
+    opensessionid: number;
+    clientid: number;
+    firstname: string;
+    lastname: string;
+    docnumber: string | null;
+    programtype: string | null;
+    category: IndividualCategory;
+    sessiontypeid: number;
+    sessiontypename: string;
+    sessiondate: string;
+    fee: string | number;
+    payment: string | number;
+    paymentmethod: 'Cash' | 'Credit Card' | null;
+    provider: string | null;
+    comments: string | null;
+    paymentcomments: string | null;
+    createdby: string | null;
+    updatedon: string;
+}
+
+export interface ClosedIndividualSession {
+    attendanceid: number;
+    clientid: number;
+    firstname: string;
+    lastname: string;
+    category: IndividualCategory;
+    sessiontypename: string | null;
+    sessiondate: string;
+    fee: string | number;
+    payment: string | number;
+    paymentmethod: string | null;
+    provider: string | null;
+    comments: string | null;
+    paymentcomments: string | null;
+    openedby: string | null;
+    closedby: string | null;
+    closedon: string | null;
+}
+
+// What the session form sends to save (open) or close a session
+export interface IndividualSessionPayload {
+    openSessionId?: number | null;
+    client: number;
+    category: IndividualCategory;
+    sessionTypeId: number;
+    date: string;
+    fee: number;
+    payment: number;
+    paymentMethod: 'Cash' | 'Credit Card';
+    provider: string;
+    comments: string;
+    // Added to the payment's ledger row when the session closes
+    paymentComments: string;
+    user: string;
+    // Closing a BIP intake or reinstate: payment for the assessment and any past due balance taken, then intake paperwork
+    // completed (intake) or the BIP Reinstatement Contract signed (reinstate)
+    paymentConfirmed?: boolean;
+    paperworkCompleted?: boolean;
+}
+
+export async function getOpenIndividualSessions(user: string): Promise<OpenIndividualSession[]> {
+    const res = await fetch(`${API_BASE}/individual-sessions/open?user=${encodeURIComponent(user)}`);
+    return agentResponse(res, 'Failed to load open sessions.');
+}
+
+export async function getClosedIndividualSessions(user: string): Promise<ClosedIndividualSession[]> {
+    const res = await fetch(`${API_BASE}/individual-sessions/closed?user=${encodeURIComponent(user)}`);
+    return agentResponse(res, 'Failed to load closed sessions.');
+}
+
+export async function saveOpenIndividualSession(data: IndividualSessionPayload): Promise<OpenIndividualSession> {
+    const res = await fetch(`${API_BASE}/individual-sessions/open`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return agentResponse(res, 'Failed to save the session.');
+}
+
+export async function deleteOpenIndividualSession(openSessionId: number, user: string) {
+    const res = await fetch(`${API_BASE}/individual-sessions/open/${openSessionId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user }),
+    });
+    return agentResponse(res, 'Failed to discard the session.');
+}
+
+// Records the attendance, fee, and payment; returns the client's new balance (stored sign: positive = owes)
+export async function closeIndividualSession(data: IndividualSessionPayload): Promise<{ attendanceId: number; newBalance: string | number }> {
+    const res = await fetch(`${API_BASE}/individual-sessions/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return agentResponse(res, 'Failed to close the session.');
+}
+
 // applyToPolyFee: pay down the client's unpaid poly fee first; any excess goes to the account balance
 export async function submitAccountPayment(data: { client: number; amount: number; comments: string; createdBy: string; paymentMethod: 'Cash' | 'Credit Card'; applyToPolyFee?: boolean }) {
     const res = await fetch(`${API_BASE}/financials/payment`, {
@@ -517,6 +726,45 @@ export async function deleteGroupDeposit(data: GroupSessionRef & { user: string 
         body: JSON.stringify(data),
     });
     return agentResponse(res, 'Failed to remove the deposit.');
+}
+
+// The deposit fields of a session in the group cash deposit report; all null while the cash is still held
+export interface GroupCashDropOff {
+    amountdeposited: string | number | null;
+    depositdate: string | null;
+    notes: string | null;
+    recordedby: string | null;
+    recordedbyname: string | null;
+    recordedon: string | null;
+}
+
+export interface GroupCashDepositRow extends GroupCashDropOff {
+    groupid: number;
+    groupname: string;
+    counselor: string | null;
+    sessiondate: string;
+    sessionnumber: number;
+    openedby: string | null;
+    openedbyname: string | null;
+    closedon: string | null;
+    attendance: string | number;
+    cash: string | number;
+}
+
+// Business Administrators get every closed session that took cash; everyone else gets the ones they opened
+export async function getGroupCashDeposits(from: string, to: string, user: string): Promise<GroupCashDepositRow[]> {
+    const res = await fetch(`${API_BASE}/reports/group-cash-deposits?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&user=${encodeURIComponent(user)}`);
+    return agentResponse(res, 'Failed to load group cash deposits.');
+}
+
+// Returns the session's deposit after the change, or null when it has none
+export async function setGroupCashDroppedOff(data: GroupSessionRef & { droppedOff: boolean; depositDate: string; user: string }): Promise<GroupCashDropOff | null> {
+    const res = await fetch(`${API_BASE}/reports/group-cash-deposits`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return agentResponse(res, 'Failed to update the deposit.');
 }
 
 export async function getDepositReport() {

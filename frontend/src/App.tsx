@@ -3,7 +3,7 @@ import {
   Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
   DollarSign, Calendar, PlusCircle, Activity, PhoneCall, ShieldAlert, 
   Layers, CheckSquare, BarChart3, Settings, CheckCircle2, Trash2, RotateCcw, Home, History,
-  Paperclip, Eye, Download, Printer, Upload, Pencil, SlidersHorizontal, UserCheck
+  Paperclip, Eye, Download, Printer, Upload, Pencil, SlidersHorizontal, UserCheck, ClipboardList
 } from 'lucide-react';
 import {
   loginUser, getClients, getGroups, submitAccountPayment, submitCustomCharge,
@@ -32,11 +32,33 @@ import RecordFilterBar from './components/clients/RecordFilterBar';
 import MonthHeader from './components/clients/MonthHeader';
 import GroupIncomeReport from './components/reports/GroupIncomeReport';
 import CounselorClientReport from './components/reports/CounselorClientReport';
+import GroupCashDepositReport from './components/reports/GroupCashDepositReport';
+import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividualsTab';
+import SessionPriceList from './components/sessions/SessionPriceList';
+import BipIntakePrompt from './components/sessions/BipIntakePrompt';
+import ProgressTab from './components/sessions/ProgressTab';
+import BipAssessmentPicker, { bipChoiceProblem, counselorChoices as bipCounselorChoices, openBipAssessment } from './components/sessions/BipAssessmentPicker';
+import type { BipAssessmentChoice } from './components/sessions/BipAssessmentPicker';
 
 // Client program statuses. 'Active' is used by group call-ins and the group roster, so keep that exact spelling.
 const PROGRAM_STATUSES = ['Active', 'Completed', 'Deceased', 'Discharged Supervision', 'Inactive', 'Program Failed', 'Revoked', 'Terminated', 'Transferred'];
 // Statuses that can be picked when adding or editing a client; the rest are only set through the Discharge button
 const EDITABLE_PROGRAM_STATUSES = ['Active', 'Inactive'];
+
+// Report tabs, in order. Counselors and Therapists only get the ones marked allRoles.
+const REPORT_TABS = [
+  { id: 'agent', label: 'Weekly Agent Report', allRoles: false },
+  { id: 'deposit', label: 'Monthly Deposit Report', allRoles: false },
+  { id: 'groupIncome', label: 'Group Income Report', allRoles: false },
+  { id: 'cashDeposits', label: 'Group Cash Deposits', allRoles: true },
+  { id: 'counselorClients', label: 'Counselor Client Report', allRoles: false },
+];
+const reportTabsFor = (role?: string) => REPORT_TABS.filter(t => t.allRoles || role === 'Business Administrator' || role === 'Office Admin');
+// The picked report if the role can see it, otherwise the role's first report
+const currentReportFor = (picked: string | null, role?: string) => {
+  const tabs = reportTabsFor(role);
+  return tabs.some(t => t.id === picked) ? picked : tabs[0]?.id ?? null;
+};
 // Discharge types a Business Administrator can pick; each becomes the client's program status
 const DISCHARGE_STATUSES = ['Completed', 'Deceased', 'Discharged Supervision', 'Program Failed', 'Revoked', 'Transferred', 'Terminated'];
 // Discharge types that require a subcategory (recorded on the case note and kept for recidivism reporting)
@@ -465,7 +487,7 @@ export default function App() {
   // Selected Client Details Drawer State
   const [selectedClientDetail, setSelectedClientDetail] = useState<any>(null);
   const [showClientPayment, setShowClientPayment] = useState(false);
-  const [clientTab, setClientTab] = useState<'information' | 'attendance' | 'financials' | 'notes' | 'polygraphs' | 'attachments' | 'changelog'>('information');
+  const [clientTab, setClientTab] = useState<'information' | 'progress' | 'attendance' | 'financials' | 'notes' | 'polygraphs' | 'attachments' | 'changelog'>('information');
   // Change Log tab (Business Administrators only); filter '' shows every type
   const [clientChangeLog, setClientChangeLog] = useState<ClientChange[]>([]);
   const [changeLogFilter, setChangeLogFilter] = useState('');
@@ -682,10 +704,11 @@ export default function App() {
   const [clientTestHistory, setClientTestHistory] = useState<any[]>([]);
 
   // Reports State
-  const [agentReportData, setAgentReportData] = useState<any[]>([]);
+  const [agentReportData, setAgentReportData] = useState<any[] | null>(null);
   const [depositReportData, setDepositReportData] = useState<any>(null);
-  const [showGroupReport, setShowGroupReport] = useState(false);
-  const [showCounselorReport, setShowCounselorReport] = useState(false);
+  const [reportsError, setReportsError] = useState('');
+  // The report tab last picked; null until one is picked (the role's first report shows)
+  const [reportTab, setReportTab] = useState<string | null>(null);
 
   // Admin Module State
   const [employees, setEmployees] = useState<any[]>([]);
@@ -1141,12 +1164,19 @@ export default function App() {
     </div>
   );
 
+  // Asked after a client is created as BIP or switched to BIP: open a BIP Intake or DV Assessment, or none
+  const [bipIntakePrompt, setBipIntakePrompt] = useState<{ clientid: number; name: string; groupCounselor?: string | null } | null>(null);
+  const counselorOfGroup = (groupid: unknown) => groups.find(g => String(g.groupid) === String(groupid ?? ''))?.counselor ?? null;
+
   const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       const res = await createClient({ ...newClient, groupid: newClient.groupid || null, createdBy: user.employeeemail });
       setSuccessMsg(res.message || 'Client added successfully!');
+      if (newClient.programtype === 'BIP') {
+        setBipIntakePrompt({ clientid: res.clientId, name: `${newClient.lastname.trim()}, ${newClient.firstname.trim()}`, groupCounselor: counselorOfGroup(newClient.groupid) });
+      }
       setNewClient(getEmptyNewClient());
       setShowNewClientForm(false);
       loadDashboardData();
@@ -1228,20 +1258,25 @@ export default function App() {
   };
 
   // Reports Generators
-  // Each report button opens its report, or closes it if it's already open
-  const handleLoadReports = async (type: string) => {
-    if (type === 'agent' && agentReportData.length > 0) {
-      setAgentReportData([]);
-    } else if (type === 'deposit' && depositReportData) {
+  // The agent and deposit reports are fetched fresh each time their tab is shown
+  const currentReport = currentReportFor(reportTab, user?.role);
+  useEffect(() => {
+    if (activeTab !== 'reports' || (currentReport !== 'agent' && currentReport !== 'deposit')) return;
+    let cancelled = false;
+    setReportsError('');
+    if (currentReport === 'agent') {
+      setAgentReportData(null);
+      getAgentReport()
+        .then(data => { if (!cancelled) setAgentReportData(data); })
+        .catch(() => { if (!cancelled) setReportsError('Failed to load the weekly agent report.'); });
+    } else {
       setDepositReportData(null);
-    } else if (type === 'agent') {
-      const data = await getAgentReport();
-      setAgentReportData(data);
-    } else if (type === 'deposit') {
-      const data = await getDepositReport();
-      setDepositReportData(data);
+      getDepositReport()
+        .then(data => { if (!cancelled) setDepositReportData(data); })
+        .catch(() => { if (!cancelled) setReportsError('Failed to load the monthly deposit report.'); });
     }
-  };
+    return () => { cancelled = true; };
+  }, [activeTab, currentReport]);
 
   // Admin User Creation. The form stays closed until New User or an account's Edit opens it.
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
@@ -1323,8 +1358,12 @@ export default function App() {
   const [statusDialogConfirming, setStatusDialogConfirming] = useState(false);
   const [statusDialogSaving, setStatusDialogSaving] = useState(false);
   const [statusDialogError, setStatusDialogError] = useState('');
+  // Activating a BIP client also offers to open a BIP Reinstate (or a new intake when a reinstate isn't allowed)
+  const [reinstateChoice, setReinstateChoice] = useState<BipAssessmentChoice>({ choice: '', provider: '' });
+  const offerReinstate = statusDialog === 'activate' && selectedClientDetail?.programtype === 'BIP';
   const openStatusDialog = (action: 'discharge' | 'activate') => {
     setStatusDialogError('');
+    setReinstateChoice({ choice: '', provider: bipCounselorChoices(employees, counselorOfGroup(selectedClientDetail?.groupid)).defaultCounselor });
     setStatusDialogChoice('');
     setStatusDialogSubcategory('');
     setStatusDialogNote('');
@@ -1343,8 +1382,21 @@ export default function App() {
       setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, programstatus } : c));
       setClientNotes(await getClientNotes(clientid));
       if (clientTab === 'changelog') await openChangeLog();
+      // Discharging also saves a discharge summary PDF to the client's attachments
+      if (clientTab === 'attachments') setClientAttachments(await getClientAttachments(clientid));
       setStatusDialog(null);
-      setSuccessMsg(`${selectedClientDetail.firstname} ${selectedClientDetail.lastname} ${statusDialog === 'activate' ? 'set to' : 'discharged as'} ${programstatus}.`);
+      setSuccessMsg(statusDialog === 'activate'
+        ? `${selectedClientDetail.firstname} ${selectedClientDetail.lastname} set to ${programstatus}.`
+        : `${selectedClientDetail.firstname} ${selectedClientDetail.lastname} discharged as ${programstatus}. Discharge summary saved to Attachments.`);
+      if (offerReinstate && reinstateChoice.choice !== 'none') {
+        // The client is already activated; a failure here only means the assessment wasn't opened
+        try {
+          const name = await openBipAssessment(clientid, reinstateChoice, user.employeeemail);
+          setSuccessMsg(`${selectedClientDetail.firstname} ${selectedClientDetail.lastname} set to ${programstatus}. ${name} opened on the Assessments & Individuals tab.`);
+        } catch (err: any) {
+          setError(`Client activated, but the assessment could not be opened: ${err.message || 'unknown error'}. Open it on the Assessments & Individuals tab.`);
+        }
+      }
     } catch (err: any) {
       // Shown inside the dialog, which stays on the confirm step so it can be retried
       setStatusDialogError(err.message || `Failed to ${statusDialog} client.`);
@@ -1782,7 +1834,8 @@ export default function App() {
   const canDeleteGroups = role === 'Business Administrator';
   const isAllowed = (tab: string) => {
     if (role === 'Office Admin' || role === 'Business Administrator') return true;
-    if (role === 'Counselor' || role === 'Therapist') return ['clients', 'attendance', 'callin', 'polygraph', 'groups', 'testing', 'agents'].includes(tab);
+    // Reports holds only the Group Cash Deposits report for them
+    if (role === 'Counselor' || role === 'Therapist') return ['clients', 'attendance', 'sessions', 'callin', 'polygraph', 'groups', 'testing', 'reports', 'agents'].includes(tab);
     if (role === 'Polygrapher') return ['polygraph'].includes(tab);
     // Unknown roles get no sections, rather than full access
     return false;
@@ -2051,6 +2104,7 @@ export default function App() {
         <button onClick={() => setActiveTab('home')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'home' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><Home size={16} /> Home</button>
         {isAllowed('clients') && <button onClick={() => setActiveTab('clients')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'clients' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><Users size={16} /> Client Roster</button>}
         {isAllowed('attendance') && <button onClick={() => setActiveTab('attendance')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'attendance' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><ClipboardCheck size={16} /> Attendance & Sign-In</button>}
+        {isAllowed('sessions') && <button onClick={() => setActiveTab('sessions')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'sessions' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><ClipboardList size={16} /> Assessments & Individuals</button>}
         {isAllowed('callin') && <button onClick={() => setActiveTab('callin')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'callin' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><PhoneCall size={16} /> Call-In Log</button>}
         {isAllowed('groups') && <button onClick={() => setActiveTab('groups')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'groups' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><Layers size={16} /> Groups</button>}
         {isAllowed('testing') && <button onClick={() => setActiveTab('testing')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'testing' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><CheckSquare size={16} /> Testing</button>}
@@ -2103,11 +2157,12 @@ export default function App() {
                 {[
                   { tab: 'clients', icon: Users, label: 'Client Roster', description: 'Search and manage client records, balances, and notes.' },
                   { tab: 'attendance', icon: ClipboardCheck, label: 'Attendance & Sign-In', description: 'Record group sessions and account payments.' },
+                  { tab: 'sessions', icon: ClipboardList, label: 'Assessments & Individuals', description: 'Record one-client assessments and individual sessions with payments.' },
                   { tab: 'callin', icon: PhoneCall, label: 'Call-In Log', description: 'Log client and group call-ins.' },
                   { tab: 'groups', icon: Layers, label: 'Groups', description: 'Manage group schedules, counselors, and rosters.' },
                   { tab: 'testing', icon: CheckSquare, label: 'Testing', description: 'Record and review test results.' },
                   { tab: 'polygraph', icon: ShieldAlert, label: 'Polygraphs', description: 'Schedule polygraph slots and record results.' },
-                  { tab: 'reports', icon: BarChart3, label: 'Reports', description: 'Agent and deposit reports.' },
+                  { tab: 'reports', icon: BarChart3, label: 'Reports', description: role === 'Counselor' || role === 'Therapist' ? 'Group cash deposits you hold.' : 'Agent, income, and deposit reports.' },
                   { tab: 'agents', icon: UserCheck, label: 'Supervising Agents', description: 'Probation officer contacts and their assigned clients.' },
                   { tab: 'admin', icon: Settings, label: 'Admin', description: 'Employees, roles, and system logs.' },
                 ].filter(s => isAllowed(s.tab)).map(s => (
@@ -2447,7 +2502,7 @@ export default function App() {
         {/* CLIENT DETAILS DRAWER */}
         {selectedClientDetail && (
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex justify-end z-50">
-            <div className="bg-slate-900 w-full max-w-4xl h-full border-l border-slate-800 flex flex-col shadow-2xl p-6 overflow-y-auto">
+            <div className="bg-slate-900 w-full max-w-6xl h-full border-l border-slate-800 flex flex-col shadow-2xl p-6 overflow-y-auto">
               <div className="flex justify-between items-start border-b border-slate-800 pb-4 mb-6">
                 <div>
                   <div className="flex flex-wrap items-center gap-3">
@@ -2564,11 +2619,24 @@ export default function App() {
                             className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
                           />
                         </div>
+                        {offerReinstate && (
+                          <div className="border-t border-slate-800 pt-4">
+                            <p className="block text-xs text-slate-400 uppercase mb-2">BIP Reinstate Assessment</p>
+                            <BipAssessmentPicker
+                              mode="reinstate"
+                              clientId={selectedClientDetail.clientid}
+                              employees={employees}
+                              groupCounselor={counselorOfGroup(selectedClientDetail.groupid)}
+                              value={reinstateChoice}
+                              onChange={setReinstateChoice}
+                            />
+                          </div>
+                        )}
                         <div className="flex justify-end gap-2">
                           <button type="button" onClick={() => setStatusDialog(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Cancel</button>
                           <button
                             type="button"
-                            disabled={!statusDialogChoice || (!!subcategories && !statusDialogSubcategory) || !statusDialogNote.trim()}
+                            disabled={!statusDialogChoice || (!!subcategories && !statusDialogSubcategory) || !statusDialogNote.trim() || (offerReinstate && !!bipChoiceProblem(reinstateChoice))}
                             onClick={() => setStatusDialogConfirming(true)}
                             className={`${actionButton} disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded text-xs font-semibold`}
                           >
@@ -2579,7 +2647,8 @@ export default function App() {
                     ) : (
                       <>
                         <p className={`text-xs rounded-lg p-3 border ${activating ? 'text-blue-300 bg-blue-500/10 border-blue-500/30' : 'text-amber-300 bg-amber-500/10 border-amber-500/30'}`}>
-                          The program status will change from <span className="font-semibold">{selectedClientDetail.programstatus || 'None'}</span> to <span className="font-semibold">{choiceLabel}</span>, and this note will be added to the case notes.
+                          The program status will change from <span className="font-semibold">{selectedClientDetail.programstatus || 'None'}</span> to <span className="font-semibold">{choiceLabel}</span>, and this note will be added to the case notes.{!activating && ' A discharge summary PDF will be saved to the client\'s attachments.'}
+                          {offerReinstate && reinstateChoice.choice !== 'none' && <> A <span className="font-semibold">{reinstateChoice.name}</span> assessment will be opened with {reinstateChoice.provider}.</>}
                         </p>
                         <p className="text-xs text-slate-300 bg-slate-950 border border-slate-800 rounded-lg p-3 whitespace-pre-wrap">{label} - {choiceLabel}: {statusDialogNote.trim()}</p>
                         {statusDialogError && (
@@ -2633,17 +2702,20 @@ export default function App() {
                 );
               })()}
 
-              <div className="flex border-b border-slate-800 gap-4 mb-6">
-                <button onClick={() => setClientTab('information')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'information' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Users size={14} /> Information</button>
-                <button onClick={() => setClientTab('attendance')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'attendance' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Calendar size={14} /> Attendance</button>
-                <button onClick={() => setClientTab('financials')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'financials' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><DollarSign size={14} /> Financial Ledger</button>
-                <button onClick={() => setClientTab('notes')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'notes' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><FileText size={14} /> Case Notes</button>
+              {/* Labels stay on one line; the row scrolls sideways when the drawer is too narrow for every tab.
+                  shrink-0 keeps the drawer's column layout from squeezing the scrolling row down to nothing. */}
+              <div className="flex shrink-0 border-b border-slate-800 gap-4 mb-6 overflow-x-auto overflow-y-hidden [scrollbar-width:thin] [scrollbar-color:#334155_transparent]">
+                <button onClick={() => setClientTab('information')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'information' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Users size={14} /> Information</button>
+                <button onClick={() => setClientTab('progress')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'progress' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><ClipboardList size={14} /> Progress</button>
+                <button onClick={() => setClientTab('attendance')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'attendance' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Calendar size={14} /> Attendance</button>
+                <button onClick={() => setClientTab('financials')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'financials' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><DollarSign size={14} /> Financial Ledger</button>
+                <button onClick={() => setClientTab('notes')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'notes' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><FileText size={14} /> Case Notes</button>
                 {selectedClientDetail.programtype !== 'BIP' && (
-                  <button onClick={() => setClientTab('polygraphs')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'polygraphs' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Activity size={14} /> Polygraphs</button>
+                  <button onClick={() => setClientTab('polygraphs')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'polygraphs' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Activity size={14} /> Polygraphs</button>
                 )}
-                <button onClick={openAttachments} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'attachments' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Paperclip size={14} /> Attachments</button>
+                <button onClick={openAttachments} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'attachments' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Paperclip size={14} /> Attachments</button>
                 {role === 'Business Administrator' && (
-                  <button onClick={openChangeLog} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase ${clientTab === 'changelog' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><History size={14} /> Change Log</button>
+                  <button onClick={openChangeLog} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'changelog' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><History size={14} /> Change Log</button>
                 )}
               </div>
 
@@ -2683,6 +2755,9 @@ export default function App() {
                               setSelectedClientDetail(saved);
                               setClients(prev => prev.map(c => c.clientid === saved.clientid ? { ...c, ...saved } : c));
                               setEditingClientInfo(false);
+                              if (saved.programtype === 'BIP' && selectedClientDetail.programtype !== 'BIP') {
+                                setBipIntakePrompt({ clientid: saved.clientid, name: `${saved.lastname}, ${saved.firstname}`, groupCounselor: counselorOfGroup(saved.groupid) });
+                              }
                             } catch (err: unknown) {
                               // Stay in edit mode so nothing typed is lost
                               setClientInfoError(err instanceof Error ? err.message : 'Failed to save client information.');
@@ -3282,6 +3357,18 @@ export default function App() {
                 </div>
               )}
 
+              {/* Every assessment on record; BIP clients also get their group check-in clearance and outside assessments */}
+              {clientTab === 'progress' && (
+                <ProgressTab
+                  key={selectedClientDetail.clientid}
+                  clientId={selectedClientDetail.clientid}
+                  role={role}
+                  userEmail={user.employeeemail}
+                  onChanged={loadDashboardData}
+                  onSuccess={setSuccessMsg}
+                />
+              )}
+
               {clientTab === 'attendance' && (
 
                 <div className="space-y-3">
@@ -3565,7 +3652,7 @@ export default function App() {
                     const newBalance = Number(selectedClientDetail.accountbalance || 0) - paidChange;
                     preview = <>
                       Balance {formatBalance(selectedClientDetail.accountbalance)} → {formatBalance(newBalance)}.
-                      {action.kind === 'adjust' ? ' Later ledger and attendance balances move by the same amount.' : fin.feetype === 'Group Fee' ? ' The check-in it was taken at and the Group Income Report are updated too.' : ''}
+                      {action.kind === 'adjust' ? ' Later ledger and attendance balances move by the same amount.' : ['Group Fee', 'Assessment Fee', 'Individual Fee'].includes(fin.feetype) ? ' The check-in it was taken at and the Group Income Report are updated too.' : ''}
                     </>;
                   }
                   const title = { adjust: 'Adjust cash payment', refund: 'Refund', dispute: 'Dispute (owed again until won)', 'dispute-won': 'Dispute won: apply the payment again', 'dispute-lost': 'Dispute lost' }[action.kind];
@@ -4347,6 +4434,22 @@ export default function App() {
                 )}
               </div>
             </div>
+          </div>
+        )}
+
+        {/* ASSESSMENTS & INDIVIDUALS TAB */}
+        {/* Stays mounted on other tabs so a session being entered isn't lost */}
+        {isAllowed('sessions') && (
+          <div className={activeTab === 'sessions' ? '' : 'hidden'}>
+            <AssessmentsIndividualsTab
+              active={activeTab === 'sessions'}
+              clients={clients}
+              employees={employees}
+              user={user}
+              onSuccess={setSuccessMsg}
+              onError={setError}
+              onSaved={loadDashboardData}
+            />
           </div>
         )}
 
@@ -5150,44 +5253,50 @@ export default function App() {
         {/* REPORTS TAB */}
         {activeTab === 'reports' && (
           <div className="space-y-6">
-            <div className="flex gap-4 border-b border-slate-800 pb-4">
-              {[
-                { label: 'Weekly Agent Report', open: agentReportData.length > 0, onClick: () => handleLoadReports('agent') },
-                { label: 'Monthly Deposit Report', open: !!depositReportData, onClick: () => handleLoadReports('deposit') },
-                { label: 'Group Income Report', open: showGroupReport, onClick: () => setShowGroupReport(!showGroupReport) },
-                { label: 'Counselor Client Report', open: showCounselorReport, onClick: () => setShowCounselorReport(!showCounselorReport) },
-              ].map(b => (
+            <div role="tablist" className="flex flex-wrap border-b border-slate-800">
+              {reportTabsFor(role).map(t => (
                 <button
-                  key={b.label}
-                  onClick={b.onClick}
-                  aria-pressed={b.open}
-                  title={b.open ? 'Click to close this report' : undefined}
-                  className={`flex items-center gap-1.5 px-4 py-2 rounded text-xs font-semibold border ${b.open ? 'bg-blue-500/10 text-blue-300 border-blue-500 hover:bg-blue-500/20' : 'bg-blue-600 hover:bg-blue-500 text-white border-transparent'}`}
+                  key={t.id}
+                  role="tab"
+                  aria-selected={currentReport === t.id}
+                  onClick={() => setReportTab(t.id)}
+                  className={`px-4 py-2.5 border-b-2 -mb-px text-sm font-medium whitespace-nowrap transition ${currentReport === t.id ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
                 >
-                  {b.label}{b.open && <X size={12} />}
+                  {t.label}
                 </button>
               ))}
             </div>
 
-            {showGroupReport && <GroupIncomeReport userEmail={user.employeeemail} canRecordDeposits={user.role === 'Business Administrator'} />}
+            {reportsError && <p className="text-xs text-red-400">{reportsError}</p>}
 
-            {showCounselorReport && <CounselorClientReport clients={clients} groups={groups} statuses={PROGRAM_STATUSES} onOpenClient={openClientLogs} />}
+            {currentReport === 'groupIncome' && <GroupIncomeReport userEmail={user.employeeemail} canRecordDeposits={user.role === 'Business Administrator'} />}
 
-            {agentReportData.length > 0 && (
+            {currentReport === 'cashDeposits' && <GroupCashDepositReport userEmail={user.employeeemail} isAdmin={user.role === 'Business Administrator'} />}
+
+            {currentReport === 'counselorClients' && <CounselorClientReport clients={clients} groups={groups} statuses={PROGRAM_STATUSES} onOpenClient={openClientLogs} />}
+
+            {currentReport === 'agent' && !reportsError && (
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
                 <h3 className="font-semibold text-white mb-4">Weekly Supervising Agent Summary</h3>
                 <table className="w-full text-left border-collapse text-xs">
                   <thead><tr className="bg-slate-800/50 text-slate-400 uppercase"><th className="p-3">Client</th><th className="p-3">Agent</th><th className="p-3">Attended Sessions</th><th className="p-3">Last Poly</th><th className="p-3">Balance</th></tr></thead>
                   <tbody className="divide-y divide-slate-800 text-sm">
-                    {agentReportData.map(r => (
+                    {agentReportData?.map(r => (
                       <tr key={r.clientid}><td className="p-3 font-medium text-white">{r.lastname}, {r.firstname}</td><td className="p-3 text-slate-300">{r.supervisingagent}</td><td className="p-3">{r.totalattended}</td><td className="p-3 text-slate-400">{r.lastpolydate ? new Date(r.lastpolydate).toLocaleDateString() : 'None'}</td><td className="p-3 font-semibold text-slate-200">{formatBalance(r.accountbalance)}</td></tr>
                     ))}
+                    {(!agentReportData || agentReportData.length === 0) && (
+                      <tr><td colSpan={5} className="p-6 text-center text-slate-500 text-sm">{agentReportData ? 'No clients to report.' : 'Loading…'}</td></tr>
+                    )}
                   </tbody>
                 </table>
               </div>
             )}
 
-            {depositReportData && (
+            {currentReport === 'deposit' && !depositReportData && !reportsError && (
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl text-center text-slate-500 text-sm">Loading…</div>
+            )}
+
+            {currentReport === 'deposit' && depositReportData && (
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl space-y-4">
                 <h3 className="font-semibold text-white">Monthly Deposit Summary</h3>
                 <div className="grid grid-cols-2 gap-4 text-center">
@@ -5317,7 +5426,18 @@ export default function App() {
               </div>
               )}
             </div>
+
+            <SessionPriceList userEmail={user.employeeemail} canEdit={role === 'Business Administrator'} onSuccess={setSuccessMsg} />
           </div>
+        )}
+
+        {bipIntakePrompt && (
+          <BipIntakePrompt
+            client={bipIntakePrompt}
+            employees={employees}
+            user={user}
+            onDone={message => { setBipIntakePrompt(null); if (message) setSuccessMsg(message); }}
+          />
         )}
       </main>
     </div>

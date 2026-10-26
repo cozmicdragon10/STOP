@@ -3,6 +3,8 @@ import { getGroupClients, getGroupSessions, saveOpenGroup, submitBatchAttendance
 import type { GroupDaySession } from '../api';
 import type { OpenGroupSession } from '../api';
 import { isMonthlyFeeClient } from '../utils/soPhases';
+import { bipCheckInBlockMessage } from '../utils/bip';
+import type { BipCheckInBlock } from '../utils/bip';
 
 export interface ClientRecord {
   clientid: number;
@@ -21,6 +23,10 @@ export interface ClientRecord {
   attendedthismonth?: boolean | null;
   // Date of the client's most recent attendance
   lastattended?: string | null;
+  // Most recent group attendance (not an assessment or individual session); sent with the group roster
+  lastgroupattended?: string | null;
+  // Set when a BIP client can't be checked into group yet (see utils/bip.ts)
+  bipcheckinblock?: BipCheckInBlock;
   // Poly fee total and how much of it has been paid; tracked apart from the account balance
   polyfee?: number | string | null;
   polyfeepaid?: number | string | null;
@@ -103,12 +109,14 @@ export const todayLocal = () => {
 const MAKEUP_COMMENT = 'Approved make-up attendance';
 
 // True when a BIP client already attended during the current calendar week (Sunday through Saturday).
+// Assessments don't count, so the group roster's lastgroupattended is used when present.
 export const attendedThisWeek = (client: ClientRecord): boolean => {
-  if (client.programtype !== 'BIP' || !client.lastattended) return false;
+  const last = client.lastgroupattended !== undefined ? client.lastgroupattended : client.lastattended;
+  if (client.programtype !== 'BIP' || !last) return false;
   const weekStart = new Date();
   weekStart.setHours(0, 0, 0, 0);
   weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-  return new Date(client.lastattended) >= weekStart;
+  return new Date(last) >= weekStart;
 };
 
 // Asks about each BIP client who already attended this week. Confirmed clients are approved make-ups;
@@ -153,9 +161,10 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
 
   const checkedInIds = useMemo(() => new Set(session.map(e => e.client.clientid)), [session]);
 
-  // Roster members who can still be checked in (not already on the sheet and not already attended today).
+  // Roster members who can still be checked in (not already on the sheet, not already attended today, and not a BIP
+  // client still waiting on their intake or reinstate assessment).
   const selectableRoster = useMemo(
-    () => roster.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid)),
+    () => roster.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid) && !c.bipcheckinblock),
     [roster, checkedInIds, attendedIds]
   );
 
@@ -174,7 +183,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
         const serverError = (data as { error?: string } | null)?.error;
         throw new Error(serverError || 'Unexpected response from server.');
       }
-      setRoster(data as ClientRecord[]);
+      // Only Active clients are listed for check-in (Manage Group still shows everyone assigned)
+      setRoster((data as ClientRecord[]).filter(c => c.programstatus === 'Active'));
       const closed = sessions.filter(s => s.closed);
       if (session === undefined && closed.length > 0) {
         const latestClosed = closed[closed.length - 1];
@@ -332,7 +342,11 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     if (alreadyAttended.length > 0) {
       notify.onError(`${alreadyAttended.map(c => `${c.lastname}, ${c.firstname}`).join('; ')} already attended this group session and cannot be checked in to it again.`);
     }
-    const fresh = clients.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid));
+    const blocked = clients.filter(c => c.bipcheckinblock && !checkedInIds.has(c.clientid));
+    if (blocked.length > 0) {
+      notify.onError(blocked.map(c => bipCheckInBlockMessage(c.bipcheckinblock, `${c.lastname}, ${c.firstname}`)).join(' '));
+    }
+    const fresh = clients.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid) && !c.bipcheckinblock);
     if (fresh.length === 0) return;
     const { approved, makeupIds } = confirmMakeups(fresh);
     if (approved.length === 0) return;

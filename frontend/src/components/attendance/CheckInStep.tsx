@@ -2,6 +2,7 @@ import { Save, Search, Trash2 } from 'lucide-react';
 import type { ClientRecord, GroupRecord, GroupCheckInState } from '../../hooks/useGroupCheckIn';
 import { formatBalance } from '../../utils/balance';
 import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
+import { bipCheckInBlockLabel, bipCheckInBlockMessage } from '../../utils/bip';
 
 interface Props {
   group: GroupRecord;
@@ -21,9 +22,11 @@ function RosterCard({ client, checked, attended, selected, onToggle }: {
   selected: boolean;
   onToggle: () => void;
 }) {
+  // A BIP client still waiting on their intake or reinstate assessment can't be checked in
+  const bipBlocked = !checked && !attended && !!client.bipcheckinblock;
   const tone = checked
     ? 'border-emerald-500/30 bg-emerald-500/5 opacity-70 cursor-default'
-    : attended
+    : attended || bipBlocked
       ? 'border-slate-800 bg-slate-950 opacity-50 cursor-not-allowed'
     : selected
       ? 'border-blue-500 bg-blue-500/10 cursor-pointer'
@@ -33,8 +36,8 @@ function RosterCard({ client, checked, attended, selected, onToggle }: {
     <label className={`flex items-start gap-3 p-3 rounded-lg border transition ${tone}`}>
       <input
         type="checkbox"
-        checked={checked || (selected && !attended)}
-        disabled={checked || attended}
+        checked={checked || (selected && !attended && !bipBlocked)}
+        disabled={checked || attended || bipBlocked}
         onChange={onToggle}
         className="mt-1 accent-blue-500"
       />
@@ -43,6 +46,11 @@ function RosterCard({ client, checked, attended, selected, onToggle }: {
         <p className="text-xs text-slate-400">DOC # {client.docnumber || '—'} · Bal {formatBalance(client.accountbalance)}</p>
         {checked && <span className="inline-block mt-1 text-[10px] font-semibold uppercase text-emerald-400">Checked in</span>}
         {!checked && attended && <span className="inline-block mt-1 text-[10px] font-semibold uppercase text-amber-400">Already attended today</span>}
+        {bipBlocked && (
+          <span className="inline-block mt-1 text-[10px] font-semibold uppercase text-amber-400" title={bipCheckInBlockMessage(client.bipcheckinblock, `${client.lastname}, ${client.firstname}`)}>
+            {bipCheckInBlockLabel(client.bipcheckinblock)}
+          </span>
+        )}
       </div>
     </label>
   );
