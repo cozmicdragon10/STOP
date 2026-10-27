@@ -12,6 +12,8 @@ interface Props {
   groups: GroupRecord[];
   clients: ClientRecord[];
   createdBy: string;
+  // Office Admins and Business Administrators can name a covering counselor when checking a group in
+  canPickCover: boolean;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   onSaved: () => void;
@@ -82,7 +84,7 @@ function filterSearchableClients(clients: ClientRecord[], groupType: string | nu
   });
 }
 
-export default function GroupCheckInWorkflow({ groups, clients, createdBy, onSuccess, onError, onSaved, openGroups, onOpenGroupsChanged, resumeRequest, onResumeHandled }: Props) {
+export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPickCover, onSuccess, onError, onSaved, openGroups, onOpenGroupsChanged, resumeRequest, onResumeHandled }: Props) {
   const wf = useGroupCheckIn(createdBy, { onSuccess, onError, onSaved, onOpenGroupsChanged });
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -180,7 +182,7 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, onSuc
         <CheckInStep group={group} wf={wf} onOpenSearch={() => setSearchOpen(true)} />
       )}
       {group && wf.view === 'review' && (
-        <ReviewStep group={group} wf={wf} createdBy={createdBy} onSuccess={onSuccess} onError={onError} onSaved={onSaved} />
+        <ReviewStep group={group} wf={wf} createdBy={createdBy} canPickCover={canPickCover} onSuccess={onSuccess} onError={onError} onSaved={onSaved} />
       )}
 
       {searchOpen && (

@@ -32,12 +32,13 @@ const formatDate = (ymd: string) => {
 };
 
 // Cash collected at closed group sessions and whether it was dropped off at the bank. Business Administrators see
-// and check off every session; everyone else sees and checks off the sessions they opened (the server checks too).
+// and check off every session; everyone else sees and checks off the sessions they are responsible for: ones they
+// opened or covered, and their own groups' sessions when the office checked them in (the server decides).
 export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEmail: string; isAdmin: boolean }) {
   const [from, setFrom] = useState(defaultFrom);
   const [to, setTo] = useState(todayLocal);
   const [statusFilter, setStatusFilter] = useState<'all' | 'held' | 'dropped'>('all');
-  const [openerFilter, setOpenerFilter] = useState('');
+  const [responsibleFilter, setResponsibleFilter] = useState('');
   // Date given to new check-offs
   const [dropOffDate, setDropOffDate] = useState(todayLocal);
   const [rows, setRows] = useState<GroupCashDepositRow[]>([]);
@@ -57,11 +58,17 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
     return () => { cancelled = true; };
   }, [from, to, userEmail]);
 
-  const openerOf = (r: GroupCashDepositRow) => r.openedbyname || r.openedby || 'Unknown';
-  const openerNames = Array.from(new Set(rows.map(openerOf))).sort((a, b) => a.localeCompare(b));
+  const responsibleOf = (r: GroupCashDepositRow) => r.responsiblename || r.responsible || 'Unknown';
+  const responsibleNames = Array.from(new Set(rows.map(responsibleOf))).sort((a, b) => a.localeCompare(b));
+  // How the session came to be theirs, when it isn't simply that they opened it
+  const responsibleNote = (r: GroupCashDepositRow) => {
+    if (r.coveredby && sameEmail(r.coveredby, r.responsible || '')) return 'covering';
+    if (!sameEmail(r.openedby, r.responsible || '')) return `opened by ${r.openedbyname || r.openedby || 'unknown'}`;
+    return '';
+  };
 
   const filtered = rows.filter(r =>
-    (!openerFilter || openerOf(r) === openerFilter)
+    (!responsibleFilter || responsibleOf(r) === responsibleFilter)
     && (statusFilter === 'all' || (statusFilter === 'dropped') === isDroppedOff(r)));
 
   const byGroup = new Map<string, GroupCashDepositRow[]>();
@@ -126,7 +133,7 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
         <div>
           <h3 className="font-semibold text-white">Group Cash Deposits</h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Cash collected at closed group sessions{isAdmin ? '' : ' you opened'}. Check a session off once its cash has been dropped off at the bank.
+            Cash collected at closed group sessions{isAdmin ? '' : ' you are responsible for'}. Check a session off once its cash has been dropped off at the bank.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -144,10 +151,10 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
             </select>
           </label>
           {isAdmin && (
-            <label className="text-xs text-slate-400">Opened By
-              <select value={openerFilter} onChange={(e) => setOpenerFilter(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded px-2 text-white text-xs">
+            <label className="text-xs text-slate-400">Responsible
+              <select value={responsibleFilter} onChange={(e) => setResponsibleFilter(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded px-2 text-white text-xs">
                 <option value="">Everyone</option>
-                {openerNames.map(name => <option key={name} value={name}>{name}</option>)}
+                {responsibleNames.map(name => <option key={name} value={name}>{name}</option>)}
               </select>
             </label>
           )}
@@ -178,7 +185,7 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
           <thead>
             <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
               <th className="p-3">Session</th>
-              {isAdmin && <th className="p-3">Opened By</th>}
+              {isAdmin && <th className="p-3">Responsible</th>}
               <th className="p-3 text-right">Attendance</th>
               <th className="p-3 text-right">Cash</th>
               <th className="p-3 text-center">Dropped Off</th>
@@ -210,7 +217,12 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
                   return (
                     <tr key={key} className="hover:bg-slate-800/30">
                       <td className="p-3 pl-6 text-slate-200 whitespace-nowrap">{sessionLabel(g, r)}</td>
-                      {isAdmin && <td className="p-3 text-slate-300 text-xs">{openerOf(r)}</td>}
+                      {isAdmin && (
+                        <td className="p-3 text-slate-300 text-xs">
+                          {responsibleOf(r)}
+                          {responsibleNote(r) && <span className="block text-slate-500">{responsibleNote(r)}</span>}
+                        </td>
+                      )}
                       <td className="p-3 text-right">{Number(r.attendance) || 0}</td>
                       <td className="p-3 text-right font-semibold text-white">{money(cashOf(r))}</td>
                       <td className="p-3 text-center">
@@ -247,7 +259,7 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
             {status === 'ready' && groups.length === 0 && (
               <tr>
                 <td colSpan={columns} className="p-6 text-center text-slate-500 text-sm">
-                  No closed group sessions{isAdmin ? '' : ' you opened'} took cash in this date range{statusFilter === 'all' ? '' : ' with this status'}.
+                  No closed group sessions{isAdmin ? '' : ' you are responsible for'} took cash in this date range{statusFilter === 'all' ? '' : ' with this status'}.
                 </td>
               </tr>
             )}

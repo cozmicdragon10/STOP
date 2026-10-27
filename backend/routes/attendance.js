@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { recordAttendance } = require('../lib/attendance');
+const { coveringCounselorFor } = require('../lib/cashResponsibility');
 
 const router = express.Router();
 
@@ -52,7 +53,7 @@ router.get('/api/groups/:groupId/sessions', async (req, res) => {
 
 // Group check-in: every client on the session sheet is saved in one transaction
 router.post('/api/attendance/batch', async (req, res) => {
-    const { group, date, sessionNumber, type, createdBy, entries } = req.body;
+    const { group, date, sessionNumber, type, createdBy, coveredBy, entries } = req.body;
     const sessionNum = Number(sessionNumber) > 0 ? Math.floor(Number(sessionNumber)) : 1;
 
     if (!Array.isArray(entries) || entries.length === 0) {
@@ -78,20 +79,23 @@ router.post('/api/attendance/batch', async (req, res) => {
         }
         // Closing the group clears its saved open sheet for this session. Who opened it is kept on the attendance rows
         // so the closed group stays visible to them; a group closed without being opened first was opened by the closer.
+        // The covering counselor (lib/cashResponsibility.js) is kept too: the closer's pick if they are an
+        // administrator, otherwise whatever was saved with the open sheet.
         const openedRes = await clientDb.query(
-            'DELETE FROM OpenGroupSessions WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3 RETURNING CreatedBy',
+            'DELETE FROM OpenGroupSessions WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3 RETURNING CreatedBy, CoveredBy',
             [group, date, sessionNum]
         );
         const openedBy = openedRes.rows[0]?.createdby || createdBy;
+        const covering = await coveringCounselorFor(createdBy, coveredBy, openedRes.rows[0]?.coveredby ?? null);
         await clientDb.query(
-            'UPDATE Attendance SET OpenedBy = $1 WHERE AttendanceId = ANY($2::int[])',
-            [openedBy, results.map(r => r.attendanceId)]
+            'UPDATE Attendance SET OpenedBy = $1, CoveredBy = $2 WHERE AttendanceId = ANY($3::int[])',
+            [openedBy, covering, results.map(r => r.attendanceId)]
         );
         await clientDb.query('COMMIT');
         res.status(201).json({ success: true, count: results.length, results, polyVouchersAwarded: results.filter(r => r.polyVoucherAwarded).length });
     } catch (error) {
         await clientDb.query('ROLLBACK');
-        res.status(500).json({ error: error.message });
+        res.status(error.status || 500).json({ error: error.message });
     } finally {
         clientDb.release();
     }

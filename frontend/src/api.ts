@@ -269,6 +269,8 @@ export interface BatchAttendancePayload {
     sessionNumber: number;
     type: string;
     createdBy: string;
+    // Counselor covering the session (employee email); only saved when an Office Admin or Business Administrator closes it
+    coveredBy?: string | null;
     entries: BatchAttendanceEntry[];
 }
 
@@ -298,6 +300,8 @@ export interface OpenGroupSession {
     sessionnumber: number;
     entries: SessionEntry[];
     createdby: string | null;
+    // Counselor covering the session, picked by the office (employee email)
+    coveredby?: string | null;
     updatedon: string;
 }
 
@@ -334,7 +338,7 @@ export async function getClosedGroups(user: string): Promise<ClosedGroupSession[
     return body;
 }
 
-export async function saveOpenGroup(data: { group: number; date: string; sessionNumber: number; entries: SessionEntry[]; createdBy: string }): Promise<OpenGroupSession> {
+export async function saveOpenGroup(data: { group: number; date: string; sessionNumber: number; entries: SessionEntry[]; createdBy: string; coveredBy?: string | null }): Promise<OpenGroupSession> {
     const res = await apiFetch(`${API_BASE}/open-groups`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -775,12 +779,16 @@ export interface GroupCashDepositRow extends GroupCashDropOff {
     sessionnumber: number;
     openedby: string | null;
     openedbyname: string | null;
+    coveredby: string | null;
+    // Who holds the session's cash: the covering counselor, the group's counselor when the office opened it, or the opener
+    responsible: string | null;
+    responsiblename: string | null;
     closedon: string | null;
     attendance: string | number;
     cash: string | number;
 }
 
-// Business Administrators get every closed session that took cash; everyone else gets the ones they opened
+// Business Administrators get every closed session that took cash; everyone else gets the ones they are responsible for
 export async function getGroupCashDeposits(from: string, to: string, user: string): Promise<GroupCashDepositRow[]> {
     const res = await apiFetch(`${API_BASE}/reports/group-cash-deposits?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&user=${encodeURIComponent(user)}`);
     return agentResponse(res, 'Failed to load group cash deposits.');

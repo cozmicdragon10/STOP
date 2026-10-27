@@ -3,6 +3,7 @@ const { logAction, pool } = require('../db');
 const { activeRoleFor, openGroupViewer } = require('../lib/access');
 const { groupNameFor } = require('../lib/changeLog');
 const { YMD } = require('../lib/sql');
+const { withResponsible, OPEN_GROUP_ADMIN_ROLES } = require('../lib/cashResponsibility');
 
 const router = express.Router();
 
@@ -127,8 +128,20 @@ router.delete('/api/reports/group-deposits', async (req, res) => {
 
 // --- GROUP CASH DEPOSIT REPORT ---
 // Closed group sessions that took cash (or have a deposit), with whether the cash was dropped off at the bank.
-// Business Administrators see every session; everyone else sees only the sessions they opened.
+// Business Administrators see every session; everyone else sees the sessions whose cash they are responsible for
+// (lib/cashResponsibility.js).
 const GROUP_DEPOSIT_COLUMNS = `d.AmountDeposited, to_char(d.DepositDate, 'YYYY-MM-DD') AS DepositDate, d.Notes, d.RecordedBy, d.RecordedOn`;
+
+// One row per closed group session; filtered by the WHERE clause passed in
+const closedSessionsSql = (where) => `
+    SELECT a."Group" AS GroupId, g.GroupName, g.Counselor, a.Date, a.SessionNumber,
+           MIN(COALESCE(a.OpenedBy, a.CreatedBy)) AS OpenedBy, MAX(a.CoveredBy) AS CoveredBy,
+           MAX(a.CreatedOn) AS ClosedOn, COUNT(*)::int AS Attendance,
+           COALESCE(SUM(a.AccountPaid) FILTER (WHERE a.PaymentMethod = 'Cash'), 0) AS Cash
+    FROM Attendance a
+    JOIN Groups g ON g.GroupId = a."Group"
+    WHERE ${where}
+    GROUP BY a."Group", g.GroupName, g.Counselor, a.Date, a.SessionNumber`;
 
 router.get('/api/reports/group-cash-deposits', async (req, res) => {
     try {
@@ -139,26 +152,18 @@ router.get('/api/reports/group-cash-deposits', async (req, res) => {
         const viewer = await openGroupViewer(user);
         if (!viewer) return res.json([]);
         const result = await pool.query(
-            `WITH s AS (
-                SELECT a."Group" AS GroupId, g.GroupName, g.Counselor, a.Date, a.SessionNumber,
-                       MIN(COALESCE(a.OpenedBy, a.CreatedBy)) AS OpenedBy, MAX(a.CreatedOn) AS ClosedOn, COUNT(*) AS Attendance,
-                       COALESCE(SUM(a.AccountPaid) FILTER (WHERE a.PaymentMethod = 'Cash'), 0) AS Cash
-                FROM Attendance a
-                JOIN Groups g ON g.GroupId = a."Group"
-                WHERE a.Date BETWEEN $1 AND $2
-                GROUP BY a."Group", g.GroupName, g.Counselor, a.Date, a.SessionNumber
-                HAVING $3::boolean OR bool_or(LOWER(COALESCE(a.OpenedBy, a.CreatedBy)) = LOWER($4))
-             )
-             SELECT s.GroupId, s.GroupName, s.Counselor, to_char(s.Date, 'YYYY-MM-DD') AS SessionDate, s.SessionNumber,
-                    s.OpenedBy, eo.DisplayName AS OpenedByName, s.ClosedOn, s.Attendance, s.Cash,
+            `SELECT s.GroupId, s.GroupName, s.Counselor, to_char(s.Date, 'YYYY-MM-DD') AS SessionDate, s.SessionNumber,
+                    s.OpenedBy, eo.DisplayName AS OpenedByName, s.CoveredBy, s.Responsible, s.ResponsibleName,
+                    s.ClosedOn, s.Attendance, s.Cash,
                     ${GROUP_DEPOSIT_COLUMNS}, er.DisplayName AS RecordedByName
-             FROM s
+             FROM (${withResponsible(closedSessionsSql('a.Date BETWEEN $1 AND $2'), '$5')}) s
              LEFT JOIN GroupDeposits d ON d.GroupId = s.GroupId AND d.SessionDate = s.Date AND d.SessionNumber = s.SessionNumber
              LEFT JOIN EmployeeRoles eo ON LOWER(eo.EmployeeEmail) = LOWER(s.OpenedBy)
              LEFT JOIN EmployeeRoles er ON LOWER(er.EmployeeEmail) = LOWER(d.RecordedBy)
-             WHERE s.Cash > 0 OR d.DepositId IS NOT NULL
+             WHERE (s.Cash > 0 OR d.DepositId IS NOT NULL)
+               AND ($3::boolean OR LOWER(s.Responsible) = LOWER($4))
              ORDER BY s.GroupName, s.Date DESC, s.SessionNumber DESC`,
-            [from, to, viewer.role === 'Business Administrator', viewer.employeeemail]
+            [from, to, viewer.role === 'Business Administrator', viewer.employeeemail, OPEN_GROUP_ADMIN_ROLES]
         );
         res.json(result.rows);
     } catch (err) {
@@ -167,8 +172,8 @@ router.get('/api/reports/group-cash-deposits', async (req, res) => {
 });
 
 // Checks a session's cash off as dropped off at the bank (records a deposit for the session's cash), or unchecks it.
-// The employee who opened the session or a Business Administrator can check it off; only a Business Administrator
-// or the employee who checked it off can uncheck it.
+// The employee responsible for the session's cash or a Business Administrator can check it off; only a Business
+// Administrator or the employee who checked it off can uncheck it.
 router.put('/api/reports/group-cash-deposits', async (req, res) => {
     try {
         const { groupId, sessionDate, sessionNumber, droppedOff, depositDate, user } = req.body;
@@ -180,16 +185,14 @@ router.put('/api/reports/group-cash-deposits', async (req, res) => {
         const isAdmin = viewer.role === 'Business Administrator';
         const session = Number(sessionNumber) || 1;
         const sessionRes = await pool.query(
-            `SELECT COUNT(*)::int AS attendance,
-                    COALESCE(SUM(AccountPaid) FILTER (WHERE PaymentMethod = 'Cash'), 0) AS cash,
-                    COALESCE(bool_or(LOWER(COALESCE(OpenedBy, CreatedBy)) = LOWER($4)), FALSE) AS opened
-             FROM Attendance WHERE "Group" = $1 AND Date = $2 AND SessionNumber = $3`,
-            [groupId, sessionDate, session, viewer.employeeemail]
+            withResponsible(closedSessionsSql('a."Group" = $1 AND a.Date = $2 AND a.SessionNumber = $3'), '$4'),
+            [groupId, sessionDate, session, OPEN_GROUP_ADMIN_ROLES]
         );
         const info = sessionRes.rows[0];
-        if (info.attendance === 0) return res.status(404).json({ error: 'That group session has not been closed.' });
-        if (!isAdmin && !info.opened) {
-            return res.status(403).json({ error: 'You can only check off deposits for group sessions you opened.' });
+        if (!info) return res.status(404).json({ error: 'That group session has not been closed.' });
+        const responsible = String(info.responsible || '').toLowerCase() === String(viewer.employeeemail).toLowerCase();
+        if (!isAdmin && !responsible) {
+            return res.status(403).json({ error: 'You can only check off deposits for group sessions you are responsible for.' });
         }
         const groupName = await groupNameFor(groupId);
         const cash = Number(info.cash);

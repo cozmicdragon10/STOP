@@ -4,11 +4,14 @@ import { validateSession } from '../../hooks/useGroupCheckIn';
 import type { ClientRecord, GroupCheckInState, GroupRecord, SessionEntry } from '../../hooks/useGroupCheckIn';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import ClientPaymentDialog from '../payments/ClientPaymentDialog';
+import CoveringCounselorPicker from './CoveringCounselorPicker';
 
 interface Props {
   group: GroupRecord;
   wf: GroupCheckInState;
   createdBy: string;
+  // Office Admins and Business Administrators can name a covering counselor
+  canPickCover: boolean;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   onSaved: () => void;
@@ -92,7 +95,7 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment }: {
   );
 }
 
-export default function ReviewStep({ group, wf, createdBy, onSuccess, onError, onSaved }: Props) {
+export default function ReviewStep({ group, wf, createdBy, canPickCover, onSuccess, onError, onSaved }: Props) {
   const problem = validateSession(wf.session);
   const [paymentClient, setPaymentClient] = useState<ClientRecord | null>(null);
   // Balances after a payment taken on this screen. Session entries keep the balance they were checked in with.
@@ -126,6 +129,10 @@ export default function ReviewStep({ group, wf, createdBy, onSuccess, onError, o
           />
         ))}
       </div>
+
+      {canPickCover && (
+        <CoveringCounselorPicker usualCounselor={group.counselor} value={wf.coveredBy} onChange={wf.setCoveredBy} disabled={wf.submitting} />
+      )}
 
       {problem && (
         <p className="text-sm text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">{problem}</p>

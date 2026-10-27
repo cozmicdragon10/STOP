@@ -1,17 +1,20 @@
 const express = require('express');
 const { logAction, pool } = require('../db');
 const { OPEN_GROUP_ADMIN_ROLES, openGroupViewer } = require('../lib/access');
+const { coveringCounselorFor } = require('../lib/cashResponsibility');
 
 const router = express.Router();
 
 const OPEN_GROUP_COLUMNS = `o.OpenSessionId, o.GroupId, g.GroupName, to_char(o.SessionDate, 'YYYY-MM-DD') AS SessionDate,
-    o.SessionNumber, o.Entries, o.CreatedBy, o.UpdatedOn`;
+    o.SessionNumber, o.Entries, o.CreatedBy, o.CoveredBy, o.UpdatedOn`;
 
+// The covering counselor (picked by the office) can see the check-in too
 const canSeeOpenGroup = (viewer, row) => {
     if (!viewer) return false;
     if (OPEN_GROUP_ADMIN_ROLES.includes(viewer.role)) return true;
     const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
-    return same(row.createdby, viewer.employeeemail) || (!!viewer.displayname && same(row.counselor, viewer.displayname));
+    return same(row.createdby, viewer.employeeemail) || same(row.coveredby, viewer.employeeemail)
+        || (!!viewer.displayname && same(row.counselor, viewer.displayname));
 };
 
 router.get('/api/open-groups', async (req, res) => {
@@ -29,7 +32,7 @@ router.get('/api/open-groups', async (req, res) => {
 });
 
 // Closed group sessions, newest first. Only Business Administrators see all of them; others see the sessions of groups
-// they counsel and the ones they opened.
+// they counsel, the ones they opened, and the ones they covered.
 router.get('/api/closed-groups', async (req, res) => {
     try {
         const viewer = await openGroupViewer(req.query.user);
@@ -50,6 +53,7 @@ router.get('/api/closed-groups', async (req, res) => {
              HAVING $1::boolean
                  OR ($3 <> '' AND LOWER(TRIM(g.Counselor)) = LOWER(TRIM($3)))
                  OR bool_or(LOWER(COALESCE(a.OpenedBy, a.CreatedBy)) = LOWER($2))
+                 OR bool_or(LOWER(a.CoveredBy) = LOWER($2))
              ORDER BY a.Date DESC, MAX(a.CreatedOn) DESC NULLS LAST
              LIMIT 100`,
             [isAdmin, viewer.employeeemail, viewer.displayname || '']
@@ -62,28 +66,30 @@ router.get('/api/closed-groups', async (req, res) => {
 
 // Saves the sheet for a group and session date, replacing any earlier save of the same session.
 // The employee who first opened it stays as CreatedBy. Someone who can't see an existing open check-in can't overwrite it.
+// coveredBy (Office Admins and Business Administrators only) names the counselor covering the session.
 router.put('/api/open-groups', async (req, res) => {
     try {
-        const { group, date, sessionNumber, entries, createdBy } = req.body;
+        const { group, date, sessionNumber, entries, createdBy, coveredBy } = req.body;
         if (!group || !date || !Array.isArray(entries) || entries.length === 0) {
             return res.status(400).json({ error: 'A group, session date, and at least one checked-in client are required.' });
         }
         const sessionNum = Number(sessionNumber) > 0 ? Math.floor(Number(sessionNumber)) : 1;
         const existing = await pool.query(
-            `SELECT o.CreatedBy, g.Counselor FROM OpenGroupSessions o JOIN Groups g ON g.GroupId = o.GroupId
+            `SELECT o.CreatedBy, o.CoveredBy, g.Counselor FROM OpenGroupSessions o JOIN Groups g ON g.GroupId = o.GroupId
              WHERE o.GroupId = $1 AND o.SessionDate = $2 AND o.SessionNumber = $3`,
             [group, date, sessionNum]
         );
         if (existing.rows[0] && !canSeeOpenGroup(await openGroupViewer(createdBy), existing.rows[0])) {
             return res.status(403).json({ error: 'This group already has an open check-in for this session, started by another counselor. Only that counselor, the group\'s counselor, or an administrator can change it.' });
         }
+        const covering = await coveringCounselorFor(createdBy, coveredBy, existing.rows[0]?.coveredby ?? null);
         const saved = await pool.query(
-            `INSERT INTO OpenGroupSessions (GroupId, SessionDate, SessionNumber, Entries, CreatedBy, UpdatedOn)
-             VALUES ($1, $2, $3, $4, $5, NOW())
+            `INSERT INTO OpenGroupSessions (GroupId, SessionDate, SessionNumber, Entries, CreatedBy, CoveredBy, UpdatedOn)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW())
              ON CONFLICT (GroupId, SessionDate, SessionNumber)
-             DO UPDATE SET Entries = EXCLUDED.Entries, UpdatedOn = NOW()
+             DO UPDATE SET Entries = EXCLUDED.Entries, CoveredBy = EXCLUDED.CoveredBy, UpdatedOn = NOW()
              RETURNING OpenSessionId`,
-            [group, date, sessionNum, JSON.stringify(entries), createdBy]
+            [group, date, sessionNum, JSON.stringify(entries), createdBy, covering]
         );
         const result = await pool.query(
             `SELECT ${OPEN_GROUP_COLUMNS} FROM OpenGroupSessions o
@@ -93,7 +99,7 @@ router.put('/api/open-groups', async (req, res) => {
         await logAction(createdBy, 'Group Check-In Saved', `Saved open check-in for Group ID ${group} on ${date} (${entries.length} client(s))`);
         res.json(result.rows[0]);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 

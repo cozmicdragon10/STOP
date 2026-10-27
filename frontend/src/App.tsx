@@ -11,8 +11,8 @@ import {
   submitPolygraphResult, deletePolygraphSlot, assignPolygraphSlot, reopenPolygraphSlot,
   getClientAttendance, getClientFinancials, adjustCashPayment, recordCardPaymentAction,
   getClientNotes, addClientNote, updateClientNote, deleteClientNote, getClientPolygraphs, getGroupClients, updateGroup, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
-  assignClientToGroup, createClient, createGroup, deleteGroup, deleteClient, updateEmployee, getClientTests, submitTestResult, getAgentReport,
-  getDepositReport, getEmployees, addEmployee, getSystemLogs, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
+  assignClientToGroup, createClient, createGroup, deleteGroup, deleteClient, updateEmployee, getClientTests, submitTestResult,
+  getEmployees, addEmployee, getSystemLogs, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
   fetchPolyFeeOverride, savePolyFeeOverride, deletePolyFeeOverride,
   getOpenGroups, deleteOpenGroup, getClosedGroups, getClientChangeLog, getSupervisingAgents,
   getClientAttachments, uploadClientAttachment, fetchClientAttachment, renameClientAttachment, deleteClientAttachment, ATTACHMENT_MAX_BYTES
@@ -30,9 +30,7 @@ import AgentPicker from './components/agents/AgentPicker';
 import ClientPicker from './components/ClientPicker';
 import RecordFilterBar from './components/clients/RecordFilterBar';
 import MonthHeader from './components/clients/MonthHeader';
-import GroupIncomeReport from './components/reports/GroupIncomeReport';
-import CounselorClientReport from './components/reports/CounselorClientReport';
-import GroupCashDepositReport from './components/reports/GroupCashDepositReport';
+import ReportsTab from './components/reports/ReportsTab';
 import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividualsTab';
 import SessionPriceList from './components/sessions/SessionPriceList';
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
@@ -45,7 +43,6 @@ import {
   STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase, DEFAULT_CLIENT_FILTERS, CLIENT_FIELD_OPTIONS, SO_ATTENDANCE_LIMIT_MONTHS,
   isAttendanceOverdue, GROUP_TYPES_BY_PROGRAM,
 } from './utils/clients';
-import { reportTabsFor, currentReportFor } from './utils/reports';
 import { caseNoteLabel } from './utils/notes';
 import { DEFAULT_GROUP_FILTERS, EMPTY_NOTE_FILTERS, EMPTY_ATTENDANCE_FILTERS, EMPTY_LEDGER_FILTERS, sortedUnique, groupByMonth, toggleInSet } from './utils/filters';
 import {
@@ -310,13 +307,6 @@ export default function App() {
   const [testScore, setTestScore] = useState('');
   const [testNotes, setTestNotes] = useState('');
   const [clientTestHistory, setClientTestHistory] = useState<any[]>([]);
-
-  // Reports State
-  const [agentReportData, setAgentReportData] = useState<any[] | null>(null);
-  const [depositReportData, setDepositReportData] = useState<any>(null);
-  const [reportsError, setReportsError] = useState('');
-  // The report tab last picked; null until one is picked (the role's first report shows)
-  const [reportTab, setReportTab] = useState<string | null>(null);
 
   // Admin Module State
   const [employees, setEmployees] = useState<any[]>([]);
@@ -878,27 +868,6 @@ export default function App() {
       setClientTestHistory(history);
     }
   };
-
-  // Reports Generators
-  // The agent and deposit reports are fetched fresh each time their tab is shown
-  const currentReport = currentReportFor(reportTab, user?.role);
-  useEffect(() => {
-    if (activeTab !== 'reports' || (currentReport !== 'agent' && currentReport !== 'deposit')) return;
-    let cancelled = false;
-    setReportsError('');
-    if (currentReport === 'agent') {
-      setAgentReportData(null);
-      getAgentReport()
-        .then(data => { if (!cancelled) setAgentReportData(data); })
-        .catch(() => { if (!cancelled) setReportsError('Failed to load the weekly agent report.'); });
-    } else {
-      setDepositReportData(null);
-      getDepositReport()
-        .then(data => { if (!cancelled) setDepositReportData(data); })
-        .catch(() => { if (!cancelled) setReportsError('Failed to load the monthly deposit report.'); });
-    }
-    return () => { cancelled = true; };
-  }, [activeTab, currentReport]);
 
   // Admin User Creation. The form stays closed until New User or an account's Edit opens it.
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
@@ -3767,6 +3736,7 @@ export default function App() {
                   groups={activeGroups}
                   clients={clients}
                   createdBy={user.employeeemail}
+                  canPickCover={role === 'Business Administrator' || role === 'Office Admin'}
                   onSuccess={setSuccessMsg}
                   onError={setError}
                   onSaved={loadDashboardData}
@@ -4795,60 +4765,7 @@ export default function App() {
 
         {/* REPORTS TAB */}
         {activeTab === 'reports' && (
-          <div className="space-y-6">
-            <div role="tablist" className="flex flex-wrap border-b border-slate-800">
-              {reportTabsFor(role).map(t => (
-                <button
-                  key={t.id}
-                  role="tab"
-                  aria-selected={currentReport === t.id}
-                  onClick={() => setReportTab(t.id)}
-                  className={`px-4 py-2.5 border-b-2 -mb-px text-sm font-medium whitespace-nowrap transition ${currentReport === t.id ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            {reportsError && <p className="text-xs text-red-400">{reportsError}</p>}
-
-            {currentReport === 'groupIncome' && <GroupIncomeReport userEmail={user.employeeemail} canRecordDeposits={user.role === 'Business Administrator'} />}
-
-            {currentReport === 'cashDeposits' && <GroupCashDepositReport userEmail={user.employeeemail} isAdmin={user.role === 'Business Administrator'} />}
-
-            {currentReport === 'counselorClients' && <CounselorClientReport clients={clients} groups={groups} statuses={PROGRAM_STATUSES} onOpenClient={openClientLogs} />}
-
-            {currentReport === 'agent' && !reportsError && (
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
-                <h3 className="font-semibold text-white mb-4">Weekly Supervising Agent Summary</h3>
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead><tr className="bg-slate-800/50 text-slate-400 uppercase"><th className="p-3">Client</th><th className="p-3">Agent</th><th className="p-3">Attended Sessions</th><th className="p-3">Last Poly</th><th className="p-3">Balance</th></tr></thead>
-                  <tbody className="divide-y divide-slate-800 text-sm">
-                    {agentReportData?.map(r => (
-                      <tr key={r.clientid}><td className="p-3 font-medium text-white">{r.lastname}, {r.firstname}</td><td className="p-3 text-slate-300">{r.supervisingagent}</td><td className="p-3">{r.totalattended}</td><td className="p-3 text-slate-400">{r.lastpolydate ? new Date(r.lastpolydate).toLocaleDateString() : 'None'}</td><td className="p-3 font-semibold text-slate-200">{formatBalance(r.accountbalance)}</td></tr>
-                    ))}
-                    {(!agentReportData || agentReportData.length === 0) && (
-                      <tr><td colSpan={5} className="p-6 text-center text-slate-500 text-sm">{agentReportData ? 'No clients to report.' : 'Loading…'}</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {currentReport === 'deposit' && !depositReportData && !reportsError && (
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl text-center text-slate-500 text-sm">Loading…</div>
-            )}
-
-            {currentReport === 'deposit' && depositReportData && (
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl space-y-4">
-                <h3 className="font-semibold text-white">Monthly Deposit Summary</h3>
-                <div className="grid grid-cols-2 gap-4 text-center">
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800"><p className="text-xs text-slate-400">Total Revenue Collected</p><p className="text-2xl font-bold text-emerald-400">${depositReportData.totalRevenue.toFixed(2)}</p></div>
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800"><p className="text-xs text-slate-400">Total Charges Assessed</p><p className="text-2xl font-bold text-amber-400">${depositReportData.totalCharges.toFixed(2)}</p></div>
-                </div>
-              </div>
-            )}
-          </div>
+          <ReportsTab user={user} clients={clients} groups={groups} onOpenClient={openClientLogs} />
         )}
 
         {/* ADMIN TAB */}

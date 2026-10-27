@@ -38,6 +38,8 @@ export interface GroupRecord {
   groupname: string;
   programtype?: string | null;
   clientcount?: number | string | null;
+  // The group's usual counselor (display name)
+  counselor?: string | null;
 }
 
 // One row on the attendance sheet. Money fields are per client so the
@@ -155,6 +157,9 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   const [sessionNumber, setSessionNumber] = useState(1);
   // Set when the picked group already has a closed session today: the user chooses a new session or adding to that one
   const [sessionChoice, setSessionChoice] = useState<{ latestClosed: GroupDaySession; nextNumber: number } | null>(null);
+  // Counselor covering the session (employee email), picked by the office; null means the group's usual counselor.
+  // The server ignores it unless an Office Admin or Business Administrator sends it.
+  const [coveredBy, setCoveredBy] = useState<string | null>(null);
 
   // Guards against a slow response for a previous group overwriting the current roster.
   const rosterRequestId = useRef(0);
@@ -223,6 +228,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     setAttendedIds(new Set());
     setSessionNumber(1);
     setSessionChoice(null);
+    setCoveredBy(null);
   };
 
   // Answer to the "already held today" question. 'new' starts another session, so everyone can be checked in again;
@@ -253,6 +259,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     setSession(open.entries);
     setView('review');
     setSessionNumber(openSession);
+    setCoveredBy(open.coveredby ?? null);
     loadRoster(open.groupid, open.sessiondate, openSession);
   };
 
@@ -261,7 +268,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     if (groupId === null || session.length === 0) return;
     setSubmitting(true);
     try {
-      await saveOpenGroup({ group: groupId, date: sessionDate ?? todayLocal(), sessionNumber, entries: session, createdBy });
+      await saveOpenGroup({ group: groupId, date: sessionDate ?? todayLocal(), sessionNumber, entries: session, createdBy, coveredBy });
       notify.onSuccess(`Check-in saved for ${session.length} client(s). Close the group from Open Groups when you're ready.`);
       clearWorkflow();
       notify.onOpenGroupsChanged?.();
@@ -402,6 +409,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
         sessionNumber,
         type: 'Group',
         createdBy,
+        coveredBy,
         entries: session.map(e => ({
           client: e.client.clientid,
           groupFee: e.fee,
@@ -459,6 +467,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     chooseSession,
     resumeOpenGroup,
     finishCheckIn,
+    coveredBy,
+    setCoveredBy,
   };
 }
 
