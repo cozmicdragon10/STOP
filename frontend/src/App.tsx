@@ -8,7 +8,7 @@ import {
 import {
   loginUser, logoutUser, setSessionEndedHandler, getClients, getGroups, submitAccountPayment, submitCustomCharge,
   getPolygraphSlots,
-  deletePolygraphSlot, assignPolygraphSlot,
+  deletePolygraphSlot,
   getClientAttendance, getClientFinancials, adjustCashPayment, recordCardPaymentAction,
   getClientNotes, addClientNote, updateClientNote, deleteClientNote, getClientPolygraphs, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
   createClient, deleteClient,
@@ -32,8 +32,9 @@ import AdminTab from './components/admin/AdminTab';
 import PolySlotForm from './components/polygraph/PolySlotForm';
 import PolyResults from './components/polygraph/PolyResults';
 import PolySchedule from './components/polygraph/PolySchedule';
-import type { SlotChoices } from './components/polygraph/PolySchedule';
 import PolyCancelDialog from './components/polygraph/PolyCancelDialog';
+import PolyAssignDialogs from './components/polygraph/PolyAssignDialogs';
+import { usePolyAssignment } from './hooks/usePolyAssignment';
 import AgentPicker from './components/agents/AgentPicker';
 import RecordFilterBar from './components/clients/RecordFilterBar';
 import MonthHeader from './components/clients/MonthHeader';
@@ -55,7 +56,7 @@ import {
   formatLogTime, formatDisplayTime, toLocalDay, ageFromBirthDate,
 } from './utils/dates';
 import { signedMoney, attendanceBalanceChange, PAYMENT_REVERSAL_TYPES, LEDGER_TONES, cardPaymentStatus, ledgerBalanceChange } from './utils/ledger';
-import { polygraphHistoryText, polygraphNotice, POLY_VOUCHER_MAX, slotStart } from './utils/polygraph';
+import { polygraphHistoryText, polygraphNotice, POLY_VOUCHER_MAX, polySchedulingNeeds, slotStart } from './utils/polygraph';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -204,19 +205,8 @@ export default function App() {
   // Slot opened from a client's account; outlined on the Poly Schedule for a few seconds
   const [highlightedSlotId, setHighlightedSlotId] = useState<number | null>(null);
   
-  // Assignment state per slot card
-  const [slotAssignments, setSlotAssignments] = useState<{ [slotId: number]: string }>({});
-  const [slotComments, setSlotComments] = useState<{ [slotId: number]: string }>({});
-  // Slot awaiting the assignment confirmation box
-  const [pendingAssignSlotId, setPendingAssignSlotId] = useState<number | null>(null);
-  // Payment prompt for a client who lacks the poly fee vouchers needed to be scheduled
-  const [polyPaymentPrompt, setPolyPaymentPrompt] = useState<{ client: any; amountDue: number; notice: string } | null>(null);
-  // Business Administrator prompt to schedule inside the post-NDI waiting period; the box must be ticked to bypass
-  const [waitBypassPrompt, setWaitBypassPrompt] = useState<{ slotId: number; clientName: string; lastPolyDate: string; earliestDate: string } | null>(null);
-  const [waitBypassConfirmed, setWaitBypassConfirmed] = useState(false);
   // Assigned slot whose reservation is being cancelled (PolyCancelDialog)
   const [reopenTarget, setReopenTarget] = useState<any>(null);
-  const [slotTypes, setSlotTypes] = useState<{ [slotId: number]: string }>({});
 
   // Inactive groups stay in the directory but are hidden from every picker for new assignments and sessions
   const activeGroups = groups.filter(g => g.active !== false);
@@ -321,108 +311,22 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, activeTab]);
 
-  // Polygraph Functions
-  // To be scheduled for a polygraph a client needs a full set of poly fee vouchers and an account balance of
-  // $0.00 or better (stored sign: positive = owes). Mirrors the server's check on assignment.
-  const polySchedulingNeeds = (client: any) => {
-    const vouchers = Number(client.polyfeevoucher ?? 0);
-    const polyFeePaid = Number(client.polyfeepaid ?? 0);
-    const polyFee = Number(client.polyfee ?? 0);
-    const short = vouchers < POLY_VOUCHER_MAX;
-    // Paying off the poly fee is what fills the vouchers, so it is only owed while they are short
-    const polyDue = short ? Math.max(0, polyFee - polyFeePaid) : 0;
-    const balanceDue = Math.max(0, Number(client.accountbalance) || 0);
-    return { vouchers, polyFeePaid, polyFee, short, polyDue, balanceDue, met: !short && balanceDue === 0 };
-  };
-
-  // Offers one payment covering what blocks scheduling: the rest of the poly fee first (which fills the vouchers),
-  // then the account balance. Short vouchers with nothing owed on the poly fee must be fixed in Edit Info.
-  const promptPolyPayment = (client: any) => {
-    const name = `${client.firstname} ${client.lastname}`;
-    const { vouchers, polyFeePaid, polyFee, short, polyDue, balanceDue } = polySchedulingNeeds(client);
-    if (short && polyDue <= 0) {
-      setError(`${name} has ${vouchers}/${POLY_VOUCHER_MAX} poly fee vouchers but nothing is owed on the poly fee. Correct the vouchers in the client's Edit Info.`);
-      return;
-    }
-    const needs = [
-      short && `${POLY_VOUCHER_MAX} poly fee vouchers (has ${vouchers}/${POLY_VOUCHER_MAX}; poly fee paid $${polyFeePaid.toFixed(2)} / $${polyFee.toFixed(2)}, $${polyDue.toFixed(2)} remaining)`,
-      balanceDue > 0 && `an account balance of $0.00 or better (owes $${balanceDue.toFixed(2)})`,
-    ].filter(Boolean);
-    setPolyPaymentPrompt({
-      client,
-      amountDue: polyDue + balanceDue,
-      notice: `Scheduling ${name} for a polygraph needs ${needs.join(' and ')}. `
-        + `Paying $${(polyDue + balanceDue).toFixed(2)} covers ${polyDue > 0 && balanceDue > 0 ? 'both' : 'it'}`
-        + (polyDue > 0 ? '; the poly fee is paid first.' : '.'),
-    });
-  };
-
-  // Opens the confirmation box; the assignment is only saved when it is accepted.
-  // clientId is passed when the slot's choice was set in the same click (scheduling from a client's account).
-  const openAssignConfirm = (slotId: number, clientId = slotAssignments[slotId]) => {
-    if (!clientId) {
-      setError('Please select a client to assign to this slot.');
-      return;
-    }
-    const client = clients.find(c => String(c.clientid) === clientId);
-    if (client && !polySchedulingNeeds(client).met) {
-      promptPolyPayment(client);
-      return;
-    }
-    setPendingAssignSlotId(slotId);
-  };
-
-  const handleAssignSlotToClient = async (slotId: number, bypassWaitPeriod = false) => {
-    if (role !== 'Business Administrator') {
-      setError('Only Business Administrators can assign polygraph slots to clients.');
-      return;
-    }
-    const clientId = slotAssignments[slotId];
-    const assignedType = slotTypes[slotId] || 'Maintenance';
-    if (!clientId) {
-      setError('Please select a client to assign to this slot.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const res = await assignPolygraphSlot(slotId, Number(clientId), assignedType, user.employeeemail, (slotComments[slotId] || '').trim(), bypassWaitPeriod);
-      const client = clients.find(c => String(c.clientid) === clientId);
-      if (res?.code === 'POLY_TOO_SOON' && client) {
-        // Only Business Administrators reach this point; offer the override instead of a plain refusal
-        setWaitBypassConfirmed(false);
-        setWaitBypassPrompt({
-          slotId,
-          clientName: `${client.lastname}, ${client.firstname}`,
-          lastPolyDate: res.lastPolyDate,
-          earliestDate: res.earliestDate,
-        });
-      } else if (res?.code === 'POLY_SCHEDULING_REQUIREMENTS' && client) {
-        // The server's figures are current; refresh the client and ask for the payment
-        const updated = { ...client, polyfeevoucher: res.vouchers, polyfeepaid: res.polyFeePaid, polyfee: res.polyFee, accountbalance: res.accountBalance };
-        setClients(prev => prev.map(c => c.clientid === client.clientid ? updated : c));
-        promptPolyPayment(updated);
-      } else if (res?.error) {
-        setError(res.error);
-      } else {
-        setSlotComments({ ...slotComments, [slotId]: '' });
-        setSuccessMsg(`Assigned ${assignedType} Polygraph slot to ${client ? client.lastname + ', ' + client.firstname : 'Client'}!`);
-        // Reloaded from the server: the vouchers and paid-in-full poly fee are spent, and spending the last fill of a
-        // poly fee override puts the regular poly fee back, which only the server knows about
-        const [freshSlots, freshClients] = await Promise.all([getPolygraphSlots(), getClients()]);
-        setPolySlots(freshSlots);
-        setClients(freshClients);
-        // Scheduled from the client's account: show the booking and the spent vouchers there too
-        setSelectedClientDetail((c: any) => (c ? { ...c, ...(freshClients.find((fc: any) => fc.clientid === c.clientid) ?? {}) } : c));
-        setDrawerPolySlot('');
-        setDrawerPolyComment('');
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to assign client to slot.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Polygraph slot assignment, shared by the Poly Schedule cards and the client account's Schedule Polygraph
+  const polyAssign = usePolyAssignment({
+    role: user?.role ?? '',
+    userEmail: user?.employeeemail ?? '',
+    clients,
+    setClients,
+    setPolySlots,
+    onAssigned: (freshClients) => {
+      // Scheduled from the client's account: show the booking and the spent vouchers there too
+      setSelectedClientDetail((c: any) => (c ? { ...c, ...(freshClients.find((fc: any) => fc.clientid === c.clientid) ?? {}) } : c));
+      setDrawerPolySlot('');
+      setDrawerPolyComment('');
+    },
+    onSuccess: setSuccessMsg,
+    onError: setError,
+  });
 
   // Opens the cancellation prompt; the reservation is only cancelled when it is submitted
   const handleReopenSlot = (slotId: number) => {
@@ -1074,16 +978,6 @@ export default function App() {
     if (ledgerFilters.sort === 'amount-low') return Number(a.amount) - Number(b.amount);
     return byDate(ledgerFilters.sort)(a, b);
   });
-
-  // The client, poly type, and comment picked on each open slot (Poly Schedule cards and the account drawer share them)
-  const slotChoices: SlotChoices = {
-    clientOf: (slotId) => slotAssignments[slotId] || '',
-    typeOf: (slotId) => slotTypes[slotId] || 'Maintenance',
-    commentOf: (slotId) => slotComments[slotId] || '',
-    setClient: (slotId, clientId) => setSlotAssignments(prev => ({ ...prev, [slotId]: clientId })),
-    setType: (slotId, type) => setSlotTypes(prev => ({ ...prev, [slotId]: type })),
-    setComment: (slotId, comment) => setSlotComments(prev => ({ ...prev, [slotId]: comment })),
-  };
 
   const getExaminerDisplayName = (email: string) =>
     employees.find(e => e.employeeemail === email)?.displayname || email;
@@ -2948,11 +2842,7 @@ export default function App() {
                                 if (!drawerPolySlot) return;
                                 const slotId = Number(drawerPolySlot);
                                 const clientId = String(selectedClientDetail.clientid);
-                                // Same per-slot choices the Poly Schedule uses, so the confirmation, payment, and waiting-period prompts work unchanged
-                                setSlotAssignments(prev => ({ ...prev, [slotId]: clientId }));
-                                setSlotTypes(prev => ({ ...prev, [slotId]: drawerPolyType }));
-                                setSlotComments(prev => ({ ...prev, [slotId]: drawerPolyComment }));
-                                openAssignConfirm(slotId, clientId);
+                                polyAssign.scheduleFromAccount(slotId, clientId, drawerPolyType, drawerPolyComment);
                               }}
                               className="grid grid-cols-1 md:grid-cols-2 gap-3"
                             >
@@ -2994,7 +2884,7 @@ export default function App() {
                               {/* The page's error banner is hidden behind the account drawer */}
                               {error && <p className="md:col-span-2 text-xs text-red-400">{error}</p>}
                               <div className="md:col-span-2 flex justify-end">
-                                <button type="submit" disabled={loading || !drawerPolySlot} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-xs font-semibold">
+                                <button type="submit" disabled={loading || polyAssign.saving || !drawerPolySlot} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-xs font-semibold">
                                   Schedule
                                 </button>
                               </div>
@@ -3536,125 +3426,23 @@ export default function App() {
         {/* TESTING MODULE TAB */}
         {activeTab === 'testing' && <TestingTab clients={clients} onSuccess={setSuccessMsg} />}
 
-        {/* Polygraph assignment dialogs. Outside the Polygraph tab so they also open over a client's account,
+        {/* Polygraph assignment prompts. Outside the Polygraph tab so they also open over a client's account,
             which can schedule from its Polygraphs section. */}
-        {pendingAssignSlotId !== null && (() => {
-          const pendingSlot = polySlots.find(s => s.slotid === pendingAssignSlotId);
-          const pendingClient = clients.find(c => String(c.clientid) === slotAssignments[pendingAssignSlotId]);
-          const pendingComment = (slotComments[pendingAssignSlotId] || '').trim();
-          const details: [string, string][] = [
-            ['Client', pendingClient ? `${pendingClient.lastname}, ${pendingClient.firstname}` : 'Not selected'],
-            ['Poly Type', slotTypes[pendingAssignSlotId] || 'Maintenance'],
-            ['Location', pendingSlot?.location || '—'],
-            ['Address', pendingSlot?.address || 'Not set'],
-            ['Date', pendingSlot ? `${new Date(pendingSlot.date).toLocaleDateString()} @ ${formatDisplayTime(pendingSlot.time)}` : '—'],
-            ['Examiner', pendingSlot ? getExaminerDisplayName(pendingSlot.polygrapher) : '—'],
-          ];
-          return (
-            <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-              <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
-                <div>
-                  <h3 className="font-semibold text-white">Confirm Polygraph Assignment</h3>
-                  <p className="text-xs text-slate-400 mt-1">Review the details below. This will be added to the client's case notes.</p>
-                </div>
-                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
-                  {details.map(([label, value]) => (
-                    <React.Fragment key={label}>
-                      <dt className="text-slate-400 uppercase">{label}</dt>
-                      <dd className={label === 'Client' ? 'text-emerald-400 font-semibold' : 'text-slate-200'}>{value}</dd>
-                    </React.Fragment>
-                  ))}
-                  {pendingComment && (
-                    <>
-                      <dt className="text-slate-400 uppercase">Comment</dt>
-                      <dd className="text-slate-200 whitespace-pre-wrap">{pendingComment}</dd>
-                    </>
-                  )}
-                </dl>
-                <div className="flex justify-end gap-2">
-                  <button type="button" onClick={() => setPendingAssignSlotId(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Go Back</button>
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={async () => {
-                      const slotId = pendingAssignSlotId;
-                      setPendingAssignSlotId(null);
-                      await handleAssignSlotToClient(slotId);
-                    }}
-                    className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded text-xs font-semibold">
-                    Accept & Assign
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-
-        {waitBypassPrompt && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="wait-bypass-title">
-            <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
-              <div>
-                <h3 id="wait-bypass-title" className="font-semibold text-white">Bypass Polygraph Waiting Period?</h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  <span className="text-emerald-400 font-semibold">{waitBypassPrompt.clientName}</span>'s last polygraph
-                  ({waitBypassPrompt.lastPolyDate}) was No Deception Indicated. The next one normally cannot be before {waitBypassPrompt.earliestDate} (5 months and 2 weeks).
-                </p>
-              </div>
-              <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
-                As a Business Administrator you can schedule this polygraph anyway. The override is recorded in the client's case notes and the system log.
-              </p>
-              <label className="flex items-start gap-2.5 cursor-pointer text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={waitBypassConfirmed}
-                  onChange={e => setWaitBypassConfirmed(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 accent-amber-500"
-                />
-                <span>I confirm I want to schedule this polygraph before {waitBypassPrompt.earliestDate}, bypassing the waiting period.</span>
-              </label>
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => setWaitBypassPrompt(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Cancel</button>
-                <button
-                  type="button"
-                  disabled={!waitBypassConfirmed || loading}
-                  onClick={async () => {
-                    const { slotId } = waitBypassPrompt;
-                    setWaitBypassPrompt(null);
-                    await handleAssignSlotToClient(slotId, true);
-                  }}
-                  className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded text-xs font-semibold"
-                >
-                  Bypass &amp; Assign
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {polyPaymentPrompt && (
-          <ClientPaymentDialog
-            client={polyPaymentPrompt.client}
-            balance={Number(polyPaymentPrompt.client.accountbalance) || 0}
-            noteLabel="Poly fee payment"
-            initialAmount={polyPaymentPrompt.amountDue}
-            initialApplyToPolyFee={polySchedulingNeeds(polyPaymentPrompt.client).polyDue > 0}
-            lockApplyToPolyFee
-            notice={polyPaymentPrompt.notice}
-            createdBy={user.employeeemail}
-            onClose={() => setPolyPaymentPrompt(null)}
-            onSuccess={setSuccessMsg}
-            onError={setError}
-            onProcessed={(newBalance, polyFeePaid, polyFeeVoucher) => {
-              const updated = { ...polyPaymentPrompt.client, accountbalance: newBalance, polyfeepaid: polyFeePaid, polyfeevoucher: polyFeeVoucher };
-              setClients(prev => prev.map(c => c.clientid === updated.clientid ? { ...c, ...updated } : c));
-              // The same client may be open in the account drawer
-              setSelectedClientDetail((c: any) => (c && c.clientid === updated.clientid ? { ...c, ...updated } : c));
-              if (polySchedulingNeeds(updated).met) {
-                setSuccessMsg(`${POLY_VOUCHER_MAX}/${POLY_VOUCHER_MAX} poly fee vouchers and the account is paid up. Click ${selectedClientDetail ? 'Schedule' : 'Confirm & Assign Slot'} to schedule.`);
-              }
-            }}
-          />
-        )}
+        <PolyAssignDialogs
+          assignment={polyAssign}
+          slots={polySlots}
+          clients={clients}
+          userEmail={user.employeeemail}
+          examinerName={getExaminerDisplayName}
+          accountOpen={!!selectedClientDetail}
+          onClientUpdated={(updated) => {
+            setClients(prev => prev.map(c => c.clientid === updated.clientid ? { ...c, ...updated } : c));
+            // The same client may be open in the account drawer
+            setSelectedClientDetail((c: any) => (c && c.clientid === updated.clientid ? { ...c, ...updated } : c));
+          }}
+          onSuccess={setSuccessMsg}
+          onError={setError}
+        />
 
         {/* POLYGRAPH TAB */}
         {activeTab === 'polygraph' && (
@@ -3735,8 +3523,8 @@ export default function App() {
                 assignableClients={clients.filter(c => !assignedSlotFor(c.clientid))}
                 highlightedSlotId={highlightedSlotId}
                 examinerName={getExaminerDisplayName}
-                choices={slotChoices}
-                onAssign={(slotId) => openAssignConfirm(slotId)}
+                choices={polyAssign.choices}
+                onAssign={(slotId) => polyAssign.openAssignConfirm(slotId)}
                 onCancelReservation={handleReopenSlot}
                 onDelete={handleDeleteSlot}
               />

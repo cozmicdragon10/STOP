@@ -1,8 +1,24 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { polygraphHistoryText, polygraphNotice, polyVoucherReturnRule, slotStart } from './polygraph';
+import { POLY_VOUCHER_MAX, polygraphHistoryText, polygraphNotice, polySchedulingNeeds, polyVoucherReturnRule, slotStart } from './polygraph';
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('polySchedulingNeeds', () => {
+  it('is met with full vouchers and nothing owed (a credit balance is fine)', () => {
+    expect(polySchedulingNeeds({ polyfeevoucher: POLY_VOUCHER_MAX, accountbalance: '-25.00' }).met).toBe(true);
+  });
+
+  it('asks for the rest of the poly fee while vouchers are short', () => {
+    const needs = polySchedulingNeeds({ polyfeevoucher: 2, polyfeepaid: '100', polyfee: '250', accountbalance: '0' });
+    expect(needs).toMatchObject({ short: true, polyDue: 150, balanceDue: 0, met: false });
+  });
+
+  it('asks for the account balance even with full vouchers', () => {
+    const needs = polySchedulingNeeds({ polyfeevoucher: POLY_VOUCHER_MAX, polyfeepaid: '0', polyfee: '250', accountbalance: '40' });
+    expect(needs).toMatchObject({ short: false, polyDue: 0, balanceDue: 40, met: false });
+  });
 });
 
 describe('slotStart', () => {

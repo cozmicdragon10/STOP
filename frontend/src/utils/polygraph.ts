@@ -34,6 +34,19 @@ export const polygraphNotice = (client: any, polygraphs: any[], today = new Date
 // A client's poly fee voucher runs 0 to this; the server fills it when the poly fee is paid in full
 export const POLY_VOUCHER_MAX = 6;
 
+// To be scheduled for a polygraph a client needs a full set of poly fee vouchers and an account balance of
+// $0.00 or better (stored sign: positive = owes). Mirrors the server's check on assignment.
+export const polySchedulingNeeds = (client: { polyfeevoucher?: unknown; polyfeepaid?: unknown; polyfee?: unknown; accountbalance?: unknown }) => {
+  const vouchers = Number(client.polyfeevoucher ?? 0);
+  const polyFeePaid = Number(client.polyfeepaid ?? 0);
+  const polyFee = Number(client.polyfee ?? 0);
+  const short = vouchers < POLY_VOUCHER_MAX;
+  // Paying off the poly fee is what fills the vouchers, so it is only owed while they are short
+  const polyDue = short ? Math.max(0, polyFee - polyFeePaid) : 0;
+  const balanceDue = Math.max(0, Number(client.accountbalance) || 0);
+  return { vouchers, polyFeePaid, polyFee, short, polyDue, balanceDue, met: !short && balanceDue === 0 };
+};
+
 export const POLY_CANCEL_REASONS =['Client requested cancellation', 'Client late / did not show', 'Examiner rescheduled', 'Weather', 'Other'];
 
 // Results that can keep the client in the NDI voucher incentive, but only by Business Administrator override
