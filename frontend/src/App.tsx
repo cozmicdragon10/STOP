@@ -11,7 +11,7 @@ import {
   submitPolygraphResult, deletePolygraphSlot, assignPolygraphSlot, reopenPolygraphSlot,
   getClientAttendance, getClientFinancials, adjustCashPayment, recordCardPaymentAction,
   getClientNotes, addClientNote, updateClientNote, deleteClientNote, getClientPolygraphs, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
-  createClient, deleteClient, updateEmployee, getClientTests, submitTestResult,
+  createClient, deleteClient, updateEmployee,
   getEmployees, addEmployee, getSystemLogs, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
   fetchPolyFeeOverride, savePolyFeeOverride, deletePolyFeeOverride,
   getOpenGroups, deleteOpenGroup, getClosedGroups, getClientChangeLog, getSupervisingAgents,
@@ -27,6 +27,7 @@ import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
 import SupervisingAgentsTab from './components/agents/SupervisingAgentsTab';
 import CallInTab from './components/callin/CallInTab';
 import GroupsTab from './components/groups/GroupsTab';
+import TestingTab from './components/testing/TestingTab';
 import AgentPicker from './components/agents/AgentPicker';
 import ClientPicker from './components/ClientPicker';
 import RecordFilterBar from './components/clients/RecordFilterBar';
@@ -237,13 +238,6 @@ export default function App() {
 
   // Inactive groups stay in the directory but are hidden from every picker for new assignments and sessions
   const activeGroups = groups.filter(g => g.active !== false);
-
-  // Testing Module State
-  const [testClient, setTestClient] = useState('');
-  const [testType, setTestType] = useState('SOTP Pre/Post');
-  const [testScore, setTestScore] = useState('');
-  const [testNotes, setTestNotes] = useState('');
-  const [clientTestHistory, setClientTestHistory] = useState<any[]>([]);
 
   // Admin Module State
   const [employees, setEmployees] = useState<any[]>([]);
@@ -680,32 +674,6 @@ export default function App() {
       setError(err.message || 'Error adding client.');
     } finally {
       setLoading(false);
-    }
-  };
-
-  // Testing Functions
-  const handleTestSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!testClient) return;
-    await submitTestResult({
-      client: Number(testClient),
-      testType,
-      score: testScore,
-      notes: testNotes,
-      date: new Date().toISOString().split('T')[0]
-    });
-    setSuccessMsg('Test result saved successfully!');
-    setTestScore('');
-    setTestNotes('');
-    const history = await getClientTests(Number(testClient));
-    setClientTestHistory(history);
-  };
-
-  const handleSelectTestClient = async (clientId: string) => {
-    setTestClient(clientId);
-    if (clientId) {
-      const history = await getClientTests(Number(clientId));
-      setClientTestHistory(history);
     }
   };
 
@@ -3782,60 +3750,7 @@ export default function App() {
         )}
 
         {/* TESTING MODULE TAB */}
-        {activeTab === 'testing' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
-              <h2 className="text-lg font-bold text-white border-b border-slate-800 pb-3">Test Entry</h2>
-              <form onSubmit={handleTestSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs text-slate-400 uppercase mb-1">Select Client</label>
-                  <ClientPicker
-                    clients={clients}
-                    value={testClient}
-                    onChange={handleSelectTestClient}
-                    required
-                    className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm placeholder-slate-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 uppercase mb-1">Test Type</label>
-                  <select value={testType} onChange={(e) => setTestType(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm">
-                    <option value="SOTP Pre/Post">SOTP Pre/Post</option>
-                    <option value="MRT Step Evaluation">MRT Step Evaluation</option>
-                    <option value="BIP Homework Assessment">BIP Homework Assessment</option>
-                    <option value="Cognitive Distortions Scale">Cognitive Distortions Scale</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 uppercase mb-1">Score / Evaluation</label>
-                  <input type="text" value={testScore} onChange={(e) => setTestScore(e.target.value)} placeholder="e.g. 85%, Passed, Step 4 Complete" className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm" required />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 uppercase mb-1">Clinical Notes</label>
-                  <textarea value={testNotes} onChange={(e) => setTestNotes(e.target.value)} rows={3} className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm" placeholder="Enter notes..." />
-                </div>
-                <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2.5 rounded-lg text-sm">Save Test Result</button>
-              </form>
-            </div>
-
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
-              <h2 className="text-lg font-bold text-white border-b border-slate-800 pb-3">Test History</h2>
-              {clientTestHistory.length === 0 ? (
-                <p className="text-xs text-slate-500 italic">Select a client to view test history.</p>
-              ) : (
-                clientTestHistory.map(t => (
-                  <div key={t.testid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm space-y-1">
-                    <div className="flex justify-between font-semibold text-white">
-                      <span>{t.testtype}</span>
-                      <span className="text-blue-400 font-bold">{t.score}</span>
-                    </div>
-                    <p className="text-xs text-slate-400">{new Date(t.date).toLocaleDateString()} — {t.notes || 'No notes'}</p>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
+        {activeTab === 'testing' && <TestingTab clients={clients} onSuccess={setSuccessMsg} />}
 
         {/* Polygraph assignment dialogs. Outside the Polygraph tab so they also open over a client's account,
             which can schedule from its Polygraphs section. */}
