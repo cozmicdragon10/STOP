@@ -77,7 +77,18 @@ const changePolyFeePaid = async (db, clientId, delta, { fee: newFee } = {}) => {
     return { polyFeePaid: paidAfter, polyFee: fee, polyFeeVoucher: vouchers, vouchersRemoved: Math.max(0, vouchersBefore - vouchers), vouchersAdded: Math.max(0, vouchers - vouchersBefore) };
 };
 
+// Splits a change to what was paid on a poly fee payment (delta; negative takes money back) between PolyFeePaid and the
+// account balance. PolyFeePaid never goes below $0: once booking a polygraph has spent the poly fee, taking money back
+// off an old poly fee payment is owed on the account instead. toAccount has delta's sign (negative: the client owes more).
+const splitPolyPaidChange = (paidBefore, delta) => {
+    // `|| 0` turns -0 into 0
+    const round = (n) => Math.round(n * 100) / 100 || 0;
+    if (delta >= 0) return { polyDelta: round(delta), toAccount: 0 };
+    const polyDelta = Math.max(delta, -Math.max(Number(paidBefore) || 0, 0));
+    return { polyDelta: round(polyDelta), toAccount: round(delta - polyDelta) };
+};
+
 const voucherChangeText = (poly) => (poly.vouchersRemoved > 0 ? ` ${poly.vouchersRemoved} poly fee voucher(s) removed.` : '')
     + (poly.vouchersAdded > 0 ? ` Poly fee paid in full: vouchers filled to ${POLY_VOUCHER_MAX}.` : '');
 
-module.exports = { POLY_VOUCHER_MAX, POLY_NDI_WAIT, POLY_VOUCHER_EARNING_RESULTS, POLY_INCENTIVE_OVERRIDE_RESULTS, LAST_POLY_RESULT_SQL, activePolyFeeOverride, countPolyFeeFill, endPolyFeeOverride, polyOverrideText, changePolyFeePaid, voucherChangeText };
+module.exports = { POLY_VOUCHER_MAX, POLY_NDI_WAIT, POLY_VOUCHER_EARNING_RESULTS, POLY_INCENTIVE_OVERRIDE_RESULTS, LAST_POLY_RESULT_SQL, activePolyFeeOverride, countPolyFeeFill, endPolyFeeOverride, polyOverrideText, changePolyFeePaid, splitPolyPaidChange, voucherChangeText };

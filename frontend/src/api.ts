@@ -600,6 +600,8 @@ export interface PaymentChangeResult {
     polyFeeVoucher?: number;
     vouchersRemoved?: number;
     vouchersAdded?: number;
+    // Poly fee payments: what poly fee paid couldn't absorb (it never goes below $0), now owed on the account balance
+    owedOnAccount?: number;
     // Polygraph the client is already booked into with poly fee vouchers; the change doesn't cancel it
     scheduledPolygraph?: { slotId: number; date: string; time: string | null; location: string | null } | null;
 }

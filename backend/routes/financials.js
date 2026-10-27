@@ -2,7 +2,7 @@ const express = require('express');
 const { logAction, pool } = require('../db');
 const { activeRoleFor } = require('../lib/access');
 const { logClientChange } = require('../lib/changeLog');
-const { POLY_VOUCHER_MAX, changePolyFeePaid, countPolyFeeFill, voucherChangeText } = require('../lib/poly');
+const { POLY_VOUCHER_MAX, changePolyFeePaid, countPolyFeeFill, splitPolyPaidChange, voucherChangeText } = require('../lib/poly');
 
 const router = express.Router();
 
@@ -152,10 +152,55 @@ const checkInFor = async (db, tx) => {
     return match.rows.length === 1 ? match.rows[0].attendanceid : null;
 };
 
+// Moves the client's balance by a change to what was paid on payment tx (positive: paid more, so owes less), along with
+// the balance stored on tx and every later ledger and attendance row. attendanceId is the check-in tx was taken at, if any.
+// Returns the new account balance.
+const shiftBalanceFrom = async (db, tx, paidChange, attendanceId) => {
+    // Compared in SQL so the stored timestamp keeps its full precision
+    await db.query(
+        `UPDATE FinancialTransactions SET FinalBalance = FinalBalance - $1
+         WHERE Client = $2 AND FinalBalance IS NOT NULL
+           AND (TransactionId = $3 OR (Date, TransactionId) > (SELECT Date, TransactionId FROM FinancialTransactions WHERE TransactionId = $3))`,
+        [paidChange, tx.client, tx.transactionid]
+    );
+    // Later check-ins: by CreatedOn when saved, otherwise after the linked check-in, otherwise on a later day
+    await db.query(
+        `UPDATE Attendance SET AccountTotal = AccountTotal - $1
+         WHERE Client = $2 AND (
+             AttendanceId = $3
+             OR CreatedOn > (SELECT Date FROM FinancialTransactions WHERE TransactionId = $4)
+             OR (CreatedOn IS NULL AND CASE WHEN $3::int IS NULL
+                     THEN Date > (SELECT Date FROM FinancialTransactions WHERE TransactionId = $4)::date
+                     ELSE AttendanceId > $3 END)
+         )`,
+        [paidChange, tx.client, attendanceId || null, tx.transactionid]
+    );
+    const balRes = await db.query(
+        'UPDATE Clients SET AccountBalance = AccountBalance - $1 WHERE ClientId = $2 RETURNING AccountBalance',
+        [paidChange, tx.client]
+    );
+    return Number(balRes.rows[0].accountbalance);
+};
+
+// A change to a poly fee payment: PolyFeePaid moves (never below $0), and any part it can't absorb is owed on the account
+// (splitPolyPaidChange). moveBalance applies that part to the account and returns the new balance.
+const applyPolyPaidChange = async (db, clientId, paidChange, moveBalance) => {
+    const paidRes = await db.query('SELECT PolyFeePaid FROM Clients WHERE ClientId = $1', [clientId]);
+    const { polyDelta, toAccount } = splitPolyPaidChange(Number(paidRes.rows[0]?.polyfeepaid || 0), paidChange);
+    const poly = await changePolyFeePaid(db, clientId, polyDelta);
+    const newBalance = toAccount !== 0 ? await moveBalance(toAccount) : null;
+    // Positive: how much more the client now owes on the account
+    const owedOnAccount = Math.round(-toAccount * 100) / 100;
+    return { poly, newBalance, owedOnAccount };
+};
+
+const owedOnAccountText = (owed) => (owed > 0 ? ` $${owed.toFixed(2)} more than was paid on the poly fee is owed on the account balance.` : '');
+
 // Corrects the amount of a cash payment (Business Administrators only). For an account payment the difference moves the
 // client's balance and the balance stored on this and every later ledger and attendance row, and a payment taken at
 // check-in also updates that attendance row's AccountPaid, which the group income report and its cash deposits use.
-// For a poly fee payment the difference moves PolyFeePaid instead, and the vouchers follow (see changePolyFeePaid).
+// For a poly fee payment the difference moves PolyFeePaid instead, and the vouchers follow (see changePolyFeePaid); a
+// decrease PolyFeePaid can't absorb (it never goes below $0) moves the balance like an account payment would.
 router.put('/api/financials/:id/adjust', async (req, res) => {
     const { id } = req.params;
     const { amount, reason, user } = req.body || {};
@@ -199,8 +244,8 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
 
         const paidOn = new Date(tx.date).toLocaleDateString('en-US');
         if (isPoly) {
-            // Poly fee rows store the account balance, which this doesn't change
-            const poly = await changePolyFeePaid(db, tx.client, delta);
+            // Poly fee rows store the account balance, which changes only by what PolyFeePaid can't absorb
+            const { poly, newBalance, owedOnAccount } = await applyPolyPaidChange(db, tx.client, delta, (toAccount) => shiftBalanceFrom(db, tx, toAccount, null));
             const scheduledPolygraph = await scheduledPolygraphFor(db, tx.client);
             await db.query(
                 `UPDATE FinancialTransactions SET Amount = $1, PaymentMethod = 'Cash', OriginalAmount = COALESCE(OriginalAmount, $2), AdjustedBy = $3,
@@ -214,34 +259,18 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
                 changeType: 'Payment Adjusted',
                 oldValue: `$${oldAmount.toFixed(2)}`,
                 newValue: `$${newAmount.toFixed(2)}`,
-                details: `Cash Poly Fee payment from ${paidOn}: ${why}. Poly fee paid now $${poly.polyFeePaid.toFixed(2)}.${voucherChangeText(poly)}${scheduledPolygraphText(scheduledPolygraph)}`,
+                details: `Cash Poly Fee payment from ${paidOn}: ${why}. Poly fee paid now $${poly.polyFeePaid.toFixed(2)}.${voucherChangeText(poly)}${owedOnAccountText(owedOnAccount)}${scheduledPolygraphText(scheduledPolygraph)}`,
             });
             await db.query('COMMIT');
-            await logAction(user, 'Payment Adjusted', `Client ID ${tx.client}: cash poly fee payment ${tx.transactionid} from ${paidOn} changed from $${oldAmount.toFixed(2)} to $${newAmount.toFixed(2)}: ${why}.${voucherChangeText(poly)}${scheduledPolygraphText(scheduledPolygraph)}`);
-            return res.json({ success: true, newBalance: Number(clientRes.rows[0].accountbalance), attendanceUpdated: false, ...poly, scheduledPolygraph });
+            await logAction(user, 'Payment Adjusted', `Client ID ${tx.client}: cash poly fee payment ${tx.transactionid} from ${paidOn} changed from $${oldAmount.toFixed(2)} to $${newAmount.toFixed(2)}: ${why}.${voucherChangeText(poly)}${owedOnAccountText(owedOnAccount)}${scheduledPolygraphText(scheduledPolygraph)}`);
+            return res.json({
+                success: true, newBalance: newBalance ?? Number(clientRes.rows[0].accountbalance), attendanceUpdated: false,
+                ...poly, owedOnAccount, scheduledPolygraph,
+            });
         }
 
         const attendanceId = await checkInFor(db, tx);
-
-        // Compared in SQL so the stored timestamp keeps its full precision
-        await db.query(
-            `UPDATE FinancialTransactions SET FinalBalance = FinalBalance - $1
-             WHERE Client = $2 AND FinalBalance IS NOT NULL
-               AND (TransactionId = $3 OR (Date, TransactionId) > (SELECT Date, TransactionId FROM FinancialTransactions WHERE TransactionId = $3))`,
-            [delta, tx.client, tx.transactionid]
-        );
-        // Later check-ins: by CreatedOn when saved, otherwise after the linked check-in, otherwise on a later day
-        await db.query(
-            `UPDATE Attendance SET AccountTotal = AccountTotal - $1
-             WHERE Client = $2 AND (
-                 AttendanceId = $3
-                 OR CreatedOn > (SELECT Date FROM FinancialTransactions WHERE TransactionId = $4)
-                 OR (CreatedOn IS NULL AND CASE WHEN $3::int IS NULL
-                         THEN Date > (SELECT Date FROM FinancialTransactions WHERE TransactionId = $4)::date
-                         ELSE AttendanceId > $3 END)
-             )`,
-            [delta, tx.client, attendanceId || null, tx.transactionid]
-        );
+        const newBalance = await shiftBalanceFrom(db, tx, delta, attendanceId);
         if (attendanceId) {
             await db.query(
                 `UPDATE Attendance SET AccountPaid = $1, PaymentMethod = COALESCE(PaymentMethod, 'Cash') WHERE AttendanceId = $2`,
@@ -254,10 +283,6 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
              WHERE TransactionId = $6`,
             [newAmount, oldAmount, user, why, attendanceId || null, tx.transactionid]
         );
-        const balRes = await db.query(
-            'UPDATE Clients SET AccountBalance = AccountBalance - $1 WHERE ClientId = $2 RETURNING AccountBalance',
-            [delta, tx.client]
-        );
         await logClientChange(db, {
             clientId: tx.client,
             changedBy: user,
@@ -269,7 +294,7 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
 
         await db.query('COMMIT');
         await logAction(user, 'Payment Adjusted', `Client ID ${tx.client}: cash payment ${tx.transactionid} from ${paidOn} changed from $${oldAmount.toFixed(2)} to $${newAmount.toFixed(2)}: ${why}`);
-        res.json({ success: true, newBalance: Number(balRes.rows[0].accountbalance), attendanceUpdated: Boolean(attendanceId) });
+        res.json({ success: true, newBalance, attendanceUpdated: Boolean(attendanceId) });
     } catch (err) {
         await db.query('ROLLBACK');
         res.status(500).json({ error: err.message });
@@ -282,6 +307,7 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
 // payment. A refund or dispute takes that much back off the payment: the client owes it again (for a poly fee payment it
 // comes off PolyFeePaid instead), and a check-in payment's AccountPaid drops so the group income report shows what was kept.
 // A dispute reverses the payment as soon as it's opened; winning it puts the disputed amount back, losing it leaves it reversed.
+// On a poly fee payment, what PolyFeePaid can't absorb (it never goes below $0) is owed on the account instead.
 const CARD_ACTIONS = ['refund', 'dispute', 'dispute-won', 'dispute-lost'];
 router.post('/api/financials/:id/card-action', async (req, res) => {
     const { id } = req.params;
@@ -354,10 +380,21 @@ router.post('/api/financials/:id/card-action', async (req, res) => {
         const isPoly = tx.feetype === 'Poly Fee';
         let newBalance = Number(clientRes.rows[0].accountbalance || 0);
         let poly = null;
+        let owedOnAccount = 0;
         const attendanceId = isPoly ? null : await checkInFor(db, tx);
         if (rowType) {
             if (isPoly) {
-                poly = await changePolyFeePaid(db, tx.client, paidChange);
+                // The refund or dispute row records today's balance, so earlier rows aren't rewritten
+                const change = await applyPolyPaidChange(db, tx.client, paidChange, async (toAccount) => {
+                    const balRes = await db.query(
+                        'UPDATE Clients SET AccountBalance = AccountBalance - $1 WHERE ClientId = $2 RETURNING AccountBalance',
+                        [toAccount, tx.client]
+                    );
+                    return Number(balRes.rows[0].accountbalance);
+                });
+                poly = change.poly;
+                owedOnAccount = change.owedOnAccount;
+                if (change.newBalance !== null) newBalance = change.newBalance;
             } else {
                 const balRes = await db.query(
                     'UPDATE Clients SET AccountBalance = AccountBalance - $1 WHERE ClientId = $2 RETURNING AccountBalance',
@@ -389,7 +426,7 @@ router.post('/api/financials/:id/card-action', async (req, res) => {
 
         const scheduledPolygraph = isPoly && rowType ? await scheduledPolygraphFor(db, tx.client) : null;
         const details = `${label}${rowType ? ` of $${rowAmount.toFixed(2)}` : ''} on the $${Number(tx.amount).toFixed(2)} credit card ${tx.feetype || 'payment'} from ${paidOn}: ${why}.`
-            + (poly ? ` Poly fee paid now $${poly.polyFeePaid.toFixed(2)}.${voucherChangeText(poly)}` : '')
+            + (poly ? ` Poly fee paid now $${poly.polyFeePaid.toFixed(2)}.${voucherChangeText(poly)}${owedOnAccountText(owedOnAccount)}` : '')
             + scheduledPolygraphText(scheduledPolygraph);
         await logClientChange(db, {
             clientId: tx.client,
@@ -400,7 +437,7 @@ router.post('/api/financials/:id/card-action', async (req, res) => {
 
         await db.query('COMMIT');
         await logAction(user, action === 'refund' ? 'Payment Refunded' : 'Payment Disputed', `Client ID ${tx.client}, payment ${tx.transactionid}: ${details}`);
-        res.json({ success: true, newBalance, attendanceUpdated: Boolean(attendanceId && rowType), ...(poly || {}), scheduledPolygraph });
+        res.json({ success: true, newBalance, attendanceUpdated: Boolean(attendanceId && rowType), ...(poly || {}), owedOnAccount, scheduledPolygraph });
     } catch (err) {
         await db.query('ROLLBACK');
         res.status(500).json({ error: err.message });

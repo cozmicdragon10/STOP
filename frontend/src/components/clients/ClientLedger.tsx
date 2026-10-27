@@ -105,6 +105,7 @@ export default function ClientLedger({ client, role, userEmail, financials, book
       onSuccess(`${what} Updated Balance: ${formatBalance(res.newBalance)}.`
         + (res.vouchersRemoved ? ` ${res.vouchersRemoved} poly fee voucher(s) removed.` : '')
         + (res.vouchersAdded ? ' Poly fee paid in full; vouchers filled.' : '')
+        + (res.owedOnAccount ? ` ${formatMoney(res.owedOnAccount)} more than was paid on the poly fee is owed on the account.` : '')
         + (res.attendanceUpdated ? ' The check-in it was taken at and the Group Income Report were updated too.' : ''));
       if (res.scheduledPolygraph) {
         const p = res.scheduledPolygraph;
@@ -280,13 +281,19 @@ export default function ClientLedger({ client, role, userEmail, financials, book
                     } else if (Math.abs(paidChange) >= 0.005 && isPoly) {
                       const fee = Number(client.polyfee || 0);
                       const paidBefore = Number(client.polyfeepaid || 0);
-                      const paidAfter = paidBefore + paidChange;
+                      // Poly fee paid stops at $0; the rest is owed on the account (the server splits it the same way)
+                      const polyChange = paidChange < 0 ? Math.max(paidChange, -Math.max(paidBefore, 0)) : paidChange;
+                      const owedOnAccount = Math.round((polyChange - paidChange) * 100) / 100;
+                      const paidAfter = paidBefore + polyChange;
                       const wasFull = fee > 0 && paidBefore >= fee;
                       const isFull = fee > 0 && paidAfter >= fee;
                       preview = <>
                         Poly fee paid {formatMoney(paidBefore)} → {formatMoney(paidAfter)} of {formatMoney(fee)}.
                         {wasFull && !isFull && <span className="text-amber-400"> No longer paid in full: the vouchers that paying in full added are removed.</span>}
                         {!wasFull && isFull && <span className="text-emerald-400"> Paid in full: vouchers fill to {POLY_VOUCHER_MAX}.</span>}
+                        {owedOnAccount > 0 && (
+                          <span className="text-amber-400"> {formatMoney(owedOnAccount)} more than was paid on the poly fee is owed on the account: balance {formatBalance(client.accountbalance)} → {formatBalance(Number(client.accountbalance || 0) + owedOnAccount)}.</span>
+                        )}
                       </>;
                     } else if (Math.abs(paidChange) >= 0.005) {
                       const newBalance = Number(client.accountbalance || 0) - paidChange;
