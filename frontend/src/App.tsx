@@ -12,8 +12,7 @@ import {
   getClientAttendance, getClientFinancials,
   getClientNotes, getClientPolygraphs, updateClient, changeClientProgramStatus,
   deleteClient,
-  getEmployees, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
-  fetchPolyFeeOverride, savePolyFeeOverride, deletePolyFeeOverride,
+  getEmployees, fetchClientFeeOverride, fetchPolyFeeOverride,
   getOpenGroups, deleteOpenGroup, getClosedGroups, getSupervisingAgents
 } from './api';
 import type { ClosedGroupSession, OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
@@ -43,6 +42,8 @@ import ClientNotes from './components/clients/ClientNotes';
 import ClientAttendanceHistory from './components/clients/ClientAttendanceHistory';
 import ClientPolygraphs from './components/clients/ClientPolygraphs';
 import ClientLedger from './components/clients/ClientLedger';
+import TempFeeOverridePanel from './components/clients/TempFeeOverridePanel';
+import PolyFeeOverridePanel from './components/clients/PolyFeeOverridePanel';
 import type { LedgerRefresh } from './components/clients/ClientLedger';
 import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividualsTab';
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
@@ -54,7 +55,7 @@ import {
   STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase, CLIENT_FIELD_OPTIONS, SO_ATTENDANCE_LIMIT_MONTHS,
   isAttendanceOverdue, GROUP_TYPES_BY_PROGRAM,
 } from './utils/clients';
-import { getLocalDateString, parseLogDate, toLocalDay, ageFromBirthDate } from './utils/dates';
+import { toLocalDay, ageFromBirthDate } from './utils/dates';
 import { formatMoney } from './utils/ledger';
 import { polygraphHistoryText, polygraphNotice, POLY_VOUCHER_MAX, slotStart, slotSummary } from './utils/polygraph';
 
@@ -102,15 +103,10 @@ export default function App() {
   const [clientInfoError, setClientInfoError] = useState('');
   const [clientInfoForm, setClientInfoForm] = useState<any>({});
   const [clientFeeOverride, setClientFeeOverride] = useState<any>(null);
-  const [showFeeOverrideForm, setShowFeeOverrideForm] = useState(false);
-  const [feeOverrideInput, setFeeOverrideInput] = useState('');
-  const [feeOverrideDate, setFeeOverrideDate] = useState('');
   // Temporary poly fee override: a reduced poly fee for a number of fills
   const [clientPolyOverride, setClientPolyOverride] = useState<PolyFeeOverride | null>(null);
-  const [showPolyOverrideForm, setShowPolyOverrideForm] = useState(false);
-  const [polyOverrideFee, setPolyOverrideFee] = useState('');
-  const [polyOverrideFills, setPolyOverrideFills] = useState('1');
-  const [polyOverrideError, setPolyOverrideError] = useState('');
+  // Shown on the poly fee override panel when the override could not be loaded
+  const [polyOverrideLoadError, setPolyOverrideLoadError] = useState('');
 
   // Attendance State
   const [isAccountOnly, setIsAccountOnly] = useState(false);
@@ -404,13 +400,9 @@ export default function App() {
     setClientTab('information');
     setEditingClientInfo(false);
     setClientInfoForm({ ...client });
-    setShowFeeOverrideForm(false);
-    setFeeOverrideInput('');
-    setFeeOverrideDate('');
     setClientFeeOverride(null);
     setClientPolyOverride(null);
-    setShowPolyOverrideForm(false);
-    setPolyOverrideError('');
+    setPolyOverrideLoadError('');
     const [att, fin, notes, polys] = await Promise.all([
       getClientAttendance(client.clientid),
       getClientFinancials(client.clientid),
@@ -432,7 +424,7 @@ export default function App() {
       const { override } = await fetchPolyFeeOverride(client.clientid);
       setClientPolyOverride(override);
     } catch (err: any) {
-      setPolyOverrideError(err.message || 'Could not load the poly fee override.');
+      setPolyOverrideLoadError(err.message || 'Could not load the poly fee override.');
     }
   };
 
@@ -1351,282 +1343,35 @@ export default function App() {
                   </div>
 
                   {/* Section 4 – Temporary Fee Override */}
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
-                    <div className="flex justify-between items-start mb-4">
-                      <h3 className="text-xs font-bold uppercase text-blue-400 tracking-wider">Temporary Fee Override</h3>
-                      {role === 'Business Administrator' && (
-                        <button
-                          type="button"
-                          onClick={() => setShowFeeOverrideForm(!showFeeOverrideForm)}
-                          className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
-                        >
-                          {showFeeOverrideForm ? 'Cancel' : clientFeeOverride ? 'Change Temporary Fee' : 'Set Temporary Fee'}
-                        </button>
-                      )}
-                    </div>
-
-                    {clientFeeOverride ? (
-                      <div className="bg-slate-900 border border-emerald-500/30 rounded-lg p-4 mb-4">
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <p className="text-xs text-slate-500 mb-1">Reduced Fee</p>
-                            <p className="text-white font-semibold text-lg">${Number(clientFeeOverride.reducedfee).toFixed(2)}</p>
-                            <p className="text-xs text-slate-500 mt-0.5">Regular fee: ${Number(selectedClientDetail.treatmentfee || 0).toFixed(2)}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-slate-500 mb-1">Expires (last day at reduced rate)</p>
-                            {/* DATE columns arrive as an ISO timestamp; keep only the date part so it isn't shifted a day by time zones */}
-                            <p className="text-white font-semibold">{parseLogDate(String(clientFeeOverride.expirationdate).split('T')[0])?.toLocaleDateString()}</p>
-                          </div>
-                        </div>
-                        {role === 'Business Administrator' && (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              setLoading(true);
-                              setClientInfoError('');
-                              try {
-                                await deleteClientFeeOverride(selectedClientDetail.clientid, user.employeeemail);
-                                setClientFeeOverride(null);
-                                setSuccessMsg('Temporary fee override removed. Regular fee will apply.');
-                                loadDashboardData();
-                              } catch (err: any) {
-                                setClientInfoError(err.message || 'Failed to remove fee override.');
-                              } finally {
-                                setLoading(false);
-                              }
-                            }}
-                            className="mt-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 px-3 py-1.5 rounded-lg text-xs font-semibold w-full"
-                          >
-                            Remove Override
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-400">No temporary fee override is active. Regular fee applies: ${Number(selectedClientDetail.treatmentfee || 0).toFixed(2)}</p>
-                    )}
-
-                    {showFeeOverrideForm && role === 'Business Administrator' && (
-                      <form onSubmit={async (e) => {
-                        e.preventDefault();
-                        if (feeOverrideInput === '' || !feeOverrideDate) {
-                          setClientInfoError('Please enter a reduced fee and expiration date.');
-                          return;
-                        }
-                        if (feeOverrideDate < getLocalDateString()) {
-                          setClientInfoError('The expiration date cannot be in the past.');
-                          return;
-                        }
-                        setLoading(true);
-                        setClientInfoError('');
-                        try {
-                          const result = await saveClientFeeOverride(selectedClientDetail.clientid, Number(feeOverrideInput), feeOverrideDate, user.employeeemail);
-                          setClientFeeOverride(result.override);
-                          setShowFeeOverrideForm(false);
-                          setFeeOverrideInput('');
-                          setFeeOverrideDate('');
-                          setSuccessMsg(`Temporary fee set to $${Number(feeOverrideInput).toFixed(2)} through ${parseLogDate(feeOverrideDate)?.toLocaleDateString()}.`);
-                          loadDashboardData();
-                        } catch (err: any) {
-                          setClientInfoError(err.message || 'Failed to set fee override.');
-                        } finally {
-                          setLoading(false);
-                        }
-                      }} className="space-y-3 border-t border-slate-800 pt-4 mt-4">
-                        <div>
-                          <label className="block text-xs text-slate-400 mb-1">Reduced Fee Amount *</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={feeOverrideInput}
-                            onChange={(e) => setFeeOverrideInput(e.target.value)}
-                            placeholder="e.g., 90.00"
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                            required
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-slate-400 mb-1">Expiration Date *</label>
-                          <input
-                            type="date"
-                            value={feeOverrideDate}
-                            onChange={(e) => setFeeOverrideDate(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                            required
-                          />
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowFeeOverrideForm(false);
-                              setFeeOverrideInput('');
-                              setFeeOverrideDate('');
-                            }}
-                            className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="submit"
-                            disabled={loading}
-                            className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
-                          >
-                            Set Override
-                          </button>
-                        </div>
-                      </form>
-                    )}
-                  </div>
+                  <TempFeeOverridePanel
+                    key={`fee-${selectedClientDetail.clientid}`}
+                    client={selectedClientDetail}
+                    role={role}
+                    userEmail={user.employeeemail}
+                    override={clientFeeOverride}
+                    onChanged={(override) => {
+                      // Skip if another account was opened while it saved
+                      if (openClientIdRef.current === selectedClientDetail.clientid) setClientFeeOverride(override);
+                      loadDashboardData();
+                    }}
+                    onSuccess={setSuccessMsg}
+                  />
 
                   {/* Section 5 – Temporary Poly Fee Override: a reduced poly fee for a number of fills, not a date */}
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
-                    <div className="flex justify-between items-start mb-4">
-                      <h3 className="text-xs font-bold uppercase text-blue-400 tracking-wider">Temporary Poly Fee Override</h3>
-                      {role === 'Business Administrator' && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowPolyOverrideForm(!showPolyOverrideForm);
-                            setPolyOverrideError('');
-                            setPolyOverrideFee(clientPolyOverride ? Number(clientPolyOverride.reducedfee).toFixed(2) : '');
-                            setPolyOverrideFills(clientPolyOverride ? String(clientPolyOverride.fillsallowed) : '1');
-                          }}
-                          className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
-                        >
-                          {showPolyOverrideForm ? 'Cancel' : clientPolyOverride ? 'Change Poly Fee Override' : 'Set Poly Fee Override'}
-                        </button>
-                      )}
-                    </div>
-
-                    {clientPolyOverride ? (
-                      <div className="bg-slate-900 border border-emerald-500/30 rounded-lg p-4 mb-4">
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <p className="text-xs text-slate-500 mb-1">Reduced Poly Fee</p>
-                            <p className="text-white font-semibold text-lg">${Number(clientPolyOverride.reducedfee).toFixed(2)}</p>
-                            <p className="text-xs text-slate-500 mt-0.5">Regular poly fee: ${Number(clientPolyOverride.regularfee).toFixed(2)}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-slate-500 mb-1">Fills Used</p>
-                            <p className="text-white font-semibold text-lg">{clientPolyOverride.fillsused} of {clientPolyOverride.fillsallowed}</p>
-                            <p className="text-xs text-slate-500 mt-0.5">
-                              {Number(clientPolyOverride.fillsused) >= Number(clientPolyOverride.fillsallowed)
-                                ? 'Last fill granted; the regular fee returns when its vouchers are used to schedule a polygraph.'
-                                : `${Number(clientPolyOverride.fillsallowed) - Number(clientPolyOverride.fillsused)} more fill(s) at the reduced fee.`}
-                            </p>
-                          </div>
-                        </div>
-                        {role === 'Business Administrator' && (
-                          <button
-                            type="button"
-                            disabled={loading}
-                            onClick={async () => {
-                              const clientid = selectedClientDetail.clientid;
-                              setLoading(true);
-                              setPolyOverrideError('');
-                              try {
-                                const res = await deletePolyFeeOverride(clientid, user.employeeemail);
-                                applyPolyOverrideResult(clientid, res);
-                                setClientPolyOverride(null);
-                                setShowPolyOverrideForm(false);
-                                setSuccessMsg(`Poly fee override removed. Poly fee is back to $${Number(res.polyFee).toFixed(2)}.`
-                                  + (res.vouchersRemoved ? ` ${res.vouchersRemoved} poly fee voucher(s) removed because the poly fee is no longer paid in full.` : ''));
-                              } catch (err: any) {
-                                setPolyOverrideError(err.message || 'Failed to remove the poly fee override.');
-                              } finally {
-                                setLoading(false);
-                              }
-                            }}
-                            className="mt-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 px-3 py-1.5 rounded-lg text-xs font-semibold w-full disabled:opacity-50"
-                          >
-                            Remove Override
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-400">No poly fee override is active. Regular poly fee applies: ${Number(selectedClientDetail.polyfee ?? 250).toFixed(2)}</p>
-                    )}
-
-                    {polyOverrideError && <p className="text-xs text-red-400 mt-2">{polyOverrideError}</p>}
-
-                    {showPolyOverrideForm && role === 'Business Administrator' && (
-                      <form onSubmit={async (e) => {
-                        e.preventDefault();
-                        const fee = Number(polyOverrideFee);
-                        const fills = Number(polyOverrideFills);
-                        if (polyOverrideFee === '' || !(fee >= 0) || !Number.isInteger(fills) || fills < 1) {
-                          setPolyOverrideError('Enter a reduced poly fee and how many fills it applies to.');
-                          return;
-                        }
-                        const clientid = selectedClientDetail.clientid;
-                        setLoading(true);
-                        setPolyOverrideError('');
-                        try {
-                          const res = await savePolyFeeOverride(clientid, { reducedFee: fee, fills, user: user.employeeemail });
-                          applyPolyOverrideResult(clientid, res);
-                          setClientPolyOverride(res.override ?? null);
-                          setShowPolyOverrideForm(false);
-                          setSuccessMsg(`Poly fee set to $${fee.toFixed(2)} for ${fills} fill${fills === 1 ? '' : 's'}.`
-                            + (res.vouchersAdded ? ' What the client has already paid covers it, so the poly fee vouchers were filled.' : '')
-                            + (res.vouchersRemoved ? ` ${res.vouchersRemoved} poly fee voucher(s) removed because the poly fee is no longer paid in full.` : ''));
-                        } catch (err: any) {
-                          setPolyOverrideError(err.message || 'Failed to save the poly fee override.');
-                        } finally {
-                          setLoading(false);
-                        }
-                      }} className="space-y-3 border-t border-slate-800 pt-4 mt-4">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs text-slate-400 mb-1">Reduced Poly Fee *</label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={polyOverrideFee}
-                              onChange={(e) => setPolyOverrideFee(e.target.value)}
-                              placeholder="e.g., 150.00"
-                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                              required
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-slate-400 mb-1">Number of Fills *</label>
-                            <input
-                              type="number"
-                              step="1"
-                              min={Math.max(1, Number(clientPolyOverride?.fillsused ?? 0))}
-                              max={20}
-                              value={polyOverrideFills}
-                              onChange={(e) => setPolyOverrideFills(e.target.value)}
-                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                              required
-                            />
-                          </div>
-                        </div>
-                        <p className="text-xs text-slate-500">
-                          A fill is the poly fee being paid in full, which fills the {POLY_VOUCHER_MAX} poly fee vouchers. The reduced fee applies until the last fill's vouchers
-                          are used to schedule a polygraph; then the regular fee (${Number(clientPolyOverride?.regularfee ?? selectedClientDetail.polyfee ?? 250).toFixed(2)}) returns.
-                        </p>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => { setShowPolyOverrideForm(false); setPolyOverrideError(''); }}
-                            className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold"
-                          >
-                            Cancel
-                          </button>
-                          <button
-                            type="submit"
-                            disabled={loading}
-                            className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
-                          >
-                            Set Override
-                          </button>
-                        </div>
-                      </form>
-                    )}
-                  </div>
+                  <PolyFeeOverridePanel
+                    key={`poly-${selectedClientDetail.clientid}`}
+                    client={selectedClientDetail}
+                    role={role}
+                    userEmail={user.employeeemail}
+                    override={clientPolyOverride}
+                    loadError={polyOverrideLoadError}
+                    onChanged={(override, result) => {
+                      applyPolyOverrideResult(selectedClientDetail.clientid, result);
+                      // Skip if another account was opened while it saved
+                      if (openClientIdRef.current === selectedClientDetail.clientid) setClientPolyOverride(override);
+                    }}
+                    onSuccess={setSuccessMsg}
+                  />
                 </div>
               )}
 
