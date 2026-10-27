@@ -97,19 +97,52 @@ STOP/
 │   ├── db.js             # PostgreSQL pool and the system log helper (logAction)
 │   ├── migrate.js        # Migration runner
 │   ├── routes/           # One router per API area (clients, groups, polygraphs, reports, ...)
-│   ├── lib/              # Logic shared between routers (attendance, poly vouchers, access, SQL fragments)
+│   ├── lib/              # Logic shared between routers:
+│   │   ├── auth.js               #   login sessions, identity stamping, role checks, login lockout
+│   │   ├── access.js             #   who may see open and closed group check-ins
+│   │   ├── attendance.js         #   recording a check-in (fees, payments, BIP week, SO monthly fee)
+│   │   ├── cashResponsibility.js #   who holds a closed group session's cash
+│   │   ├── poly.js               #   poly fee vouchers, overrides, and poly fee payment changes
+│   │   └── changeLog.js, sql.js  #   client change log, shared SQL fragments
 │   ├── migrations/       # Numbered SQL migrations, applied in order
 │   ├── test/             # Backend tests
 │   ├── passwords.js      # Password hashing
 │   ├── dischargeSummary.js  # Discharge summary PDF
 │   └── certs/            # SSL certificate
 ├── frontend/             # React frontend with Vite
-│   ├── src/App.tsx       # Main app shell and tabs
-│   ├── src/components/   # Tab and dialog components
-│   ├── src/utils/        # Business rules and formatting helpers (with *.test.ts tests)
-│   └── src/api.ts        # Calls to the backend
+│   └── src/
+│       ├── App.tsx       # App shell: login, header and tabs, Home, the client account drawer's frame, and
+│       │                 #   loading the shared data (clients, groups, slots, employees, the open account)
+│       ├── api.ts        # Calls to the backend
+│       ├── hooks/        # useGroupCheckIn (group check-in workflow), usePolyAssignment (booking polygraph slots)
+│       ├── components/   # One folder per area; each tab is its own component:
+│       │   ├── attendance/   #   group check-in steps, covering counselor picker
+│       │   ├── payments/     #   account-only payment, custom charge, payment dialog, card fields
+│       │   ├── clients/      #   roster and New Client, and each section of the client account drawer
+│       │   │                 #   (info and Edit Info, fee overrides, status dialog, ledger, attendance,
+│       │   │                 #   notes, polygraphs, attachments, change log)
+│       │   ├── polygraph/    #   Poly Admin, Poly Schedule, Poly Results, and the booking/cancel dialogs
+│       │   ├── sessions/     #   Assessments & Individuals, BIP intake and reinstate
+│       │   └── admin/, agents/, callin/, groups/, reports/, testing/  #   the other tabs
+│       └── utils/        # Business rules and formatting helpers (with *.test.ts tests)
 └── README.md
 ```
+
+The client account drawer's data (the open client, their ledger, attendance, notes, polygraphs, and fee overrides)
+is loaded and kept in `App.tsx`, because several sections change it; each section component gets it as props and
+reports changes back. Saves that finish after another client was opened don't overwrite the newly opened one.
+
+## Business rules worth knowing
+
+- **Group cash responsibility** (`backend/lib/cashResponsibility.js`): a closed group session's cash belongs to the
+  covering counselor if the office picked one at check-in; otherwise to the group's usual counselor when an Office
+  Admin or Business Administrator opened it; otherwise to whoever opened it. The Group Cash Deposits report and its
+  drop-off check-off follow this.
+- **Poly fee payment corrections** (`backend/lib/poly.js`): adjusting, refunding, or disputing a poly fee payment
+  moves poly fee paid, which never goes below $0. Booking a polygraph spends the poly fee (paid resets to $0), so
+  taking money back after that is owed on the account balance instead.
+- **New accounts**: New User refuses an email that already has an account; existing accounts are changed with Edit,
+  which signs the person out when their password changes or the account is deactivated.
 
 Some rules exist in both the backend and the frontend (the monthly fee rule, the first check-in limit, BIP check-in
 messages, call-in reasons). `backend/test/sharedRules.test.js` fails if the two copies drift apart.
