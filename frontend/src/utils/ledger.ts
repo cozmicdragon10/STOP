@@ -3,6 +3,8 @@ import { toDisplayBalance } from './balance';
 // Attendance balance math uses the same display sign as the balance shown on the card.
 // Each row stores the balance after its session, so the "before" balance is rebuilt from that row alone.
 export const signedMoney = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toFixed(2)}`;
+// Same format as signedMoney, for amounts entered on forms and shown in messages
+export const formatMoney = signedMoney;
 export const attendanceBalanceChange = (att: any) => {
   const fee = Number(att.groupfee || 0);
   const paid = Number(att.accountpaid || 0);

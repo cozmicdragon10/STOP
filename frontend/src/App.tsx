@@ -1,22 +1,22 @@
-import React, { Fragment, useState, useEffect } from 'react';
+import React, { Fragment, useState, useEffect, useRef } from 'react';
 import { 
   Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
   DollarSign, Calendar, Activity, PhoneCall, ShieldAlert, 
   Layers, CheckSquare, BarChart3, Settings, CheckCircle2, Trash2, RotateCcw, Home, History,
-  Paperclip, Pencil, SlidersHorizontal, UserCheck, ClipboardList
+  Paperclip, UserCheck, ClipboardList
 } from 'lucide-react';
 import {
   loginUser, logoutUser, setSessionEndedHandler, getClients, getGroups, submitAccountPayment, submitCustomCharge,
   getPolygraphSlots,
   deletePolygraphSlot,
-  getClientAttendance, getClientFinancials, adjustCashPayment, recordCardPaymentAction,
+  getClientAttendance, getClientFinancials,
   getClientNotes, getClientPolygraphs, updateClient, changeClientProgramStatus,
   deleteClient,
   getEmployees, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
   fetchPolyFeeOverride, savePolyFeeOverride, deletePolyFeeOverride,
   getOpenGroups, deleteOpenGroup, getClosedGroups, getSupervisingAgents
 } from './api';
-import type { CardPaymentAction, ClosedGroupSession, OpenGroupSession, PaymentChangeResult, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
+import type { ClosedGroupSession, OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
@@ -35,8 +35,6 @@ import PolyCancelDialog from './components/polygraph/PolyCancelDialog';
 import PolyAssignDialogs from './components/polygraph/PolyAssignDialogs';
 import { usePolyAssignment } from './hooks/usePolyAssignment';
 import AgentPicker from './components/agents/AgentPicker';
-import RecordFilterBar from './components/clients/RecordFilterBar';
-import MonthHeader from './components/clients/MonthHeader';
 import ReportsTab from './components/reports/ReportsTab';
 import ClientRoster from './components/clients/ClientRoster';
 import ClientAttachments from './components/clients/ClientAttachments';
@@ -44,6 +42,8 @@ import ClientChangeLog from './components/clients/ClientChangeLog';
 import ClientNotes from './components/clients/ClientNotes';
 import ClientAttendanceHistory from './components/clients/ClientAttendanceHistory';
 import ClientPolygraphs from './components/clients/ClientPolygraphs';
+import ClientLedger from './components/clients/ClientLedger';
+import type { LedgerRefresh } from './components/clients/ClientLedger';
 import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividualsTab';
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
@@ -54,11 +54,8 @@ import {
   STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase, CLIENT_FIELD_OPTIONS, SO_ATTENDANCE_LIMIT_MONTHS,
   isAttendanceOverdue, GROUP_TYPES_BY_PROGRAM,
 } from './utils/clients';
-import { EMPTY_LEDGER_FILTERS, sortedUnique, groupByMonth, toggleInSet } from './utils/filters';
-import {
-  localYmd, getLocalDateString, parseLogDate, formatDisplayTime, toLocalDay, ageFromBirthDate,
-} from './utils/dates';
-import { signedMoney, PAYMENT_REVERSAL_TYPES, LEDGER_TONES, cardPaymentStatus, ledgerBalanceChange } from './utils/ledger';
+import { getLocalDateString, parseLogDate, toLocalDay, ageFromBirthDate } from './utils/dates';
+import { formatMoney } from './utils/ledger';
 import { polygraphHistoryText, polygraphNotice, POLY_VOUCHER_MAX, slotStart, slotSummary } from './utils/polygraph';
 
 export default function App() {
@@ -97,16 +94,6 @@ export default function App() {
   const [clientAttendance, setClientAttendance] = useState<any[]>([]);
   const [clientFinancials, setClientFinancials] = useState<any[]>([]);
   const [clientNotes, setClientNotes] = useState<any[]>([]);
-  // Financial Ledger filters in the client drawer; reset whenever a client is opened
-  // Payment being corrected in the Financial Ledger (Business Administrators only): a cash adjustment, or a refund or dispute step on a card payment
-  const [paymentAction, setPaymentAction] = useState<{ id: number; kind: 'adjust' | CardPaymentAction; amount: string; reason: string } | null>(null);
-  const [paymentActionError, setPaymentActionError] = useState('');
-  // Shown in the ledger after a poly fee payment change when the client is already booked into a polygraph with vouchers
-  const [scheduledPolyNotice, setScheduledPolyNotice] = useState<{ slotId: number; text: string } | null>(null);
-  const [showLedgerFilters, setShowLedgerFilters] = useState(false);
-  // Ledger months (YYYY-MM) the user has collapsed
-  const [collapsedLedgerMonths, setCollapsedLedgerMonths] = useState<Set<string>>(() => new Set());
-  const [ledgerFilters, setLedgerFilters] = useState(EMPTY_LEDGER_FILTERS);
   const [clientPolygraphs, setClientPolygraphs] = useState<any[]>([]);
   // Client whose polygraphs are loaded, so the notice never uses the previous client's results
   const [clientPolygraphsFor, setClientPolygraphsFor] = useState<number | null>(null);
@@ -152,7 +139,6 @@ export default function App() {
   const selectedClientRecord = clients.find(c => c.clientid === Number(selectedClient));
   const currentBalance = Number(selectedClientRecord?.accountbalance || 0);
   const balanceAfterPayment = currentBalance - paymentAmount;
-  const formatMoney = (n: number) => (n < 0 ? `-$${Math.abs(n).toFixed(2)}` : `$${n.toFixed(2)}`);
   const [comments, setComments] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Credit Card'>('Cash');
   // Billing details PayPal needs for card payments. Not saved yet; card number and CVV never touch our system.
@@ -414,12 +400,6 @@ export default function App() {
   // Drawer Log Loading
   const openClientLogs = async (client: any) => {
     setStatusDialog(null);
-    setCollapsedLedgerMonths(new Set());
-    setShowLedgerFilters(false);
-    setLedgerFilters(EMPTY_LEDGER_FILTERS);
-    setPaymentAction(null);
-    setPaymentActionError('');
-    setScheduledPolyNotice(null);
     setSelectedClientDetail(client);
     setClientTab('information');
     setEditingClientInfo(false);
@@ -520,56 +500,22 @@ export default function App() {
     setLoading(false);
   };
 
-  const handlePaymentAction = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!paymentAction || !selectedClientDetail) return;
-    const { id, kind } = paymentAction;
-    const reason = paymentAction.reason.trim();
-    const amount = Number(paymentAction.amount);
-    const needsAmount = kind === 'adjust' || kind === 'refund' || kind === 'dispute';
-    if ((needsAmount && !(amount > 0)) || !reason) return;
-    const clientid = selectedClientDetail.clientid;
-    setLoading(true);
-    setPaymentActionError('');
-    try {
-      const res: PaymentChangeResult = kind === 'adjust'
-        ? await adjustCashPayment(id, { amount, reason, user: user.employeeemail })
-        : await recordCardPaymentAction(id, { action: kind, amount: needsAmount ? amount : undefined, reason, user: user.employeeemail });
-      const changes: any = { accountbalance: res.newBalance };
-      if (res.polyFeePaid !== undefined) changes.polyfeepaid = res.polyFeePaid;
-      if (res.polyFeeVoucher !== undefined) changes.polyfeevoucher = res.polyFeeVoucher;
-      setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, ...changes } : c));
-      setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, ...changes } : c));
-      setPaymentAction(null);
-      const what = {
-        adjust: `Payment adjusted to ${formatMoney(amount)}.`,
-        refund: `Refund of ${formatMoney(amount)} recorded.`,
-        dispute: `Dispute of ${formatMoney(amount)} recorded; the amount is owed again until the dispute is won.`,
-        'dispute-won': 'Dispute marked won; the payment is applied again.',
-        'dispute-lost': 'Dispute marked lost.',
-      }[kind];
-      setSuccessMsg(`${what} Updated Balance: ${formatBalance(res.newBalance)}.`
-        + (res.vouchersRemoved ? ` ${res.vouchersRemoved} poly fee voucher(s) removed.` : '')
-        + (res.vouchersAdded ? ' Poly fee paid in full; vouchers filled.' : '')
-        + (res.attendanceUpdated ? ' The check-in it was taken at and the Group Income Report were updated too.' : ''));
-      if (res.scheduledPolygraph) {
-        const p = res.scheduledPolygraph;
-        setScheduledPolyNotice({
-          slotId: p.slotId,
-          text: `This client already has a polygraph scheduled ${new Date(`${p.date}T00:00:00`).toLocaleDateString()}${p.time ? ` @ ${formatDisplayTime(p.time)}` : ''}${p.location ? ` (${p.location})` : ''} using poly fee vouchers. Changing the poly fee payment did not cancel it or return the vouchers.`,
-        });
-      }
-      // Later ledger and attendance rows carry the new balance; a poly fee change can add or take back an override fill
-      const [att, fin, poly] = await Promise.all([getClientAttendance(clientid), getClientFinancials(clientid), fetchPolyFeeOverride(clientid)]);
-      setClientAttendance(att);
-      setClientFinancials(fin);
-      setClientPolyOverride(poly.override);
-    } catch (err: any) {
-      setPaymentActionError(err.message || 'Could not save the change.');
-    } finally {
-      setLoading(false);
-    }
+  // A payment was corrected on the ledger: update the client and reload what the change moved
+  const handleLedgerPaymentChanged = ({ clientId, changes, attendance, financials, polyOverride }: LedgerRefresh) => {
+    setSelectedClientDetail((c: any) => (c && c.clientid === clientId ? { ...c, ...changes } : c));
+    setClients(prev => prev.map(c => c.clientid === clientId ? { ...c, ...changes } : c));
+    // The reloaded rows belong to that client; skip them if another account was opened meanwhile
+    if (openClientIdRef.current !== clientId) return;
+    setClientAttendance(attendance);
+    setClientFinancials(financials);
+    setClientPolyOverride(polyOverride);
   };
+
+  // The account open right now, for saves that finish after the user may have moved to another client
+  const openClientIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    openClientIdRef.current = selectedClientDetail?.clientid ?? null;
+  }, [selectedClientDetail]);
 
   // Scrolls to and briefly outlines a slot opened from a client's account. Kept above the sign-in return so the hook count never changes.
   useEffect(() => {
@@ -618,27 +564,6 @@ export default function App() {
     // Unknown roles get no sections, rather than full access
     return false;
   };
-
-  // Client drawer: Financial Ledger after filters and sort
-  const byDate = (sort: string) => (a: any, b: any) => {
-    const diff = new Date(a.date).getTime() - new Date(b.date).getTime();
-    return sort === 'oldest' ? diff : -diff;
-  };
-  const ledgerSearch = ledgerFilters.search.trim().toLowerCase();
-  const shownLedger = clientFinancials.filter(f => {
-    const day = localYmd(f.date);
-    if (ledgerFilters.type && f.type !== ledgerFilters.type) return false;
-    if (ledgerFilters.feeType && f.feetype !== ledgerFilters.feeType) return false;
-    if (ledgerFilters.method && f.paymentmethod !== ledgerFilters.method) return false;
-    if (ledgerFilters.from && day < ledgerFilters.from) return false;
-    if (ledgerFilters.to && day > ledgerFilters.to) return false;
-    if (ledgerSearch && ![f.comments, f.feetype, f.type, f.paymentmethod, Number(f.amount).toFixed(2)].some(v => String(v ?? '').toLowerCase().includes(ledgerSearch))) return false;
-    return true;
-  }).sort((a, b) => {
-    if (ledgerFilters.sort === 'amount-high') return Number(b.amount) - Number(a.amount);
-    if (ledgerFilters.sort === 'amount-low') return Number(a.amount) - Number(b.amount);
-    return byDate(ledgerFilters.sort)(a, b);
-  });
 
   const getExaminerDisplayName = (email: string) =>
     employees.find(e => e.employeeemail === email)?.displayname || email;
@@ -1722,248 +1647,18 @@ export default function App() {
               )}
 
               {clientTab === 'financials' && (
-                <div className="space-y-3">
-                  {scheduledPolyNotice && (
-                    <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-3 text-sm text-amber-300 flex items-start justify-between gap-3">
-                      <p><AlertCircle size={15} className="inline mr-1.5 -mt-0.5" />{scheduledPolyNotice.text}</p>
-                      <div className="shrink-0 flex items-center gap-3">
-                        {isAllowed('polygraph') && (
-                          <button type="button" onClick={() => openPolySlot(scheduledPolyNotice.slotId)} className="text-xs font-semibold underline hover:text-white">View Slot</button>
-                        )}
-                        <button type="button" onClick={() => setScheduledPolyNotice(null)} aria-label="Dismiss" className="hover:text-white"><X size={15} /></button>
-                      </div>
-                    </div>
-                  )}
-                  {(() => {
-                    // Filters set but hidden are counted on the button so they aren't forgotten
-                    const activeLedgerFilters = [ledgerFilters.search.trim(), ledgerFilters.type, ledgerFilters.feeType, ledgerFilters.method, ledgerFilters.from, ledgerFilters.to].filter(Boolean).length;
-                    return (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowLedgerFilters(show => !show)}
-                          aria-expanded={showLedgerFilters}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border ${showLedgerFilters ? 'bg-slate-700 border-slate-600 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
-                        >
-                          <SlidersHorizontal size={13} /> Filters
-                          {activeLedgerFilters > 0 && (
-                            <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{activeLedgerFilters}</span>
-                          )}
-                        </button>
-                        <span className="ml-auto text-xs text-slate-500">
-                          {shownLedger.length === clientFinancials.length ? `${clientFinancials.length} entries` : `Showing ${shownLedger.length} of ${clientFinancials.length}`}
-                        </span>
-                      </div>
-                    );
-                  })()}
-                  {showLedgerFilters && <RecordFilterBar
-                    search={ledgerFilters.search}
-                    onSearch={v => setLedgerFilters(f => ({ ...f, search: v }))}
-                    searchPlaceholder="Comments, fee type, amount..."
-                    selects={[
-                      { label: 'Type', value: ledgerFilters.type, onChange: v => setLedgerFilters(f => ({ ...f, type: v })), allLabel: 'All Types', options: sortedUnique(clientFinancials.map(f => f.type)) },
-                      { label: 'Fee Type', value: ledgerFilters.feeType, onChange: v => setLedgerFilters(f => ({ ...f, feeType: v })), allLabel: 'All Fee Types', options: sortedUnique(clientFinancials.map(f => f.feetype)) },
-                      { label: 'Method', value: ledgerFilters.method, onChange: v => setLedgerFilters(f => ({ ...f, method: v })), allLabel: 'All Methods', options: sortedUnique(clientFinancials.map(f => f.paymentmethod)) },
-                    ]}
-                    from={ledgerFilters.from}
-                    to={ledgerFilters.to}
-                    onFrom={v => setLedgerFilters(f => ({ ...f, from: v }))}
-                    onTo={v => setLedgerFilters(f => ({ ...f, to: v }))}
-                    sort={ledgerFilters.sort}
-                    onSort={v => setLedgerFilters(f => ({ ...f, sort: v }))}
-                    sortOptions={[
-                      { value: 'newest', label: 'Newest First' },
-                      { value: 'oldest', label: 'Oldest First' },
-                      { value: 'amount-high', label: 'Amount: High to Low' },
-                      { value: 'amount-low', label: 'Amount: Low to High' },
-                    ]}
-                    shown={shownLedger.length}
-                    total={clientFinancials.length}
-                    onClear={() => setLedgerFilters(f => ({ ...EMPTY_LEDGER_FILTERS, sort: f.sort }))}
-                  />}
-                  {shownLedger.length === 0 && clientFinancials.length > 0 && (
-                    <p className="text-center text-slate-500 text-sm py-4">No ledger entries match these filters.</p>
-                  )}
-                  {groupByMonth(shownLedger, ledgerFilters.sort).map(month => {
-                    const charges = month.rows.filter(f => f.type === 'Charge').reduce((t, f) => t + Number(f.amount || 0), 0);
-                    // Net of refunds and disputes
-                    const payments = month.rows.filter(f => f.type !== 'Charge')
-                      .reduce((t, f) => t + (PAYMENT_REVERSAL_TYPES.includes(f.type) ? -1 : 1) * Number(f.amount || 0), 0);
-                    const collapsed = collapsedLedgerMonths.has(month.key);
-                    return (
-                  <div key={month.key} className="space-y-2">
-                    <MonthHeader label={month.label} count={month.rows.length} noun="entry" collapsed={collapsed} onToggle={() => setCollapsedLedgerMonths(prev => toggleInSet(prev, month.key))}>
-                      <span className="text-slate-500">Fees <span className={`font-semibold ${charges > 0 ? 'text-red-400' : 'text-slate-400'}`}>{charges > 0 ? '-' : ''}{signedMoney(charges)}</span></span>
-                      <span className="text-slate-500">Payments <span className={`font-semibold ${payments > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>{payments > 0 ? '+' : ''}{signedMoney(payments)}</span></span>
-                    </MonthHeader>
-                  {!collapsed && month.rows.map(fin => {
-                    // Charges (fees) are red and refunds/disputes amber, both adding to what's owed; payments are green and take away from it
-                    const charge = fin.type === 'Charge';
-                    const reversal = PAYMENT_REVERSAL_TYPES.includes(fin.type);
-                    const minus = charge || reversal;
-                    const tone = charge ? LEDGER_TONES.charge : reversal ? LEDGER_TONES.reversal : LEDGER_TONES.payment;
-                    const badge = charge ? 'Fee' : fin.type === 'Payment' ? 'Payment' : fin.type;
-                    const isPoly = fin.feetype === 'Poly Fee';
-                    const isAdmin = role === 'Business Administrator';
-                    // Payments saved before the method was recorded were all cash
-                    const canAdjust = isAdmin && fin.type === 'Payment' && (!fin.paymentmethod || fin.paymentmethod === 'Cash');
-                    const card = fin.type === 'Payment' && fin.paymentmethod === 'Credit Card' ? cardPaymentStatus(fin, clientFinancials) : null;
-                    const disputeOpen = fin.disputestatus === 'Open';
-                    const action = paymentAction?.id === fin.transactionid ? paymentAction : null;
-                    const startAction = (kind: 'adjust' | CardPaymentAction, amount: number) => {
-                      setPaymentAction({ id: fin.transactionid, kind, amount: amount > 0 ? amount.toFixed(2) : '', reason: '' });
-                      setPaymentActionError('');
-                    };
-                    const linkClass = 'inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white';
-                    return (<div key={fin.transactionid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm"><div className="flex justify-between items-center"><div><p className="font-semibold text-white">
-                      {fin.feetype || fin.type}
-                      <span className={`ml-2 align-middle text-[10px] uppercase tracking-wide px-2 py-0.5 rounded border ${tone.badge}`}>{badge}</span>
-                      {!charge && fin.paymentmethod && (
-                        <span className="ml-2 align-middle text-[10px] uppercase tracking-wide bg-slate-800 text-slate-300 px-2 py-0.5 rounded">{fin.paymentmethod}</span>
-                      )}
-                      {fin.disputestatus && (
-                        <span className={`ml-2 align-middle text-[10px] uppercase tracking-wide px-2 py-0.5 rounded border ${disputeOpen ? 'text-amber-400 bg-amber-500/10 border-amber-500/30' : fin.disputestatus === 'Won' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-red-400 bg-red-500/10 border-red-500/30'}`}>Dispute {fin.disputestatus}</span>
-                      )}
-                    </p><p className="text-xs text-slate-400">{new Date(fin.date).toLocaleString()} — {fin.comments}</p>
-                    {fin.adjustedon && (
-                      <p className="text-xs text-amber-400 mt-1">
-                        Adjusted from {formatMoney(Number(fin.originalamount))} by {fin.adjustedby} on {new Date(fin.adjustedon).toLocaleDateString()}{fin.adjustmentreason ? `: ${fin.adjustmentreason}` : ''}
-                      </p>
-                    )}
-                    {card && card.kept < Number(fin.amount) && (
-                      <p className="text-xs text-amber-400 mt-1">
-                        {card.refunded > 0 && <>Refunded {formatMoney(card.refunded)}. </>}
-                        {card.openDispute > 0 && <>{formatMoney(card.openDispute)} in dispute. </>}
-                        Kept {formatMoney(card.kept)} of {formatMoney(Number(fin.amount))}.
-                      </p>
-                    )}
-                    </div><div className="text-right shrink-0 pl-4">
-                  <p className={`font-bold ${tone.text}`}>{minus ? '-' : '+'}${Number(fin.amount).toFixed(2)}</p>
-                  {(() => { const b = ledgerBalanceChange(fin); return b && (
-                    <p className={`text-xs mt-1 ${b.after < 0 ? 'text-red-400' : 'text-slate-400'}`}>
-                      {b.changesBalance ? <>Balance {signedMoney(b.before)} → {signedMoney(b.after)}</> : <>Balance unchanged: {signedMoney(b.after)}</>}
-                    </p>
-                  ); })()}
-                  {!action && (
-                    <div className="mt-1 flex justify-end gap-3">
-                      {canAdjust && <button type="button" onClick={() => startAction('adjust', Number(fin.amount))} className={linkClass}><Pencil size={12} /> Adjust</button>}
-                      {isAdmin && card && !disputeOpen && card.kept > 0 && (
-                        <>
-                          <button type="button" onClick={() => startAction('refund', card.kept)} className={linkClass}>Refund</button>
-                          <button type="button" onClick={() => startAction('dispute', card.kept)} className={linkClass}>Dispute</button>
-                        </>
-                      )}
-                      {isAdmin && card && disputeOpen && (
-                        <>
-                          <button type="button" onClick={() => startAction('dispute-won', 0)} className={linkClass}>Dispute Won</button>
-                          <button type="button" onClick={() => startAction('dispute-lost', 0)} className={linkClass}>Dispute Lost</button>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div></div>
-                {action && (() => {
-                  const needsAmount = action.kind === 'adjust' || action.kind === 'refund' || action.kind === 'dispute';
-                  const entered = Number(action.amount) || 0;
-                  const max = action.kind === 'adjust' ? Infinity : card?.kept ?? 0;
-                  // Change to what was paid on this payment: positive means the client paid more
-                  const paidChange = action.kind === 'adjust' ? entered - Number(fin.amount)
-                    : action.kind === 'dispute-won' ? (card?.openDispute ?? 0)
-                    : action.kind === 'dispute-lost' ? 0
-                    : -entered;
-                  const amountOk = !needsAmount || (entered > 0 && entered <= max + 0.005 && (action.kind !== 'adjust' || Math.abs(paidChange) >= 0.005));
-                  let preview: React.ReactNode = null;
-                  if (action.kind === 'dispute-lost') {
-                    preview = <>The disputed {formatMoney(card?.openDispute ?? 0)} stays owed{isPoly ? ' on the poly fee' : ''}.</>;
-                  } else if (Math.abs(paidChange) >= 0.005 && isPoly) {
-                    const fee = Number(selectedClientDetail.polyfee || 0);
-                    const paidBefore = Number(selectedClientDetail.polyfeepaid || 0);
-                    const paidAfter = paidBefore + paidChange;
-                    const wasFull = fee > 0 && paidBefore >= fee;
-                    const isFull = fee > 0 && paidAfter >= fee;
-                    preview = <>
-                      Poly fee paid {formatMoney(paidBefore)} → {formatMoney(paidAfter)} of {formatMoney(fee)}.
-                      {wasFull && !isFull && <span className="text-amber-400"> No longer paid in full: the vouchers that paying in full added are removed.</span>}
-                      {!wasFull && isFull && <span className="text-emerald-400"> Paid in full: vouchers fill to {POLY_VOUCHER_MAX}.</span>}
-                    </>;
-                  } else if (Math.abs(paidChange) >= 0.005) {
-                    const newBalance = Number(selectedClientDetail.accountbalance || 0) - paidChange;
-                    preview = <>
-                      Balance {formatBalance(selectedClientDetail.accountbalance)} → {formatBalance(newBalance)}.
-                      {action.kind === 'adjust' ? ' Later ledger and attendance balances move by the same amount.' : ['Group Fee', 'Assessment Fee', 'Individual Fee'].includes(fin.feetype) ? ' The check-in it was taken at and the Group Income Report are updated too.' : ''}
-                    </>;
-                  }
-                  const title = { adjust: 'Adjust cash payment', refund: 'Refund', dispute: 'Dispute (owed again until won)', 'dispute-won': 'Dispute won: apply the payment again', 'dispute-lost': 'Dispute lost' }[action.kind];
-                  const submitLabel = { adjust: 'Save Adjustment', refund: 'Record Refund', dispute: 'Record Dispute', 'dispute-won': 'Mark Won', 'dispute-lost': 'Mark Lost' }[action.kind];
-                  return (
-                  <form onSubmit={handlePaymentAction} className="mt-3 pt-3 border-t border-slate-800 space-y-2">
-                    <p className="text-xs font-semibold text-slate-300">{title}</p>
-                    <div className="flex flex-wrap gap-2">
-                      {needsAmount && (
-                        <div className="relative w-36">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0.01"
-                            max={Number.isFinite(max) ? max : undefined}
-                            value={action.amount}
-                            onKeyDown={(e) => { if (e.key === '-' || e.key === 'e' || e.key === 'E') e.preventDefault(); }}
-                            onChange={(e) => setPaymentAction({ ...action, amount: e.target.value.replace(/-/g, '') })}
-                            aria-label={action.kind === 'adjust' ? 'Correct payment amount' : 'Amount'}
-                            autoFocus
-                            required
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 pl-7 pr-3 text-white text-sm"
-                          />
-                        </div>
-                      )}
-                      <input
-                        type="text"
-                        value={action.reason}
-                        onChange={(e) => setPaymentAction({ ...action, reason: e.target.value })}
-                        placeholder="Reason…"
-                        autoFocus={!needsAmount}
-                        required
-                        className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-sm"
-                      />
-                    </div>
-                    {needsAmount && Number.isFinite(max) && <p className="text-xs text-slate-500">Up to {formatMoney(max)} (what's left of this payment).</p>}
-                    {preview && <p className="text-xs text-slate-400">{preview}</p>}
-                    {isPoly && action.kind !== 'dispute-lost' && (() => {
-                      // Booking the polygraph already used the vouchers, so changing this payment can't take them back
-                      const slot = assignedSlotFor(selectedClientDetail.clientid);
-                      return slot && (
-                        <div className="bg-amber-500/10 border border-amber-500/40 rounded-lg p-2.5 text-xs text-amber-300 flex items-start justify-between gap-3">
-                          <p>
-                            <AlertCircle size={13} className="inline mr-1 -mt-0.5" />
-                            This client already has a polygraph scheduled ({slotSummary(slot)}) using poly fee vouchers.
-                            Changing this payment won't cancel it or return those vouchers.
-                          </p>
-                          {isAllowed('polygraph') && (
-                            <button type="button" onClick={() => openPolySlot(slot.slotid)} className="shrink-0 underline hover:text-white">View Slot</button>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    {paymentActionError && <p className="text-xs text-red-400">{paymentActionError}</p>}
-                    <div className="flex justify-end gap-2">
-                      <button type="button" onClick={() => { setPaymentAction(null); setPaymentActionError(''); }} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Cancel</button>
-                      <button
-                        type="submit"
-                        disabled={loading || !amountOk || !action.reason.trim()}
-                        className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
-                      >
-                        {submitLabel}
-                      </button>
-                    </div>
-                  </form>
-                  );
-                })()}
-                </div>);
-                  })}
-                  </div>
-                    );
-                  })}</div>
+                <ClientLedger
+                  key={selectedClientDetail.clientid}
+                  client={selectedClientDetail}
+                  role={role}
+                  userEmail={user.employeeemail}
+                  financials={clientFinancials}
+                  bookedSlot={assignedSlotFor(selectedClientDetail.clientid)}
+                  canViewSlot={isAllowed('polygraph')}
+                  onViewSlot={openPolySlot}
+                  onPaymentChanged={handleLedgerPaymentChanged}
+                  onSuccess={setSuccessMsg}
+                />
               )}
 
               {clientTab === 'notes' && (
