@@ -8,7 +8,7 @@ import {
 import {
   loginUser, logoutUser, setSessionEndedHandler, getClients, getGroups, submitAccountPayment, submitCustomCharge,
   getPolygraphSlots,
-  deletePolygraphSlot, assignPolygraphSlot, reopenPolygraphSlot,
+  deletePolygraphSlot, assignPolygraphSlot,
   getClientAttendance, getClientFinancials, adjustCashPayment, recordCardPaymentAction,
   getClientNotes, addClientNote, updateClientNote, deleteClientNote, getClientPolygraphs, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
   createClient, deleteClient,
@@ -31,8 +31,10 @@ import TestingTab from './components/testing/TestingTab';
 import AdminTab from './components/admin/AdminTab';
 import PolySlotForm from './components/polygraph/PolySlotForm';
 import PolyResults from './components/polygraph/PolyResults';
+import PolySchedule from './components/polygraph/PolySchedule';
+import type { SlotChoices } from './components/polygraph/PolySchedule';
+import PolyCancelDialog from './components/polygraph/PolyCancelDialog';
 import AgentPicker from './components/agents/AgentPicker';
-import ClientPicker from './components/ClientPicker';
 import RecordFilterBar from './components/clients/RecordFilterBar';
 import MonthHeader from './components/clients/MonthHeader';
 import ReportsTab from './components/reports/ReportsTab';
@@ -53,10 +55,7 @@ import {
   formatLogTime, formatDisplayTime, toLocalDay, ageFromBirthDate,
 } from './utils/dates';
 import { signedMoney, attendanceBalanceChange, PAYMENT_REVERSAL_TYPES, LEDGER_TONES, cardPaymentStatus, ledgerBalanceChange } from './utils/ledger';
-import {
-  polygraphHistoryText, polygraphNotice, POLY_VOUCHER_MAX, POLY_CANCEL_REASONS, POLY_CANCEL_NOTICE_HOURS,
-  slotStart, polyVoucherReturnRule,
-} from './utils/polygraph';
+import { polygraphHistoryText, polygraphNotice, POLY_VOUCHER_MAX, slotStart } from './utils/polygraph';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -215,13 +214,8 @@ export default function App() {
   // Business Administrator prompt to schedule inside the post-NDI waiting period; the box must be ticked to bypass
   const [waitBypassPrompt, setWaitBypassPrompt] = useState<{ slotId: number; clientName: string; lastPolyDate: string; earliestDate: string } | null>(null);
   const [waitBypassConfirmed, setWaitBypassConfirmed] = useState(false);
-  // Cancellation prompt for an assigned slot
+  // Assigned slot whose reservation is being cancelled (PolyCancelDialog)
   const [reopenTarget, setReopenTarget] = useState<any>(null);
-  const [reopenReason, setReopenReason] = useState('');
-  const [reopenNotes, setReopenNotes] = useState('');
-  const [reopenReturnVouchers, setReopenReturnVouchers] = useState(true);
-  // Business Administrator override of the voucher return the cancellation reason would otherwise lock
-  const [reopenVoucherOverride, setReopenVoucherOverride] = useState(false);
   const [slotTypes, setSlotTypes] = useState<{ [slotId: number]: string }>({});
 
   // Inactive groups stay in the directory but are hidden from every picker for new assignments and sessions
@@ -432,37 +426,18 @@ export default function App() {
 
   // Opens the cancellation prompt; the reservation is only cancelled when it is submitted
   const handleReopenSlot = (slotId: number) => {
-    setReopenReason('');
-    setReopenNotes('');
-    setReopenReturnVouchers(true);
-    setReopenVoucherOverride(false);
     setReopenTarget(polySlots.find(s => s.slotid === slotId) || { slotid: slotId });
   };
 
-  const confirmReopenSlot = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!reopenTarget || !reopenReason) return;
-    const slotId = reopenTarget.slotid;
-    setLoading(true);
-    try {
-      const res = await reopenPolygraphSlot(slotId, { reason: reopenReason, notes: reopenNotes, returnVouchers: (reopenVoucherOverride ? null : polyVoucherReturnRule(reopenReason, reopenTarget)) ?? reopenReturnVouchers, overrideVoucherRule: reopenVoucherOverride, user: user.employeeemail });
-      if (res?.error) {
-        setError(res.error);
-      } else {
-        setReopenTarget(null);
-        setSuccessMsg(res.reopened === false
-          ? 'Reservation cancelled. The appointment time has passed, so the slot was closed instead of reopened.'
-          : 'Reservation cancelled. Polygraph slot is now open for new bookings!');
-        // Clients are reloaded too: cancelling can return the booking's poly fee vouchers
-        const [freshSlots, freshClients] = await Promise.all([getPolygraphSlots(), getClients()]);
-        setPolySlots(freshSlots);
-        setClients(freshClients);
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to reopen slot.');
-    } finally {
-      setLoading(false);
-    }
+  const handleReservationCancelled = async (reopened: boolean) => {
+    setReopenTarget(null);
+    setSuccessMsg(reopened
+      ? 'Reservation cancelled. Polygraph slot is now open for new bookings!'
+      : 'Reservation cancelled. The appointment time has passed, so the slot was closed instead of reopened.');
+    // Clients are reloaded too: cancelling can return the booking's poly fee vouchers
+    const [freshSlots, freshClients] = await Promise.all([getPolygraphSlots(), getClients()]);
+    setPolySlots(freshSlots);
+    setClients(freshClients);
   };
 
   const handleDeleteSlot = async (slotId: number) => {
@@ -1100,9 +1075,15 @@ export default function App() {
     return byDate(ledgerFilters.sort)(a, b);
   });
 
-  // A reservation cancelled after its appointment time closes the slot instead of reopening it
-  const reopenStart = reopenTarget ? slotStart(reopenTarget) : null;
-  const reopenPassed = reopenStart !== null && reopenStart.getTime() <= Date.now();
+  // The client, poly type, and comment picked on each open slot (Poly Schedule cards and the account drawer share them)
+  const slotChoices: SlotChoices = {
+    clientOf: (slotId) => slotAssignments[slotId] || '',
+    typeOf: (slotId) => slotTypes[slotId] || 'Maintenance',
+    commentOf: (slotId) => slotComments[slotId] || '',
+    setClient: (slotId, clientId) => setSlotAssignments(prev => ({ ...prev, [slotId]: clientId })),
+    setType: (slotId, type) => setSlotTypes(prev => ({ ...prev, [slotId]: type })),
+    setComment: (slotId, comment) => setSlotComments(prev => ({ ...prev, [slotId]: comment })),
+  };
 
   const getExaminerDisplayName = (email: string) =>
     employees.find(e => e.employeeemail === email)?.displayname || email;
@@ -3736,176 +3717,29 @@ export default function App() {
             )}
 
             {reopenTarget && (
-              <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-                <form onSubmit={confirmReopenSlot} className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
-                  <div>
-                    <h3 className="font-semibold text-white">Cancel Polygraph Reservation</h3>
-                    <p className="text-xs text-slate-400 mt-1">
-                      {reopenTarget.assignedClientName ?`${reopenTarget.assignedClientName} will be notified in their case notes.` : 'The slot will be reopened for new bookings.'}
-                    </p>
-                    {reopenPassed && (
-                      <p className="text-xs text-amber-400 mt-1">The appointment time has passed, so the slot will be closed instead of reopened.</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-400 uppercase mb-1">Cancellation Reason *</label>
-                    <select required value={reopenReason} onChange={(e) => { setReopenReason(e.target.value); setReopenVoucherOverride(false); }} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm">
-                      <option value="">Select a reason...</option>
-                      {POLY_CANCEL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-400 uppercase mb-1">Notes <span className="normal-case text-slate-500">(optional)</span></label>
-                    <textarea value={reopenNotes} onChange={(e) => setReopenNotes(e.target.value)} rows={3} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" placeholder="Add details for the case note..." />
-                  </div>
-                  {(() => {
-                    const reasonRule = polyVoucherReturnRule(reopenReason, reopenTarget);
-                    const voucherRule = reopenVoucherOverride ? null : reasonRule;
-                    return (
-                      <div>
-                        <div className="flex items-center justify-between gap-2">
-                          <label className={`flex items-center gap-2 text-slate-200 ${voucherRule === null ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                            <input type="checkbox" checked={voucherRule ?? reopenReturnVouchers} disabled={voucherRule !== null} onChange={(e) => setReopenReturnVouchers(e.target.checked)} className="accent-amber-500 disabled:opacity-60" />
-                            Poly Vouchers Return
-                          </label>
-                          {role === 'Business Administrator' && reasonRule !== null && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!reopenVoucherOverride) setReopenReturnVouchers(reasonRule);
-                                setReopenVoucherOverride(!reopenVoucherOverride);
-                              }}
-                              className="text-xs font-semibold px-2 py-1 rounded border border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
-                            >
-                              {reopenVoucherOverride ? 'Undo Override' : 'Override'}
-                            </button>
-                          )}
-                        </div>
-                        {reasonRule !== null && (
-                          <p className="text-xs text-slate-500 mt-1 ml-6">
-                            {reopenVoucherOverride
-                              ? 'Business Administrator override: the choice will be recorded in the case note.'
-                              : reopenReason === 'Client requested cancellation'
-                                ? `Locked: cancelled ${reasonRule ? 'more' : 'less'} than ${POLY_CANCEL_NOTICE_HOURS} hours before the appointment.`
-                                : `Locked by the cancellation reason.`}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })()}
-                  <div className="flex justify-end gap-2">
-                    <button type="button" onClick={() => setReopenTarget(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Keep Reservation</button>
-                    <button type="submit" disabled={loading || !reopenReason} className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-4 py-2 rounded text-xs font-semibold">{reopenPassed ? 'Cancel Reservation' : 'Cancel Reservation & Reopen'}</button>
-                  </div>
-                </form>
-              </div>
+              <PolyCancelDialog
+                slot={reopenTarget}
+                role={role}
+                userEmail={user.employeeemail}
+                onClose={() => setReopenTarget(null)}
+                onCancelled={handleReservationCancelled}
+                onError={setError}
+              />
             )}
 
             {polySubTab === 'schedule' && (
-              <div className="space-y-4">
-                <h3 className="text-sm font-semibold text-blue-400">Available Polygraph Slots & Client Assignment</h3>
-                {examinerSlots.length === 0 ? (
-                  <p className="text-xs text-slate-500 italic">{polyFiltersActive ? 'No slots match these filters.' : 'No available slots scheduled.'}</p>
-                ) : (
-                  <div className="flex flex-col gap-3">
-                    {examinerSlots.map(slot => (
-                      <div key={slot.slotid} id={`poly-slot-${slot.slotid}`} className={`bg-slate-950 border ${slot.status === 'Assigned' ? 'border-emerald-500/40 bg-emerald-950/10' : 'border-slate-800'} ${highlightedSlotId === slot.slotid ? 'ring-2 ring-blue-500' : ''} px-4 py-3 rounded-xl text-sm space-y-2 transition`}>
-                        <div className="flex justify-between items-start gap-3">
-                          <div className="min-w-0">
-                            <p className="font-semibold text-white">{slot.location}</p>
-                            <p className="text-xs text-slate-400 mt-0.5">
-                              {new Date(slot.date).toLocaleDateString()} @ {formatDisplayTime(slot.time)}
-                              <span className="text-slate-600"> · </span>{slot.address || 'Address not set'}
-                              <span className="text-slate-600"> · </span>Examiner: {getExaminerDisplayName(slot.polygrapher)}
-                            </p>
-                          </div>
-                          <span className={`shrink-0 text-xs px-2 py-0.5 rounded ${slot.status === 'Assigned' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : slot.status === 'Closed' ? 'bg-slate-800 text-slate-400 border border-slate-700' : 'bg-blue-500/10 text-blue-400'}`}>
-                            {slot.status === 'Assigned' ? 'Assigned' : slot.status === 'Closed' ? 'Closed' : '1 Open Slot'}
-                          </span>
-                        </div>
-
-                        {slot.status === 'Assigned' ? (
-                          <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
-                            <div className="flex items-center gap-2">
-                              <span className="text-slate-300 font-medium">Assigned Client: <strong className="text-emerald-400">{slot.assignedClientName}</strong></span>
-                              <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded">{slot.type}</span>
-                            </div>
-                            <button
-                              onClick={() => handleReopenSlot(slot.slotid)}
-                              className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-600/40 px-3 py-1.5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition">
-                              <RotateCcw size={13} /> Cancel Reservation & Reopen
-                            </button>
-                          </div>
-                        ) : slot.status === 'Closed' ? (
-                          <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2">
-                            <p className="text-xs text-slate-400 italic">Reservation cancelled after the appointment time. This slot was not reopened.</p>
-                            {role === 'Business Administrator' && (
-                              <button
-                                onClick={() => handleDeleteSlot(slot.slotid)}
-                                title="Delete closed slot"
-                                className="bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 px-3 py-2 rounded text-xs font-semibold flex items-center justify-center gap-1 transition">
-                                <Trash2 size={13} /> Delete
-                              </button>
-                            )}
-                          </div>
-                        ) : role === 'Business Administrator' ? (
-                          <div className="pt-2 border-t border-slate-800 space-y-2">
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-                              <div>
-                                <label className="block text-xs text-slate-400 uppercase mb-1">Assign Client</label>
-                                <ClientPicker
-                                  // One scheduled polygraph per client: clients already booked into a slot aren't offered
-                                  clients={clients.filter(c => !assignedSlotFor(c.clientid))}
-                                  value={slotAssignments[slot.slotid] || ''}
-                                  onChange={(id) => setSlotAssignments({ ...slotAssignments, [slot.slotid]: id })}
-                                  className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-xs placeholder-slate-500"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-xs text-slate-400 uppercase mb-1">Poly Type</label>
-                                <select 
-                                  value={slotTypes[slot.slotid] || 'Maintenance'} 
-                                  onChange={(e) => setSlotTypes({ ...slotTypes, [slot.slotid]: e.target.value })}
-                                  className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-xs">
-                                  <option value="Instant">Instant Poly</option>
-                                  <option value="Maintenance">Maintenance</option>
-                                  <option value="Sexual History">Sexual History</option>
-                                  <option value="Specific">Specific Issue</option>
-                                  <option value="Monitoring">Monitoring</option>
-                                </select>
-                              </div>
-                              <div className="md:col-span-2">
-                                <label className="block text-xs text-slate-400 uppercase mb-1">Comment <span className="normal-case text-slate-500">(optional)</span></label>
-                                <input
-                                  type="text"
-                                  value={slotComments[slot.slotid] || ''}
-                                  onChange={(e) => setSlotComments({ ...slotComments, [slot.slotid]: e.target.value })}
-                                  placeholder="Added to the client's case note when assigned..."
-                                  className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-xs" />
-                              </div>
-                            </div>
-                            <div className="flex justify-end gap-2">
-                              <button
-                                onClick={() => openAssignConfirm(slot.slotid)}
-                                className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded text-xs font-semibold">
-                                Confirm & Assign Slot
-                              </button>
-                              <button 
-                                onClick={() => handleDeleteSlot(slot.slotid)}
-                                title="Delete open slot"
-                                className="bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 px-3 py-1.5 rounded text-xs font-semibold flex items-center justify-center gap-1 transition">
-                                <Trash2 size={13} /> Delete
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="pt-3 text-xs text-slate-400 italic">Only Business Administrators can assign polygraph slots to clients.</p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <PolySchedule
+                slots={examinerSlots}
+                filtersActive={polyFiltersActive}
+                role={role}
+                assignableClients={clients.filter(c => !assignedSlotFor(c.clientid))}
+                highlightedSlotId={highlightedSlotId}
+                examinerName={getExaminerDisplayName}
+                choices={slotChoices}
+                onAssign={(slotId) => openAssignConfirm(slotId)}
+                onCancelReservation={handleReopenSlot}
+                onDelete={handleDeleteSlot}
+              />
             )}
 
             {polySubTab === 'results' && (
