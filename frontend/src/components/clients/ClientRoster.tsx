@@ -340,7 +340,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                 >
                   {c.lastattended ? new Date(c.lastattended).toLocaleDateString() : 'Never'}
                 </td>
-                <td className="p-3 text-slate-400 text-xs">{c.lastpoly ? new Date(c.lastpoly).toLocaleDateString() : 'None'}</td>
+                <td className="p-3 text-slate-400 text-xs">{c.programtype === 'BIP' ? '—' : c.lastpoly ? new Date(c.lastpoly).toLocaleDateString() : 'None'}</td>
                 <td className="p-3"><span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium ${c.programstatus === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`} title={c.programstatus}>{c.programstatus === 'Discharged Supervision' ? 'Discharged' : c.programstatus}</span></td>
                 <td className={`p-3 font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</td>
               </tr>

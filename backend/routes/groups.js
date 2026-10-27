@@ -6,11 +6,19 @@ const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, GROUP_ATTEN
 
 const router = express.Router();
 
+// Group program types each client program can be assigned to; mirrors GROUP_TYPES_BY_PROGRAM in frontend/src/utils/clients.ts
+const GROUP_TYPES_BY_PROGRAM = {
+    'State SO': ['SO', 'FED SO'],
+    'Federal SO': ['SO', 'FED SO'],
+    'Voluntary SO': ['SO', 'FED SO'],
+    'BIP': ['BIP'],
+};
+
 router.get('/api/groups', async (req, res) => {
     try {
         const query = `
             SELECT g.*, 
-            (SELECT COUNT(*) FROM Clients WHERE GroupId = g.GroupId) AS ClientCount
+            (SELECT COUNT(*) FROM Clients WHERE GroupId = g.GroupId AND ProgramStatus = 'Active') AS ClientCount
             FROM Groups g ORDER BY g.GroupName ASC;
         `;
         const result = await pool.query(query);
@@ -108,7 +116,21 @@ router.post('/api/groups/:id/assign', async (req, res) => {
     try {
         const { id } = req.params;
         const { clientId, assignedBy } = req.body;
-        const beforeRes = await pool.query('SELECT GroupId FROM Clients WHERE ClientId = $1', [clientId]);
+        const beforeRes = await pool.query('SELECT GroupId, ProgramType, ProgramStatus, FirstName, LastName FROM Clients WHERE ClientId = $1', [clientId]);
+        const groupRes = await pool.query('SELECT ProgramType FROM Groups WHERE GroupId = $1', [id]);
+        const c = beforeRes.rows[0];
+        if (!c || groupRes.rows.length === 0) return res.status(404).json({ error: 'Client or group not found.' });
+        // Only active clients are assigned, and only to a group of their program: BIP to BIP groups, SO to SO groups
+        // (a group without a program type takes anyone). Mirrors clientFitsGroup in frontend/src/utils/clients.ts.
+        const name = `${c.lastname}, ${c.firstname}`;
+        if (c.programstatus !== 'Active') {
+            return res.status(400).json({ error: `${name} is ${c.programstatus || 'not active'}. Only active clients can be assigned to a group.` });
+        }
+        const groupType = String(groupRes.rows[0].programtype || '').trim().toUpperCase();
+        const fits = !groupType || (GROUP_TYPES_BY_PROGRAM[c.programtype] || []).includes(groupType);
+        if (!fits) {
+            return res.status(400).json({ error: `${name} is a ${c.programtype || 'client with no program'} client and can't be assigned to a ${groupType} group.` });
+        }
         await pool.query('UPDATE Clients SET GroupId = $1 WHERE ClientId = $2', [id, clientId]);
         const oldGroupId = beforeRes.rows[0]?.groupid || null;
         if (beforeRes.rows.length > 0 && oldGroupId !== Number(id)) {

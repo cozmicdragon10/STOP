@@ -59,6 +59,8 @@ interface FormState {
 const CATEGORIES: IndividualCategory[] = ['Assessment', 'Individual'];
 // Roles that see every open session; everyone else sees the ones they opened or are the counselor/therapist on
 const ADMIN_ROLES = ['Business Administrator', 'Office Admin'];
+// Client program types that can have "SO clients only" price list entries (the server checks too)
+const SO_CLIENT_TYPES = ['State SO', 'Federal SO', 'Voluntary SO'];
 
 const money = (n: number) => `$${n.toFixed(2)}`;
 const cents = (n: number) => Math.round(n * 100) / 100;
@@ -79,6 +81,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const [formError, setFormError] = useState('');
   const [sessionTypes, setSessionTypes] = useState<SessionType[]>([]);
   const [panelTab, setPanelTab] = useState<'open' | 'closed'>('open');
+  const [panelCategory, setPanelCategory] = useState<IndividualCategory>('Assessment');
   const [openSessions, setOpenSessions] = useState<OpenIndividualSession[]>([]);
   const [closedSessions, setClosedSessions] = useState<ClosedIndividualSession[]>([]);
   const [listError, setListError] = useState('');
@@ -112,9 +115,10 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
 
   const client = clients.find(c => String(c.clientid) === form.clientId) ?? null;
   const clientIsBip = client?.programtype === 'BIP';
-  // Inactive entries stay pickable only when an open session already uses them; BIP-only ones are hidden for other clients
+  const clientIsSo = SO_CLIENT_TYPES.includes(client?.programtype || '');
+  // Inactive entries stay pickable only when an open session already uses them; BIP-only and SO-only ones are hidden for other clients
   const typeChoices = sessionTypes.filter(t => t.category === form.category
-    && ((t.active && (!client || clientIsBip || !t.biponly)) || String(t.sessiontypeid) === form.sessionTypeId));
+    && ((t.active && (!client || ((clientIsBip || !t.biponly) && (clientIsSo || !t.soonly)))) || String(t.sessiontypeid) === form.sessionTypeId));
   const sessionType = sessionTypes.find(t => String(t.sessiontypeid) === form.sessionTypeId) ?? null;
 
   // A BIP reinstate is priced by the time since the client's last BIP intake: the price list fee under 6 months,
@@ -183,6 +187,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
     if (!sessionType) return `Choose a${form.category === 'Assessment' ? 'n assessment' : 'n individual session'} type.`;
     if (!form.date) return 'Enter the session date.';
     if (sessionType.biponly && !clientIsBip) return `${sessionType.name} is only for BIP clients.`;
+    if (sessionType.soonly && !clientIsSo) return `${sessionType.name} is only for SO clients.`;
     if (isReinstate) {
       if (!intakeInfo) return 'Still checking the client\'s last BIP intake. Try again in a moment.';
       if (!intakeInfo.data) return `No BIP Intake or DV Assessment on record for this client, so a ${sessionType.name} can't be done. Do a new BIP Intake or DV Assessment instead.`;
@@ -264,6 +269,11 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
     }
   };
 
+  // The side panel shows one category at a time
+  const shownOpen = openSessions.filter(o => o.category === panelCategory);
+  const shownClosed = closedSessions.filter(c => c.category === panelCategory);
+  const panelNoun = panelCategory === 'Assessment' ? 'assessments' : 'individual sessions';
+
   const label = 'block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5';
   const input = 'w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm';
   const blockMinus = (e: React.KeyboardEvent) => { if (e.key === '-' || e.key === 'e' || e.key === 'E') e.preventDefault(); };
@@ -328,9 +338,10 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                 {typeChoices.map(t => <option key={t.sessiontypeid} value={t.sessiontypeid}>{t.name} ({money(Number(t.fee))}){t.active ? '' : ' (inactive)'}</option>)}
               </select>
               {typeChoices.length === 0 && (
-                <p className="text-xs text-slate-500 mt-1.5">No {form.category === 'Assessment' ? 'assessment' : 'individual session'} types on the price list{client && !clientIsBip ? ' for non-BIP clients' : ''}. A Business Administrator can add them in Admin.</p>
+                <p className="text-xs text-slate-500 mt-1.5">No {form.category === 'Assessment' ? 'assessment' : 'individual session'} types on the price list{client ? ' for this client' : ''}. A Business Administrator can add them in Admin.</p>
               )}
               {sessionType?.biponly && client && !clientIsBip && <p className="text-xs text-amber-400 mt-1.5">{sessionType.name} is only for BIP clients.</p>}
+              {sessionType?.soonly && client && !clientIsSo && <p className="text-xs text-amber-400 mt-1.5">{sessionType.name} is only for SO clients.</p>}
               {isReinstate && client && clientIsBip && (
                 !intakeInfo ? <p className="text-xs text-slate-500 mt-1.5">Checking the last BIP intake…</p>
                 : !intakeInfo.data ? (
@@ -374,34 +385,31 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                 )}
                 <p className="text-[11px] text-slate-500 mt-1">{isAdmin ? 'From the price list; you can change it for this session.' : 'From the price list.'}</p>
               </div>
-              <div>
-                <label className={label}>Payment <span className="normal-case font-normal text-slate-500">(optional)</span></label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
-                  <input type="number" step="0.01" min="0" value={form.payment} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} placeholder="0.00" className={`${input} pl-7`} />
+              {/* An assessment's payment is taken when it is reviewed and closed */}
+              {!cashOnly && (
+                <div>
+                  <label className={label}>Payment <span className="normal-case font-normal text-slate-500">(optional)</span></label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
+                    <input type="number" step="0.01" min="0" value={form.payment} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} placeholder="0.00" className={`${input} pl-7`} />
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
-            {payment > 0 && (
+            {!cashOnly && payment > 0 && (
               <div>
                 <label className={label}>Payment Method</label>
-                {cashOnly ? (
-                  <p className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-slate-300">Cash <span className="text-xs text-slate-500">(assessments are cash only)</span></p>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-2 gap-3">
-                      {(['Cash', 'Credit Card'] as const).map(m => (
-                        <button key={m} type="button" onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-sm font-semibold transition ${form.paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}>{m}</button>
-                      ))}
-                    </div>
-                    {form.paymentMethod === 'Credit Card' && <p className="text-xs text-slate-500 mt-1.5">Card processing is not connected yet, so the card payment is recorded without charging the card.</p>}
-                  </>
-                )}
+                <div className="grid grid-cols-2 gap-3">
+                  {(['Cash', 'Credit Card'] as const).map(m => (
+                    <button key={m} type="button" onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-sm font-semibold transition ${form.paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}>{m}</button>
+                  ))}
+                </div>
+                {form.paymentMethod === 'Credit Card' && <p className="text-xs text-slate-500 mt-1.5">Card processing is not connected yet, so the card payment is recorded without charging the card.</p>}
               </div>
             )}
 
-            {paymentCommentsField}
+            {!cashOnly && paymentCommentsField}
             {commentsField}
 
             {formError && <p role="alert" className="text-xs text-red-400 bg-red-500/10 border border-red-500 rounded-lg p-3">{formError}</p>}
@@ -427,7 +435,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                 ['Counselor / Therapist', form.provider],
                 // An intake's comments are edited below instead
                 ...(!needsChecks && form.comments.trim() ? [[commentsLabel, form.comments.trim()]] : []),
-                ...(!needsChecks && form.paymentComments.trim() ? [['Payment Comments', form.paymentComments.trim()]] : []),
+                ...(!cashOnly && form.paymentComments.trim() ? [['Payment Comments', form.paymentComments.trim()]] : []),
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-4"><span className="text-slate-400">{k}</span><span className="text-white text-right">{v}</span></div>
               ))}
@@ -480,6 +488,25 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
               </div>
             )}
 
+            {cashOnly && !needsChecks && (
+              <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4 text-sm">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={label}>Payment <span className="normal-case font-normal text-slate-500">(optional)</span></label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
+                      <input type="number" step="0.01" min="0" value={form.payment} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} placeholder="0.00" className={`${input} pl-7`} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={label}>Method</label>
+                    <p className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-slate-300">Cash <span className="text-xs text-slate-500">(cash only)</span></p>
+                  </div>
+                </div>
+                {paymentCommentsField}
+              </div>
+            )}
+
             {formError && <p role="alert" className="text-xs text-red-400 bg-red-500/10 border border-red-500 rounded-lg p-3">{formError}</p>}
 
             <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
@@ -499,10 +526,20 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
           <div className="flex bg-slate-950 border border-slate-800 rounded-lg p-0.5">
             {(['open', 'closed'] as const).map(t => (
               <button key={t} type="button" onClick={() => setPanelTab(t)} className={`px-3 py-1 rounded text-xs font-semibold transition ${panelTab === t ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
-                {t === 'open' ? `Open${openSessions.length ? ` (${openSessions.length})` : ''}` : 'Closed'}
+                {t === 'open' ? `Open${shownOpen.length ? ` (${shownOpen.length})` : ''}` : 'Closed'}
               </button>
             ))}
           </div>
+        </div>
+        <div className="grid grid-cols-2 bg-slate-950 border border-slate-800 rounded-lg p-0.5 my-3">
+          {CATEGORIES.map(c => {
+            const count = openSessions.filter(o => o.category === c).length;
+            return (
+              <button key={c} type="button" onClick={() => setPanelCategory(c)} className={`px-3 py-1 rounded text-xs font-semibold transition ${panelCategory === c ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+                {c === 'Assessment' ? 'Assessments' : 'Individuals'}{count ? ` (${count} open)` : ''}
+              </button>
+            );
+          })}
         </div>
 
         {listError ? (
@@ -512,11 +549,11 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
             <p className="text-xs text-slate-400 leading-relaxed mb-4">
               {ADMIN_ROLES.includes(user.role || '') ? 'Sessions saved as open.' : 'Sessions you opened or are the counselor/therapist on.'} Open one to review and close it.
             </p>
-            {openSessions.length === 0 ? (
-              <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">No open sessions.</p>
+            {shownOpen.length === 0 ? (
+              <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">No open {panelNoun}.</p>
             ) : (
               <ul className="space-y-2">
-                {openSessions.map(o => (
+                {shownOpen.map(o => (
                   <li key={o.opensessionid} className={`bg-slate-950 border rounded-lg p-3 ${form.openSessionId === o.opensessionid ? 'border-blue-500/60' : 'border-slate-800'}`}>
                     <div className="flex justify-between items-start gap-2">
                       <div className="min-w-0">
@@ -538,11 +575,11 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
         ) : (
           <>
             <p className="text-xs text-slate-400 leading-relaxed mb-4">{user.role === 'Business Administrator' ? 'Recently closed sessions.' : 'Recently closed sessions you opened, closed, or were the counselor/therapist on.'}</p>
-            {closedSessions.length === 0 ? (
-              <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">No closed sessions.</p>
+            {shownClosed.length === 0 ? (
+              <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">No closed {panelNoun}.</p>
             ) : (
               <ul className="space-y-2 max-h-[32rem] overflow-y-auto pr-1">
-                {closedSessions.map(c => {
+                {shownClosed.map(c => {
                   const expanded = expandedClosed === c.attendanceid;
                   return (
                     <li key={c.attendanceid} className={`bg-slate-950 border rounded-lg ${expanded ? 'border-blue-500/40' : 'border-slate-800'}`}>

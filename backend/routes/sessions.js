@@ -17,26 +17,29 @@ router.get('/api/session-types', async (req, res) => {
 });
 
 const SESSION_TYPE_KINDS = ['Standard', 'BIP Intake', 'BIP Reinstate'];
+// The client program types an "SO clients only" price list entry is for
+const SO_CLIENT_TYPES = ['State SO', 'Federal SO', 'Voluntary SO'];
 const validPrice = (v) => v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v)) && Number(v) >= 0;
 
 // Checks a price list entry from the body; returns an error message or null
-const sessionTypeProblem = ({ category, name, fee, kind = 'Standard', lateFee }) => {
+const sessionTypeProblem = ({ category, name, fee, kind = 'Standard', bipOnly, soOnly, lateFee }) => {
     if (!INDIVIDUAL_SESSION_TYPES.includes(category)) return 'Choose Assessment or Individual.';
     if (!String(name || '').trim()) return 'Enter a name.';
     if (!validPrice(fee)) return 'Enter a price of $0.00 or more.';
     if (!SESSION_TYPE_KINDS.includes(kind)) return `Choose a kind: ${SESSION_TYPE_KINDS.join(', ')}.`;
     if (kind !== 'Standard' && category !== 'Assessment') return 'Only assessments can be a BIP intake or BIP reinstate.';
     if (kind === 'BIP Reinstate' && !validPrice(lateFee)) return 'Enter the price for a reinstate done 6 months to a year after the intake.';
+    if (soOnly === true && (bipOnly === true || kind !== 'Standard')) return 'An entry can be BIP clients only or SO clients only, not both.';
     return null;
 };
 
 // The stored settings for a price list entry; BIP intakes and reinstates are always BIP only
-const sessionTypeValues = ({ name, fee, kind = 'Standard', bipOnly, lateFee }) => [
+const sessionTypeValues = ({ name, fee, kind = 'Standard', bipOnly, soOnly, lateFee }) => [
     String(name).trim().slice(0, 100), Number(fee).toFixed(2), kind, kind !== 'Standard' || bipOnly === true,
-    kind === 'BIP Reinstate' ? Number(lateFee).toFixed(2) : null,
+    kind === 'BIP Reinstate' ? Number(lateFee).toFixed(2) : null, soOnly === true,
 ];
 const describeSessionType = (t) => `${t.name} $${Number(t.fee).toFixed(2)}${t.latefee !== null && t.latefee !== undefined ? ` / $${Number(t.latefee).toFixed(2)} after 6 months` : ''}`
-    + `${t.kind !== 'Standard' ? ` [${t.kind}]` : ''}${t.biponly ? ' (BIP only)' : ''}${t.active === false ? ' (inactive)' : ''}`;
+    + `${t.kind !== 'Standard' ? ` [${t.kind}]` : ''}${t.biponly ? ' (BIP only)' : ''}${t.soonly ? ' (SO only)' : ''}${t.active === false ? ' (inactive)' : ''}`;
 
 // The client's most recent completed BIP intake (BIP Intake or DV Assessment, here or at another provider) on or before
 // the date, and where the date falls: 'early' (under 6 months after it), 'late' (6 months to under a year), or 'expired'
@@ -172,7 +175,7 @@ router.post('/api/session-types', async (req, res) => {
         const problem = sessionTypeProblem(req.body);
         if (problem) return res.status(400).json({ error: problem });
         const result = await pool.query(
-            'INSERT INTO SessionTypes (Category, Name, Fee, Kind, BipOnly, LateFee) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
+            'INSERT INTO SessionTypes (Category, Name, Fee, Kind, BipOnly, LateFee, SoOnly) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *',
             [category, ...sessionTypeValues(req.body)]
         );
         await logAction(user, 'Price List Added', `${category}: ${describeSessionType(result.rows[0])}`);
@@ -195,7 +198,7 @@ router.put('/api/session-types/:id', async (req, res) => {
         const problem = sessionTypeProblem({ ...req.body, category: before.category });
         if (problem) return res.status(400).json({ error: problem });
         const result = await pool.query(
-            'UPDATE SessionTypes SET Name = $1, Fee = $2, Kind = $3, BipOnly = $4, LateFee = $5, Active = $6 WHERE SessionTypeId = $7 RETURNING *',
+            'UPDATE SessionTypes SET Name = $1, Fee = $2, Kind = $3, BipOnly = $4, LateFee = $5, SoOnly = $6, Active = $7 WHERE SessionTypeId = $8 RETURNING *',
             [...sessionTypeValues(req.body), active !== false, req.params.id]
         );
         const after = result.rows[0];
@@ -273,7 +276,7 @@ const checkIndividualSession = async (db, body, viewer) => {
     if (paymentNum > 0 && !['Cash', 'Credit Card'].includes(paymentMethod)) return { error: 'Choose a payment method: Cash or Credit Card.' };
     // Assessments are paid in cash only
     if (paymentNum > 0 && category === 'Assessment' && paymentMethod !== 'Cash') return { error: 'Assessments can only be paid in cash.' };
-    const typeRes = await db.query('SELECT Category, Name, Fee, Kind, BipOnly, LateFee FROM SessionTypes WHERE SessionTypeId = $1', [sessionTypeId]);
+    const typeRes = await db.query('SELECT Category, Name, Fee, Kind, BipOnly, SoOnly, LateFee FROM SessionTypes WHERE SessionTypeId = $1', [sessionTypeId]);
     const type = typeRes.rows[0];
     if (!type || type.category !== category) return { error: `Choose ${category === 'Assessment' ? 'an assessment' : 'an individual session'} type from the price list.` };
     const clientRes = await db.query('SELECT ProgramType, FirstName, LastName FROM Clients WHERE ClientId = $1', [client]);
@@ -282,6 +285,7 @@ const checkIndividualSession = async (db, body, viewer) => {
     const name = `${c.lastname}, ${c.firstname}`;
     if (category === 'Individual' && c.programtype === 'BIP') return { error: `${name} is a BIP client. BIP clients do not have individual sessions.` };
     if (type.biponly && c.programtype !== 'BIP') return { error: `${type.name} is only for BIP clients, and ${name} is not in BIP.` };
+    if (type.soonly && !SO_CLIENT_TYPES.includes(c.programtype)) return { error: `${type.name} is only for SO clients, and ${name} is not in SO.` };
     // A reinstate is priced by the time since the client's last BIP intake, and can't be done a year or more after it
     let listFee = Number(type.fee);
     if (type.kind === 'BIP Reinstate') {

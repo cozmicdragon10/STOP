@@ -71,3 +71,9 @@ export const GROUP_TYPES_BY_PROGRAM: Record<string, string[]> = {
   'Voluntary SO': ['SO', 'FED SO'],
   'BIP': ['BIP'],
 };
+// Whether a client of this program can be put in a group of this program type: BIP groups take BIP clients, SO groups
+// take SO clients. A group without a program type takes anyone. Mirrors the server's check on assignment.
+export const clientFitsGroup = (clientProgram?: string | null, groupProgram?: string | null) => {
+  const groupType = (groupProgram || '').trim().toUpperCase();
+  return !groupType || (GROUP_TYPES_BY_PROGRAM[clientProgram || ''] ?? []).includes(groupType);
+};

@@ -305,7 +305,8 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
               <p className="text-white font-medium">{groups.find(g => g.groupid === client.groupid)?.groupname || client.groupid || '—'}</p>
             )}
           </div>
-          {ACCOUNT_FIELDS.map(({ label, field, prefix, step = '0.01', min, max }) => (
+          {/* BIP clients don't take polygraphs, so their poly fee and vouchers aren't shown */}
+          {ACCOUNT_FIELDS.filter(({ field }) => !(programType === 'BIP' && field === 'polyfeevoucher')).map(({ label, field, prefix, step = '0.01', min, max }) => (
             <div key={field}>
               <p className="text-xs text-slate-500 mb-0.5">{label}</p>
               {editing ? (
@@ -330,7 +331,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
             </div>
           ))}
           {/* Poly fee progress: amount paid so far out of the total poly fee */}
-          <div>
+          {programType !== 'BIP' && <div>
             <p className="text-xs text-slate-500 mb-0.5">Poly Fee (Paid / Total)</p>
             {editing ? (
               <div className="flex items-center gap-2">
@@ -365,7 +366,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                 </p>
               );
             })()}
-          </div>
+          </div>}
         </div>
       </div>
     </>

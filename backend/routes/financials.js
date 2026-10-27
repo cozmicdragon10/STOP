@@ -39,16 +39,16 @@ router.post('/api/financials/payment', async (req, res) => {
         if (polyAmount > 0) {
             // The poly fee is tracked separately, so the account balance is unchanged by this row
             await clientDb.query(
-                `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod)
-                 VALUES ($1, NOW(), 'Payment', $2, 'Poly Fee', $3, $4, $5)`,
-                [client, polyAmount, oldBalance, comment, paymentMethod]
+                `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, EnteredBy)
+                 VALUES ($1, NOW(), 'Payment', $2, 'Poly Fee', $3, $4, $5, $6)`,
+                [client, polyAmount, oldBalance, comment, paymentMethod, createdBy || null]
             );
         }
         if (accountAmount > 0) {
             await clientDb.query(
-                `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod)
-                 VALUES ($1, NOW(), 'Payment', $2, 'Account Payment', $3, $4, $5)`,
-                [client, accountAmount, newBalance, comment, paymentMethod]
+                `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, EnteredBy)
+                 VALUES ($1, NOW(), 'Payment', $2, 'Account Payment', $3, $4, $5, $6)`,
+                [client, accountAmount, newBalance, comment, paymentMethod, createdBy || null]
             );
         }
 
@@ -99,9 +99,9 @@ router.post('/api/financials/charge', async (req, res) => {
         const newBalance = oldBalance + chargeAmount;
 
         await clientDb.query(
-            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments)
-             VALUES ($1, NOW(), 'Charge', $2, 'Custom Fee', $3, $4)`,
-            [client, chargeAmount, newBalance, comments.trim()]
+            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, EnteredBy)
+             VALUES ($1, NOW(), 'Charge', $2, 'Custom Fee', $3, $4, $5)`,
+            [client, chargeAmount, newBalance, comments.trim(), createdBy]
         );
 
         await clientDb.query('UPDATE Clients SET AccountBalance = $1 WHERE ClientId = $2', [newBalance, client]);
@@ -411,11 +411,11 @@ router.post('/api/financials/:id/card-action', async (req, res) => {
         const label = { refund: 'Refund', dispute: 'Dispute opened', 'dispute-won': 'Dispute won', 'dispute-lost': 'Dispute lost' }[action];
         if (rowType) {
             await db.query(
-                `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, AttendanceId, RelatedTransactionId)
-                 VALUES ($1, NOW(), $2, $3, $4, $5, $6, 'Credit Card', $7, $8)`,
+                `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, AttendanceId, RelatedTransactionId, EnteredBy)
+                 VALUES ($1, NOW(), $2, $3, $4, $5, $6, 'Credit Card', $7, $8, $9)`,
                 [tx.client, rowType, rowAmount, tx.feetype, newBalance,
                     `${label} on the $${Number(tx.amount).toFixed(2)} credit card payment from ${paidOn}: ${why} (${user})`,
-                    attendanceId, tx.transactionid]
+                    attendanceId, tx.transactionid, user || null]
             );
         }
         const status = { dispute: 'Open', 'dispute-won': 'Won', 'dispute-lost': 'Lost' }[action] ?? tx.disputestatus ?? null;

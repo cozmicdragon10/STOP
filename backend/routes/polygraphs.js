@@ -157,6 +157,15 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
         if (!clientId) {
             return res.status(400).json({ error: 'Client ID is required.' });
         }
+        // Only active clients are booked, and BIP clients don't take polygraphs
+        const programRes = await db.query('SELECT ProgramType, ProgramStatus, FirstName, LastName FROM Clients WHERE ClientId = $1', [clientId]);
+        const bookedClient = programRes.rows[0];
+        if (bookedClient?.programtype === 'BIP') {
+            return res.status(400).json({ error: `${bookedClient.lastname}, ${bookedClient.firstname} is a BIP client. BIP clients don't take polygraphs.` });
+        }
+        if (bookedClient && bookedClient.programstatus !== 'Active') {
+            return res.status(400).json({ error: `${bookedClient.lastname}, ${bookedClient.firstname} is ${bookedClient.programstatus || 'not active'}. Only active clients can be scheduled for a polygraph.` });
+        }
 
         const slotRes = await db.query('SELECT * FROM PolygraphSlots WHERE SlotId = $1', [slotId]);
         if (slotRes.rows.length === 0) {
@@ -268,6 +277,12 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
              WHERE ClientId = $2`,
             [POLY_VOUCHER_MAX, clientId]
         );
+        // The vouchers used go on the account's change log, not the case note
+        await logClientChange(db, {
+            clientId, changedBy: user, changeType: 'Poly Fee Vouchers',
+            oldValue: String(vouchers), newValue: String(vouchers - POLY_VOUCHER_MAX),
+            details: `${POLY_VOUCHER_MAX} poly fee vouchers used to schedule the polygraph ${noteContext}.`,
+        });
 
         // Spending the last fill a poly fee override allows ends it and puts the regular poly fee back
         let overrideText = '';
@@ -286,7 +301,7 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
         const bypassText = waitBypassed
             ? `Scheduled inside the waiting period after the No Deception Indicated polygraph on ${waitBypassed.lasttaken} (earliest normal date ${waitBypassed.earliest}) by Business Administrator override.`
             : '';
-        const noteText = `Polygraph scheduled ${noteContext}. Used ${POLY_VOUCHER_MAX} poly fee vouchers.${overrideText}`
+        const noteText = `Polygraph scheduled ${noteContext}.${overrideText}`
             + (bypassText ? ` ${bypassText}` : '')
             + (String(comments || '').trim() ? ` Notes: ${String(comments).trim()}` : '');
         await db.query(
@@ -399,15 +414,28 @@ router.post('/api/polygraphs/slots/:slotId/open', async (req, res) => {
             const rule = overrideVoucherRule ? null : polyVoucherReturnRule(String(reason).trim(), slot);
             const ruleOverridden = overrideVoucherRule && polyVoucherReturnRule(String(reason).trim(), slot) !== null;
             const refunded = (rule ?? returnVouchers !== false) ? Number(polyvouchersused || 0) : 0;
+            // Whether the vouchers went back goes on the account's change log, not the case note
+            const overrideText = ruleOverridden ? ` Set to ${refunded > 0 ? 'returned' : 'not returned'} by Business Administrator override.` : '';
             if (refunded > 0) {
-                await db.query(
-                    'UPDATE Clients SET PolyFeeVoucher = LEAST(PolyFeeVoucher + $1, $2) WHERE ClientId = $3',
+                const voucherRes = await db.query(
+                    `UPDATE Clients c SET PolyFeeVoucher = LEAST(c.PolyFeeVoucher + $1, $2)
+                     FROM (SELECT PolyFeeVoucher FROM Clients WHERE ClientId = $3) before
+                     WHERE c.ClientId = $3 RETURNING before.PolyFeeVoucher AS before, c.PolyFeeVoucher AS after`,
                     [refunded, POLY_VOUCHER_MAX, client]
                 );
+                const { before, after } = voucherRes.rows[0];
+                await logClientChange(db, {
+                    clientId: client, changedBy: user, changeType: 'Poly Fee Vouchers',
+                    oldValue: String(before), newValue: String(after),
+                    details: `${refunded} poly fee vouchers returned: polygraph reservation canceled ${noteContext} (${String(reason).trim()}).${overrideText}`,
+                });
+            } else if (Number(polyvouchersused || 0) > 0) {
+                await logClientChange(db, {
+                    clientId: client, changedBy: user, changeType: 'Poly Fee Vouchers',
+                    details: `${polyvouchersused} poly fee vouchers not returned: polygraph reservation canceled ${noteContext} (${String(reason).trim()}).${overrideText}`,
+                });
             }
             const noteText = `Polygraph reservation canceled ${noteContext}. Reason: ${String(reason).trim()}.`
-                + (refunded > 0 ? ` ${refunded} poly fee vouchers returned to the client.` : '')
-                + (ruleOverridden ? ` Poly voucher return set to ${refunded > 0 ? 'returned' : 'not returned'} by Business Administrator override.` : '')
                 + (appointmentPassed ? ' The slot was not reopened because the appointment time had passed.' : '')
                 + (String(notes || '').trim() ? ` Notes: ${String(notes).trim()}` : '');
             await db.query(

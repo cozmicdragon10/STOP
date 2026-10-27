@@ -3,7 +3,9 @@ import { SlidersHorizontal, X } from 'lucide-react';
 import { assignClientToGroup, createGroup, deleteGroup, getGroupClients, updateGroup } from '../../api';
 import ScheduleSelect from '../ScheduleSelect';
 import { DEFAULT_GROUP_FILTERS } from '../../utils/filters';
-import { formatBalance } from '../../utils/balance';
+import { formatBalance, toDisplayBalance } from '../../utils/balance';
+import { clientFitsGroup, formatPhase } from '../../utils/clients';
+import { toLocalDay } from '../../utils/dates';
 
 interface DirectoryGroup {
   groupid: number;
@@ -22,10 +24,17 @@ interface DirectoryClient {
   firstname: string;
   lastname: string;
   docnumber?: string | null;
+  programtype?: string | null;
+  programstatus?: string | null;
 }
 
 interface RosterClient extends DirectoryClient {
   accountbalance?: number | string | null;
+  programtype?: string | null;
+  phase?: string | null;
+  programstatus?: string | null;
+  // Latest attendance row's date
+  lastattended?: string | null;
 }
 
 interface Employee {
@@ -45,6 +54,8 @@ interface Props {
   onError: (message: string) => void;
   // Reload groups and clients after a group is created, changed, deleted, or gets a client
   onGroupsChanged: () => void;
+  // Opens a client's account from the roster
+  onOpenClient: (client: DirectoryClient) => void;
 }
 
 type GroupSortKey = 'groupname' | 'location' | 'counselor' | 'programtype' | 'schedule' | 'clientcount' | 'active';
@@ -61,13 +72,15 @@ const errorText = (err: unknown, fallback: string) => (err instanceof Error && e
 
 // The Group Directory: filters, sorting, the New Group form, and the Roster / Assign Clients / Group Details panel
 // that opens under a group's row
-export default function GroupsTab({ groups, clients, employees, role, userEmail, onSuccess, onError, onGroupsChanged }: Props) {
+export default function GroupsTab({ groups, clients, employees, role, userEmail, onSuccess, onError, onGroupsChanged, onOpenClient }: Props) {
   const canEditGroupDetails = role !== 'Office Admin';
   const canDeleteGroups = role === 'Business Administrator';
 
   const [selectedGroupDetail, setSelectedGroupDetail] = useState<DirectoryGroup | null>(null);
   const groupDetailRef = useRef<HTMLDivElement>(null);
   const [groupRoster, setGroupRoster] = useState<RosterClient[]>([]);
+  // The Roster lists only active clients, matching the Assigned Clients count in the directory
+  const activeRoster = groupRoster.filter(c => c.programstatus === 'Active');
   const [assignClientSearch, setAssignClientSearch] = useState('');
   const [groupTab, setGroupTab] = useState<'roster' | 'assign' | 'schedule'>('roster');
   const [editGroupName, setEditGroupName] = useState('');
@@ -256,13 +269,41 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
 
       {groupTab === 'roster' && (
         <div className="space-y-2">
-          <p className="text-xs text-slate-400 uppercase font-semibold">Assigned Clients ({groupRoster.length})</p>
-          {groupRoster.map(c => (
-            <div key={c.clientid} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center text-sm">
-              <span className="font-medium text-white">{c.lastname}, {c.firstname} ({c.docnumber})</span>
-              <span className="text-xs text-slate-400">Balance: {formatBalance(c.accountbalance)}</span>
+          <p className="text-xs text-slate-400 uppercase font-semibold">Assigned Clients ({activeRoster.length})</p>
+          {activeRoster.length === 0 && <p className="text-xs text-slate-500 italic">No active clients in this group.</p>}
+          {activeRoster.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="text-slate-500 uppercase tracking-wider border-b border-slate-800">
+                    <th className="p-2.5">Client</th>
+                    <th className="p-2.5">Phase</th>
+                    <th className="p-2.5">Last Attended</th>
+                    <th className="p-2.5 text-right">Balance</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 text-sm">
+                  {[...activeRoster].sort((a, b) => `${a.lastname}, ${a.firstname}`.localeCompare(`${b.lastname}, ${b.firstname}`)).map(c => (
+                    <tr
+                      key={c.clientid}
+                      // The full client from the directory when it's there; the roster row carries every client field too
+                      onClick={() => onOpenClient(clients.find(cl => cl.clientid === c.clientid) ?? c)}
+                      title="Open client account"
+                      className="cursor-pointer transition hover:bg-slate-800/50"
+                    >
+                      <td className="p-2.5">
+                        <span className="font-medium text-white">{c.lastname}, {c.firstname}</span>
+                        {c.docnumber && <span className="ml-2 text-xs text-slate-500 font-mono">{c.docnumber}</span>}
+                      </td>
+                      <td className="p-2.5 text-slate-300">{formatPhase(c.programtype, c.phase) || '—'}</td>
+                      <td className="p-2.5 text-slate-300">{c.lastattended ? toLocalDay(c.lastattended).toLocaleDateString() : 'Never'}</td>
+                      <td className={`p-2.5 text-right font-medium ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ))}
+          )}
         </div>
       )}
 
@@ -280,7 +321,10 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
           </div>
           {(() => {
             const assignedClientIds = new Set(groupRoster.map(c => c.clientid));
-            const unassignedClients = clients.filter(c => !assignedClientIds.has(c.clientid));
+            // Active clients whose program fits the group (BIP to BIP groups, SO to SO groups) and who aren't in it yet
+            const unassignedClients = clients.filter(c => !assignedClientIds.has(c.clientid)
+              && c.programstatus === 'Active'
+              && clientFitsGroup(c.programtype, selectedGroupDetail.programtype));
             const searchTerm = assignClientSearch.trim().toLowerCase();
             const filteredClients = searchTerm
               ? unassignedClients.filter(c => [
@@ -299,7 +343,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
                   ))
                 ) : (
                   <p className="text-xs text-slate-500 italic col-span-2">
-                    {searchTerm ? 'No clients match your search.' : 'All available clients are already assigned to this group.'}
+                    {searchTerm ? 'No clients match your search.' : `No other active${selectedGroupDetail.programtype ? ` ${selectedGroupDetail.programtype.trim().toUpperCase() === 'BIP' ? 'BIP' : 'SO'}` : ''} clients to assign.`}
                   </p>
                 )}
               </div>

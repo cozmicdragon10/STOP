@@ -435,7 +435,7 @@ export default function App() {
   const role = user.role;
   const isAllowed = (tab: string) => {
     if (role === 'Office Admin' || role === 'Business Administrator') return true;
-    // Reports holds only the Group Cash Deposits report for them
+    // Reports holds only the Cash Deposits report for them
     if (role === 'Counselor' || role === 'Therapist') return ['clients', 'attendance', 'sessions', 'callin', 'polygraph', 'groups', 'testing', 'reports', 'agents'].includes(tab);
     if (role === 'Polygrapher') return ['polygraph'].includes(tab);
     // Unknown roles get no sections, rather than full access
@@ -808,8 +808,9 @@ export default function App() {
                     onSuccess={setSuccessMsg}
                   />
 
-                  {/* Section 5 – Temporary Poly Fee Override: a reduced poly fee for a number of fills, not a date */}
-                  <PolyFeeOverridePanel
+                  {/* Section 5 – Temporary Poly Fee Override: a reduced poly fee for a number of fills, not a date.
+                      BIP clients don't take polygraphs, so they have no poly fee. */}
+                  {selectedClientDetail.programtype !== 'BIP' && <PolyFeeOverridePanel
                     key={`poly-${selectedClientDetail.clientid}`}
                     client={selectedClientDetail}
                     role={role}
@@ -822,7 +823,7 @@ export default function App() {
                       if (openClientIdRef.current === selectedClientDetail.clientid) setClientPolyOverride(override);
                     }}
                     onSuccess={setSuccessMsg}
-                  />
+                  />}
                 </div>
               )}
 
@@ -1095,6 +1096,7 @@ export default function App() {
             onSuccess={setSuccessMsg}
             onError={setError}
             onGroupsChanged={loadDashboardData}
+            onOpenClient={openClientLogs}
           />
         )}
 
@@ -1195,7 +1197,7 @@ export default function App() {
                 slots={examinerSlots}
                 filtersActive={polyFiltersActive}
                 role={role}
-                assignableClients={clients.filter(c => !assignedSlotFor(c.clientid))}
+                assignableClients={clients.filter(c => c.programstatus === 'Active' && c.programtype !== 'BIP' && !assignedSlotFor(c.clientid))}
                 highlightedSlotId={highlightedSlotId}
                 examinerName={getExaminerDisplayName}
                 choices={polyAssign.choices}

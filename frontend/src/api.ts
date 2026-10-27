@@ -591,6 +591,8 @@ export interface SessionType {
     kind: SessionTypeKind;
     // Only BIP clients can have it (always set for BIP intakes and reinstates)
     biponly: boolean;
+    // Only SO clients (State, Federal, Voluntary SO) can have it; never set with biponly
+    soonly: boolean;
     latefee: string | number | null;
 }
 
@@ -674,7 +676,7 @@ export async function getSessionTypes(): Promise<SessionType[]> {
 
 export async function saveSessionType(data: {
     id?: number; category: IndividualCategory; name: string; fee: number; active: boolean;
-    kind: SessionTypeKind; bipOnly: boolean; lateFee: number | null; user: string;
+    kind: SessionTypeKind; bipOnly: boolean; soOnly: boolean; lateFee: number | null; user: string;
 }): Promise<SessionType> {
     const res = await apiFetch(`${API_BASE}/session-types${data.id ? `/${data.id}` : ''}`, {
         method: data.id ? 'PUT' : 'POST',
@@ -1028,6 +1030,71 @@ export interface GroupCashDepositRow extends GroupCashDropOff {
 export async function getGroupCashDeposits(from: string, to: string, user: string): Promise<GroupCashDepositRow[]> {
     const res = await apiFetch(`${API_BASE}/reports/group-cash-deposits?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&user=${encodeURIComponent(user)}`);
     return jsonResponse(res, 'Failed to load group cash deposits.');
+}
+
+// A cash payment taken outside a group session, and whether it was dropped off at the bank (deposit fields null while held)
+export interface UserCashDepositRow {
+    transactionid: number;
+    paidon: string;
+    amount: string | number;
+    feetype: string | null;
+    comments: string | null;
+    // The employee who took the payment and holds the cash; null for payments from before this was recorded
+    enteredby: string | null;
+    enteredbyname: string | null;
+    clientid: number | null;
+    firstname: string | null;
+    lastname: string | null;
+    docnumber: string | null;
+    depositdate: string | null;
+    recordedby: string | null;
+    recordedbyname: string | null;
+    recordedon: string | null;
+}
+
+// Business Administrators get every cash payment taken outside a group; everyone else gets the ones they took
+export async function getUserCashDeposits(from: string, to: string, user: string): Promise<UserCashDepositRow[]> {
+    const res = await apiFetch(`${API_BASE}/reports/user-cash-deposits?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&user=${encodeURIComponent(user)}`);
+    return jsonResponse(res, 'Failed to load user cash deposits.');
+}
+
+// Returns the payment after the change
+export async function setUserCashDroppedOff(data: { transactionId: number; droppedOff: boolean; depositDate: string; user: string }): Promise<UserCashDepositRow> {
+    const res = await apiFetch(`${API_BASE}/reports/user-cash-deposits`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return jsonResponse(res, 'Failed to update the deposit.');
+}
+
+// A payment (or a refund or dispute against one) or a client note, with who entered it and when
+export interface UserActivityRow {
+    kind: 'Payment' | 'Note';
+    id: number;
+    client: number | null;
+    firstname: string | null;
+    lastname: string | null;
+    docnumber: string | null;
+    enteredon: string;
+    // Employee email; null for payments entered before who entered them was recorded
+    enteredby: string | null;
+    enteredbyname: string | null;
+    // The ledger type (Payment, Refund, Dispute, Dispute Won) or the note category
+    detail: string;
+    amount: string | number | null;
+    paymentmethod: string | null;
+    feetype: string | null;
+    comments: string | null;
+    editedby: string | null;
+    editedbyname: string | null;
+    editedon: string | null;
+}
+
+// Business Administrators and Office Admins only
+export async function getUserActivity(from: string, to: string, user: string): Promise<UserActivityRow[]> {
+    const res = await apiFetch(`${API_BASE}/reports/user-activity?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&user=${encodeURIComponent(user)}`);
+    return jsonResponse(res, 'Failed to load the user activity report.');
 }
 
 // Returns the session's deposit after the change, or null when it has none

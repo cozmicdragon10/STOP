@@ -18,6 +18,7 @@ interface EditState {
   active: boolean;
   kind: SessionTypeKind;
   bipOnly: boolean;
+  soOnly: boolean;
   // Reinstate price from 6 months to a year after the intake
   lateFee: string;
 }
@@ -28,7 +29,7 @@ const KINDS: { kind: SessionTypeKind; label: string }[] = [
   { kind: 'BIP Intake', label: 'BIP intake (starts the reinstate clock)' },
   { kind: 'BIP Reinstate', label: 'BIP reinstate (priced by time since intake)' },
 ];
-const NEW_PRICE: EditState = { category: 'Assessment', name: '', fee: '', active: true, kind: 'Standard', bipOnly: false, lateFee: '' };
+const NEW_PRICE: EditState = { category: 'Assessment', name: '', fee: '', active: true, kind: 'Standard', bipOnly: false, soOnly: false, lateFee: '' };
 const validPrice = (v: string) => v !== '' && Number(v) >= 0;
 
 // The assessment and individual session types and their prices, used by the Assessments & Individuals tab.
@@ -54,7 +55,7 @@ export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Prop
     setError('');
     try {
       const saved = await saveSessionType({
-        ...editing, name: editing.name.trim(), fee: Number(editing.fee), lateFee: reinstate ? Number(editing.lateFee) : null, user: userEmail,
+        ...editing, soOnly: editing.soOnly && editing.kind === 'Standard', name: editing.name.trim(), fee: Number(editing.fee), lateFee: reinstate ? Number(editing.lateFee) : null, user: userEmail,
       });
       setTypes(prev => (editing.id ? prev.map(t => (t.sessiontypeid === saved.sessiontypeid ? saved : t)) : [...prev, saved]));
       onSuccess(`${saved.category} "${saved.name}" saved.`);
@@ -126,8 +127,13 @@ export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Prop
             </div>
           )}
           <label className="flex items-center gap-2 text-xs text-slate-300">
-            <input type="checkbox" checked={editing.bipOnly || editing.kind !== 'Standard'} disabled={editing.kind !== 'Standard'} onChange={e => setEditing({ ...editing, bipOnly: e.target.checked })} className="accent-blue-500 disabled:opacity-50" />
+            <input type="checkbox" checked={editing.bipOnly || editing.kind !== 'Standard'} disabled={editing.kind !== 'Standard'} onChange={e => setEditing({ ...editing, bipOnly: e.target.checked, soOnly: e.target.checked ? false : editing.soOnly })} className="accent-blue-500 disabled:opacity-50" />
             BIP clients only{editing.kind !== 'Standard' && <span className="text-slate-500">(always, for BIP intakes and reinstates)</span>}
+          </label>
+          {/* BIP only and SO only can't both be set; checking one clears the other */}
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input type="checkbox" checked={editing.soOnly && editing.kind === 'Standard'} disabled={editing.kind !== 'Standard'} onChange={e => setEditing({ ...editing, soOnly: e.target.checked, bipOnly: e.target.checked ? false : editing.bipOnly })} className="accent-blue-500 disabled:opacity-50" />
+            SO clients only <span className="text-slate-500">(State, Federal, and Voluntary SO)</span>
           </label>
           {editing.id && (
             <label className="flex items-center gap-2 text-xs text-slate-300">
@@ -155,8 +161,8 @@ export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Prop
                 <div key={t.sessiontypeid} className={`bg-slate-950 border p-3 rounded flex justify-between items-center gap-3 text-xs ${editing?.id === t.sessiontypeid ? 'border-blue-500' : 'border-slate-800'}`}>
                   <div className="min-w-0">
                     <p className={`font-semibold truncate ${t.active ? 'text-white' : 'text-slate-500'}`}>{t.name}</p>
-                    {(t.biponly || t.kind !== 'Standard') && (
-                      <p className="text-[11px] text-slate-500 truncate">{[t.biponly && 'BIP only', t.kind === 'BIP Intake' && 'Starts reinstate clock', t.kind === 'BIP Reinstate' && 'Reinstate'].filter(Boolean).join(' · ')}</p>
+                    {(t.biponly || t.soonly || t.kind !== 'Standard') && (
+                      <p className="text-[11px] text-slate-500 truncate">{[t.biponly && 'BIP only', t.soonly && 'SO only',t.kind === 'BIP Intake' && 'Starts reinstate clock', t.kind === 'BIP Reinstate' && 'Reinstate'].filter(Boolean).join(' · ')}</p>
                     )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -166,7 +172,7 @@ export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Prop
                       {t.kind === 'BIP Reinstate' && t.latefee !== null && <span className="block text-[11px] font-normal text-slate-400">${Number(t.latefee).toFixed(2)} after 6 mo.</span>}
                     </span>
                     {canEdit && (
-                      <button type="button" onClick={() => { setError(''); setEditing({ id: t.sessiontypeid, category: t.category, name: t.name, fee: Number(t.fee).toFixed(2), active: t.active, kind: t.kind, bipOnly: t.biponly, lateFee: t.latefee !== null ? Number(t.latefee).toFixed(2) : '' }); }} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1 rounded font-semibold">Edit</button>
+                      <button type="button" onClick={() => { setError(''); setEditing({ id: t.sessiontypeid, category: t.category, name: t.name, fee: Number(t.fee).toFixed(2), active: t.active, kind: t.kind, bipOnly: t.biponly, soOnly: t.soonly, lateFee: t.latefee !== null ? Number(t.latefee).toFixed(2) : '' }); }} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1 rounded font-semibold">Edit</button>
                     )}
                   </div>
                 </div>

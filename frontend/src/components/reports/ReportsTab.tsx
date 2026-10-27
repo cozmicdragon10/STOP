@@ -6,7 +6,9 @@ import { PROGRAM_STATUSES } from '../../utils/clients';
 import { formatBalance } from '../../utils/balance';
 import GroupIncomeReport from './GroupIncomeReport';
 import GroupCashDepositReport from './GroupCashDepositReport';
+import UserCashDepositReport from './UserCashDepositReport';
 import CounselorClientReport from './CounselorClientReport';
+import UserActivityReport from './UserActivityReport';
 
 type CounselorReportProps = ComponentProps<typeof CounselorClientReport>;
 
@@ -39,6 +41,8 @@ export default function ReportsTab({ user, clients, groups, onOpenClient }: Prop
   const [agentReportData, setAgentReportData] = useState<AgentReportRow[] | null>(null);
   const [depositReportData, setDepositReportData] = useState<DepositReport | null>(null);
   const [reportsError, setReportsError] = useState('');
+  // Cash Deposits: cash taken at group sessions, or cash payments users took outside a group
+  const [cashTab, setCashTab] = useState<'group' | 'user'>('group');
 
   const currentReport = currentReportFor(reportTab, user.role);
 
@@ -95,9 +99,30 @@ export default function ReportsTab({ user, clients, groups, onOpenClient }: Prop
 
       {currentReport === 'groupIncome' && <GroupIncomeReport userEmail={user.employeeemail} canRecordDeposits={user.role === 'Business Administrator'} />}
 
-      {currentReport === 'cashDeposits' && <GroupCashDepositReport userEmail={user.employeeemail} isAdmin={user.role === 'Business Administrator'} />}
+      {currentReport === 'cashDeposits' && (
+        <div className="space-y-4">
+          <div className="inline-flex bg-slate-950 p-1 rounded-lg border border-slate-800">
+            {([['group', 'Group Cash Deposits'], ['user', 'User Cash Deposits']] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setCashTab(id)}
+                aria-pressed={cashTab === id}
+                className={`px-4 py-1.5 rounded text-xs font-semibold transition ${cashTab === id ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {cashTab === 'group'
+            ? <GroupCashDepositReport userEmail={user.employeeemail} isAdmin={user.role === 'Business Administrator'} />
+            : <UserCashDepositReport userEmail={user.employeeemail} isAdmin={user.role === 'Business Administrator'} />}
+        </div>
+      )}
 
       {currentReport === 'counselorClients' && <CounselorClientReport clients={clients} groups={groups} statuses={PROGRAM_STATUSES} onOpenClient={onOpenClient} />}
+
+      {currentReport === 'userActivity' && <UserActivityReport userEmail={user.employeeemail} clients={clients} onOpenClient={onOpenClient} />}
 
       {currentReport === 'agent' && !reportsError && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">

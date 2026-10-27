@@ -46,8 +46,8 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
   const parsedAmount = amount.trim() === '' ? 0 : Number(amount);
   const validAmount = Number.isFinite(parsedAmount) && parsedAmount > 0;
 
-  // Poly fee option is offered only when the client record carries poly fee figures
-  const hasPolyFee = client.polyfee != null;
+  // Poly fee option is offered only when the client record carries poly fee figures; BIP clients don't take polygraphs
+  const hasPolyFee = client.polyfee != null && client.programtype !== 'BIP';
   const polyFee = Number(client.polyfee ?? 0);
   const polyPaid = Number(client.polyfeepaid ?? 0);
   const polyOwed = Math.max(0, polyFee - polyPaid);

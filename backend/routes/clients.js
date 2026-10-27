@@ -214,6 +214,10 @@ router.post('/api/clients/:id/notes', async (req, res) => {
     try {
         const { id } = req.params;
         const { user, comments, category } = req.body;
+        // Notes typed on the Case Notes tab are admin or therapist notes; the other categories are written by the system
+        if (!['Admin', 'Therapist'].includes(category)) {
+            return res.status(400).json({ error: 'Choose a note type: Admin Note or Therapist Note.' });
+        }
         const result = await pool.query(
             'INSERT INTO Notes (Client, Date, "User", Comments, Category) VALUES ($1, NOW(), $2, $3, $4) RETURNING *',
             [id, user, comments, category]

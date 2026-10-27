@@ -88,15 +88,15 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
     const attendanceId = attRes.rows[0].attendanceid;
     if (paidNum > 0) {
         await db.query(
-            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, AttendanceId)
-             VALUES ($1, NOW(), 'Payment', $2, $7, $3, $4, $5, $6)`,
-            [client, paidNum, newBalance, `Payment applied during ${type} session on ${sessionDate}.${paymentComments ? ` ${paymentComments}` : ''}`, paymentMethod, attendanceId, feeType]
+            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, AttendanceId, EnteredBy)
+             VALUES ($1, NOW(), 'Payment', $2, $7, $3, $4, $5, $6, $8)`,
+            [client, paidNum, newBalance, `Payment applied during ${type} session on ${sessionDate}.${paymentComments ? ` ${paymentComments}` : ''}`, paymentMethod, attendanceId, feeType, createdBy || null]
         );
     } else if (feeNum > 0) {
         await db.query(
-            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, AttendanceId)
-             VALUES ($1, NOW(), 'Charge', $2, $6, $3, $4, $5)`,
-            [client, feeNum, newBalance, `${type} fee assessed on ${sessionDate}.`, attendanceId, feeType]
+            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, AttendanceId, EnteredBy)
+             VALUES ($1, NOW(), 'Charge', $2, $6, $3, $4, $5, $7)`,
+            [client, feeNum, newBalance, `${type} fee assessed on ${sessionDate}.`, attendanceId, feeType, createdBy || null]
         );
     }
 

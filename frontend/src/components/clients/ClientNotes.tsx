@@ -17,8 +17,13 @@ interface Props {
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-// New notes are filed under this category
-const NEW_NOTE_CATEGORY = 'Therapist';
+// The note types a new note can be filed under (the others are written by the system); the server checks too
+const NEW_NOTE_CATEGORIES = [
+  { value: 'Admin', label: 'Admin Note' },
+  { value: 'Therapist', label: 'Therapist Note' },
+];
+// Starting choice: office roles write admin notes, counselors and therapists write therapist notes
+const defaultNoteCategory = (role: string) => (role === 'Business Administrator' || role === 'Office Admin' ? 'Admin' : 'Therapist');
 
 const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 
@@ -29,6 +34,7 @@ export default function ClientNotes({ clientId, user, notes, setNotes }: Props) 
   const [showForm, setShowForm] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [newNoteText, setNewNoteText] = useState('');
+  const [newNoteCategory, setNewNoteCategory] = useState(() => defaultNoteCategory(user.role));
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState('');
   // Inline edit of one case note; noteError is shown under the note it belongs to
@@ -62,7 +68,7 @@ export default function ClientNotes({ clientId, user, notes, setNotes }: Props) 
     setAdding(true);
     setAddError('');
     try {
-      await addClientNote(clientId, { user: user.employeeemail, comments: newNoteText, category: NEW_NOTE_CATEGORY });
+      await addClientNote(clientId, { user: user.employeeemail, comments: newNoteText, category: newNoteCategory });
       setNewNoteText('');
       setShowForm(false);
       setNotes(await getClientNotes(clientId));
@@ -131,10 +137,16 @@ export default function ClientNotes({ clientId, user, notes, setNotes }: Props) 
       </div>
       {showForm && (
         <form onSubmit={handleAddNote} className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-3">
+          <label className="flex items-center gap-2 text-xs text-slate-400">
+            Note Type
+            <select value={newNoteCategory} onChange={(e) => setNewNoteCategory(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-xs">
+              {NEW_NOTE_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+          </label>
           <textarea value={newNoteText} onChange={(e) => setNewNoteText(e.target.value)} placeholder="Type case note..." rows={3} autoFocus className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required />
           {addError && <p className="text-xs text-red-400">{addError}</p>}
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => { setShowForm(false); setNewNoteText(''); setAddError(''); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg text-xs font-semibold">Cancel</button>
+            <button type="button" onClick={() => { setShowForm(false); setNewNoteText(''); setNewNoteCategory(defaultNoteCategory(user.role)); setAddError(''); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg text-xs font-semibold">Cancel</button>
             <button type="submit" disabled={adding} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1"><PlusCircle size={14} /> Save Note</button>
           </div>
         </form>
