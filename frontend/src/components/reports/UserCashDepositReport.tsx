@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { getUserCashDeposits, setUserCashDroppedOff } from '../../api';
 import type { UserCashDepositRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
+import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 
 const NOT_RECORDED = 'Not recorded';
 
@@ -10,7 +11,6 @@ const cents = (n: number) => Math.round(n * 100) / 100;
 const cashOf = (r: UserCashDepositRow) => Number(r.amount) || 0;
 const isDroppedOff = (r: UserCashDepositRow) => r.depositdate !== null;
 const sameEmail = (a: string | null, b: string) => String(a || '').trim().toLowerCase() === b.trim().toLowerCase();
-const takenByOf = (r: UserCashDepositRow) => r.enteredbyname || r.enteredby || NOT_RECORDED;
 
 // First of the month two months back, so the last few months of held cash are in view
 const defaultFrom = () => {
@@ -29,6 +29,9 @@ const formatWhen = (value: string) => new Date(value).toLocaleString([], { dateS
 // was dropped off at the bank. Business Administrators see and check off every payment; everyone else sees and
 // checks off the ones they took (the server decides).
 export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmail: string; isAdmin: boolean }) {
+  const employeeLabel = useEmployeeLabel();
+  // "Display Name (Role)"; payments from before this was recorded have no one
+  const takenByOf = (r: UserCashDepositRow) => (r.enteredby ? employeeLabel(r.enteredby) : NOT_RECORDED);
   const [from, setFrom] = useState(defaultFrom);
   const [to, setTo] = useState(todayLocal);
   const [statusFilter, setStatusFilter] = useState<'all' | 'held' | 'dropped'>('all');
@@ -215,7 +218,7 @@ export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmai
                         {dropped ? (
                           <span className="text-slate-300">
                             <span className="text-emerald-400 font-semibold">Dropped off</span> {formatDate(r.depositdate!)}
-                            {(r.recordedbyname || r.recordedby) && <span className="text-slate-500"> · by {r.recordedbyname || r.recordedby}</span>}
+                            {r.recordedby && <span className="text-slate-500"> · by {employeeLabel(r.recordedby)}</span>}
                           </span>
                         ) : (
                           <span className="text-amber-400 font-semibold">Holding</span>

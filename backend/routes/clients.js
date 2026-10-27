@@ -2,6 +2,7 @@ const express = require('express');
 const { buildDischargeSummaryPdf } = require('../dischargeSummary');
 const { logAction, pool } = require('../db');
 const { activeRoleFor } = require('../lib/access');
+const { requireRole } = require('../lib/auth');
 const { groupNameFor, logClientChange } = require('../lib/changeLog');
 const { POLY_VOUCHER_MAX, activePolyFeeOverride, countPolyFeeFill } = require('../lib/poly');
 const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK } = require('../lib/sql');
@@ -203,7 +204,11 @@ router.get('/api/clients/:id/financials', async (req, res) => {
 router.get('/api/clients/:id/notes', async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await pool.query('SELECT * FROM Notes WHERE Client = $1 ORDER BY Date DESC', [id]);
+        // Denied notes are kept for the record but no longer shown on the account
+        const result = await pool.query(
+            `SELECT * FROM Notes WHERE Client = $1 AND ApprovalStatus IS DISTINCT FROM 'Denied' ORDER BY Date DESC`,
+            [id]
+        );
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -218,11 +223,21 @@ router.post('/api/clients/:id/notes', async (req, res) => {
         if (!['Admin', 'Therapist'].includes(category)) {
             return res.status(400).json({ error: 'Choose a note type: Admin Note or Therapist Note.' });
         }
+        // A Counselor's note waits for a Business Administrator when the client hasn't attended this month
+        // (their latest attendance of any kind is in an earlier month, or they have none). Role is from the session.
+        let approvalStatus = null;
+        if (req.user?.role === 'Counselor') {
+            const attended = await pool.query(
+                `SELECT EXISTS (SELECT 1 FROM Attendance WHERE Client = $1 AND date_trunc('month', Date) = date_trunc('month', CURRENT_DATE)) AS thisMonth`,
+                [id]
+            );
+            if (!attended.rows[0].thismonth) approvalStatus = 'Pending';
+        }
         const result = await pool.query(
-            'INSERT INTO Notes (Client, Date, "User", Comments, Category) VALUES ($1, NOW(), $2, $3, $4) RETURNING *',
-            [id, user, comments, category]
+            'INSERT INTO Notes (Client, Date, "User", Comments, Category, ApprovalStatus) VALUES ($1, NOW(), $2, $3, $4, $5) RETURNING *',
+            [id, user, comments, category, approvalStatus]
         );
-        await logAction(user, 'Add Note', `Added note to Client ID ${id}`);
+        await logAction(user, 'Add Note', `Added note to Client ID ${id}${approvalStatus ? ' (awaiting Business Administrator approval)' : ''}`);
         res.status(201).json(result.rows[0]);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -256,6 +271,53 @@ router.put('/api/notes/:noteId', async (req, res) => {
             [String(comments).trim(), user, noteId]
         );
         await logAction(user, 'Edit Note', `Edited note ${noteId} on Client ID ${check.note.client}. Previous text: ${check.note.comments}`);
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Case notes awaiting approval, oldest first, with their client (Business Administrators only)
+router.get('/api/notes/pending', requireRole('Business Administrator'), async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT n.*, c.FirstName, c.LastName, c.DOCNumber, c.ProgramType, e.DisplayName AS AuthorName,
+                    (SELECT MAX(Date) FROM Attendance WHERE Client = n.Client) AS LastAttended
+             FROM Notes n
+             JOIN Clients c ON c.ClientId = n.Client
+             LEFT JOIN EmployeeRoles e ON LOWER(e.EmployeeEmail) = LOWER(n."User")
+             WHERE n.ApprovalStatus = 'Pending'
+             ORDER BY c.LastName, c.FirstName, n.Date`
+        );
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Approves or denies a pending note (Business Administrators only). Approving can save edited text with it.
+router.post('/api/notes/:noteId/review', requireRole('Business Administrator'), async (req, res) => {
+    try {
+        const { noteId } = req.params;
+        const { decision, comments, user } = req.body;
+        if (!['approve', 'deny'].includes(decision)) return res.status(400).json({ error: 'Choose approve or deny.' });
+        const found = await pool.query('SELECT * FROM Notes WHERE NoteId = $1', [noteId]);
+        const note = found.rows[0];
+        if (!note) return res.status(404).json({ error: 'Case note not found.' });
+        if (note.approvalstatus !== 'Pending') return res.status(409).json({ error: `This note was already ${String(note.approvalstatus || 'reviewed').toLowerCase()}.` });
+        const status = decision === 'approve' ? 'Approved' : 'Denied';
+        const edited = decision === 'approve' && comments !== undefined && String(comments).trim() !== String(note.comments || '').trim();
+        if (edited && !String(comments).trim()) return res.status(400).json({ error: 'The note cannot be empty.' });
+        const result = await pool.query(
+            `UPDATE Notes SET ApprovalStatus = $1, ReviewedBy = $2, ReviewedOn = NOW(),
+                 Comments = CASE WHEN $3 THEN $4 ELSE Comments END,
+                 EditedBy = CASE WHEN $3 THEN $2 ELSE EditedBy END,
+                 EditedOn = CASE WHEN $3 THEN NOW() ELSE EditedOn END
+             WHERE NoteId = $5 RETURNING *`,
+            [status, user, edited, String(comments ?? '').trim(), noteId]
+        );
+        await logAction(user, `Note ${status}`, `${status} ${note.category || ''} note ${noteId} on Client ID ${note.client} by ${note.User}.`
+            + (edited ? ` Edited before approval. Previous text: ${note.comments}` : ` Text: ${note.comments}`));
         res.json(result.rows[0]);
     } catch (err) {
         res.status(500).json({ error: err.message });

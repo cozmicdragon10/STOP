@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { getGroupCashDeposits, setGroupCashDroppedOff } from '../../api';
 import type { GroupCashDepositRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
+import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 
 interface GroupTotals {
   key: string;
@@ -35,6 +36,7 @@ const formatDate = (ymd: string) => {
 // and check off every session; everyone else sees and checks off the sessions they are responsible for: ones they
 // opened or covered, and their own groups' sessions when the office checked them in (the server decides).
 export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEmail: string; isAdmin: boolean }) {
+  const employeeLabel = useEmployeeLabel();
   const [from, setFrom] = useState(defaultFrom);
   const [to, setTo] = useState(todayLocal);
   const [statusFilter, setStatusFilter] = useState<'all' | 'held' | 'dropped'>('all');
@@ -243,7 +245,7 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
                         {dropped ? (
                           <span className="text-slate-300">
                             <span className="text-emerald-400 font-semibold">Dropped off</span> {formatDate(r.depositdate!)}
-                            {(r.recordedbyname || r.recordedby) && <span className="text-slate-500"> · by {r.recordedbyname || r.recordedby}</span>}
+                            {r.recordedby && <span className="text-slate-500"> · by {employeeLabel(r.recordedby)}</span>}
                             {variance !== 0 && (
                               <span className={variance > 0 ? 'text-sky-400' : 'text-red-400'}> · {money(deposited)} deposited, {variance > 0 ? 'over' : 'short'} {money(Math.abs(variance))}</span>
                             )}

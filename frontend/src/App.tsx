@@ -27,6 +27,7 @@ import CallInTab from './components/callin/CallInTab';
 import GroupsTab from './components/groups/GroupsTab';
 import TestingTab from './components/testing/TestingTab';
 import AdminTab from './components/admin/AdminTab';
+import FormsTab from './components/forms/FormsTab';
 import PolySlotForm from './components/polygraph/PolySlotForm';
 import PolyResults from './components/polygraph/PolyResults';
 import PolySchedule from './components/polygraph/PolySchedule';
@@ -43,6 +44,8 @@ import ClientPolygraphs from './components/clients/ClientPolygraphs';
 import ClientLedger from './components/clients/ClientLedger';
 import TempFeeOverridePanel from './components/clients/TempFeeOverridePanel';
 import PolyFeeOverridePanel from './components/clients/PolyFeeOverridePanel';
+import PendingNotesButton from './components/clients/PendingNotesButton';
+import EmployeeLabelProvider from './components/EmployeeLabelProvider';
 import ProgramStatusDialog from './components/clients/ProgramStatusDialog';
 import ClientInfoForm from './components/clients/ClientInfoForm';
 import type { LedgerRefresh } from './components/clients/ClientLedger';
@@ -115,6 +118,10 @@ export default function App() {
   const [expandedClosedGroup, setExpandedClosedGroup] = useState<string | null>(null);
   // Open group picked in the Open Groups panel, handed to the check-in workflow to load
   const [resumeRequest, setResumeRequest] = useState<OpenGroupSession | null>(null);
+
+  // Bumped when a case note goes to or comes out of approval, so the Notes to Approve count reloads
+  const [pendingNotesKey, setPendingNotesKey] = useState(0);
+  const refreshPendingNotes = () => setPendingNotesKey(k => k + 1);
 
   // Polygraph State
   const [polySubTab, setPolySubTab] = useState<'admin' | 'schedule' | 'results'>('schedule');
@@ -436,8 +443,8 @@ export default function App() {
   const isAllowed = (tab: string) => {
     if (role === 'Office Admin' || role === 'Business Administrator') return true;
     // Reports holds only the Cash Deposits report for them
-    if (role === 'Counselor' || role === 'Therapist') return ['clients', 'attendance', 'sessions', 'callin', 'polygraph', 'groups', 'testing', 'reports', 'agents'].includes(tab);
-    if (role === 'Polygrapher') return ['polygraph'].includes(tab);
+    if (role === 'Counselor' || role === 'Therapist') return ['clients', 'attendance', 'sessions', 'callin', 'polygraph', 'groups', 'testing', 'reports', 'agents', 'forms'].includes(tab);
+    if (role === 'Polygrapher') return ['polygraph', 'forms'].includes(tab);
     // Unknown roles get no sections, rather than full access
     return false;
   };
@@ -488,6 +495,7 @@ export default function App() {
   };
 
   return (
+    <EmployeeLabelProvider employees={employees}>
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
       {/* Top Header Navigation */}
       <header className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center">
@@ -499,6 +507,7 @@ export default function App() {
           </div>
         </div>
         <div className="flex items-center gap-4">
+          {isAllowed('forms') && <button onClick={() => setActiveTab('forms')} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'forms' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30' : 'bg-slate-800 border border-transparent text-slate-400 hover:bg-slate-700 hover:text-white'}`}><FileText size={16} /> Forms</button>}
           {isAllowed('admin') && <button onClick={() => setActiveTab('admin')} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'admin' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30' : 'bg-slate-800 border border-transparent text-slate-400 hover:bg-slate-700 hover:text-white'}`}><Settings size={16} /> Admin</button>}
           <div className="text-right">
             <p className="text-sm font-medium text-white">{user.displayname}</p>
@@ -600,6 +609,16 @@ export default function App() {
               onCreated={handleClientCreated}
               onSuccess={setSuccessMsg}
               onError={setError}
+              headerActions={role === 'Business Administrator' && (
+                <PendingNotesButton
+                  userEmail={user.employeeemail}
+                  clients={clients}
+                  refreshKey={pendingNotesKey}
+                  onOpenClient={openClientLogs}
+                  onChanged={refreshPendingNotes}
+                  onSuccess={setSuccessMsg}
+                />
+              )}
             />
           </div>
         )}
@@ -859,7 +878,7 @@ export default function App() {
               )}
 
               {clientTab === 'notes' && (
-                <ClientNotes key={selectedClientDetail.clientid} clientId={selectedClientDetail.clientid} user={user} notes={clientNotes} setNotes={setClientNotes} />
+                <ClientNotes key={selectedClientDetail.clientid} clientId={selectedClientDetail.clientid} user={user} notes={clientNotes} setNotes={setClientNotes} onApprovalChanged={refreshPendingNotes} />
               )}
 
               {clientTab === 'polygraphs' && selectedClientDetail.programtype !== 'BIP' && (
@@ -1228,6 +1247,8 @@ export default function App() {
         )}
 
         {/* ADMIN TAB */}
+        {activeTab === 'forms' && isAllowed('forms') && <FormsTab role={role} onSuccess={setSuccessMsg} />}
+
         {activeTab === 'admin' && (
           <AdminTab user={user} employees={employees} onEmployeesChanged={setEmployees} onSuccess={setSuccessMsg} onError={setError} />
         )}
@@ -1242,5 +1263,6 @@ export default function App() {
         )}
       </main>
     </div>
+    </EmployeeLabelProvider>
   );
 }

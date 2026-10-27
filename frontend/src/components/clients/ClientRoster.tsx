@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { SlidersHorizontal } from 'lucide-react';
 import { createClient } from '../../api';
 import type { SupervisingAgent } from '../../api';
@@ -22,6 +23,8 @@ interface Props {
   onCreated: (created: { clientId: number; name: string; programtype: string; groupid: string }) => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
+  // Extra buttons in the header, e.g. the Business Administrator's Notes to Approve
+  headerActions?: ReactNode;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -41,7 +44,7 @@ type FilterKey = 'agent' | 'programtype' | 'phase' | 'currentgroup' | 'status';
 
 // The Client Roster tab: searchable, filterable client list and the New Client form. Clicking a row opens the
 // client's account (App's drawer).
-export default function ClientRoster({ clients, activeGroups, directoryAgents, userEmail, onOpenClient, onCreated, onSuccess, onError }: Props) {
+export default function ClientRoster({ clients, activeGroups, directoryAgents, userEmail, onOpenClient, onCreated, onSuccess, onError, headerActions }: Props) {
   const [clientSearch, setClientSearch] = useState('');
   const [clientFilters, setClientFilters] = useState(DEFAULT_CLIENT_FILTERS);
   // Filter row is hidden until toggled; the choice is remembered in this browser. Filters still apply while hidden.
@@ -140,6 +143,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
           </div>
           <div className="flex items-center gap-3">
             <button type="button" onClick={() => setShowNewClientForm(s => !s)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap">+ New Client</button>
+            {headerActions}
             <input
               type="search"
               value={clientSearch}

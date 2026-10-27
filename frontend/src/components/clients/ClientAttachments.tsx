@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, Eye, Paperclip, Pencil, Printer, Trash2, Upload, X } from 'lucide-react';
+import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import {
   ATTACHMENT_MAX_BYTES, deleteClientAttachment, fetchClientAttachment, getClientAttachments, renameClientAttachment,
   uploadClientAttachment,
@@ -25,6 +26,7 @@ const errorText = (err: unknown, fallback: string) => (err instanceof Error && e
 // The Attachments tab of a client's account. Loaded each time it is shown (App remounts it after a discharge saves a
 // discharge summary PDF here).
 export default function ClientAttachments({ clientId, userEmail, canDelete, onSuccess }: Props) {
+  const employeeLabel = useEmployeeLabel();
   const [attachments, setAttachments] = useState<ClientAttachment[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [uploading, setUploading] = useState(false);
@@ -193,7 +195,7 @@ export default function ClientAttachments({ clientId, userEmail, canDelete, onSu
               <p className="font-semibold text-white truncate" title={a.filename}>{a.filename}</p>
             )}
             <p className="text-xs text-slate-400 mt-0.5">
-              {formatFileSize(a.filesize)} · Added {new Date(a.uploadedon).toLocaleDateString()} by {a.uploadedby || 'Unknown'}
+              {formatFileSize(a.filesize)} · Added {new Date(a.uploadedon).toLocaleDateString()} by {employeeLabel(a.uploadedby) || 'Unknown'}
             </p>
           </div>
           <div className="flex gap-1.5 shrink-0">

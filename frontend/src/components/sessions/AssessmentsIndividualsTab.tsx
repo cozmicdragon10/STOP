@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ClipboardList, Trash2 } from 'lucide-react';
+import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import {
   closeIndividualSession, deleteOpenIndividualSession, getBipIntake, getClosedIndividualSessions, getOpenIndividualSessions,
   getSessionTypes, saveOpenIndividualSession,
@@ -69,6 +70,7 @@ const formatDay = (ymd: string) => (ymd === todayLocal() ? 'Today' : new Date(`$
 // Assessments and individual sessions: one client per session, saved as open and then closed like a group check-in.
 // Closing records the attendance, the fee from the price list, and any payment.
 export default function AssessmentsIndividualsTab({ active, clients, employees, user, onSuccess, onError, onSaved }: Props) {
+  const employeeLabel = useEmployeeLabel();
   const isAdmin = user.role === 'Business Administrator';
   const blankForm = useCallback((category: IndividualCategory = 'Assessment'): FormState => ({
     openSessionId: null, category, clientId: '', sessionTypeId: '', date: todayLocal(), fee: '', payment: '',
@@ -560,7 +562,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                         <p className="text-sm font-semibold text-white truncate">{o.lastname}, {o.firstname}</p>
                         <p className="text-xs text-slate-300 truncate">{o.category} · {o.sessiontypename}</p>
                         <p className={`text-xs ${o.sessiondate === todayLocal() ? 'text-slate-400' : 'text-amber-400'}`}>{formatDay(o.sessiondate)}{o.provider ? ` · ${o.provider}` : ''}</p>
-                        <p className="text-[11px] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${o.createdby}` : ''}</p>
+                        <p className="text-[11px] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${employeeLabel(o.createdby)}` : ''}</p>
                       </div>
                       <button type="button" onClick={() => discard(o)} className="text-slate-500 hover:text-red-400 p-1 rounded shrink-0" aria-label={`Discard open ${o.category.toLowerCase()} for ${o.lastname}, ${o.firstname}`}>
                         <Trash2 size={14} />

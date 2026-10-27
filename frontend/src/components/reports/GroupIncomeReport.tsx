@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ChevronDown, ChevronRight, Landmark, Pencil, Printer, Trash2 } from 'lucide-react';
+import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { deleteGroupDeposit, getGroupDeposits, getGroupReport, saveGroupDeposit } from '../../api';
 import type { GroupDeposit, GroupReportRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
@@ -74,6 +75,7 @@ const totalsFor = (key: string, rows: GroupReportRow[]): GroupTotals => {
 
 // Only Business Administrators record, edit, or remove deposits; everyone else sees the status (the server checks too)
 export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { userEmail: string; canRecordDeposits: boolean }) {
+  const employeeLabel = useEmployeeLabel();
   const [from, setFrom] = useState(firstOfMonth);
   const [to, setTo] = useState(todayLocal);
   // One date instead of a range; from and to are kept equal while it's on
@@ -669,7 +671,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
                                       </span>
                                       <span className="text-slate-300">
                                         Deposited {money(deposited)} of {money(session.cash)} cash on {formatDate(deposit.depositdate)}
-                                        {deposit.recordedby && <span className="text-slate-500"> · recorded by {deposit.recordedby}</span>}
+                                        {deposit.recordedby && <span className="text-slate-500"> · recorded by {employeeLabel(deposit.recordedby)}</span>}
                                       </span>
                                       {deposit.notes && <span className="text-slate-400 italic">{deposit.notes}</span>}
                                       {canRecordDeposits && (

@@ -8,6 +8,7 @@ import { EMPTY_LEDGER_FILTERS, groupByMonth, sortedUnique, toggleInSet } from '.
 import { LEDGER_TONES, PAYMENT_REVERSAL_TYPES, cardPaymentStatus, formatMoney, ledgerBalanceChange, signedMoney } from '../../utils/ledger';
 import { formatBalance } from '../../utils/balance';
 import { formatDisplayTime, localYmd } from '../../utils/dates';
+import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { POLY_VOUCHER_MAX, slotSummary } from '../../utils/polygraph';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client, ledger, and slot rows are untyped throughout App */
@@ -45,6 +46,7 @@ const ACTION_SUBMIT_LABELS: Record<PaymentActionKind, string> = { adjust: 'Save 
 // The Financial Ledger tab of a client's account: entries by month, and (Business Administrators) corrections to a
 // payment: adjust a cash payment, or refund, dispute, and settle a dispute on a card payment
 export default function ClientLedger({ client, role, userEmail, financials, bookedSlot, canViewSlot, onViewSlot, onPaymentChanged, onSuccess }: Props) {
+  const employeeLabel = useEmployeeLabel();
   const [filters, setFilters] = useState(EMPTY_LEDGER_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
   // Months (YYYY-MM) the user has collapsed
@@ -228,7 +230,7 @@ export default function ClientLedger({ client, role, userEmail, financials, book
                       <p className="text-xs text-slate-400">{new Date(fin.date).toLocaleString()} — {fin.comments}</p>
                       {fin.adjustedon && (
                         <p className="text-xs text-amber-400 mt-1">
-                          Adjusted from {formatMoney(Number(fin.originalamount))} by {fin.adjustedby} on {new Date(fin.adjustedon).toLocaleDateString()}{fin.adjustmentreason ? `: ${fin.adjustmentreason}` : ''}
+                          Adjusted from {formatMoney(Number(fin.originalamount))} by {employeeLabel(fin.adjustedby)} on {new Date(fin.adjustedon).toLocaleDateString()}{fin.adjustmentreason ? `: ${fin.adjustmentreason}` : ''}
                         </p>
                       )}
                       {card && card.kept < Number(fin.amount) && (

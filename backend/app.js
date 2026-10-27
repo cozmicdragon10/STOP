@@ -32,5 +32,6 @@ app.use(require('./routes/testing'));
 app.use(require('./routes/reports'));
 app.use(require('./routes/admin'));
 app.use(require('./routes/agents'));
+app.use(require('./routes/documents'));
 
 module.exports = app;

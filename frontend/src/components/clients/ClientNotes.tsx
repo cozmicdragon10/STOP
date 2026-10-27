@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { Pencil, PlusCircle, SlidersHorizontal, Trash2 } from 'lucide-react';
-import { addClientNote, deleteClientNote, getClientNotes, updateClientNote } from '../../api';
+import { addClientNote, deleteClientNote, getClientNotes, reviewClientNote, updateClientNote } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
+import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { caseNoteLabel } from '../../utils/notes';
 import { EMPTY_NOTE_FILTERS, sortedUnique } from '../../utils/filters';
 import { formatLogMonthDay, formatLogTime, formatLogYear, localYmd } from '../../utils/dates';
@@ -14,6 +15,8 @@ interface Props {
   // Loaded by App with the rest of the account; other account actions (status changes, payments) add notes too
   notes: any[];
   setNotes: Dispatch<SetStateAction<any[]>>;
+  // A note went to, or came out of, the approval list; refreshes the count on the Client Directory
+  onApprovalChanged?: () => void;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -28,7 +31,12 @@ const defaultNoteCategory = (role: string) => (role === 'Business Administrator'
 const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 
 // The Case Notes tab of a client's account: filters, the new-note form, and in-place edit and delete
-export default function ClientNotes({ clientId, user, notes, setNotes }: Props) {
+export default function ClientNotes({ clientId, user, notes, setNotes, onApprovalChanged }: Props) {
+  const isBusinessAdmin = user.role === 'Business Administrator';
+  const employeeLabel = useEmployeeLabel();
+  // Shown above the list after a Counselor's note is sent for approval
+  const [pendingNotice, setPendingNotice] = useState(false);
+  const [reviewingId, setReviewingId] = useState<number | null>(null);
   const [filters, setFilters] = useState(EMPTY_NOTE_FILTERS);
   // The new-note form and the filter row stay closed until their buttons open them
   const [showForm, setShowForm] = useState(false);
@@ -53,7 +61,7 @@ export default function ClientNotes({ clientId, user, notes, setNotes }: Props) 
     if (filters.category && n.category !== filters.category) return false;
     if (filters.from && day < filters.from) return false;
     if (filters.to && day > filters.to) return false;
-    if (search && ![n.comments, n.User, caseNoteLabel(n)].some(v => String(v ?? '').toLowerCase().includes(search))) return false;
+    if (search && ![n.comments, n.User, employeeLabel(n.User), caseNoteLabel(n)].some(v => String(v ?? '').toLowerCase().includes(search))) return false;
     return true;
   }).sort((a, b) => {
     const diff = new Date(a.date).getTime() - new Date(b.date).getTime();
@@ -68,7 +76,9 @@ export default function ClientNotes({ clientId, user, notes, setNotes }: Props) 
     setAdding(true);
     setAddError('');
     try {
-      await addClientNote(clientId, { user: user.employeeemail, comments: newNoteText, category: newNoteCategory });
+      const saved = await addClientNote(clientId, { user: user.employeeemail, comments: newNoteText, category: newNoteCategory });
+      setPendingNotice(saved.approvalstatus === 'Pending');
+      if (saved.approvalstatus === 'Pending') onApprovalChanged?.();
       setNewNoteText('');
       setShowForm(false);
       setNotes(await getClientNotes(clientId));
@@ -97,13 +107,32 @@ export default function ClientNotes({ clientId, user, notes, setNotes }: Props) 
     }
   };
 
+  // Business Administrators approve or deny a pending note here or from the Client Directory's approval list.
+  // A denied note leaves the account.
+  const handleReview = async (noteId: number, decision: 'approve' | 'deny') => {
+    if (decision === 'deny' && !window.confirm('Deny this case note? It will no longer show on the account.')) return;
+    setReviewingId(noteId);
+    setNoteError(null);
+    try {
+      const saved = await reviewClientNote(noteId, { decision, user: user.employeeemail });
+      setNotes(list => (decision === 'deny' ? list.filter(n => n.noteid !== noteId) : list.map(n => (n.noteid === noteId ? saved : n))));
+      onApprovalChanged?.();
+    } catch (err) {
+      setNoteError({ noteId, message: errorText(err, 'Failed to review the note.') });
+    } finally {
+      setReviewingId(null);
+    }
+  };
+
   const handleDeleteNote = async (noteId: number) => {
     if (!window.confirm('Delete this case note? This cannot be undone.')) return;
     setNoteError(null);
     try {
       await deleteClientNote(noteId, user.employeeemail);
+      const removed = notes.find(n => n.noteid === noteId);
       setNotes(list => list.filter(n => n.noteid !== noteId));
       if (editingNoteId === noteId) setEditingNoteId(null);
+      if (removed?.approvalstatus === 'Pending') onApprovalChanged?.();
     } catch (err) {
       setNoteError({ noteId, message: errorText(err, 'Failed to delete the note.') });
     }
@@ -172,6 +201,12 @@ export default function ClientNotes({ clientId, user, notes, setNotes }: Props) 
         total={notes.length}
         onClear={() => setFilters(f => ({ ...EMPTY_NOTE_FILTERS, sort: f.sort }))}
       />}
+      {pendingNotice && (
+        <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex justify-between gap-3">
+          <span>This client hasn't attended this month, so your note was sent to a Business Administrator for approval. It shows on the account in the meantime.</span>
+          <button type="button" onClick={() => setPendingNotice(false)} className="shrink-0 text-amber-400 hover:text-white">Dismiss</button>
+        </p>
+      )}
       {shownNotes.length === 0 && notes.length > 0 && (
         <p className="text-center text-slate-500 text-sm py-4">No case notes match these filters.</p>
       )}
@@ -184,7 +219,18 @@ export default function ClientNotes({ clientId, user, notes, setNotes }: Props) 
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-xs text-blue-400 font-semibold">{caseNoteLabel(n)}</span>
+              <span className="flex items-center gap-2">
+                <span className="text-xs text-blue-400 font-semibold">{caseNoteLabel(n)}</span>
+                {n.approvalstatus === 'Pending' && (
+                  <span className="text-[10px] uppercase font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded">Awaiting approval</span>
+                )}
+                {n.approvalstatus === 'Pending' && isBusinessAdmin && editingNoteId !== n.noteid && (
+                  <span className="flex gap-1.5">
+                    <button type="button" disabled={reviewingId === n.noteid} onClick={() => handleReview(n.noteid, 'approve')} className="text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-2 py-0.5 rounded">Approve</button>
+                    <button type="button" disabled={reviewingId === n.noteid} onClick={() => handleReview(n.noteid, 'deny')} className="text-[11px] font-semibold bg-slate-800 hover:bg-red-600 border border-slate-700 disabled:opacity-50 text-slate-200 px-2 py-0.5 rounded">Deny</button>
+                  </span>
+                )}
+              </span>
               {canChangeNote(n) && editingNoteId !== n.noteid && (
                 <span className="flex gap-3 text-xs">
                   <button type="button" onClick={() => { setEditingNoteId(n.noteid); setEditNoteText(n.comments || ''); setNoteError(null); }} className="inline-flex items-center gap-1 text-slate-400 hover:text-white"><Pencil size={12} /> Edit</button>
@@ -205,8 +251,9 @@ export default function ClientNotes({ clientId, user, notes, setNotes }: Props) 
             )}
             {noteError && noteError.noteId === n.noteid && <p className="text-xs text-red-400 mt-1">{noteError.message}</p>}
             <p className="text-xs text-slate-500 text-right mt-2">
-              — {n.User}
-              {n.editedon && <span className="italic"> · edited {new Date(n.editedon).toLocaleString()}{n.editedby && n.editedby !== n.User ? ` by ${n.editedby}` : ''}</span>}
+              — {employeeLabel(n.User)}
+              {n.editedon && <span className="italic"> · edited {new Date(n.editedon).toLocaleString()}{n.editedby && n.editedby !== n.User ? ` by ${employeeLabel(n.editedby)}` : ''}</span>}
+              {n.approvalstatus === 'Approved' && n.reviewedon && <span className="italic"> · approved {new Date(n.reviewedon).toLocaleString()}{n.reviewedby ? ` by ${employeeLabel(n.reviewedby)}` : ''}</span>}
             </p>
           </div>
         </div>

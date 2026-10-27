@@ -3,6 +3,7 @@ import { getClientChangeLog } from '../../api';
 import type { ClientChange } from '../../api';
 import { CHANGE_LOG_TYPES } from '../../utils/clients';
 import { formatLogMonthDay, formatLogTime, formatLogYear } from '../../utils/dates';
+import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 
 interface Props {
   clientId: number;
@@ -14,6 +15,7 @@ const labelFor = (type: string) => CHANGE_LOG_TYPES.find(t => t.type === type)?.
 // The Change Log tab of a client's account (Business Administrators only; the server checks the role). Loaded each
 // time it is shown, so it includes changes made since the account was opened.
 export default function ClientChangeLog({ clientId, userEmail }: Props) {
+  const employeeLabel = useEmployeeLabel();
   const [changes, setChanges] = useState<ClientChange[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [filter, setFilter] = useState('');
@@ -79,7 +81,7 @@ export default function ClientChangeLog({ clientId, userEmail }: Props) {
               </p>
             )}
             {c.details && <p className="text-xs text-slate-400">{c.details}</p>}
-            <p className="text-xs text-slate-500 text-right">— {c.changedby}</p>
+            <p className="text-xs text-slate-500 text-right">— {employeeLabel(c.changedby)}</p>
           </div>
         </div>
       ))}

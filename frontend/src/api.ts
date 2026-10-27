@@ -203,6 +203,20 @@ export interface ClientNote {
     category: string;
     editedby: string | null;
     editedon: string | null;
+    // 'Pending' while a Counselor's note waits for a Business Administrator; null when no approval was needed
+    approvalstatus: 'Pending' | 'Approved' | 'Denied' | null;
+    reviewedby: string | null;
+    reviewedon: string | null;
+}
+
+// A note awaiting approval, with its client
+export interface PendingNote extends ClientNote {
+    firstname: string;
+    lastname: string;
+    docnumber: string | null;
+    programtype: string | null;
+    authorname: string | null;
+    lastattended: string | null;
 }
 
 export interface PolygraphResult {
@@ -1239,6 +1253,22 @@ export async function updateClientNote(noteId: number, data: { user: string; com
     return jsonResponse(res, 'Failed to save the note.');
 }
 
+// Business Administrators only; grouped by client (sorted by client name, then oldest note first)
+export async function getPendingNotes(): Promise<PendingNote[]> {
+    const res = await apiFetch(`${API_BASE}/notes/pending`);
+    return jsonResponse(res, 'Failed to load the notes awaiting approval.');
+}
+
+// Business Administrators only. Approving can save edited text with it.
+export async function reviewClientNote(noteId: number, data: { decision: 'approve' | 'deny'; comments?: string; user: string }): Promise<ClientNote> {
+    const res = await apiFetch(`${API_BASE}/notes/${noteId}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return jsonResponse(res, 'Failed to review the note.');
+}
+
 export async function deleteClientNote(noteId: number, user: string): Promise<{ success: true }> {
     const res = await apiFetch(`${API_BASE}/notes/${noteId}`, {
         method: 'DELETE',
@@ -1329,6 +1359,66 @@ export async function deleteClientAttachment(attachmentId: number, user: string)
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || 'Failed to delete the attachment.');
     }
+}
+
+// A blank form or document on the Forms page (not tied to a client)
+export interface LibraryDocument {
+    documentid: number;
+    filename: string;
+    contenttype: string;
+    filesize: number;
+    category: string;
+    description: string | null;
+    uploadedby: string | null;
+    uploadedon: string;
+}
+
+export async function getLibraryDocuments(): Promise<LibraryDocument[]> {
+    const res = await apiFetch(`${API_BASE}/documents`);
+    return jsonResponse(res, 'Could not load the forms.');
+}
+
+// Business Administrators and Office Admins only. Sent as raw bytes; the name, type, and category travel in headers.
+export async function uploadLibraryDocument(file: File, category: string): Promise<LibraryDocument> {
+    const res = await apiFetch(`${API_BASE}/documents`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/octet-stream',
+            'X-File-Name': encodeURIComponent(file.name),
+            'X-File-Type': file.type || 'application/octet-stream',
+            'X-Category': encodeURIComponent(category),
+        },
+        body: file,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || (res.status === 413 ? 'File is larger than 25 MB.' : `Upload failed (server responded ${res.status}).`));
+    return body;
+}
+
+// The file as a Blob typed with its saved content type, for viewing, downloading, or printing
+export async function fetchLibraryDocument(doc: LibraryDocument): Promise<Blob> {
+    const res = await apiFetch(`${API_BASE}/documents/${doc.documentid}`);
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Could not open the document.');
+    }
+    return new Blob([await res.arrayBuffer()], { type: doc.contenttype });
+}
+
+// Business Administrators and Office Admins only; the server keeps the original extension
+export async function updateLibraryDocument(id: number, changes: { fileName?: string; category?: string; description?: string }): Promise<LibraryDocument> {
+    const res = await apiFetch(`${API_BASE}/documents/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(changes),
+    });
+    return jsonResponse(res, 'Failed to save the document.');
+}
+
+// Business Administrators only
+export async function deleteLibraryDocument(id: number): Promise<{ success: true }> {
+    const res = await apiFetch(`${API_BASE}/documents/${id}`, { method: 'DELETE' });
+    return jsonResponse(res, 'Failed to delete the document.');
 }
 
 // A booking refusal the page acts on is marked with a code; any other refusal has only the error

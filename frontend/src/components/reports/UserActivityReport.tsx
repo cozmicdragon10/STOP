@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Printer } from 'lucide-react';
+import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { getUserActivity } from '../../api';
 import type { UserActivityRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
@@ -17,7 +18,6 @@ const money = (n: number) => `$${n.toFixed(2)}`;
 const cents = (n: number) => Math.round(n * 100) / 100;
 // Refunds and disputes take money back; a won dispute puts it back
 const signedAmount = (r: UserActivityRow) => (r.detail === 'Refund' || r.detail === 'Dispute' ? -1 : 1) * Number(r.amount || 0);
-const enteredByOf = (r: UserActivityRow) => r.enteredbyname || r.enteredby || NOT_RECORDED;
 const clientOf = (r: UserActivityRow) => (r.lastname || r.firstname ? `${r.lastname}, ${r.firstname}` : '—');
 const formatWhen = (value: string) => new Date(value).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
 const formatTime = (value: string) => new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -35,6 +35,9 @@ const firstOfMonth = () => `${todayLocal().slice(0, 7)}-01`;
 
 // Payments and client notes entered in the system, with who entered them and when (Business Administrators and Office Admins)
 export default function UserActivityReport<C extends { clientid: number }>({ userEmail, clients, onOpenClient }: Props<C>) {
+  const employeeLabel = useEmployeeLabel();
+  // "Display Name (Role)"; payments from before this was recorded have no one
+  const enteredByOf = (r: UserActivityRow) => (r.enteredby ? employeeLabel(r.enteredby) : NOT_RECORDED);
   const [from, setFrom] = useState(firstOfMonth);
   const [to, setTo] = useState(todayLocal);
   const [kind, setKind] = useState<'' | 'Payment' | 'Note'>('');
@@ -246,7 +249,7 @@ export default function UserActivityReport<C extends { clientid: number }>({ use
                 </td>
                 <td className="p-3 text-slate-300 min-w-[16rem] whitespace-pre-wrap break-words">
                   {r.comments || <span className="text-slate-500">—</span>}
-                  {r.editedon && <span className="block text-[11px] text-slate-500">Edited {formatWhen(r.editedon)}{r.editedbyname || r.editedby ? ` by ${r.editedbyname || r.editedby}` : ''}</span>}
+                  {r.editedon && <span className="block text-[11px] text-slate-500">Edited {formatWhen(r.editedon)}{r.editedby ? ` by ${employeeLabel(r.editedby)}` : ''}</span>}
                 </td>
               </tr>
               )),
