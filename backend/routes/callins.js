@@ -3,7 +3,7 @@ const { pool } = require('../db');
 
 const router = express.Router();
 
-// Optional call-in reasons. Keep in sync with CALL_IN_REASONS in frontend/src/App.tsx.
+// Optional call-in reasons. Keep in sync with CALL_IN_REASONS in frontend/src/utils/notes.ts (test/sharedRules.test.js checks).
 const CALL_IN_REASONS = ['Routine check-in', 'Missed appointment', 'Reschedule request', 'Transportation issue', 'Work conflict', 'Other'];
 
 router.post('/api/callin/client', async (req, res) => {

@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import {
   loginUser, logoutUser, setSessionEndedHandler, getClients, getGroups, submitAccountPayment, submitCustomCharge,
-  submitClientCallIn, submitGroupCallIn, getPolygraphSlots, createPolygraphSlot,
+  getPolygraphSlots, createPolygraphSlot,
   submitPolygraphResult, deletePolygraphSlot, assignPolygraphSlot, reopenPolygraphSlot,
   getClientAttendance, getClientFinancials, adjustCashPayment, recordCardPaymentAction,
   getClientNotes, addClientNote, updateClientNote, deleteClientNote, getClientPolygraphs, getGroupClients, updateGroup, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
@@ -25,9 +25,9 @@ import { SO_PHASES, SO_TREATMENT_FEES } from './utils/soPhases';
 import CardPaymentFields from './components/payments/CardPaymentFields';
 import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
 import SupervisingAgentsTab from './components/agents/SupervisingAgentsTab';
+import CallInTab from './components/callin/CallInTab';
 import AgentPicker from './components/agents/AgentPicker';
 import ClientPicker from './components/ClientPicker';
-import GroupPicker from './components/GroupPicker';
 import RecordFilterBar from './components/clients/RecordFilterBar';
 import MonthHeader from './components/clients/MonthHeader';
 import GroupIncomeReport from './components/reports/GroupIncomeReport';
@@ -46,7 +46,7 @@ import {
   isAttendanceOverdue, GROUP_TYPES_BY_PROGRAM,
 } from './utils/clients';
 import { reportTabsFor, currentReportFor } from './utils/reports';
-import { caseNoteLabel, CALL_IN_REASONS } from './utils/notes';
+import { caseNoteLabel } from './utils/notes';
 import { DEFAULT_GROUP_FILTERS, EMPTY_NOTE_FILTERS, EMPTY_ATTENDANCE_FILTERS, EMPTY_LEDGER_FILTERS, sortedUnique, groupByMonth, toggleInSet } from './utils/filters';
 import {
   localYmd, timeBetween, getLocalDateString, getLocalTimeString, getDefaultPolyTime, parseLogDate, formatLogMonthDay, formatLogYear,
@@ -179,7 +179,6 @@ export default function App() {
   const chargeCurrentBalance = Number(chargeClientRecord?.accountbalance || 0);
   const balanceAfterCharge = chargeCurrentBalance + chargeAmount;
   const [selectedClient, setSelectedClient] = useState('');
-  const [selectedGroup, setSelectedGroup] = useState('');
   const [paymentInput, setPaymentInput] = useState('');
   const paymentAmount = Number(paymentInput) || 0;
   const selectedClientRecord = clients.find(c => c.clientid === Number(selectedClient));
@@ -193,13 +192,6 @@ export default function App() {
   const [cardBilling, setCardBilling] = useState(emptyCardBilling);
   // Set only after a payment is saved to the account; drives the receipt printout
   const [lastPayment, setLastPayment] = useState<null | { clientName: string; docNumber: string; amount: number; method: string; notes: string; newBalance: number; processedBy: string; date: string }>(null);
-
-  // Call-In State
-  const [callInMode, setCallInMode] = useState<'client' | 'group'>('client');
-  const [callInComment, setCallInComment] = useState('');
-  const [callInReason, setCallInReason] = useState('');
-  // Optional, group call-ins only: the day the call-in is for when the group meets on another day
-  const [groupCallInDate, setGroupCallInDate] = useState('');
 
   // Polygraph State
   const [polySubTab, setPolySubTab] = useState<'admin' | 'schedule' | 'results'>('schedule');
@@ -1398,26 +1390,6 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleCallInSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    // Typed text that was never picked from the list leaves no client or group selected
-    if (callInMode === 'client' ? !selectedClient : !selectedGroup) return;
-    setLoading(true);
-    if (callInMode === 'client') {
-      await submitClientCallIn({ client: Number(selectedClient), date: new Date(), comment: callInComment, createdBy: user.employeeemail, reason: callInReason || null });
-      setSuccessMsg('Client call-in logged successfully!');
-    } else {
-      const res = await submitGroupCallIn({ group: Number(selectedGroup), date: new Date(), comment: callInComment, createdBy: user.employeeemail, reason: callInReason || null, callInDate: groupCallInDate || null });
-      const forText = res.forDate ? ` for ${new Date(`${res.forDate}T00:00:00`).toLocaleDateString()}` : '';
-      setSuccessMsg(`Group call-in logged${forText} for ${res.count} active clients!`);
-    }
-    setCallInComment('');
-    setCallInReason('');
-    setGroupCallInDate('');
-    loadDashboardData();
-    setLoading(false);
   };
 
   // Scrolls to and briefly outlines a slot opened from a client's account. Kept above the sign-in return so the hook count never changes.
@@ -4085,71 +4057,12 @@ export default function App() {
 
         {/* CALL-IN MODULE TAB */}
         {activeTab === 'callin' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-xl max-w-2xl mx-auto overflow-hidden">
-            <div className="p-6 border-b border-slate-800 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4">
-              <div>
-                <h2 className="text-lg font-bold text-white">Call-In Log</h2>
-                <p className="text-xs text-slate-400 mt-1">Record a call-in for one client or for every active client in a group. Entries are saved to the client's notes and event log.</p>
-              </div>
-              <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
-                <button type="button" onClick={() => setCallInMode('client')} className={`px-3 py-1.5 rounded text-xs font-semibold transition ${callInMode === 'client' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>Client</button>
-                <button type="button" onClick={() => setCallInMode('group')} className={`px-3 py-1.5 rounded text-xs font-semibold transition ${callInMode === 'group' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>Group</button>
-              </div>
-            </div>
-
-            <form onSubmit={handleCallInSubmit} className="p-6 space-y-5">
-              {callInMode === 'client' ? (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Client</label>
-                  <ClientPicker
-                    clients={clients}
-                    value={selectedClient}
-                    onChange={setSelectedClient}
-                    required
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm placeholder-slate-500"
-                  />
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Group</label>
-                  <GroupPicker
-                    groups={activeGroups}
-                    value={selectedGroup}
-                    onChange={setSelectedGroup}
-                    required
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm placeholder-slate-500"
-                  />
-                  {selectedGroup && (
-                    <p className="text-xs text-slate-500 mt-1.5">
-                      Will be logged for {clients.filter(c => c.groupid === Number(selectedGroup) && c.programstatus === 'Active').length} active client(s) in this group.
-                    </p>
-                  )}
-                  <div className="mt-4">
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Call-In Is For <span className="normal-case font-normal text-slate-500">(optional)</span></label>
-                    <input type="date" value={groupCallInDate} onChange={(e) => setGroupCallInDate(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" />
-                    <p className="text-xs text-slate-500 mt-1.5">Leave blank for today. Set a date if the group meets on another day. It is still logged today and the date is noted on the entry.</p>
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Reason <span className="normal-case font-normal text-slate-500">(optional)</span></label>
-                <select value={callInReason} onChange={(e) => setCallInReason(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm">
-                  <option value="">No reason selected</option>
-                  {CALL_IN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Details</label>
-                <textarea value={callInComment} onChange={(e) => setCallInComment(e.target.value)} rows={4} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" placeholder="What did the client report?" required />
-              </div>
-
-              <div className="flex justify-end pt-4 border-t border-slate-800">
-                <button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm">Submit Call-In</button>
-              </div>
-            </form>
-          </div>
+          <CallInTab
+            clients={clients}
+            groups={activeGroups}
+            user={user}
+            onLogged={(message) => { setSuccessMsg(message); loadDashboardData(); }}
+          />
         )}
 
         {/* GROUPS MODULE TAB */}
