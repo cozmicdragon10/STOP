@@ -14,9 +14,9 @@ import {
   deleteClient,
   getEmployees, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
   fetchPolyFeeOverride, savePolyFeeOverride, deletePolyFeeOverride,
-  getOpenGroups, deleteOpenGroup, getClosedGroups, getClientChangeLog, getSupervisingAgents
+  getOpenGroups, deleteOpenGroup, getClosedGroups, getSupervisingAgents
 } from './api';
-import type { CardPaymentAction, ClientChange, ClosedGroupSession, OpenGroupSession, PaymentChangeResult, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
+import type { CardPaymentAction, ClosedGroupSession, OpenGroupSession, PaymentChangeResult, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
@@ -40,13 +40,14 @@ import MonthHeader from './components/clients/MonthHeader';
 import ReportsTab from './components/reports/ReportsTab';
 import ClientRoster from './components/clients/ClientRoster';
 import ClientAttachments from './components/clients/ClientAttachments';
+import ClientChangeLog from './components/clients/ClientChangeLog';
 import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividualsTab';
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
 import BipAssessmentPicker, { bipChoiceProblem, counselorChoices as bipCounselorChoices, openBipAssessment } from './components/sessions/BipAssessmentPicker';
 import type { BipAssessmentChoice } from './components/sessions/BipAssessmentPicker';
 import {
-  EDITABLE_PROGRAM_STATUSES, DISCHARGE_STATUSES, DISCHARGE_SUBCATEGORIES, CHANGE_LOG_TYPES, SO_PROGRAM_TYPES,
+  EDITABLE_PROGRAM_STATUSES, DISCHARGE_STATUSES, DISCHARGE_SUBCATEGORIES,SO_PROGRAM_TYPES,
   STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase, CLIENT_FIELD_OPTIONS, SO_ATTENDANCE_LIMIT_MONTHS,
   isAttendanceOverdue, GROUP_TYPES_BY_PROGRAM,
 } from './utils/clients';
@@ -92,10 +93,6 @@ export default function App() {
   const [selectedClientDetail, setSelectedClientDetail] = useState<any>(null);
   const [showClientPayment, setShowClientPayment] = useState(false);
   const [clientTab, setClientTab] = useState<'information' | 'progress' | 'attendance' | 'financials' | 'notes' | 'polygraphs' | 'attachments' | 'changelog'>('information');
-  // Change Log tab (Business Administrators only); filter '' shows every type
-  const [clientChangeLog, setClientChangeLog] = useState<ClientChange[]>([]);
-  const [changeLogFilter, setChangeLogFilter] = useState('');
-  const [changeLogStatus, setChangeLogStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [clientAttendance, setClientAttendance] = useState<any[]>([]);
   const [clientFinancials, setClientFinancials] = useState<any[]>([]);
   const [clientNotes, setClientNotes] = useState<any[]>([]);
@@ -421,9 +418,8 @@ export default function App() {
       setClientInfoForm((f: any) => (f && f.clientid === clientid ? { ...f, programstatus } : f));
       setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, programstatus } : c));
       setClientNotes(await getClientNotes(clientid));
-      if (clientTab === 'changelog') await openChangeLog();
-      // Discharging also saves a discharge summary PDF to the client's attachments
-      setAttachmentsVersion(v => v + 1);
+      // Reload the Attachments and Change Log tabs: discharging saves a discharge summary PDF, and both log the change
+      setAccountTabsVersion(v => v + 1);
       setStatusDialog(null);
       setSuccessMsg(statusDialog === 'activate'
         ? `${selectedClientDetail.firstname} ${selectedClientDetail.lastname} set to ${programstatus}.`
@@ -445,28 +441,10 @@ export default function App() {
     }
   };
 
-  // Loaded each time the tab is opened so it includes changes made since the drawer opened
-  const openChangeLog = async () => {
-    if (!selectedClientDetail) return;
-    setClientTab('changelog');
-    setChangeLogStatus('loading');
-    try {
-      setClientChangeLog(await getClientChangeLog(selectedClientDetail.clientid, user.employeeemail));
-      setChangeLogStatus('ready');
-    } catch (err: any) {
-      setClientChangeLog([]);
-      setChangeLogStatus('error');
-      setError(err.message || 'Failed to load the change log.');
-    }
-  };
-
   // Drawer Log Loading
   const openClientLogs = async (client: any) => {
     setNoPolyOverride(false);
     setStatusDialog(null);
-    setChangeLogFilter('');
-    setClientChangeLog([]);
-    setChangeLogStatus('idle');
     setNoteFilters(EMPTY_NOTE_FILTERS);
     setShowNoteForm(false);
     setShowNoteFilters(false);
@@ -528,8 +506,8 @@ export default function App() {
     setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, ...changes } : c));
   };
 
-  // Bumped after a discharge saves a discharge summary PDF, so the Attachments tab reloads if it is showing
-  const [attachmentsVersion, setAttachmentsVersion] = useState(0);
+  // Bumped after a program status change so the Attachments and Change Log tabs reload if showing
+  const [accountTabsVersion, setAccountTabsVersion] = useState(0);
 
   const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1202,7 +1180,7 @@ export default function App() {
                 )}
                 <button onClick={() => setClientTab('attachments')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'attachments' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Paperclip size={14} /> Attachments</button>
                 {role === 'Business Administrator' && (
-                  <button onClick={openChangeLog} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'changelog' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><History size={14} /> Change Log</button>
+                  <button onClick={() => setClientTab('changelog')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'changelog' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><History size={14} /> Change Log</button>
                 )}
               </div>
 
@@ -2494,7 +2472,7 @@ export default function App() {
 
               {clientTab === 'attachments' && (
                 <ClientAttachments
-                  key={`${selectedClientDetail.clientid}-${attachmentsVersion}`}
+                  key={`${selectedClientDetail.clientid}-${accountTabsVersion}`}
                   clientId={selectedClientDetail.clientid}
                   userEmail={user.employeeemail}
                   canDelete={role === 'Business Administrator'}
@@ -2502,60 +2480,9 @@ export default function App() {
                 />
               )}
 
-              {clientTab === 'changelog' && role === 'Business Administrator' && (() => {
-                const shown = clientChangeLog.filter(c => !changeLogFilter || c.changetype === changeLogFilter);
-                const labelFor = (type: string) => CHANGE_LOG_TYPES.find(t => t.type === type)?.label || type;
-                return (
-                  <div className="space-y-3">
-                    {/* One filter per change type; counts reflect the whole log */}
-                    <div className="flex flex-wrap gap-2">
-                      {[{ type: '', label: 'All' }, ...CHANGE_LOG_TYPES].map(({ type, label }) => {
-                        const count = type ? clientChangeLog.filter(c => c.changetype === type).length : clientChangeLog.length;
-                        const active = changeLogFilter === type;
-                        return (
-                          <button
-                            key={type || 'all'}
-                            type="button"
-                            onClick={() => setChangeLogFilter(type)}
-                            className={`px-3 py-1.5 rounded-full border text-xs font-semibold transition ${active ? 'border-blue-500 bg-blue-500/15 text-blue-300' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'}`}
-                          >
-                            {label} <span className="text-slate-500">({count})</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {changeLogStatus === 'loading' ? (
-                      <p className="text-sm text-slate-500">Loading change log...</p>
-                    ) : changeLogStatus === 'error' ? (
-                      <button type="button" onClick={openChangeLog} className="text-sm text-blue-400 hover:underline">Could not load the change log. Retry</button>
-                    ) : shown.length === 0 ? (
-                      <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-xl p-6 text-center">
-                        {changeLogFilter ? `No ${labelFor(changeLogFilter)} changes recorded.` : 'No changes recorded for this client yet.'}
-                      </p>
-                    ) : shown.map((c, i) => (
-                      <div key={c.changeid ?? `expired-${i}`} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex gap-5">
-                        <div className="shrink-0 w-28 flex flex-col justify-center border-r border-slate-800 pr-5">
-                          <p className="text-2xl font-bold text-white leading-tight">{formatLogMonthDay(c.changedon)}</p>
-                          <p className="text-sm text-slate-400 mt-0.5">{formatLogYear(c.changedon)}</p>
-                          <p className="text-xs text-slate-500 mt-1">{formatLogTime(c.changedon)}</p>
-                        </div>
-                        <div className="flex-1 min-w-0 space-y-1">
-                          <span className="text-xs text-blue-400 font-semibold">{labelFor(c.changetype)}</span>
-                          {(c.oldvalue || c.newvalue) && (
-                            <p className="text-slate-200">
-                              {c.oldvalue && <><span className="text-slate-400 line-through">{c.oldvalue}</span><span className="text-slate-500"> → </span></>}
-                              <span className="font-semibold text-white">{c.newvalue}</span>
-                            </p>
-                          )}
-                          {c.details && <p className="text-xs text-slate-400">{c.details}</p>}
-                          <p className="text-xs text-slate-500 text-right">— {c.changedby}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
+              {clientTab === 'changelog' && role === 'Business Administrator' && (
+                <ClientChangeLog key={`${selectedClientDetail.clientid}-${accountTabsVersion}`} clientId={selectedClientDetail.clientid} userEmail={user.employeeemail} />
+              )}
             </div>
           </div>
         )}
