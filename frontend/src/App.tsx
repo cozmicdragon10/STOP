@@ -8,7 +8,7 @@ import {
 import {
   loginUser, logoutUser, setSessionEndedHandler, getClients, getGroups, submitAccountPayment, submitCustomCharge,
   getPolygraphSlots,
-  submitPolygraphResult, deletePolygraphSlot, assignPolygraphSlot, reopenPolygraphSlot,
+  deletePolygraphSlot, assignPolygraphSlot, reopenPolygraphSlot,
   getClientAttendance, getClientFinancials, adjustCashPayment, recordCardPaymentAction,
   getClientNotes, addClientNote, updateClientNote, deleteClientNote, getClientPolygraphs, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
   createClient, deleteClient,
@@ -30,6 +30,7 @@ import GroupsTab from './components/groups/GroupsTab';
 import TestingTab from './components/testing/TestingTab';
 import AdminTab from './components/admin/AdminTab';
 import PolySlotForm from './components/polygraph/PolySlotForm';
+import PolyResults from './components/polygraph/PolyResults';
 import AgentPicker from './components/agents/AgentPicker';
 import ClientPicker from './components/ClientPicker';
 import RecordFilterBar from './components/clients/RecordFilterBar';
@@ -53,7 +54,7 @@ import {
 } from './utils/dates';
 import { signedMoney, attendanceBalanceChange, PAYMENT_REVERSAL_TYPES, LEDGER_TONES, cardPaymentStatus, ledgerBalanceChange } from './utils/ledger';
 import {
-  polygraphHistoryText, polygraphNotice, POLY_VOUCHER_MAX, POLY_CANCEL_REASONS, POLY_INCENTIVE_OVERRIDE_RESULTS, POLY_CANCEL_NOTICE_HOURS,
+  polygraphHistoryText, polygraphNotice, POLY_VOUCHER_MAX, POLY_CANCEL_REASONS, POLY_CANCEL_NOTICE_HOURS,
   slotStart, polyVoucherReturnRule,
 } from './utils/polygraph';
 
@@ -222,14 +223,6 @@ export default function App() {
   // Business Administrator override of the voucher return the cancellation reason would otherwise lock
   const [reopenVoucherOverride, setReopenVoucherOverride] = useState(false);
   const [slotTypes, setSlotTypes] = useState<{ [slotId: number]: string }>({});
-
-  // Active slot selected on Poly Results tab
-  const [selectedSlotForResults, setSelectedSlotForResults] = useState<any>(null);
-  const [resResultType, setResResultType] = useState('No Deception Indicated');
-  // Incentive program continuation on an Inconclusive or No Opinion result: unchecked and locked unless a Business Administrator overrides
-  const [resIncentiveContinued, setResIncentiveContinued] = useState(false);
-  const [resIncentiveOverride, setResIncentiveOverride] = useState(false);
-  const [resNotes, setResNotes] = useState('');
 
   // Inactive groups stay in the directory but are hidden from every picker for new assignments and sessions
   const activeGroups = groups.filter(g => g.active !== false);
@@ -460,9 +453,6 @@ export default function App() {
         setSuccessMsg(res.reopened === false
           ? 'Reservation cancelled. The appointment time has passed, so the slot was closed instead of reopened.'
           : 'Reservation cancelled. Polygraph slot is now open for new bookings!');
-        if (selectedSlotForResults?.slotid === slotId) {
-          setSelectedSlotForResults(null);
-        }
         // Clients are reloaded too: cancelling can return the booking's poly fee vouchers
         const [freshSlots, freshClients] = await Promise.all([getPolygraphSlots(), getClients()]);
         setPolySlots(freshSlots);
@@ -486,9 +476,6 @@ export default function App() {
         setError(res.error);
       } else {
         setSuccessMsg('Open polygraph slot deleted successfully!');
-        if (selectedSlotForResults?.slotid === slotId) {
-          setSelectedSlotForResults(null);
-        }
         const freshSlots = await getPolygraphSlots();
         setPolySlots(freshSlots);
       }
@@ -498,50 +485,6 @@ export default function App() {
       setLoading(false);
     }
   };
-
-  const handlePolyResultSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  if (!selectedSlotForResults) {
-    setError('Please select an assigned polygraph slot first.');
-    return;
-  }
-
-  const clientId = Number(selectedSlotForResults.assignedClientId);
-  if (!(clientId > 0)) {
-    setError('This slot has no assigned client, so the result cannot be recorded.');
-    return;
-  }
-
-  try {
-    const res = await submitPolygraphResult({
-      client: clientId,
-      date: new Date().toISOString().split('T')[0],
-      type: selectedSlotForResults.type || 'Maintenance',
-      results: resResultType,
-      polygrapher: selectedSlotForResults.polygrapher || user.employeeemail,
-      notes: resNotes,
-      // The server reads the polygraph's date and time from the slot
-      slotId: selectedSlotForResults.slotid,
-      incentiveContinued: POLY_INCENTIVE_OVERRIDE_RESULTS.includes(resResultType) && resIncentiveOverride && resIncentiveContinued,
-      user: user.employeeemail
-    });
-    // Keep the slot unless the result was saved, so nothing is lost
-    if (res?.error) throw new Error(res.error);
-
-    if (selectedSlotForResults.slotid) {
-      await deletePolygraphSlot(selectedSlotForResults.slotid);
-    }
-
-    setSelectedSlotForResults(null);
-    setResNotes('');
-    setResIncentiveContinued(false);
-    setResIncentiveOverride(false);
-    setSuccessMsg('Polygraph result recorded and slot removed permanently!');
-    loadDashboardData();
-  } catch (err: any) {
-    setError(err.message || 'Error completing polygraph slot.');
-  }
-};
 
   // New client form state. Program status and program type start at the most common values.
   // Start date defaults to today's local date, computed each time the form is reset.
@@ -3966,116 +3909,16 @@ export default function App() {
             )}
 
             {polySubTab === 'results' && (
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-sm font-semibold text-blue-400">Assigned Polygraph Appointments Pending Results</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Select an assigned client appointment to complete and record test results.</p>
-                </div>
-
-                {assignedSlots.length === 0 ? (
-                  <div className="bg-slate-950 border border-slate-800 p-8 rounded-xl text-center">
-                    <CheckCircle2 size={32} className="mx-auto text-slate-600 mb-2" />
-                    <p className="text-slate-400 text-sm">No assigned polygraph appointments pending results.</p>
-                    <p className="text-xs text-slate-500 mt-1">Assign clients to open slots under the Poly Schedule tab first.</p>
-                  </div>
-                ) : (
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
-                      <thead>
-                        <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
-                          <th className="p-3">Client</th>
-                          <th className="p-3">Type</th>
-                          <th className="p-3">Location</th>
-                          <th className="p-3">Scheduled</th>
-                          <th className="p-3">Examiner</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800 text-sm">
-                        {assignedSlots.map(slot => (
-                          <tr
-                            key={slot.slotid}
-                            onClick={() => { setSelectedSlotForResults(slot); setResIncentiveContinued(false); setResIncentiveOverride(false); }}
-                            className={`transition cursor-pointer ${selectedSlotForResults?.slotid === slot.slotid ? 'bg-blue-500/10' : 'hover:bg-slate-800/50'}`}>
-                            <td className="p-3 font-medium text-white">{slot.assignedClientName}</td>
-                            <td className="p-3"><span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-xs">{slot.type || 'Polygraph'}</span></td>
-                            <td className="p-3 text-slate-400">{slot.location}</td>
-                            <td className="p-3 text-slate-300">{new Date(slot.date).toLocaleDateString()} @ {formatDisplayTime(slot.time)}</td>
-                            <td className="p-3 text-slate-300">{getExaminerDisplayName(slot.polygrapher)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                {selectedSlotForResults && (
-                  <form onSubmit={handlePolyResultSubmit} className="bg-slate-950 border border-blue-500/40 p-6 rounded-xl space-y-4 max-w-2xl mt-6">
-                    <div className="border-b border-slate-800 pb-3 flex justify-between items-center">
-                      <h4 className="font-bold text-white">Record Results for {selectedSlotForResults.assignedClientName}</h4>
-                      <span className="text-xs text-slate-400">{selectedSlotForResults.type} Exam</span>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs text-slate-400 uppercase mb-1">Polygraph Examination Result</label>
-                      <select value={resResultType} onChange={(e) => { setResResultType(e.target.value); setResIncentiveContinued(false); setResIncentiveOverride(false); }} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm">
-                        <option value="No Deception Indicated">No Deception Indicated (NDI)</option>
-                        <option value="Deception Indicated">Deception Indicated (DI)</option>
-                        <option value="Inconclusive">Inconclusive (INC)</option>
-                        <option value="No Opinion">No Opinion (NO)</option>
-                        <option value="No Significant Response">No Significant Response (NSR)</option>
-                      </select>
-                    </div>
-
-                    {POLY_INCENTIVE_OVERRIDE_RESULTS.includes(resResultType) && (
-                      <div>
-                        <div className="flex items-center justify-between gap-2">
-                          <label className={`flex items-center gap-2 text-sm text-slate-200 ${resIncentiveOverride ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                            <input type="checkbox" checked={resIncentiveOverride && resIncentiveContinued} disabled={!resIncentiveOverride} onChange={(e) => setResIncentiveContinued(e.target.checked)} className="accent-blue-500 disabled:opacity-60" />
-                            Incentive Program Continuation
-                          </label>
-                          {role === 'Business Administrator' && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (resIncentiveOverride) setResIncentiveContinued(false);
-                                setResIncentiveOverride(!resIncentiveOverride);
-                              }}
-                              className="text-xs font-semibold px-2 py-1 rounded border border-amber-500/40 text-amber-400 hover:bg-amber-500/10"
-                            >
-                              {resIncentiveOverride ? 'Undo Override' : 'Override'}
-                            </button>
-                          )}
-                        </div>
-                        <p className="text-xs text-slate-500 mt-1 ml-6">
-                          {resIncentiveOverride
-                            ? 'Business Administrator override: checked keeps the client earning poly fee vouchers as if the result were NDI.'
-                            : `Locked unchecked for ${resResultType} results.`}
-                        </p>
-                      </div>
-                    )}
-
-                    <div>
-                      <label className="block text-xs text-slate-400 uppercase mb-1">Examiner Clinical Notes & Observations</label>
-                      <textarea value={resNotes} onChange={(e) => setResNotes(e.target.value)} placeholder="Type examiner notes and exam observations..." rows={4} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required />
-                    </div>
-
-                    <div className="flex gap-3 pt-2">
-                      <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2.5 rounded-lg text-sm">
-                        Save Polygraph Result & Close Slot
-                      </button>
-                      <button 
-                        type="button" 
-                        onClick={() => handleReopenSlot(selectedSlotForResults.slotid)} 
-                        className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-600/40 px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition">
-                        <RotateCcw size={15} /> Cancel Reservation & Reopen
-                      </button>
-                      <button type="button" onClick={() => setSelectedSlotForResults(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2.5 rounded-lg text-sm">
-                        Close
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
+              <PolyResults
+                slots={assignedSlots}
+                role={role}
+                userEmail={user.employeeemail}
+                examinerName={getExaminerDisplayName}
+                onCancelReservation={handleReopenSlot}
+                onRecorded={loadDashboardData}
+                onSuccess={setSuccessMsg}
+                onError={setError}
+              />
             )}
           </div>
         )}
