@@ -10,7 +10,7 @@ import {
   getPolygraphSlots,
   deletePolygraphSlot,
   getClientAttendance, getClientFinancials, adjustCashPayment, recordCardPaymentAction,
-  getClientNotes, getClientPolygraphs, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
+  getClientNotes, getClientPolygraphs, updateClient, changeClientProgramStatus,
   deleteClient,
   getEmployees, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
   fetchPolyFeeOverride, savePolyFeeOverride, deletePolyFeeOverride,
@@ -43,6 +43,7 @@ import ClientAttachments from './components/clients/ClientAttachments';
 import ClientChangeLog from './components/clients/ClientChangeLog';
 import ClientNotes from './components/clients/ClientNotes';
 import ClientAttendanceHistory from './components/clients/ClientAttendanceHistory';
+import ClientPolygraphs from './components/clients/ClientPolygraphs';
 import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividualsTab';
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
@@ -55,11 +56,10 @@ import {
 } from './utils/clients';
 import { EMPTY_LEDGER_FILTERS, sortedUnique, groupByMonth, toggleInSet } from './utils/filters';
 import {
-  localYmd, timeBetween, getLocalDateString, parseLogDate, formatLogMonthDay, formatLogYear,
-  formatDisplayTime, toLocalDay, ageFromBirthDate,
+  localYmd, getLocalDateString, parseLogDate, formatDisplayTime, toLocalDay, ageFromBirthDate,
 } from './utils/dates';
 import { signedMoney, PAYMENT_REVERSAL_TYPES, LEDGER_TONES, cardPaymentStatus, ledgerBalanceChange } from './utils/ledger';
-import { polygraphHistoryText, polygraphNotice, POLY_VOUCHER_MAX, polySchedulingNeeds, slotStart } from './utils/polygraph';
+import { polygraphHistoryText, polygraphNotice, POLY_VOUCHER_MAX, slotStart, slotSummary } from './utils/polygraph';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -124,10 +124,6 @@ export default function App() {
   const [polyOverrideFee, setPolyOverrideFee] = useState('');
   const [polyOverrideFills, setPolyOverrideFills] = useState('1');
   const [polyOverrideError, setPolyOverrideError] = useState('');
-  // Scheduling a polygraph from the client account's Polygraphs section
-  const [drawerPolySlot, setDrawerPolySlot] = useState('');
-  const [drawerPolyType, setDrawerPolyType] = useState('Maintenance');
-  const [drawerPolyComment, setDrawerPolyComment] = useState('');
 
   // Attendance State
   const [isAccountOnly, setIsAccountOnly] = useState(false);
@@ -293,8 +289,6 @@ export default function App() {
     onAssigned: (freshClients) => {
       // Scheduled from the client's account: show the booking and the spent vouchers there too
       setSelectedClientDetail((c: any) => (c ? { ...c, ...(freshClients.find((fc: any) => fc.clientid === c.clientid) ?? {}) } : c));
-      setDrawerPolySlot('');
-      setDrawerPolyComment('');
     },
     onSuccess: setSuccessMsg,
     onError: setError,
@@ -349,25 +343,14 @@ export default function App() {
     loadDashboardData();
   };
 
-  // No Poly Required stays locked until a Business Administrator overrides it; each change is saved right away
-  const [noPolyOverride, setNoPolyOverride] = useState(false);
-  const [noPolySaving, setNoPolySaving] = useState(false);
-  const handleNoPolyRequiredChange = async (checked: boolean) => {
+  // No Poly Required was saved from the account's Polygraphs tab
+  const handleNoPolyRequiredSaved = async (saved: boolean) => {
     if (!selectedClientDetail) return;
     const clientid = selectedClientDetail.clientid;
-    setNoPolySaving(true);
-    try {
-      const saved = await setClientNoPolyRequired(clientid, checked, user.employeeemail);
-      setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, nopolyrequired: saved } : c));
-      setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, nopolyrequired: saved } : c));
-      setClientNotes(await getClientNotes(clientid));
-      setNoPolyOverride(false);
-      setSuccessMsg(`No Poly Required ${saved ? 'checked' : 'unchecked'} for ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}.`);
-    } catch (err: any) {
-      setError(err.message || 'Failed to update No Poly Required.');
-    } finally {
-      setNoPolySaving(false);
-    }
+    setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, nopolyrequired: saved } : c));
+    setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, nopolyrequired: saved } : c));
+    setSuccessMsg(`No Poly Required ${saved ? 'checked' : 'unchecked'} for ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}.`);
+    setClientNotes(await getClientNotes(clientid));
   };
 
   // A discharged client's program status is locked; only the Activate button changes it
@@ -430,7 +413,6 @@ export default function App() {
 
   // Drawer Log Loading
   const openClientLogs = async (client: any) => {
-    setNoPolyOverride(false);
     setStatusDialog(null);
     setCollapsedLedgerMonths(new Set());
     setShowLedgerFilters(false);
@@ -449,9 +431,6 @@ export default function App() {
     setClientPolyOverride(null);
     setShowPolyOverrideForm(false);
     setPolyOverrideError('');
-    setDrawerPolySlot('');
-    setDrawerPolyType('Maintenance');
-    setDrawerPolyComment('');
     const [att, fin, notes, polys] = await Promise.all([
       getClientAttendance(client.clientid),
       getClientFinancials(client.clientid),
@@ -705,9 +684,6 @@ export default function App() {
     setActiveTab('polygraph');
     setHighlightedSlotId(slotId);
   };
-
-  const slotSummary = (slot: any) =>
-    `${new Date(slot.date).toLocaleDateString()} @ ${formatDisplayTime(slot.time)}${slot.location ? ` · ${slot.location}` : ''}`;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -1995,176 +1971,23 @@ export default function App() {
               )}
 
               {clientTab === 'polygraphs' && selectedClientDetail.programtype !== 'BIP' && (
-                <div className="space-y-3">
-                  <div className="bg-slate-950 border border-slate-800 px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <label className={`flex items-center gap-1.5 text-slate-200 whitespace-nowrap ${noPolyOverride && !noPolySaving ? 'cursor-pointer' : 'cursor-not-allowed'}`}>
-                        <input
-                          type="checkbox"
-                          checked={!!selectedClientDetail.nopolyrequired}
-                          disabled={!noPolyOverride || noPolySaving}
-                          onChange={e => handleNoPolyRequiredChange(e.target.checked)}
-                          className="accent-blue-500 disabled:opacity-60"
-                        />
-                        No Poly Required
-                      </label>
-                      <span className="text-slate-500 truncate">
-                        {noPolySaving
-                          ? 'Saving...'
-                          : noPolyOverride
-                            ? 'Override on: check or uncheck to save (recorded in case notes).'
-                            : 'Locked'}
-                      </span>
-                    </div>
-                    {role === 'Business Administrator' && (
-                      <button
-                        type="button"
-                        disabled={noPolySaving}
-                        onClick={() => setNoPolyOverride(o => !o)}
-                        className="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
-                      >
-                        {noPolyOverride ? 'Cancel Override' : 'Override'}
-                      </button>
-                    )}
-                  </div>
-                  {(() => {
-                    const slot = assignedSlotFor(selectedClientDetail.clientid);
-                    if (!slot) {
-                      // Not booked: open slots that haven't started yet, soonest first
-                      const openSlots = polySlots
-                        .filter(s => s.status === 'Open' && (slotStart(s)?.getTime() ?? Infinity) > Date.now())
-                        .sort((a, b) => (slotStart(a)?.getTime() ?? Infinity) - (slotStart(b)?.getTime() ?? Infinity));
-                      const needs = polySchedulingNeeds(selectedClientDetail);
-                      return (
-                        <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm space-y-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Schedule Polygraph</p>
-                            <p className={`text-xs ${needs.met ? 'text-emerald-400' : 'text-amber-400'}`}>
-                              Vouchers {Number(selectedClientDetail.polyfeevoucher ?? 0)}/{POLY_VOUCHER_MAX}
-                              {!needs.met && ' · payment needed before scheduling'}
-                            </p>
-                          </div>
-                          {role !== 'Business Administrator' ? (
-                            <p className="text-xs text-slate-400 italic">Only Business Administrators can assign polygraph slots to clients.</p>
-                          ) : openSlots.length === 0 ? (
-                            <p className="text-xs text-slate-400 italic">No open polygraph slots are coming up. Add slots under Polygraphs › Poly Admin.</p>
-                          ) : (
-                            <form
-                              onSubmit={(e) => {
-                                e.preventDefault();
-                                if (!drawerPolySlot) return;
-                                const slotId = Number(drawerPolySlot);
-                                const clientId = String(selectedClientDetail.clientid);
-                                polyAssign.scheduleFromAccount(slotId, clientId, drawerPolyType, drawerPolyComment);
-                              }}
-                              className="grid grid-cols-1 md:grid-cols-2 gap-3"
-                            >
-                              <label className="md:col-span-2 text-xs text-slate-400">Open Slot
-                                <select
-                                  value={drawerPolySlot}
-                                  onChange={(e) => setDrawerPolySlot(e.target.value)}
-                                  required
-                                  className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-xs"
-                                >
-                                  <option value="">Choose a slot…</option>
-                                  {openSlots.map(s => (
-                                    <option key={s.slotid} value={s.slotid}>{slotSummary(s)} · {getExaminerDisplayName(s.polygrapher)}</option>
-                                  ))}
-                                </select>
-                              </label>
-                              <label className="text-xs text-slate-400">Poly Type
-                                <select
-                                  value={drawerPolyType}
-                                  onChange={(e) => setDrawerPolyType(e.target.value)}
-                                  className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-xs"
-                                >
-                                  <option value="Instant">Instant Poly</option>
-                                  <option value="Maintenance">Maintenance</option>
-                                  <option value="Sexual History">Sexual History</option>
-                                  <option value="Specific">Specific Issue</option>
-                                  <option value="Monitoring">Monitoring</option>
-                                </select>
-                              </label>
-                              <label className="text-xs text-slate-400">Comment <span className="text-slate-500">(optional)</span>
-                                <input
-                                  type="text"
-                                  value={drawerPolyComment}
-                                  onChange={(e) => setDrawerPolyComment(e.target.value)}
-                                  placeholder="Added to the case note"
-                                  className="mt-1 w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-xs"
-                                />
-                              </label>
-                              {/* The page's error banner is hidden behind the account drawer */}
-                              {error && <p className="md:col-span-2 text-xs text-red-400">{error}</p>}
-                              <div className="md:col-span-2 flex justify-end">
-                                <button type="submit" disabled={loading || polyAssign.saving || !drawerPolySlot} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-xs font-semibold">
-                                  Schedule
-                                </button>
-                              </div>
-                            </form>
-                          )}
-                        </div>
-                      );
-                    }
-                    return (
-                      <div className="bg-blue-500/5 border border-blue-500/30 p-4 rounded-xl text-sm flex items-center justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Scheduled Polygraph</p>
-                          <p className="text-white mt-0.5">{slotSummary(slot)}</p>
-                          <p className="text-xs text-slate-400 mt-0.5">Examiner: {getExaminerDisplayName(slot.polygrapher)}{slot.type ? ` · ${slot.type}` : ''}</p>
-                        </div>
-                        {isAllowed('polygraph') && (
-                          <button type="button" onClick={() => openPolySlot(slot.slotid)} className="shrink-0 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">View Slot</button>
-                        )}
-                      </div>
-                    );
-                  })()}
-                  {clientPolygraphs.map((poly, i) => {
-                    // Gap to the previous card, by the polygraph date when one was recorded (the list is ordered the same way)
-                    const polyDay = (p: any) => localYmd(p.polygraphdatetime || p.date);
-                    const prev = clientPolygraphs[i - 1];
-                    const gap = prev && polyDay(prev) && polyDay(poly) ? timeBetween(polyDay(poly), polyDay(prev)) : null;
-                    // Above the newest polygraph: how long it has been since then
-                    const since = i === 0 && polyDay(poly) ? timeBetween(polyDay(poly), localYmd(new Date())) : null;
-                    const label = since
-                      ? (since === 'Same day' ? 'Last polygraph was today' : `${since} since last polygraph`)
-                      : gap && (gap === 'Same day' ? 'Same day' : `${gap} apart`);
-                    return (
-                  <Fragment key={poly.resultid}>
-                  {label && (
-                    <div className={`flex items-center gap-3 px-4 ${since ? '' : '-my-1'}`}>
-                      <div className="flex-1 border-t border-dashed border-slate-800" />
-                      <span className={`text-[11px] rounded-full px-2.5 py-0.5 whitespace-nowrap border ${since ? 'text-blue-300 bg-blue-500/10 border-blue-500/30 font-semibold' : 'text-slate-400 bg-slate-900 border-slate-800'}`}>{label}</span>
-                      <div className="flex-1 border-t border-dashed border-slate-800" />
-                    </div>
-                  )}
-                  <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex gap-5">
-                    <div className="shrink-0 w-28 flex flex-col justify-center border-r border-slate-800 pr-5">
-                      <p className="text-2xl font-bold text-white leading-tight">{formatLogMonthDay(poly.date)}</p>
-                      <p className="text-sm text-slate-400 mt-0.5">{formatLogYear(poly.date)}</p>
-                      {/* Date is when the result was recorded (no time is stored for it) */}
-                      <p className="text-xs text-slate-500 mt-1">Recorded</p>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-start gap-3 font-semibold text-white">
-                        <span>{poly.type} Polygraph</span>
-                        <span className="text-xs text-emerald-400 text-right">{poly.results}</span>
-                      </div>
-                      <p className="text-xs text-slate-400 mt-1">Examiner: {getExaminerDisplayName(poly.polygrapher)}</p>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Polygraph Date:{' '}
-                        <span className="text-slate-200">
-                          {poly.polygraphdatetime
-                            ? (() => { const d = new Date(poly.polygraphdatetime); return `${d.toLocaleDateString()} @ ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`; })()
-                            : 'Not recorded'}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-                  </Fragment>
-                    );
-                  })}
-                </div>
+                <ClientPolygraphs
+                  key={selectedClientDetail.clientid}
+                  client={selectedClientDetail}
+                  role={role}
+                  userEmail={user.employeeemail}
+                  polygraphs={clientPolygraphs}
+                  slots={polySlots}
+                  bookedSlot={assignedSlotFor(selectedClientDetail.clientid)}
+                  examinerName={getExaminerDisplayName}
+                  canViewSlot={isAllowed('polygraph')}
+                  onViewSlot={openPolySlot}
+                  onSchedule={(slotId, type, comment) => polyAssign.scheduleFromAccount(slotId, String(selectedClientDetail.clientid), type, comment)}
+                  scheduling={loading || polyAssign.saving}
+                  error={error}
+                  onNoPolyRequiredSaved={handleNoPolyRequiredSaved}
+                  onError={setError}
+                />
               )}
 
               {clientTab === 'attachments' && (

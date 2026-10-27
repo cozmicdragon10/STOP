@@ -1,4 +1,4 @@
-import { localYmd, timeBetween, toLocalDay } from './dates';
+import { formatDisplayTime, localYmd, timeBetween, toLocalDay } from './dates';
 
 export const POLY_OVERDUE_MONTHS = 6;
 
@@ -64,6 +64,10 @@ export const slotStart = (slot: any): Date | null => {
   if (match[3]?.toLowerCase() === 'pm') hours += 12;
   return new Date(year, month - 1, day, hours, Number(match[2]));
 };
+
+// One-line description of a slot: date @ time · location
+export const slotSummary = (slot: { date: string; time?: string; location?: string | null }) =>
+  `${new Date(slot.date).toLocaleDateString()} @ ${formatDisplayTime(slot.time)}${slot.location ? ` · ${slot.location}` : ''}`;
 
 // Whether a cancellation returns the booking's poly fee vouchers: true/false is fixed by the reason, null leaves it to staff
 export const polyVoucherReturnRule = (reason: string, slot: any): boolean | null => {
