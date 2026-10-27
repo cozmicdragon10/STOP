@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import {
   loginUser, logoutUser, setSessionEndedHandler, getClients, getGroups, submitAccountPayment, submitCustomCharge,
-  getPolygraphSlots, createPolygraphSlot,
+  getPolygraphSlots,
   submitPolygraphResult, deletePolygraphSlot, assignPolygraphSlot, reopenPolygraphSlot,
   getClientAttendance, getClientFinancials, adjustCashPayment, recordCardPaymentAction,
   getClientNotes, addClientNote, updateClientNote, deleteClientNote, getClientPolygraphs, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
@@ -29,6 +29,7 @@ import CallInTab from './components/callin/CallInTab';
 import GroupsTab from './components/groups/GroupsTab';
 import TestingTab from './components/testing/TestingTab';
 import AdminTab from './components/admin/AdminTab';
+import PolySlotForm from './components/polygraph/PolySlotForm';
 import AgentPicker from './components/agents/AgentPicker';
 import ClientPicker from './components/ClientPicker';
 import RecordFilterBar from './components/clients/RecordFilterBar';
@@ -47,7 +48,7 @@ import {
 import { caseNoteLabel } from './utils/notes';
 import { EMPTY_NOTE_FILTERS, EMPTY_ATTENDANCE_FILTERS, EMPTY_LEDGER_FILTERS, sortedUnique, groupByMonth, toggleInSet } from './utils/filters';
 import {
-  localYmd, timeBetween, getLocalDateString, getLocalTimeString, getDefaultPolyTime, parseLogDate, formatLogMonthDay, formatLogYear,
+  localYmd, timeBetween, getLocalDateString, parseLogDate, formatLogMonthDay, formatLogYear,
   formatLogTime, formatDisplayTime, toLocalDay, ageFromBirthDate,
 } from './utils/dates';
 import { signedMoney, attendanceBalanceChange, PAYMENT_REVERSAL_TYPES, LEDGER_TONES, cardPaymentStatus, ledgerBalanceChange } from './utils/ledger';
@@ -202,12 +203,6 @@ export default function App() {
   const [polySlots, setPolySlots] = useState<any[]>([]);
   // Slot opened from a client's account; outlined on the Poly Schedule for a few seconds
   const [highlightedSlotId, setHighlightedSlotId] = useState<number | null>(null);
-  const [polyLocation, setPolyLocation] = useState('Oklahoma City Office');
-  const [polyAddress, setPolyAddress] = useState('123 Main St, OKC');
-  const [polyDate, setPolyDate] = useState(() => getLocalDateString());
-  const [polyTime, setPolyTime] = useState(() => getDefaultPolyTime());
-  const [polyExaminer, setPolyExaminer] = useState('jvance@chandlercbt.com');
-  const [polyType, setPolyType] = useState('Maintenance');
   
   // Assignment state per slot card
   const [slotAssignments, setSlotAssignments] = useState<{ [slotId: number]: string }>({});
@@ -340,76 +335,6 @@ export default function App() {
   }, [user, activeTab]);
 
   // Polygraph Functions
-  const handleCreateSlot = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (role !== 'Business Administrator' && role !== 'Polygrapher') {
-      setError('Only Business Administrators and Polygraphers can create appointment slots.');
-      return;
-    }
-    setLoading(true);
-    setError('');
-
-    const now = new Date();
-    const todayStr = getLocalDateString(now);
-    const currentTimeStr = getLocalTimeString(now);
-
-    if (!polyDate) {
-      setError('Please select an appointment date.');
-      setLoading(false);
-      return;
-    }
-
-    if (!polyTime) {
-      setError('Please select an appointment time.');
-      setLoading(false);
-      return;
-    }
-
-    if (polyDate < todayStr) {
-      setError(`Appointment date cannot be in the past. Please select today (${todayStr}) or a future date.`);
-      setLoading(false);
-      return;
-    }
-
-    if (polyDate === todayStr && polyTime <= currentTimeStr) {
-      setError(`Appointment time must be in the future (after ${formatDisplayTime(currentTimeStr)}).`);
-      setLoading(false);
-      return;
-    }
-
-    if (!polyExaminer) {
-      setError('Please select an examiner for the appointment slot.');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const res = await createPolygraphSlot({ 
-        location: polyLocation, 
-        address: polyAddress, 
-        date: polyDate, 
-        time: polyTime, 
-        polygrapher: polyExaminer, 
-        type: polyType, 
-        comments: 'Scheduled Slot', 
-        slots: 1
-      });
-
-      if (res?.error) {
-        setError(res.error);
-      } else {
-        setSuccessMsg('Polygraph appointment slot created successfully!');
-        const freshSlots = await getPolygraphSlots();
-        setPolySlots(freshSlots);
-        setPolySubTab('schedule');
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to create slot.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // To be scheduled for a polygraph a client needs a full set of poly fee vouchers and an account balance of
   // $0.00 or better (stored sign: positive = owes). Mirrors the server's check on assignment.
   const polySchedulingNeeds = (client: any) => {
@@ -1236,8 +1161,6 @@ export default function App() {
   const reopenStart = reopenTarget ? slotStart(reopenTarget) : null;
   const reopenPassed = reopenStart !== null && reopenStart.getTime() <= Date.now();
 
-  // Only active Polygraphers can be picked as the examiner for a new slot
-  const activePolygraphers = employees.filter(e => e.role === 'Polygrapher' && e.active !== false);
   const getExaminerDisplayName = (email: string) =>
     employees.find(e => e.employeeemail === email)?.displayname || email;
 
@@ -3860,100 +3783,13 @@ export default function App() {
             )}
 
             {polySubTab === 'admin' && (
-              <>
-                {(role !== 'Business Administrator' && role !== 'Polygrapher') && (
-                  <p className="text-xs text-slate-400 italic bg-slate-950 border border-slate-700 rounded-lg p-3">
-                    Only Business Administrators and Polygraphers can create appointment slots.
-                  </p>
-                )}
-                {(role === 'Business Administrator' || role === 'Polygrapher') && (
-                  <form onSubmit={handleCreateSlot} className="space-y-4 max-w-2xl">
-                <h3 className="text-sm font-semibold text-blue-400">Create Single Appointment Slot</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs text-slate-400 uppercase mb-1">Office Location</label>
-                    <input type="text" value={polyLocation} onChange={(e) => setPolyLocation(e.target.value)} placeholder="Location" className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-400 uppercase mb-1">Address</label>
-                    <input type="text" value={polyAddress} onChange={(e) => setPolyAddress(e.target.value)} placeholder="Address" className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs text-slate-400 uppercase mb-1">Date</label>
-                    <input 
-                      type="date" 
-                      min={getLocalDateString()} 
-                      value={polyDate} 
-                      onChange={(e) => {
-                        const newDate = e.target.value;
-                        setPolyDate(newDate);
-                        const today = getLocalDateString();
-                        const curTime = getLocalTimeString();
-                        if (newDate === today && polyTime && polyTime < curTime) {
-                          setPolyTime(curTime);
-                        }
-                      }} 
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm [color-scheme:dark]" 
-                      required 
-                    />
-                    <span className="text-[10px] text-slate-500 mt-1 block">Min date: Today ({getLocalDateString()})</span>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-400 uppercase mb-1">Time</label>
-                    <input 
-                      type="time" 
-                      min={polyDate === getLocalDateString() ? getLocalTimeString() : undefined} 
-                      value={polyTime} 
-                      onChange={(e) => setPolyTime(e.target.value)} 
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm [color-scheme:dark]" 
-                      required 
-                    />
-                    <span className="text-[10px] text-slate-500 mt-1 block">
-                      {polyDate === getLocalDateString() 
-                        ? `Min time: ${formatDisplayTime(getLocalTimeString())} (active time)` 
-                        : 'Future date: any time'}
-                    </span>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs text-slate-400 uppercase mb-1">Examiner</label>
-                    <select
-                      value={polyExaminer}
-                      onChange={(e) => setPolyExaminer(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm"
-                      required
-                    >
-                      <option value="">-- Choose Examiner --</option>
-                      {activePolygraphers.map(e => (
-                        <option key={e.employeeemail} value={e.employeeemail}>
-                          {e.displayname} ({e.employeeemail})
-                        </option>
-                      ))}
-                    </select>
-                    {activePolygraphers.length === 0 && (
-                      <p className="text-xs text-amber-400 mt-1">No active polygraphers. Add or reactivate one under Admin.</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-xs text-slate-400 uppercase mb-1">Slot Type</label>
-                    <select value={polyType} onChange={(e) => setPolyType(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm">
-                      <option value="Maintenance">Maintenance</option>
-                      <option value="Instant">Instant Poly</option>
-                      <option value="Sexual History">Sexual History</option>
-                      <option value="Specific">Specific Issue</option>
-                      <option value="Monitoring">Monitoring</option>
-                    </select>
-                  </div>
-                </div>
-                <button type="submit" disabled={loading} className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2.5 rounded-lg text-sm">
-                  {loading ? 'Creating...' : 'Create Appointment Slot'}
-                </button>
-                  </form>
-                )}
-              </>
+              <PolySlotForm
+                role={role}
+                employees={employees}
+                onSuccess={setSuccessMsg}
+                onError={setError}
+                onCreated={async () => { setPolySlots(await getPolygraphSlots()); setPolySubTab('schedule'); }}
+              />
             )}
 
             {reopenTarget && (
