@@ -8,6 +8,10 @@ const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'https://192.168.1.133:5173,ht
     .split(',').map(o => o.trim()).filter(Boolean);
 
 const app = express();
+// API responses hold client records and depend on who is logged in, so browsers must not cache them.
+// (Cached copies from before logins existed came back as bare 304s with no data.)
+app.set('etag', false);
+app.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 app.use(cors({ origin: CORS_ORIGINS }));
 app.use(express.json());
 // Everything below needs a logged-in session, except POST /api/auth/login

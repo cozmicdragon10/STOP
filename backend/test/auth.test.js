@@ -31,6 +31,12 @@ test('only the frontend origin may call the API from a browser', async () => {
     assert.equal(other.headers.get('access-control-allow-origin'), null);
 });
 
+test('API responses are never cached by the browser', async () => {
+    const res = await fetch(`${base}/api/clients`);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.equal(res.headers.get('etag'), null);
+});
+
 test('identity fields are replaced with the session email', () => {
     const req = {
         body: { user: 'admin@example.com', createdBy: 'admin@example.com', updatedBy: 'x', comments: 'kept' },
