@@ -1,9 +1,9 @@
-import React, { Fragment, useState, useEffect, useRef } from 'react';
+import React, { Fragment, useState, useEffect } from 'react';
 import { 
   Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
   DollarSign, Calendar, PlusCircle, Activity, PhoneCall, ShieldAlert, 
   Layers, CheckSquare, BarChart3, Settings, CheckCircle2, Trash2, RotateCcw, Home, History,
-  Paperclip, Eye, Download, Printer, Upload, Pencil, SlidersHorizontal, UserCheck, ClipboardList
+  Paperclip, Pencil, SlidersHorizontal, UserCheck, ClipboardList
 } from 'lucide-react';
 import {
   loginUser, logoutUser, setSessionEndedHandler, getClients, getGroups, submitAccountPayment, submitCustomCharge,
@@ -14,10 +14,9 @@ import {
   deleteClient,
   getEmployees, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
   fetchPolyFeeOverride, savePolyFeeOverride, deletePolyFeeOverride,
-  getOpenGroups, deleteOpenGroup, getClosedGroups, getClientChangeLog, getSupervisingAgents,
-  getClientAttachments, uploadClientAttachment, fetchClientAttachment, renameClientAttachment, deleteClientAttachment, ATTACHMENT_MAX_BYTES
+  getOpenGroups, deleteOpenGroup, getClosedGroups, getClientChangeLog, getSupervisingAgents
 } from './api';
-import type { CardPaymentAction, ClientAttachment, ClientChange, ClosedGroupSession, OpenGroupSession, PaymentChangeResult, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
+import type { CardPaymentAction, ClientChange, ClosedGroupSession, OpenGroupSession, PaymentChangeResult, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
@@ -40,6 +39,7 @@ import RecordFilterBar from './components/clients/RecordFilterBar';
 import MonthHeader from './components/clients/MonthHeader';
 import ReportsTab from './components/reports/ReportsTab';
 import ClientRoster from './components/clients/ClientRoster';
+import ClientAttachments from './components/clients/ClientAttachments';
 import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividualsTab';
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
@@ -423,7 +423,7 @@ export default function App() {
       setClientNotes(await getClientNotes(clientid));
       if (clientTab === 'changelog') await openChangeLog();
       // Discharging also saves a discharge summary PDF to the client's attachments
-      if (clientTab === 'attachments') setClientAttachments(await getClientAttachments(clientid));
+      setAttachmentsVersion(v => v + 1);
       setStatusDialog(null);
       setSuccessMsg(statusDialog === 'activate'
         ? `${selectedClientDetail.firstname} ${selectedClientDetail.lastname} set to ${programstatus}.`
@@ -464,9 +464,6 @@ export default function App() {
   const openClientLogs = async (client: any) => {
     setNoPolyOverride(false);
     setStatusDialog(null);
-    setClientAttachments([]);
-    setAttachmentsStatus('idle');
-    setAttachmentError('');
     setChangeLogFilter('');
     setClientChangeLog([]);
     setChangeLogStatus('idle');
@@ -531,131 +528,8 @@ export default function App() {
     setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, ...changes } : c));
   };
 
-  // Attachments: loaded each time the tab is opened. View/Print only open types the browser can show safely;
-  // everything else (and anything that could run script, like HTML or SVG) is download only.
-  const [clientAttachments, setClientAttachments] = useState<ClientAttachment[]>([]);
-  const [attachmentsStatus, setAttachmentsStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
-  const [attachmentUploading, setAttachmentUploading] = useState(false);
-  const [attachmentError, setAttachmentError] = useState('');
-  const attachmentInputRef = useRef<HTMLInputElement>(null);
-  const VIEWABLE_ATTACHMENT_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'text/plain'];
-  const canViewAttachment = (a: ClientAttachment) => VIEWABLE_ATTACHMENT_TYPES.includes(a.contenttype);
-  const formatFileSize = (bytes: number) =>
-    bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-
-  const openAttachments = async () => {
-    if (!selectedClientDetail) return;
-    setClientTab('attachments');
-    setAttachmentError('');
-    setAttachmentsStatus('loading');
-    try {
-      setClientAttachments(await getClientAttachments(selectedClientDetail.clientid));
-      setAttachmentsStatus('ready');
-    } catch (err: any) {
-      setClientAttachments([]);
-      setAttachmentsStatus('error');
-      setAttachmentError(err.message || 'Could not load attachments.');
-    }
-  };
-
-  const handleAttachmentUpload = async (files: FileList | null) => {
-    if (!selectedClientDetail || !files || files.length === 0) return;
-    const clientid = selectedClientDetail.clientid;
-    const tooBig = Array.from(files).filter(f => f.size > ATTACHMENT_MAX_BYTES);
-    if (tooBig.length > 0) {
-      setAttachmentError(`Larger than 25 MB: ${tooBig.map(f => f.name).join(', ')}`);
-      return;
-    }
-    setAttachmentUploading(true);
-    setAttachmentError('');
-    try {
-      for (const file of Array.from(files)) {
-        await uploadClientAttachment(clientid, file, user.employeeemail);
-      }
-      setClientAttachments(await getClientAttachments(clientid));
-      setSuccessMsg(files.length === 1 ? `Attached ${files[0].name}.` : `Attached ${files.length} files.`);
-    } catch (err: any) {
-      setAttachmentError(err.message || 'Upload failed.');
-      setClientAttachments(await getClientAttachments(clientid).catch(() => clientAttachments));
-    } finally {
-      setAttachmentUploading(false);
-      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
-    }
-  };
-
-  // mode: view opens a new tab, download saves the file, print sends it to a hidden frame's print dialog
-  const handleAttachmentOpen = async (attachment: ClientAttachment, mode: 'view' | 'download' | 'print') => {
-    setAttachmentError('');
-    // Opened before the fetch so the browser doesn't treat it as a blocked popup
-    const viewer = mode === 'view' ? window.open('', '_blank') : null;
-    try {
-      const url = URL.createObjectURL(await fetchClientAttachment(attachment));
-      if (mode === 'view') {
-        if (viewer) viewer.location.href = url; else window.open(url, '_blank');
-      } else if (mode === 'download') {
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = attachment.filename;
-        link.click();
-      } else {
-        const frame = document.createElement('iframe');
-        frame.style.position = 'fixed';
-        frame.style.width = '0';
-        frame.style.height = '0';
-        frame.style.border = '0';
-        frame.onload = () => {
-          frame.contentWindow?.focus();
-          frame.contentWindow?.print();
-          setTimeout(() => frame.remove(), 60000);
-        };
-        frame.src = url;
-        document.body.appendChild(frame);
-      }
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    } catch (err: any) {
-      viewer?.close();
-      setAttachmentError(err.message || 'Could not open the attachment.');
-    }
-  };
-
-  // Rename happens in place on the attachment row; Enter saves, Escape cancels
-  const [renamingAttachmentId, setRenamingAttachmentId] = useState<number | null>(null);
-  const [attachmentRenameValue, setAttachmentRenameValue] = useState('');
-  const [attachmentRenameSaving, setAttachmentRenameSaving] = useState(false);
-  const startAttachmentRename = (attachment: ClientAttachment) => {
-    setAttachmentError('');
-    setRenamingAttachmentId(attachment.attachmentid);
-    setAttachmentRenameValue(attachment.filename);
-  };
-  const handleAttachmentRename = async (attachment: ClientAttachment) => {
-    const name = attachmentRenameValue.trim();
-    if (!name || name === attachment.filename) {
-      setRenamingAttachmentId(null);
-      return;
-    }
-    setAttachmentRenameSaving(true);
-    setAttachmentError('');
-    try {
-      const saved = await renameClientAttachment(attachment.attachmentid, name, user.employeeemail);
-      setClientAttachments(prev => prev.map(a => a.attachmentid === saved.attachmentid ? saved : a));
-      setRenamingAttachmentId(null);
-    } catch (err: any) {
-      setAttachmentError(err.message || 'Failed to rename the attachment.');
-    } finally {
-      setAttachmentRenameSaving(false);
-    }
-  };
-
-  const handleAttachmentDelete = async (attachment: ClientAttachment) => {
-    if (!window.confirm(`Delete ${attachment.filename}? This cannot be undone.`)) return;
-    setAttachmentError('');
-    try {
-      await deleteClientAttachment(attachment.attachmentid, user.employeeemail);
-      setClientAttachments(prev => prev.filter(a => a.attachmentid !== attachment.attachmentid));
-    } catch (err: any) {
-      setAttachmentError(err.message || 'Failed to delete the attachment.');
-    }
-  };
+  // Bumped after a discharge saves a discharge summary PDF, so the Attachments tab reloads if it is showing
+  const [attachmentsVersion, setAttachmentsVersion] = useState(0);
 
   const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1326,7 +1200,7 @@ export default function App() {
                 {selectedClientDetail.programtype !== 'BIP' && (
                   <button onClick={() => setClientTab('polygraphs')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'polygraphs' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Activity size={14} /> Polygraphs</button>
                 )}
-                <button onClick={openAttachments} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'attachments' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Paperclip size={14} /> Attachments</button>
+                <button onClick={() => setClientTab('attachments')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'attachments' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Paperclip size={14} /> Attachments</button>
                 {role === 'Business Administrator' && (
                   <button onClick={openChangeLog} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'changelog' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><History size={14} /> Change Log</button>
                 )}
@@ -2619,79 +2493,13 @@ export default function App() {
               )}
 
               {clientTab === 'attachments' && (
-                <div className="space-y-3">
-                  <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex items-center justify-between gap-3">
-                    <p className="text-xs text-slate-400">Save documents to this client's account. Up to 25 MB per file.</p>
-                    <input
-                      ref={attachmentInputRef}
-                      type="file"
-                      multiple
-                      className="hidden"
-                      onChange={e => handleAttachmentUpload(e.target.files)}
-                    />
-                    <button
-                      type="button"
-                      disabled={attachmentUploading}
-                      onClick={() => attachmentInputRef.current?.click()}
-                      className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 shrink-0"
-                    >
-                      <Upload size={14} /> {attachmentUploading ? 'Uploading...' : 'Add Attachment'}
-                    </button>
-                  </div>
-                  {attachmentError && (
-                    <div role="alert" className="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-sm flex justify-between items-center gap-3">
-                      <span>{attachmentError}</span>
-                      <button onClick={() => setAttachmentError('')} className="text-red-400 hover:text-red-200"><X size={14} /></button>
-                    </div>
-                  )}
-                  {attachmentsStatus === 'loading' && <p className="text-sm text-slate-400">Loading attachments...</p>}
-                  {attachmentsStatus === 'ready' && clientAttachments.length === 0 && (
-                    <p className="text-sm text-slate-400">No attachments yet.</p>
-                  )}
-                  {clientAttachments.map(a => (
-                    <div key={a.attachmentid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex items-center gap-4">
-                      <Paperclip size={18} className="text-slate-500 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        {renamingAttachmentId === a.attachmentid ? (
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              autoFocus
-                              aria-label="New attachment name"
-                              value={attachmentRenameValue}
-                              disabled={attachmentRenameSaving}
-                              onChange={e => setAttachmentRenameValue(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') handleAttachmentRename(a);
-                                if (e.key === 'Escape') setRenamingAttachmentId(null);
-                              }}
-                              className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-white text-sm"
-                            />
-                            <button type="button" disabled={attachmentRenameSaving} onClick={() => handleAttachmentRename(a)} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-2.5 py-1 rounded-lg text-xs font-semibold">{attachmentRenameSaving ? 'Saving...' : 'Save'}</button>
-                            <button type="button" disabled={attachmentRenameSaving} onClick={() => setRenamingAttachmentId(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg text-xs font-semibold">Cancel</button>
-                          </div>
-                        ) : (
-                          <p className="font-semibold text-white truncate" title={a.filename}>{a.filename}</p>
-                        )}
-                        <p className="text-xs text-slate-400 mt-0.5">
-                          {formatFileSize(a.filesize)} · Added {new Date(a.uploadedon).toLocaleDateString()} by {a.uploadedby || 'Unknown'}
-                        </p>
-                      </div>
-                      <div className="flex gap-1.5 shrink-0">
-                        {canViewAttachment(a) && (
-                          <>
-                            <button type="button" onClick={() => handleAttachmentOpen(a, 'view')} title="View" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"><Eye size={13} /> View</button>
-                            <button type="button" onClick={() => handleAttachmentOpen(a, 'print')} title="Print" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"><Printer size={13} /> Print</button>
-                          </>
-                        )}
-                        <button type="button" onClick={() => startAttachmentRename(a)} title="Rename" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"><Pencil size={13} /> Rename</button>
-                        <button type="button" onClick={() => handleAttachmentOpen(a, 'download')} title="Download" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"><Download size={13} /> Download</button>
-                        {role === 'Business Administrator' && (
-                          <button type="button" onClick={() => handleAttachmentDelete(a)} title="Delete" aria-label={`Delete ${a.filename}`} className="text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2 py-1.5 rounded-lg bg-red-500/5 border border-red-500/20"><Trash2 size={13} /></button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <ClientAttachments
+                  key={`${selectedClientDetail.clientid}-${attachmentsVersion}`}
+                  clientId={selectedClientDetail.clientid}
+                  userEmail={user.employeeemail}
+                  canDelete={role === 'Business Administrator'}
+                  onSuccess={setSuccessMsg}
+                />
               )}
 
               {clientTab === 'changelog' && role === 'Business Administrator' && (() => {
