@@ -6,7 +6,7 @@ import {
   Paperclip, UserCheck, ClipboardList
 } from 'lucide-react';
 import {
-  loginUser, logoutUser, setSessionEndedHandler, getClients, getGroups, submitAccountPayment, submitCustomCharge,
+  loginUser, logoutUser, setSessionEndedHandler, getClients, getGroups,
   getPolygraphSlots,
   deletePolygraphSlot,
   getClientAttendance, getClientFinancials,
@@ -19,8 +19,9 @@ import type { ClosedGroupSession, OpenGroupSession, PolyFeeOverride, PolyFeeOver
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
-import CardPaymentFields from './components/payments/CardPaymentFields';
 import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
+import AccountPaymentForm from './components/payments/AccountPaymentForm';
+import CustomChargeForm from './components/payments/CustomChargeForm';
 import SupervisingAgentsTab from './components/agents/SupervisingAgentsTab';
 import CallInTab from './components/callin/CallInTab';
 import GroupsTab from './components/groups/GroupsTab';
@@ -49,7 +50,6 @@ import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividu
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
 import { DISCHARGE_STATUSES } from './utils/clients';
-import { formatMoney } from './utils/ledger';
 import { polygraphHistoryText, polygraphNotice, slotStart, slotSummary } from './utils/polygraph';
 
 export default function App() {
@@ -113,26 +113,6 @@ export default function App() {
   const [expandedClosedGroup, setExpandedClosedGroup] = useState<string | null>(null);
   // Open group picked in the Open Groups panel, handed to the check-in workflow to load
   const [resumeRequest, setResumeRequest] = useState<OpenGroupSession | null>(null);
-  const [chargeClient, setChargeClient] = useState('');
-  const [chargeInput, setChargeInput] = useState('');
-  const [chargeNotes, setChargeNotes] = useState('');
-  const chargeAmount = Number(chargeInput) || 0;
-  const chargeClientRecord = clients.find(c => c.clientid === Number(chargeClient));
-  const chargeCurrentBalance = Number(chargeClientRecord?.accountbalance || 0);
-  const balanceAfterCharge = chargeCurrentBalance + chargeAmount;
-  const [selectedClient, setSelectedClient] = useState('');
-  const [paymentInput, setPaymentInput] = useState('');
-  const paymentAmount = Number(paymentInput) || 0;
-  const selectedClientRecord = clients.find(c => c.clientid === Number(selectedClient));
-  const currentBalance = Number(selectedClientRecord?.accountbalance || 0);
-  const balanceAfterPayment = currentBalance - paymentAmount;
-  const [comments, setComments] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Credit Card'>('Cash');
-  // Billing details PayPal needs for card payments. Not saved yet; card number and CVV never touch our system.
-  const emptyCardBilling = { cardholderName: '', receiptEmail: '', street: '', city: '', state: '', zip: '', country: 'US' };
-  const [cardBilling, setCardBilling] = useState(emptyCardBilling);
-  // Set only after a payment is saved to the account; drives the receipt printout
-  const [lastPayment, setLastPayment] = useState<null | { clientName: string; docNumber: string; amount: number; method: string; notes: string; newBalance: number; processedBy: string; date: string }>(null);
 
   // Polygraph State
   const [polySubTab, setPolySubTab] = useState<'admin' | 'schedule' | 'results'>('schedule');
@@ -396,60 +376,6 @@ export default function App() {
 
   // Bumped after a program status change so the Attachments and Change Log tabs reload if showing
   const [accountTabsVersion, setAccountTabsVersion] = useState(0);
-
-  const handleStandalonePaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedClient || paymentAmount <= 0) return;
-    setLoading(true);
-    setLastPayment(null);
-    const client = clients.find(c => c.clientid === Number(selectedClient));
-    const res = await submitAccountPayment({
-      client: Number(selectedClient),
-      amount: paymentAmount,
-      comments,
-      createdBy: user.employeeemail,
-      paymentMethod
-    });
-    if (res.success) {
-      setSuccessMsg(`${paymentMethod} payment recorded! Updated Balance: ${formatBalance(res.newBalance)}`);
-      setLastPayment({
-        clientName: client ? `${client.lastname}, ${client.firstname}` : `Client #${selectedClient}`,
-        docNumber: client?.docnumber || '',
-        amount: paymentAmount,
-        method: paymentMethod,
-        notes: comments,
-        newBalance: Number(res.newBalance),
-        processedBy: user.employeeemail,
-        date: new Date().toLocaleString()
-      });
-      loadDashboardData();
-      setComments('');
-    } else {
-      setError(res.error || 'Error recording payment.');
-    }
-    setLoading(false);
-  };
-
-  const handleCustomChargeSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chargeClient || chargeAmount <= 0 || !chargeNotes.trim()) return;
-    setLoading(true);
-    const res = await submitCustomCharge({
-      client: Number(chargeClient),
-      amount: chargeAmount,
-      comments: chargeNotes.trim(),
-      createdBy: user.employeeemail
-    });
-    if (res.success) {
-      setSuccessMsg(`Custom fee of ${formatMoney(chargeAmount)} charged! Updated Balance: ${formatBalance(res.newBalance)}`);
-      loadDashboardData();
-      setChargeInput('');
-      setChargeNotes('');
-    } else {
-      setError(res.error || 'Error charging custom fee.');
-    }
-    setLoading(false);
-  };
 
   // A payment was corrected on the ledger: update the client and reload what the change moved
   const handleLedgerPaymentChanged = ({ clientId, changes, attendance, financials, polyOverride }: LedgerRefresh) => {
@@ -1005,150 +931,15 @@ export default function App() {
                 />
               </div>
 
-              {isCustomCharge && role === 'Business Administrator' ? (
-                <form onSubmit={handleCustomChargeSubmit} className="space-y-5 max-w-xl">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Client</label>
-                    <select value={chargeClient} onChange={(e) => setChargeClient(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required>
-                      <option value="">Select a client…</option>
-                      {clients.map(c => <option key={c.clientid} value={c.clientid}>{c.lastname}, {c.firstname}</option>)}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Fee Amount</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
-                      <input type="number" step="0.01" min="0.01" value={chargeInput} onKeyDown={(e) => { if (e.key === '-' || e.key === 'e' || e.key === 'E') e.preventDefault(); }} onChange={(e) => setChargeInput(e.target.value.replace(/-/g, ''))} placeholder="0.00" className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 pl-7 pr-3 text-white text-sm" required />
-                    </div>
-                    {chargeClientRecord ? (
-                      <div className="mt-3 bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm space-y-1.5">
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">Current balance</span>
-                          <span className={toDisplayBalance(chargeCurrentBalance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatMoney(toDisplayBalance(chargeCurrentBalance))}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">This charge</span>
-                          <span className="text-red-400">-{formatMoney(chargeAmount)}</span>
-                        </div>
-                        <div className="flex justify-between border-t border-slate-800 pt-1.5">
-                          <span className="font-semibold text-slate-300">Balance after charge</span>
-                          <span className={`font-bold ${toDisplayBalance(balanceAfterCharge) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatMoney(toDisplayBalance(balanceAfterCharge))}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500 mt-1.5">Select a client to see their account balance.</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Notes</label>
-                    <textarea value={chargeNotes} onChange={(e) => setChargeNotes(e.target.value)} rows={3} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" placeholder="Reason for this fee…" required />
-                  </div>
-
-                  <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
-                    <button type="submit" disabled={loading || !chargeNotes.trim()} className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">Charge Fee</button>
-                  </div>
-                </form>
-              ) : !isAccountOnly ? null : (
-                <>
-                <form onSubmit={handleStandalonePaymentSubmit} className="space-y-5 max-w-xl">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Client</label>
-                    <select value={selectedClient} onChange={(e) => setSelectedClient(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required>
-                      <option value="">Select a client…</option>
-                      {clients.map(c => <option key={c.clientid} value={c.clientid}>{c.lastname}, {c.firstname}</option>)}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Payment Method</label>
-                    <div className="grid grid-cols-2 gap-3">
-                      {(['Cash', 'Credit Card'] as const).map(method => (
-                        <button
-                          key={method}
-                          type="button"
-                          onClick={() => setPaymentMethod(method)}
-                          className={`border rounded-lg py-2.5 text-sm font-semibold transition ${paymentMethod === method ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}
-                        >
-                          {method}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {paymentMethod === 'Credit Card' && (
-                    <CardPaymentFields value={cardBilling} onChange={setCardBilling} />
-                  )}
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Payment Amount</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
-                      <input type="number" step="0.01" min="0" value={paymentInput} onKeyDown={(e) => { if (e.key === '-' || e.key === 'e' || e.key === 'E') e.preventDefault(); }} onChange={(e) => setPaymentInput(e.target.value.replace(/-/g, ''))} placeholder="0.00" className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 pl-7 pr-3 text-white text-sm" required />
-                    </div>
-                    {selectedClientRecord ? (
-                      <div className="mt-3 bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm space-y-1.5">
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">Current balance</span>
-                          <span className={toDisplayBalance(currentBalance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatMoney(toDisplayBalance(currentBalance))}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">This payment</span>
-                          <span className="text-emerald-400">+{formatMoney(paymentAmount)}</span>
-                        </div>
-                        <div className="flex justify-between border-t border-slate-800 pt-1.5">
-                          <span className="font-semibold text-slate-300">Balance after payment</span>
-                          <span className={`font-bold ${toDisplayBalance(balanceAfterPayment) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatMoney(toDisplayBalance(balanceAfterPayment))}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-500 mt-1.5">Select a client to see their account balance.</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Notes <span className="normal-case font-normal text-slate-500">(optional)</span></label>
-                    <textarea value={comments} onChange={(e) => setComments(e.target.value)} rows={3} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" placeholder="e.g. Cash payment, receipt #…" />
-                  </div>
-
-                  <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
-                    <button type="button" onClick={() => window.print()} disabled={!lastPayment} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">Print Receipt</button>
-                    <button type="submit" disabled={loading} className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">Process Payment</button>
-                  </div>
-                </form>
-
-                {lastPayment && (
-                  <>
-                    <style>{`
-                      @media print {
-                        body * { visibility: hidden !important; }
-                        #payment-receipt, #payment-receipt * { visibility: visible !important; }
-                        #payment-receipt { display: block !important; position: absolute; left: 0; top: 0; width: 100%; }
-                      }
-                    `}</style>
-                    <div id="payment-receipt" className="hidden bg-white text-black p-6 text-sm">
-                      <h2 className="text-lg font-bold">Payment Receipt</h2>
-                      <p className="text-xs text-gray-600 mb-3">{lastPayment.date}</p>
-                      <hr className="mb-3 border-gray-300" />
-                      <table className="w-full text-sm">
-                        <tbody>
-                          <tr><td className="py-1 text-gray-600">Client</td><td className="py-1 text-right font-medium">{lastPayment.clientName}</td></tr>
-                          {lastPayment.docNumber && <tr><td className="py-1 text-gray-600">DOC #</td><td className="py-1 text-right">{lastPayment.docNumber}</td></tr>}
-                          <tr><td className="py-1 text-gray-600">Payment method</td><td className="py-1 text-right">{lastPayment.method}</td></tr>
-                          <tr><td className="py-1 text-gray-600">Amount paid</td><td className="py-1 text-right font-bold">${lastPayment.amount.toFixed(2)}</td></tr>
-                          <tr><td className="py-1 text-gray-600">Balance after payment</td><td className="py-1 text-right">{formatMoney(toDisplayBalance(lastPayment.newBalance))}</td></tr>
-                        </tbody>
-                      </table>
-                      {lastPayment.notes && <p className="mt-3 text-xs"><span className="text-gray-600">Notes:</span> {lastPayment.notes}</p>}
-                      <hr className="my-3 border-gray-300" />
-                      <p className="text-xs text-gray-600">Processed by {lastPayment.processedBy}</p>
-                      <p className="text-xs text-gray-600 mt-3 text-center">Thank you.</p>
-                    </div>
-                  </>
-                )}
-                </>
+              {/* Both stay mounted while another mode is showing, so a form in progress and the last receipt are kept */}
+              {role === 'Business Administrator' && (
+                <div className={isCustomCharge ? '' : 'hidden'}>
+                  <CustomChargeForm clients={clients} userEmail={user.employeeemail} onCharged={loadDashboardData} onSuccess={setSuccessMsg} onError={setError} />
+                </div>
               )}
+              <div className={isAccountOnly && !(isCustomCharge && role === 'Business Administrator') ? '' : 'hidden'}>
+                <AccountPaymentForm clients={clients} userEmail={user.employeeemail} onRecorded={loadDashboardData} onSuccess={setSuccessMsg} onError={setError} />
+              </div>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
