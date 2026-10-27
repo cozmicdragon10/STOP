@@ -50,6 +50,12 @@ test('identity fields are replaced with the session email', () => {
     assert.equal(req.headers['x-user-email'], 'counselor@example.com');
 });
 
+test('assignedBy and removedBy are replaced too; coveredBy is left as sent', () => {
+    const req = { body: { assignedBy: 'admin@example.com', removedBy: 'admin@example.com', coveredBy: 'other@example.com' }, query: {}, headers: {} };
+    stampIdentity(req, 'counselor@example.com');
+    assert.deepEqual(req.body, { assignedBy: 'counselor@example.com', removedBy: 'counselor@example.com', coveredBy: 'other@example.com' });
+});
+
 test('identity fields are not added where the request had none', () => {
     const req = { body: { comments: 'only' }, query: {}, headers: {} };
     stampIdentity(req, 'counselor@example.com');

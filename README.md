@@ -134,7 +134,7 @@ The backend provides REST API endpoints for:
   on every other request. Sessions last `SESSION_HOURS` (default 12), and only a hash of the token is stored
   (`Sessions` table). Logging out, changing an employee's password, or deactivating them ends their sessions.
 - **Identity:** the server takes the acting employee from the session, never from the request. Fields such as `user`,
-  `createdBy`, `updatedBy`, `?user=` and the `X-User` header are overwritten with the session's email
+  `createdBy`, `updatedBy`, `assignedBy`, `removedBy`, `?user=` and the `X-User` header are overwritten with the session's email
   (`backend/lib/auth.js`).
 - **Admin-only routes:** account changes and the system log need an Office Admin or Business Administrator session;
   deleting a group needs a Business Administrator.
