@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { submitAccountPayment } from '../../api';
 import CardPaymentFields from './CardPaymentFields';
+import { emptyCardBilling } from './cardBilling';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { formatMoney } from '../../utils/ledger';
 
@@ -16,9 +17,6 @@ interface Props {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 interface Receipt { clientName: string; docNumber: string; amount: number; method: string; notes: string; newBalance: number; processedBy: string; date: string }
-
-// Billing details PayPal needs for card payments. Not saved yet; card number and CVV never touch our system.
-const emptyCardBilling = { cardholderName: '', receiptEmail: '', street: '', city: '', state: '', zip: '', country: 'US' };
 
 // Attendance tab's Account-Only Payment: a payment toward a client's balance without a check-in, with a printable receipt
 export default function AccountPaymentForm({ clients, userEmail, onRecorded, onSuccess, onError }: Props) {

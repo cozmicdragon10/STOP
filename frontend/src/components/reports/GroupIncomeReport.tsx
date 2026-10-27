@@ -81,12 +81,12 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
   const [groupFilter, setGroupFilter] = useState('');
   const [counselorFilter, setCounselorFilter] = useState('');
   const [rows, setRows] = useState<GroupReportRow[]>([]);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [error, setError] = useState('');
+  // The range the rows (or the error) were loaded for; an invalid range keeps showing the last one
+  const [loaded, setLoaded] = useState<{ key: string; error: string } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [printError, setPrintError] = useState('');
   const [deposits, setDeposits] = useState<Map<string, GroupDeposit>>(() => new Map());
-  const [depositsError, setDepositsError] = useState('');
+  const [depositsLoaded, setDepositsLoaded] = useState<{ key: string; error: string } | null>(null);
   // The session whose deposit form is open, by depositKey
   const [editing, setEditing] = useState<string | null>(null);
   const [form, setForm] = useState({ amount: '', date: '', notes: '' });
@@ -94,20 +94,27 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
   // Shown under the session it belongs to
   const [formError, setFormError] = useState<{ key: string; message: string } | null>(null);
 
+  const rangeKey = from && to && from <= to ? `${from}|${to}` : null;
   useEffect(() => {
-    if (!from || !to || from > to) return;
+    if (!rangeKey) return;
     let cancelled = false;
-    setStatus('loading');
     getGroupReport(from, to)
-      .then(data => { if (!cancelled) { setRows(data); setStatus('ready'); } })
-      .catch(err => { if (!cancelled) { setError(err.message || 'Failed to load the group report.'); setStatus('error'); } });
+      .then(data => { if (!cancelled) { setRows(data); setLoaded({ key: rangeKey, error: '' }); } })
+      .catch(err => { if (!cancelled) setLoaded({ key: rangeKey, error: err.message || 'Failed to load the group report.' }); });
     // Loaded on their own so the report still shows if deposits can't be read
-    setDepositsError('');
     getGroupDeposits(from, to)
-      .then(list => { if (!cancelled) setDeposits(new Map(list.map(d => [depositKey(d.groupid, d.sessiondate, d.sessionnumber), d]))); })
-      .catch(err => { if (!cancelled) { setDeposits(new Map()); setDepositsError(err.message || 'Failed to load group deposits.'); } });
+      .then(list => {
+        if (cancelled) return;
+        setDeposits(new Map(list.map(d => [depositKey(d.groupid, d.sessiondate, d.sessionnumber), d])));
+        setDepositsLoaded({ key: rangeKey, error: '' });
+      })
+      .catch(err => { if (!cancelled) { setDeposits(new Map()); setDepositsLoaded({ key: rangeKey, error: err.message || 'Failed to load group deposits.' }); } });
     return () => { cancelled = true; };
-  }, [from, to]);
+  }, [rangeKey, from, to]);
+  const status = !loaded || (rangeKey && loaded.key !== rangeKey) ? 'loading' : loaded.error ? 'error' : 'ready';
+  const error = loaded?.error ?? '';
+  // Hidden while the next range's deposits load
+  const depositsError = depositsLoaded && (!rangeKey || depositsLoaded.key === rangeKey) ? depositsLoaded.error : '';
 
   const groups = useMemo(() => {
     const byKey = new Map<string, GroupReportRow[]>();

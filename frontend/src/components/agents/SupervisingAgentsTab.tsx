@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Mail, Pencil, Phone, PlusCircle, Search, Trash2, UserCheck } from 'lucide-react';
 import { deleteSupervisingAgent, getSupervisingAgents, saveSupervisingAgent } from '../../api';
 import type { SupervisingAgent } from '../../api';
@@ -43,7 +43,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
   const canEdit = user.role === 'Business Administrator' || user.role === 'Office Admin';
   const canDelete = user.role === 'Business Administrator';
 
-  const loadAgents = async () => {
+  const loadAgents = useCallback(async () => {
     try {
       const loaded = await getSupervisingAgents();
       setAgents(loaded);
@@ -52,11 +52,13 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
     } catch (err: any) {
       setLoadError(err.message || 'Failed to load supervising agents.');
     }
-  };
+  }, [onAgentsLoaded]);
 
   useEffect(() => {
+    // loadAgents only sets state after the request finishes
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadAgents();
-  }, []);
+  }, [loadAgents]);
 
   const isDischarged = (c: any) => dischargeStatuses.includes(c.programstatus);
 

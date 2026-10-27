@@ -1,19 +1,6 @@
 // Card payment fields shared by the Account-Only Payment screen and the check-in details dialog.
 // Card number, expiration, and CVV are collected by PayPal's secure fields, so they are never stored here.
-
-export interface CardBilling {
-  cardholderName: string;
-  receiptEmail: string;
-  street: string;
-  city: string;
-  state: string;
-  zip: string;
-  country: string;
-}
-
-export const emptyCardBilling: CardBilling = {
-  cardholderName: '', receiptEmail: '', street: '', city: '', state: '', zip: '', country: 'US',
-};
+import type { CardBilling } from './cardBilling';
 
 interface Props {
   value: CardBilling;

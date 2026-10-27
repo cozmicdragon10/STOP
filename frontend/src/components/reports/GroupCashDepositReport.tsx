@@ -42,21 +42,23 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
   // Date given to new check-offs
   const [dropOffDate, setDropOffDate] = useState(todayLocal);
   const [rows, setRows] = useState<GroupCashDepositRow[]>([]);
-  const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
-  const [error, setError] = useState('');
+  // The range the rows (or the error) were loaded for; an invalid range keeps showing the last one
+  const [loaded, setLoaded] = useState<{ key: string; error: string } | null>(null);
   const [saving, setSaving] = useState<Set<string>>(() => new Set());
   // Shown under the session it belongs to
   const [rowError, setRowError] = useState<{ key: string; message: string } | null>(null);
 
+  const rangeKey = from && to && from <= to ? `${from}|${to}|${userEmail}` : null;
   useEffect(() => {
-    if (!from || !to || from > to) return;
+    if (!rangeKey) return;
     let cancelled = false;
-    setStatus('loading');
     getGroupCashDeposits(from, to, userEmail)
-      .then(data => { if (!cancelled) { setRows(data); setStatus('ready'); } })
-      .catch(err => { if (!cancelled) { setError(err.message || 'Failed to load group cash deposits.'); setStatus('error'); } });
+      .then(data => { if (!cancelled) { setRows(data); setLoaded({ key: rangeKey, error: '' }); } })
+      .catch(err => { if (!cancelled) setLoaded({ key: rangeKey, error: err.message || 'Failed to load group cash deposits.' }); });
     return () => { cancelled = true; };
-  }, [from, to, userEmail]);
+  }, [rangeKey, from, to, userEmail]);
+  const status = !loaded || (rangeKey && loaded.key !== rangeKey) ? 'loading' : loaded.error ? 'error' : 'ready';
+  const error = loaded?.error ?? '';
 
   const responsibleOf = (r: GroupCashDepositRow) => r.responsiblename || r.responsible || 'Unknown';
   const responsibleNames = Array.from(new Set(rows.map(responsibleOf))).sort((a, b) => a.localeCompare(b));

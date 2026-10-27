@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import BipAssessmentPicker, { bipChoiceProblem, counselorChoices, openBipAssessment } from './BipAssessmentPicker';
-import type { BipAssessmentChoice } from './BipAssessmentPicker';
+import BipAssessmentPicker from './BipAssessmentPicker';
+import { bipChoiceProblem, counselorChoices, openBipAssessment } from './bipAssessment';
+import type { BipAssessmentChoice } from './bipAssessment';
 
 interface Employee {
   displayname: string;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 interface PickerClient {
   clientid: number;
@@ -29,10 +29,11 @@ export default function ClientPicker({ clients, value, onChange, placeholder = '
   const [highlight, setHighlight] = useState(0);
 
   // Follow selection changes made outside the box, such as clearing it after a slot is assigned
-  useEffect(() => {
+  const [shownValue, setShownValue] = useState(value);
+  if (value !== shownValue) {
+    setShownValue(value);
     setText(selected ? labelFor(selected) : '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
+  }
 
   const term = text.trim().toLowerCase();
   const searching = open && (!selected || text !== labelFor(selected));

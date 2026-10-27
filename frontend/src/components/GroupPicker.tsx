@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 interface PickerGroup {
   groupid: number;
@@ -28,10 +28,11 @@ export default function GroupPicker({ groups, value, onChange, placeholder = 'Se
   const [highlight, setHighlight] = useState(0);
 
   // Follow selection changes made outside the box, such as clearing it after a call-in is logged
-  useEffect(() => {
+  const [shownValue, setShownValue] = useState(value);
+  if (value !== shownValue) {
+    setShownValue(value);
     setText(selected ? selected.groupname : '');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
+  }
 
   const term = text.trim().toLowerCase();
   const searching = open && (!selected || text !== selected.groupname);

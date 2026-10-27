@@ -91,6 +91,8 @@ export default function App() {
   const [clientPolygraphs, setClientPolygraphs] = useState<any[]>([]);
   // Client whose polygraphs are loaded, so the notice never uses the previous client's results
   const [clientPolygraphsFor, setClientPolygraphsFor] = useState<number | null>(null);
+  // When the open account's polygraphs were loaded; tells a booked slot that is still upcoming from one awaiting results
+  const [clientPolygraphsAt, setClientPolygraphsAt] = useState(() => Date.now());
   // Shown at the top of the Information tab when part of the account could not be loaded
   const [accountLoadError, setAccountLoadError] = useState('');
   const [clientFeeOverride, setClientFeeOverride] = useState<any>(null);
@@ -171,7 +173,7 @@ export default function App() {
       } else {
         setError(res.error || 'Login failed.');
       }
-    } catch (err: any) {
+    } catch {
       setError('Server connection error. Ensure backend is running.');
     }
   };
@@ -228,6 +230,8 @@ export default function App() {
   };
 
   useEffect(() => {
+    // loadOpenGroups only sets state after its requests finish
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (user && activeTab === 'attendance') loadOpenGroups();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, activeTab]);
@@ -353,6 +357,7 @@ export default function App() {
     setClientNotes(notes);
     setClientPolygraphs(polys);
     setClientPolygraphsFor(client.clientid);
+    setClientPolygraphsAt(Date.now());
     try {
       const { override } = await fetchClientFeeOverride(client.clientid);
       setClientFeeOverride(override);
@@ -737,7 +742,7 @@ export default function App() {
                 const slot = assignedSlotFor(selectedClientDetail.clientid);
                 if (slot) {
                   const start = slotStart(slot);
-                  const upcoming = !start || start.getTime() > Date.now();
+                  const upcoming = !start || start.getTime() > clientPolygraphsAt;
                   return (
                     <div className="bg-blue-500/10 border border-blue-500/50 text-blue-300 p-3 rounded-lg text-sm flex items-center justify-between gap-3 mb-6">
                       <p className="flex items-center gap-2">

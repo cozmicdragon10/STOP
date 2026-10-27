@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { SCHEDULE_DAYS, SCHEDULE_TIMES, formatSchedule, parseSchedule } from '../utils/schedule';
 
 // Day and time pickers for a group schedule, read from and written back as "Thursdays @ 7:00 PM"
@@ -6,13 +6,15 @@ const ScheduleSelect = ({ value, onChange, className }: { value: string; onChang
   const [day, setDay] = useState(() => parseSchedule(value).day);
   const [time, setTime] = useState(() => parseSchedule(value).time);
   // Pick up values set from outside (opening a group, cancelling the new-group form)
-  useEffect(() => {
+  const [shownValue, setShownValue] = useState(value);
+  if (value !== shownValue) {
+    setShownValue(value);
     if (value !== formatSchedule(day, time)) {
       const next = parseSchedule(value);
       setDay(next.day);
       setTime(next.time);
     }
-  }, [value]);
+  }
   const pick = (nextDay: string, nextTime: string) => {
     setDay(nextDay);
     setTime(nextTime);

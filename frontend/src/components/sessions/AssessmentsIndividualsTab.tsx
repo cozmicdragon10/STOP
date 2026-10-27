@@ -90,11 +90,11 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const [intake, setIntake] = useState<{ key: string; data: BipIntake | null } | null>(null);
 
   const loadLists = useCallback(async () => {
-    setListError('');
     try {
       const [open, closed] = await Promise.all([getOpenIndividualSessions(user.employeeemail), getClosedIndividualSessions(user.employeeemail)]);
       setOpenSessions(open);
       setClosedSessions(closed);
+      setListError('');
     } catch (err: any) {
       setListError(err.message || 'Failed to load sessions.');
     }
@@ -103,6 +103,8 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   useEffect(() => {
     if (!active) return;
     getSessionTypes().then(setSessionTypes).catch(err => setListError(err.message || 'Failed to load the price list.'));
+    // loadLists only sets state after its requests finish
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadLists();
   }, [active, loadLists]);
 
@@ -137,11 +139,15 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const listFee = isReinstate ? reinstatePrice : sessionType ? Number(sessionType.fee) : null;
 
   // A Business Administrator's fee box follows the reinstate price unless they typed a different amount
-  useEffect(() => {
-    if (reinstatePrice === null || !sessionType) return;
-    const prices = [sessionType.fee, sessionType.latefee].filter(p => p !== null).map(p => Number(p).toFixed(2));
-    setForm(f => (f.fee === '' || prices.includes(Number(f.fee).toFixed(2)) ? { ...f, fee: reinstatePrice.toFixed(2) } : f));
-  }, [reinstatePrice, sessionType]);
+  const reinstatePriceKey = reinstatePrice === null || !sessionType ? null : `${sessionType.sessiontypeid}|${sessionType.fee}|${sessionType.latefee}|${reinstatePrice}`;
+  const [pricedFor, setPricedFor] = useState<string | null>(null);
+  if (reinstatePriceKey !== pricedFor) {
+    setPricedFor(reinstatePriceKey);
+    if (reinstatePrice !== null && sessionType) {
+      const prices = [sessionType.fee, sessionType.latefee].filter(p => p !== null).map(p => Number(p).toFixed(2));
+      setForm(f => (f.fee === '' || prices.includes(Number(f.fee).toFixed(2)) ? { ...f, fee: reinstatePrice.toFixed(2) } : f));
+    }
+  }
   // Counselors and therapists first; the current user is always a choice
   const providers = Array.from(new Set([
     ...employees.filter(e => e.active !== false && e.role !== 'Polygrapher').map(e => e.displayname),

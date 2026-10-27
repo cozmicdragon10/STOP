@@ -3,7 +3,8 @@ import type { ClientRecord, PaymentMethod } from '../../hooks/useGroupCheckIn';
 import { submitAccountPayment } from '../../api';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { printReceipt, type Receipt } from '../../utils/receipt';
-import CardPaymentFields, { emptyCardBilling, type CardBilling } from './CardPaymentFields';
+import CardPaymentFields from './CardPaymentFields';
+import { emptyCardBilling, type CardBilling } from './cardBilling';
 
 interface Props {
   client: ClientRecord;

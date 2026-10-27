@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { changeClientProgramStatus } from '../../api';
-import BipAssessmentPicker, { bipChoiceProblem, counselorChoices, openBipAssessment } from '../sessions/BipAssessmentPicker';
-import type { BipAssessmentChoice } from '../sessions/BipAssessmentPicker';
+import BipAssessmentPicker from '../sessions/BipAssessmentPicker';
+import { bipChoiceProblem, counselorChoices, openBipAssessment } from '../sessions/bipAssessment';
+import type { BipAssessmentChoice } from '../sessions/bipAssessment';
 import { DISCHARGE_STATUSES, DISCHARGE_SUBCATEGORIES, EDITABLE_PROGRAM_STATUSES } from '../../utils/clients';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client and employee rows are untyped throughout App */

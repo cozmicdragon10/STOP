@@ -4,7 +4,8 @@ import { submitAccountPayment } from '../../api';
 import { FIRST_CHECKIN_MAX_OWED, formatBalance } from '../../utils/balance';
 import { isMonthlyFeeClient } from '../../utils/soPhases';
 import { printReceipt, type Receipt } from '../../utils/receipt';
-import CardPaymentFields, { emptyCardBilling, type CardBilling } from '../payments/CardPaymentFields';
+import CardPaymentFields from '../payments/CardPaymentFields';
+import { emptyCardBilling, type CardBilling } from '../payments/cardBilling';
 
 interface Props {
   clients: ClientRecord[];
