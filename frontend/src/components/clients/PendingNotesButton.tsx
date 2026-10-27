@@ -6,12 +6,11 @@ import { caseNoteLabel } from '../../utils/notes';
 import { toLocalDay } from '../../utils/dates';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 
-interface Props<C extends { clientid: number }> {
+interface Props {
   userEmail: string;
-  clients: C[];
   // Changes whenever a note goes to or comes out of the approval list elsewhere (the Case Notes tab), to refetch
   refreshKey: number;
-  onOpenClient: (client: C) => void;
+  onOpenClient: (clientId: number) => void;
   // A note here was approved or denied
   onChanged: () => void;
   onSuccess: (message: string) => void;
@@ -21,7 +20,7 @@ const errorText = (err: unknown, fallback: string) => (err instanceof Error && e
 
 // Business Administrators only: a button with the count of case notes awaiting approval, opening the list grouped by
 // client. Each note's text can be edited before approving; Deny takes it off the account.
-export default function PendingNotesButton<C extends { clientid: number }>({ userEmail, clients, refreshKey, onOpenClient, onChanged, onSuccess }: Props<C>) {
+export default function PendingNotesButton({ userEmail, refreshKey, onOpenClient, onChanged, onSuccess }: Props) {
   const employeeLabel = useEmployeeLabel();
   const [notes, setNotes] = useState<PendingNote[]>([]);
   const [loadError, setLoadError] = useState('');
@@ -65,10 +64,8 @@ export default function PendingNotesButton<C extends { clientid: number }>({ use
   };
 
   const openAccount = (clientId: number) => {
-    const c = clients.find(cl => cl.clientid === clientId);
-    if (!c) return;
     setOpen(false);
-    onOpenClient(c);
+    onOpenClient(clientId);
   };
 
   return (

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Mail, Pencil, Phone, PlusCircle, Search, Trash2, UserCheck } from 'lucide-react';
-import { deleteSupervisingAgent, getSupervisingAgents, saveSupervisingAgent } from '../../api';
+import { deleteSupervisingAgent, getClients, getSupervisingAgents, saveSupervisingAgent } from '../../api';
 import type { SupervisingAgent } from '../../api';
 
 interface Props {
+  // Current clients (not discharged); the selected agent's discharged clients are loaded on their own
   clients: any[];
   user: { employeeemail: string; role: string };
   dischargeStatuses: string[];
@@ -81,9 +82,28 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
   const unlistedCount = rows.filter(r => !r.agent).length;
 
   const selected = rows.find(r => r.key === selectedKey) || null;
+  const selectedName = selected?.name;
+
+  // The selected agent's discharged clients, loaded from the server since App's list holds current clients only
+  const [dischargedLoaded, setDischargedLoaded] = useState<{ key: string; clients: Props['clients'] } | null>(null);
+  useEffect(() => {
+    if (!selectedKey || !selectedName) return;
+    let cancelled = false;
+    getClients({ status: 'discharged', agent: selectedName })
+      .then(loaded => { if (!cancelled) setDischargedLoaded({ key: selectedKey, clients: loaded }); })
+      .catch(err => { if (!cancelled) onError(err.message || 'Failed to load discharged clients.'); });
+    return () => { cancelled = true; };
+  }, [selectedKey, selectedName, clients, onError]);
+
   const selectedCurrent = selected ? selected.clients.filter(c => !isDischarged(c)) : [];
-  const selectedDischarged = selected ? selected.clients.filter(isDischarged) : [];
-  const selectedVisible = (showDischarged ? selected?.clients ?? [] : selectedCurrent)
+  // Clients discharged during this session are still in App's list until it reloads
+  const dischargedHere = selected ? selected.clients.filter(isDischarged) : [];
+  const dischargedHereIds = new Set(dischargedHere.map(c => c.clientid));
+  const selectedDischarged = [
+    ...dischargedHere,
+    ...(dischargedLoaded?.key === selectedKey ? dischargedLoaded.clients.filter(c => !dischargedHereIds.has(c.clientid)) : []),
+  ];
+  const selectedVisible = (showDischarged ? [...selectedCurrent, ...selectedDischarged] : selectedCurrent)
     .slice()
     .sort((a, b) => `${a.lastname}, ${a.firstname}`.localeCompare(`${b.lastname}, ${b.firstname}`));
 

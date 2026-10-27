@@ -9,7 +9,7 @@ const routes = () => app.router.stack
 
 test('every API route is mounted once', () => {
     const list = routes();
-    assert.equal(list.length, 93);
+    assert.equal(list.length, 94);
     assert.equal(new Set(list).size, list.length, 'a route is registered twice');
     for (const r of list) assert.match(r, /^(GET|POST|PUT|PATCH|DELETE) \/api\//);
 });

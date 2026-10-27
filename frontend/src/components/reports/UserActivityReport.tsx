@@ -6,10 +6,9 @@ import type { UserActivityRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { escapeHtml } from '../../utils/receipt';
 
-interface Props<C extends { clientid: number }> {
+interface Props {
   userEmail: string;
-  clients: C[];
-  onOpenClient: (client: C) => void;
+  onOpenClient: (clientId: number) => void;
 }
 
 const NOT_RECORDED = 'Not recorded';
@@ -34,7 +33,7 @@ const dayLabel = (ymd: string) => {
 const firstOfMonth = () => `${todayLocal().slice(0, 7)}-01`;
 
 // Payments and client notes entered in the system, with who entered them and when (Business Administrators and Office Admins)
-export default function UserActivityReport<C extends { clientid: number }>({ userEmail, clients, onOpenClient }: Props<C>) {
+export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
   const employeeLabel = useEmployeeLabel();
   // "Display Name (Role)"; payments from before this was recorded have no one
   const enteredByOf = (r: UserActivityRow) => (r.enteredby ? employeeLabel(r.enteredby) : NOT_RECORDED);
@@ -96,8 +95,7 @@ export default function UserActivityReport<C extends { clientid: number }>({ use
   const showingToday = from === today && to === today;
 
   const openClient = (r: UserActivityRow) => {
-    const c = clients.find(cl => cl.clientid === r.client);
-    if (c) onOpenClient(c);
+    if (r.client) onOpenClient(r.client);
   };
 
   const printReport = () => {

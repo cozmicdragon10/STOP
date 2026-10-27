@@ -4,6 +4,7 @@ import { SlidersHorizontal } from 'lucide-react';
 import { createClient } from '../../api';
 import type { SupervisingAgent } from '../../api';
 import AgentPicker from '../agents/AgentPicker';
+import { useClientsByStatus } from '../../hooks/useClientsByStatus';
 import {
   PROGRAM_STATUSES, EDITABLE_PROGRAM_STATUSES, SO_PROGRAM_TYPES, STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase,
   DEFAULT_CLIENT_FILTERS, SO_ATTENDANCE_LIMIT_MONTHS, isAttendanceOverdue, GROUP_TYPES_BY_PROGRAM,
@@ -13,6 +14,7 @@ import { formatBalance, toDisplayBalance } from '../../utils/balance';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client and group rows are untyped throughout App */
 interface Props {
+  // Current clients (not discharged); discharged clients are loaded when the status filter asks for them
   clients: any[];
   // Active groups only; offered on the New Client form
   activeGroups: any[];
@@ -47,6 +49,8 @@ type FilterKey = 'agent' | 'programtype' | 'phase' | 'currentgroup' | 'status';
 export default function ClientRoster({ clients, activeGroups, directoryAgents, userEmail, onOpenClient, onCreated, onSuccess, onError, headerActions }: Props) {
   const [clientSearch, setClientSearch] = useState('');
   const [clientFilters, setClientFilters] = useState(DEFAULT_CLIENT_FILTERS);
+  // Clients with the picked status; Status: All and the discharge statuses load discharged clients from the server
+  const { clients: statusClients, loading: statusLoading, error: statusError } = useClientsByStatus(clients, clientFilters.status);
   // Filter row is hidden until toggled; the choice is remembered in this browser. Filters still apply while hidden.
   const [showClientFilters, setShowClientFilters] = useState(() => {
     try { return localStorage.getItem('showClientFilters') === 'true'; } catch { return false; }
@@ -98,13 +102,13 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
     if (key === 'phase') {
       // SO phases in phase order, then BIP weeks by number, then anything else
       const rank = (p: string) => SO_PHASES.includes(p) ? SO_PHASES.indexOf(p) : isWholeNumber(p) ? 100 + Number(p) : Infinity;
-      return Array.from(new Set(clients.map(c => String(c.phase ?? '').trim()).filter(Boolean)))
+      return Array.from(new Set(statusClients.map(c => String(c.phase ?? '').trim()).filter(Boolean)))
         .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
     }
     const field = key === 'agent' ? 'supervisingagent' : key === 'currentgroup' ? 'groupname' : 'programtype';
-    return Array.from(new Set(clients.map(c => c[field]).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
+    return Array.from(new Set(statusClients.map(c => c[field]).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
   };
-  const filteredClients = clients
+  const filteredClients = statusClients
     .filter(c => {
       if (clientSearchTerm && ![
         c.firstname, c.lastname, `${c.firstname} ${c.lastname}`, `${c.lastname}, ${c.firstname}`,
@@ -163,7 +167,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
               )}
             </button>
             <span className="text-xs bg-slate-800 px-3 py-1 rounded-full text-slate-300 whitespace-nowrap">
-              {filteredClients.length === clients.length ? `${clients.length} Registered Clients` : `${filteredClients.length} of ${clients.length} Clients`}
+              {statusLoading ? 'Loading…' : filteredClients.length === statusClients.length ? `${statusClients.length} Clients` : `${filteredClients.length} of ${statusClients.length} Clients`}
             </span>
           </div>
         </div>
@@ -351,7 +355,9 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
             ))}
             {filteredClients.length === 0 && (
               <tr>
-                <td colSpan={10} className="p-6 text-center text-slate-500 text-sm">No clients match your filters.</td>
+                <td colSpan={10} className={`p-6 text-center text-sm ${statusError ? 'text-red-400' : 'text-slate-500'}`}>
+                  {statusError || (statusLoading ? 'Loading discharged clients…' : 'No clients match your filters.')}
+                </td>
               </tr>
             )}
           </tbody>

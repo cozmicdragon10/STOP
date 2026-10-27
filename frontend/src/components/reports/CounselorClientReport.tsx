@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Printer } from 'lucide-react';
 import { SO_PHASES } from '../../utils/soPhases';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { escapeHtml } from '../../utils/receipt';
+import { useClientsByStatus } from '../../hooks/useClientsByStatus';
 
 interface ReportClient {
   clientid: number;
@@ -30,6 +31,7 @@ interface ReportGroup {
 }
 
 interface Props {
+  // Current clients (not discharged)
   clients: ReportClient[];
   groups: ReportGroup[];
   statuses: string[];
@@ -94,9 +96,11 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
   const showSo = program !== 'BIP';
   const showBip = program !== 'SO';
 
+  // Status: All and the discharge statuses load discharged clients from the server
+  const { clients: statusClients, loading, error } = useClientsByStatus(clients, statusFilter);
   const shownClients = useMemo(
-    () => clients.filter(c => (!statusFilter || c.programstatus === statusFilter) && (!program || (program === 'BIP') === isBip(c))),
-    [clients, statusFilter, program]
+    () => statusClients.filter(c => !program || (program === 'BIP') === isBip(c)),
+    [statusClients, program]
   );
   const programGroups = useMemo(
     () => groups.filter(g => !program || (program === 'BIP') === (g.programtype === 'BIP')),
@@ -204,6 +208,8 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
         <div>
           <h3 className="font-semibold text-white">Counselor Client Report</h3>
           <p className="text-xs text-slate-400 mt-0.5">Clients in the groups each counselor leads, split by SO and BIP and counted by phase. Click a group to list its clients, and a client to open their account.</p>
+          {loading && <p className="text-xs text-slate-500 mt-1">Loading discharged clients…</p>}
+          {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
         </div>
         <div className="flex flex-wrap items-end gap-3">
           <div className="text-xs text-slate-400">Program

@@ -6,7 +6,7 @@ import {
   Paperclip, UserCheck, ClipboardList
 } from 'lucide-react';
 import {
-  loginUser, logoutUser, setSessionEndedHandler, getClients, getGroups,
+  loginUser, logoutUser, setSessionEndedHandler, getClient, getClients, getGroups,
   getPolygraphSlots,
   deletePolygraphSlot,
   getClientAttendance, getClientFinancials,
@@ -322,6 +322,8 @@ export default function App() {
     const clientid = selectedClientDetail.clientid;
     setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, programstatus } : c));
     setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, programstatus } : c));
+    // The list holds current clients only: a reactivated client joins it and a discharged one leaves it
+    getClients().then(setClients).catch(err => console.error('Failed to refresh clients', err));
     const notes = await getClientNotes(clientid);
     // Skip if another account was opened while it saved
     if (openClientIdRef.current !== clientid) return;
@@ -371,6 +373,15 @@ export default function App() {
       setClientPolyOverride(override);
     } catch (err: any) {
       setPolyOverrideLoadError(err.message || 'Could not load the poly fee override.');
+    }
+  };
+
+  // Opens an account by id. The client list holds current clients only, so a discharged client is loaded first.
+  const openClientById = async (clientId: number) => {
+    try {
+      openClientLogs(clients.find(c => c.clientid === clientId) ?? await getClient(clientId));
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : 'Failed to load the client.');
     }
   };
 
@@ -556,7 +567,7 @@ export default function App() {
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-                <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Clients</p>
+                <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Current Clients</p>
                 <p className="text-3xl font-bold text-white mt-2">{clients.length}</p>
               </div>
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
@@ -612,9 +623,8 @@ export default function App() {
               headerActions={role === 'Business Administrator' && (
                 <PendingNotesButton
                   userEmail={user.employeeemail}
-                  clients={clients}
                   refreshKey={pendingNotesKey}
-                  onOpenClient={openClientLogs}
+                  onOpenClient={openClientById}
                   onChanged={refreshPendingNotes}
                   onSuccess={setSuccessMsg}
                 />
@@ -1243,7 +1253,7 @@ export default function App() {
 
         {/* REPORTS TAB */}
         {activeTab === 'reports' && (
-          <ReportsTab user={user} clients={clients} groups={groups} onOpenClient={openClientLogs} />
+          <ReportsTab user={user} clients={clients} groups={groups} onOpenClient={openClientLogs} onOpenClientId={openClientById} />
         )}
 
         {/* ADMIN TAB */}

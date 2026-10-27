@@ -270,9 +270,19 @@ export async function logoutUser() {
     sessionToken = null;
 }
 
-export async function getClients(): Promise<Client[]> {
-    const res = await apiFetch(`${API_BASE}/clients`);
+// Without options, current clients only (not discharged). status: 'all', 'discharged' (any discharge status), or one
+// program status; agent: only that supervising agent's clients.
+export async function getClients(options: { status?: string; agent?: string } = {}): Promise<Client[]> {
+    const query = new URLSearchParams();
+    if (options.status) query.set('status', options.status);
+    if (options.agent) query.set('agent', options.agent);
+    const res = await apiFetch(`${API_BASE}/clients${query.toString() ? `?${query}` : ''}`);
     return jsonResponse(res, 'Failed to load clients.');
+}
+
+export async function getClient(clientId: number): Promise<Client> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}`);
+    return jsonResponse(res, 'Failed to load the client.');
 }
 
 export async function getGroups(): Promise<Group[]> {

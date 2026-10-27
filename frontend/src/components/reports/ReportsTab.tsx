@@ -17,6 +17,8 @@ interface Props {
   clients: CounselorReportProps['clients'];
   groups: CounselorReportProps['groups'];
   onOpenClient: CounselorReportProps['onOpenClient'];
+  // Opens an account by id, loading the client if it isn't in the current list (e.g. discharged)
+  onOpenClientId: (clientId: number) => void;
 }
 
 interface AgentReportRow {
@@ -35,7 +37,7 @@ interface DepositReport {
 }
 
 // The Reports tab: a row of report tabs (filtered by role) and the picked report
-export default function ReportsTab({ user, clients, groups, onOpenClient }: Props) {
+export default function ReportsTab({ user, clients, groups, onOpenClient, onOpenClientId }: Props) {
   // The report tab last picked; null until one is picked (the role's first report shows)
   const [reportTab, setReportTab] = useState<string | null>(null);
   const [agentReportData, setAgentReportData] = useState<AgentReportRow[] | null>(null);
@@ -122,7 +124,7 @@ export default function ReportsTab({ user, clients, groups, onOpenClient }: Prop
 
       {currentReport === 'counselorClients' && <CounselorClientReport clients={clients} groups={groups} statuses={PROGRAM_STATUSES} onOpenClient={onOpenClient} />}
 
-      {currentReport === 'userActivity' && <UserActivityReport userEmail={user.employeeemail} clients={clients} onOpenClient={onOpenClient} />}
+      {currentReport === 'userActivity' && <UserActivityReport userEmail={user.employeeemail} onOpenClient={onOpenClientId} />}
 
       {currentReport === 'agent' && !reportsError && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">

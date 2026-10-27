@@ -9,24 +9,62 @@ const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK } = require(
 
 const router = express.Router();
 
+// Discharge types a Business Administrator can pick; each becomes the client's program status
+const DISCHARGE_STATUSES = ['Completed', 'Deceased', 'Discharged Supervision', 'Program Failed', 'Revoked', 'Transferred', 'Terminated'];
+
+// A client row as the roster and every client picker use it
+const clientRowsSql = (where) => `
+    SELECT
+        c.*,
+        g.GroupName,
+        COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
+        (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
+        (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly,
+        ${ATTENDED_THIS_MONTH} AS AttendedThisMonth,
+        ${ACTIVE_FEE_OVERRIDE} AS ActiveFeeOverride,
+        ${BIP_CHECKIN_BLOCK} AS BipCheckInBlock
+    FROM Clients c
+    LEFT JOIN Groups g ON c.GroupId = g.GroupId
+    ${where}
+    ORDER BY c.LastName ASC`;
+
+// Without a status, current clients only (not discharged): discharged clients pile up over the years, so they are only
+// sent when asked for. status: 'all', 'discharged' (any discharge status), or one program status.
+// agent: only that supervising agent's clients, ignoring case and surrounding spaces like the agent directory.
 router.get('/api/clients', async (req, res) => {
     try {
-        const query = `
-            SELECT 
-                c.*, 
-                g.GroupName, 
-                COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
-                (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
-                (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly,
-                ${ATTENDED_THIS_MONTH} AS AttendedThisMonth,
-                ${ACTIVE_FEE_OVERRIDE} AS ActiveFeeOverride,
-                ${BIP_CHECKIN_BLOCK} AS BipCheckInBlock
-            FROM Clients c
-            LEFT JOIN Groups g ON c.GroupId = g.GroupId
-            ORDER BY c.LastName ASC;
-        `;
-        const result = await pool.query(query);
+        const status = req.query.status ? String(req.query.status) : '';
+        const conditions = [];
+        const params = [];
+        if (!status) {
+            params.push(DISCHARGE_STATUSES);
+            conditions.push(`c.ProgramStatus <> ALL($${params.length})`);
+        } else if (status === 'discharged') {
+            params.push(DISCHARGE_STATUSES);
+            conditions.push(`c.ProgramStatus = ANY($${params.length})`);
+        } else if (status !== 'all') {
+            params.push(status);
+            conditions.push(`c.ProgramStatus = $${params.length}`);
+        }
+        if (req.query.agent) {
+            params.push(String(req.query.agent));
+            conditions.push(`LOWER(TRIM(c.SupervisingAgent)) = LOWER(TRIM($${params.length}))`);
+        }
+        const result = await pool.query(clientRowsSql(conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''), params);
         res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// One client, for opening the account of a client who isn't in the current list (e.g. discharged)
+router.get('/api/clients/:id', async (req, res) => {
+    try {
+        const result = await pool.query(clientRowsSql('WHERE c.ClientId = $1'), [req.params.id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Client not found.' });
+        }
+        res.json(result.rows[0]);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -70,8 +108,6 @@ router.put('/api/clients/:id/no-poly-required', async (req, res) => {
 // Statuses that can be set when adding or editing a client; the discharge statuses below are only set through discharge
 const EDITABLE_PROGRAM_STATUSES = ['Active', 'Inactive'];
 
-// Discharge types a Business Administrator can pick; each becomes the client's program status
-const DISCHARGE_STATUSES = ['Completed', 'Deceased', 'Discharged Supervision', 'Program Failed', 'Revoked', 'Transferred', 'Terminated'];
 // Discharge types that require a subcategory; each discharge is kept in ClientDischarges for recidivism reporting
 const DISCHARGE_SUBCATEGORIES = {
     'Program Failed': ['Attendance', 'Polys', 'Not Amenable'],
