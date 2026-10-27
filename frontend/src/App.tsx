@@ -42,6 +42,7 @@ import ClientRoster from './components/clients/ClientRoster';
 import ClientAttachments from './components/clients/ClientAttachments';
 import ClientChangeLog from './components/clients/ClientChangeLog';
 import ClientNotes from './components/clients/ClientNotes';
+import ClientAttendanceHistory from './components/clients/ClientAttendanceHistory';
 import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividualsTab';
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
@@ -52,12 +53,12 @@ import {
   STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase, CLIENT_FIELD_OPTIONS, SO_ATTENDANCE_LIMIT_MONTHS,
   isAttendanceOverdue, GROUP_TYPES_BY_PROGRAM,
 } from './utils/clients';
-import { EMPTY_ATTENDANCE_FILTERS, EMPTY_LEDGER_FILTERS, sortedUnique, groupByMonth, toggleInSet } from './utils/filters';
+import { EMPTY_LEDGER_FILTERS, sortedUnique, groupByMonth, toggleInSet } from './utils/filters';
 import {
   localYmd, timeBetween, getLocalDateString, parseLogDate, formatLogMonthDay, formatLogYear,
   formatDisplayTime, toLocalDay, ageFromBirthDate,
 } from './utils/dates';
-import { signedMoney, attendanceBalanceChange, PAYMENT_REVERSAL_TYPES, LEDGER_TONES, cardPaymentStatus, ledgerBalanceChange } from './utils/ledger';
+import { signedMoney, PAYMENT_REVERSAL_TYPES, LEDGER_TONES, cardPaymentStatus, ledgerBalanceChange } from './utils/ledger';
 import { polygraphHistoryText, polygraphNotice, POLY_VOUCHER_MAX, polySchedulingNeeds, slotStart } from './utils/polygraph';
 
 export default function App() {
@@ -102,11 +103,8 @@ export default function App() {
   const [paymentActionError, setPaymentActionError] = useState('');
   // Shown in the ledger after a poly fee payment change when the client is already booked into a polygraph with vouchers
   const [scheduledPolyNotice, setScheduledPolyNotice] = useState<{ slotId: number; text: string } | null>(null);
-  const [attendanceFilters, setAttendanceFilters] = useState(EMPTY_ATTENDANCE_FILTERS);
-  const [showAttendanceFilters, setShowAttendanceFilters] = useState(false);
   const [showLedgerFilters, setShowLedgerFilters] = useState(false);
-  // Attendance and ledger months (YYYY-MM) the user has collapsed
-  const [collapsedAttendanceMonths, setCollapsedAttendanceMonths] = useState<Set<string>>(() => new Set());
+  // Ledger months (YYYY-MM) the user has collapsed
   const [collapsedLedgerMonths, setCollapsedLedgerMonths] = useState<Set<string>>(() => new Set());
   const [ledgerFilters, setLedgerFilters] = useState(EMPTY_LEDGER_FILTERS);
   const [clientPolygraphs, setClientPolygraphs] = useState<any[]>([]);
@@ -434,9 +432,6 @@ export default function App() {
   const openClientLogs = async (client: any) => {
     setNoPolyOverride(false);
     setStatusDialog(null);
-    setAttendanceFilters(EMPTY_ATTENDANCE_FILTERS);
-    setShowAttendanceFilters(false);
-    setCollapsedAttendanceMonths(new Set());
     setCollapsedLedgerMonths(new Set());
     setShowLedgerFilters(false);
     setLedgerFilters(EMPTY_LEDGER_FILTERS);
@@ -645,25 +640,11 @@ export default function App() {
     return false;
   };
 
-  // Client drawer: Attendance, Case Notes, and Financial Ledger after filters and sort
+  // Client drawer: Financial Ledger after filters and sort
   const byDate = (sort: string) => (a: any, b: any) => {
     const diff = new Date(a.date).getTime() - new Date(b.date).getTime();
     return sort === 'oldest' ? diff : -diff;
   };
-  const attendanceSearch = attendanceFilters.search.trim().toLowerCase();
-  const shownAttendance = clientAttendance.filter(a => {
-    const day = localYmd(a.date);
-    const paid = Number(a.accountpaid || 0) > 0;
-    if (attendanceFilters.group && (a.groupname || 'Group Session') !== attendanceFilters.group) return false;
-    if (attendanceFilters.type && a.type !== attendanceFilters.type) return false;
-    if (attendanceFilters.payment === 'Paid' && !paid) return false;
-    if (attendanceFilters.payment === 'No Payment' && paid) return false;
-    if (attendanceFilters.from && day < attendanceFilters.from) return false;
-    if (attendanceFilters.to && day > attendanceFilters.to) return false;
-    if (attendanceSearch && ![a.groupname, a.groupschedule, a.type, a.comments, a.paymentmethod].some(v => String(v ?? '').toLowerCase().includes(attendanceSearch))) return false;
-    return true;
-  }).sort(byDate(attendanceFilters.sort));
-
   const ledgerSearch = ledgerFilters.search.trim().toLowerCase();
   const shownLedger = clientFinancials.filter(f => {
     const day = localYmd(f.date);
@@ -1761,117 +1742,7 @@ export default function App() {
               )}
 
               {clientTab === 'attendance' && (
-
-                <div className="space-y-3">
-                  {(() => {
-                    // Filters set but hidden are counted on the button so they aren't forgotten
-                    const activeAttendanceFilters = [attendanceFilters.search.trim(), attendanceFilters.group, attendanceFilters.type, attendanceFilters.payment, attendanceFilters.from, attendanceFilters.to].filter(Boolean).length;
-                    return (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowAttendanceFilters(show => !show)}
-                          aria-expanded={showAttendanceFilters}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border ${showAttendanceFilters ? 'bg-slate-700 border-slate-600 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
-                        >
-                          <SlidersHorizontal size={13} /> Filters
-                          {activeAttendanceFilters > 0 && (
-                            <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{activeAttendanceFilters}</span>
-                          )}
-                        </button>
-                        <span className="ml-auto text-xs text-slate-500">
-                          {shownAttendance.length === clientAttendance.length ? `${clientAttendance.length} sessions` : `Showing ${shownAttendance.length} of ${clientAttendance.length}`}
-                        </span>
-                      </div>
-                    );
-                  })()}
-                  {showAttendanceFilters && (
-                    <RecordFilterBar
-                      search={attendanceFilters.search}
-                      onSearch={v => setAttendanceFilters(f => ({ ...f, search: v }))}
-                      searchPlaceholder="Group, type, or comments..."
-                      selects={[
-                        { label: 'Group', value: attendanceFilters.group, onChange: v => setAttendanceFilters(f => ({ ...f, group: v })), allLabel: 'All Groups', options: sortedUnique(clientAttendance.map(a => a.groupname || 'Group Session')) },
-                        { label: 'Type', value: attendanceFilters.type, onChange: v => setAttendanceFilters(f => ({ ...f, type: v })), allLabel: 'All Types', options: sortedUnique(clientAttendance.map(a => a.type)) },
-                        { label: 'Payment', value: attendanceFilters.payment, onChange: v => setAttendanceFilters(f => ({ ...f, payment: v })), allLabel: 'All', options: ['Paid', 'No Payment'] },
-                      ]}
-                      from={attendanceFilters.from}
-                      to={attendanceFilters.to}
-                      onFrom={v => setAttendanceFilters(f => ({ ...f, from: v }))}
-                      onTo={v => setAttendanceFilters(f => ({ ...f, to: v }))}
-                      sort={attendanceFilters.sort}
-                      onSort={v => setAttendanceFilters(f => ({ ...f, sort: v }))}
-                      sortOptions={[
-                        { value: 'newest', label: 'Newest First' },
-                        { value: 'oldest', label: 'Oldest First' },
-                      ]}
-                      shown={shownAttendance.length}
-                      total={clientAttendance.length}
-                      onClear={() => setAttendanceFilters(f => ({ ...EMPTY_ATTENDANCE_FILTERS, sort: f.sort }))}
-                    />
-                  )}
-                  {shownAttendance.length === 0 && clientAttendance.length > 0 && (
-                    <p className="text-center text-slate-500 text-sm py-4">No attendance matches these filters.</p>
-                  )}
-                  {groupByMonth(shownAttendance, attendanceFilters.sort).map(month => {
-                      const totals = month.rows.reduce((t, att) => {
-                        const c = attendanceBalanceChange(att);
-                        return { fee: t.fee + c.fee, paid: t.paid + c.paid, change: t.change + (c.after - c.before) };
-                      }, { fee: 0, paid: 0, change: 0 });
-                      const change = Math.round(totals.change * 100) / 100;
-                      const collapsed = collapsedAttendanceMonths.has(month.key);
-                      return (
-                  <div key={month.key} className="space-y-2">
-                    <MonthHeader label={month.label} count={month.rows.length} noun="session" collapsed={collapsed} onToggle={() => setCollapsedAttendanceMonths(prev => toggleInSet(prev, month.key))}>
-                      <span className="text-slate-500">Fees <span className="text-red-400 font-semibold">{signedMoney(totals.fee)}</span></span>
-                      <span className="text-slate-500">Paid <span className="text-emerald-400 font-semibold">{signedMoney(totals.paid)}</span></span>
-                      <span className="text-slate-500">Change <span className={`font-semibold ${change > 0 ? 'text-emerald-400' : change < 0 ? 'text-red-400' : 'text-slate-400'}`}>{change > 0 ? '+' : ''}{signedMoney(change)}</span></span>
-                    </MonthHeader>
-                  {!collapsed && month.rows.map(att => (
-                  // One compact row per session: date, group, then fee, paid, and the balance before → after
-                  (() => { const c = attendanceBalanceChange(att); return (
-                  <div key={att.attendanceid} className="bg-slate-950 border border-slate-800 px-4 py-2.5 rounded-xl text-sm flex flex-wrap items-center gap-x-4 gap-y-2">
-                    <div className="shrink-0 w-16 border-r border-slate-800 pr-4">
-                      <p className="font-bold text-white leading-tight">{formatLogMonthDay(att.date)}</p>
-                      <p className="text-[11px] text-slate-500">{formatLogYear(att.date)}</p>
-                    </div>
-                    <div className="flex-1 min-w-[10rem]">
-                      <p className="font-semibold text-white truncate">
-                        {att.groupname || 'Group Session'}
-                        {att.groupschedule && <span className="ml-2 text-xs font-normal text-slate-400">{att.groupschedule}</span>}
-                      </p>
-                      {att.comments && <p className="text-xs text-slate-400 truncate" title={att.comments}>{att.comments}</p>}
-                    </div>
-                    <div className="shrink-0 flex gap-5 text-xs text-right">
-                      <div>
-                        <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Fee</p>
-                        <p className="text-red-400 font-semibold">{signedMoney(c.fee)}</p>
-                      </div>
-                      <div>
-                        <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Paid</p>
-                        <p className="text-emerald-400 font-semibold">{signedMoney(c.paid)}</p>
-                      </div>
-                      {(() => { const change = Math.round((c.after - c.before) * 100) / 100; return (
-                        <div>
-                          <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Change</p>
-                          <p className={`font-semibold ${change > 0 ? 'text-emerald-400' : change < 0 ? 'text-red-400' : 'text-slate-400'}`}>{change > 0 ? '+' : ''}{signedMoney(change)}</p>
-                        </div>
-                      ); })()}
-                      <div>
-                        <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Balance</p>
-                        <p className="whitespace-nowrap">
-                          <span className="text-slate-400">{signedMoney(c.before)} → </span>
-                          <span className={`font-semibold ${c.after < 0 ? 'text-red-400' : 'text-white'}`}>{signedMoney(c.after)}</span>
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  ); })()
-                  ))}
-                  </div>
-                      );
-                  })}
-                </div>
+                <ClientAttendanceHistory key={selectedClientDetail.clientid} attendance={clientAttendance} />
               )}
 
               {clientTab === 'financials' && (
