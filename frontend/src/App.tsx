@@ -11,8 +11,8 @@ import {
   submitPolygraphResult, deletePolygraphSlot, assignPolygraphSlot, reopenPolygraphSlot,
   getClientAttendance, getClientFinancials, adjustCashPayment, recordCardPaymentAction,
   getClientNotes, addClientNote, updateClientNote, deleteClientNote, getClientPolygraphs, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
-  createClient, deleteClient, updateEmployee,
-  getEmployees, addEmployee, getSystemLogs, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
+  createClient, deleteClient,
+  getEmployees, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
   fetchPolyFeeOverride, savePolyFeeOverride, deletePolyFeeOverride,
   getOpenGroups, deleteOpenGroup, getClosedGroups, getClientChangeLog, getSupervisingAgents,
   getClientAttachments, uploadClientAttachment, fetchClientAttachment, renameClientAttachment, deleteClientAttachment, ATTACHMENT_MAX_BYTES
@@ -28,13 +28,13 @@ import SupervisingAgentsTab from './components/agents/SupervisingAgentsTab';
 import CallInTab from './components/callin/CallInTab';
 import GroupsTab from './components/groups/GroupsTab';
 import TestingTab from './components/testing/TestingTab';
+import AdminTab from './components/admin/AdminTab';
 import AgentPicker from './components/agents/AgentPicker';
 import ClientPicker from './components/ClientPicker';
 import RecordFilterBar from './components/clients/RecordFilterBar';
 import MonthHeader from './components/clients/MonthHeader';
 import ReportsTab from './components/reports/ReportsTab';
 import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividualsTab';
-import SessionPriceList from './components/sessions/SessionPriceList';
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
 import BipAssessmentPicker, { bipChoiceProblem, counselorChoices as bipCounselorChoices, openBipAssessment } from './components/sessions/BipAssessmentPicker';
@@ -239,25 +239,10 @@ export default function App() {
   // Inactive groups stay in the directory but are hidden from every picker for new assignments and sessions
   const activeGroups = groups.filter(g => g.active !== false);
 
-  // Admin Module State
+  // Employee accounts: managed on the Admin tab, also used for examiner names and counselor pickers
   const [employees, setEmployees] = useState<any[]>([]);
-  const [systemLogs, setSystemLogs] = useState<any[]>([]);
   // Supervising agent directory, suggested in the client forms' agent field
   const [directoryAgents, setDirectoryAgents] = useState<SupervisingAgent[]>([]);
-  // System audit logs stay collapsed until requested
-  const [showSystemLogs, setShowSystemLogs] = useState(false);
-  const [empEmail, setEmpEmail] = useState('');
-  const [empName, setEmpName] = useState('');
-  const [empRole, setEmpRole] = useState('Counselor');
-  const [empLoc] = useState('Oklahoma City');
-  // Email of the account being edited, or null when adding a new one
-  const [editingEmail, setEditingEmail] = useState<string | null>(null);
-  const [empActive, setEmpActive] = useState(true);
-  const [accountFilter, setAccountFilter] = useState<'active' | 'inactive' | 'all'>('active');
-  const [empPassword, setEmpPassword] = useState('');
-  const [empSearch, setEmpSearch] = useState('');
-  // '' shows every user type
-  const [empRoleFilter, setEmpRoleFilter] = useState('');
 
   // The server refused the session (expired after 12 hours, or the account was changed): back to the login screen
   useEffect(() => {
@@ -300,14 +285,13 @@ export default function App() {
 
   const loadDashboardData = async () => {
     try {
-      const [clientData, groupData, slotData, empData, logData] = await Promise.all([
-        getClients(), getGroups(), getPolygraphSlots(), getEmployees(), getSystemLogs()
+      const [clientData, groupData, slotData, empData] = await Promise.all([
+        getClients(), getGroups(), getPolygraphSlots(), getEmployees()
       ]);
       setClients(clientData);
       setGroups(groupData);
       setPolySlots(slotData);
       setEmployees(empData);
-      setSystemLogs(logData);
     } catch (err) {
       console.error('Failed to load data', err);
     }
@@ -674,53 +658,6 @@ export default function App() {
       setError(err.message || 'Error adding client.');
     } finally {
       setLoading(false);
-    }
-  };
-
-  // Admin User Creation. The form stays closed until New User or an account's Edit opens it.
-  const [showEmployeeForm, setShowEmployeeForm] = useState(false);
-  const resetEmployeeForm = () => {
-    setShowEmployeeForm(false);
-    setEditingEmail(null);
-    setEmpEmail('');
-    setEmpName('');
-    setEmpRole('Counselor');
-    setEmpActive(true);
-    setEmpPassword('');
-  };
-
-  const startEditEmployee = (emp: any) => {
-    setShowEmployeeForm(true);
-    setEditingEmail(emp.employeeemail);
-    setEmpEmail(emp.employeeemail);
-    setEmpName(emp.displayname || '');
-    setEmpRole(emp.role || 'Counselor');
-    setEmpActive(emp.active !== false);
-    setEmpPassword('');
-  };
-
-  const handleSaveEmployee = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      if (editingEmail) {
-        await updateEmployee(editingEmail, { displayName: empName, role: empRole, active: empActive, updatedBy: user.employeeemail, password: empPassword });
-        setSuccessMsg(empPassword ? 'Account updated and password changed!' : 'Account updated successfully!');
-      } else {
-        await addEmployee({
-          employeeEmail: empEmail,
-          displayName: empName,
-          role: empRole,
-          location: empLoc,
-          active: true,
-          password: empPassword
-        });
-        setSuccessMsg('Employee account created successfully!');
-      }
-      resetEmployeeForm();
-      const updated = await getEmployees();
-      setEmployees(updated);
-    } catch (err: any) {
-      setError(err.message || 'Error saving account.');
     }
   };
 
@@ -4314,125 +4251,7 @@ export default function App() {
 
         {/* ADMIN TAB */}
         {activeTab === 'admin' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
-              <div className="flex justify-between items-center gap-3 border-b border-slate-800 pb-3">
-                <h2 className="text-lg font-bold text-white">User Management</h2>
-                {role === 'Business Administrator' && !showEmployeeForm && (
-                  <button type="button" onClick={() => { resetEmployeeForm(); setShowEmployeeForm(true); }} className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1.5 rounded-lg text-xs flex items-center gap-1.5">
-                    <PlusCircle size={14} /> New User
-                  </button>
-                )}
-              </div>
-              {/* Only Business Administrators can create or edit accounts */}
-              {role !== 'Business Administrator' && (
-                <p className="text-xs text-slate-500 bg-slate-950 border border-slate-800 rounded p-3">
-                  Only Business Administrators can create or edit accounts.
-                </p>
-              )}
-              {role === 'Business Administrator' && showEmployeeForm && (
-              <form onSubmit={handleSaveEmployee} className="space-y-3 bg-slate-950/50 border border-slate-800 rounded-lg p-4">
-                <p className="text-sm font-semibold text-white">{editingEmail ? 'Edit Account' : 'New User'}</p>
-                {editingEmail && <p className="text-xs text-blue-400">Editing {editingEmail}. Email can't be changed.</p>}
-                <input type="email" value={empEmail} onChange={(e) => setEmpEmail(e.target.value)} disabled={editingEmail !== null} placeholder="Employee Email" className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm disabled:opacity-50" required />
-                <input type="text" value={empName} onChange={(e) => setEmpName(e.target.value)} placeholder="Full Display Name" className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm" required />
-                <input type="password" value={empPassword} onChange={(e) => setEmpPassword(e.target.value)} autoComplete="new-password" placeholder={editingEmail ? 'New password (leave blank to keep current)' : 'Password'} className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm" required={editingEmail === null} />
-                <select value={empRole} onChange={(e) => setEmpRole(e.target.value)} disabled={editingEmail === user.employeeemail} className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm disabled:opacity-50">
-                  <option value="Office Admin">Office Admin</option>
-                  <option value="Business Administrator">Business Administrator</option>
-                  <option value="Counselor">Counselor</option>
-                  <option value="Polygrapher">Polygrapher</option>
-                </select>
-                {editingEmail && (
-                  <label className="flex items-center gap-2 text-xs text-slate-300">
-                    <input type="checkbox" checked={empActive} onChange={(e) => setEmpActive(e.target.checked)} disabled={editingEmail === user.employeeemail} className="rounded accent-blue-500 disabled:opacity-50" />
-                    Active (inactive accounts cannot log in)
-                  </label>
-                )}
-                {editingEmail === user.employeeemail && (
-                  <p className="text-xs text-slate-500">You can change your own name here, but not your own role or active status.</p>
-                )}
-                <div className="flex gap-2">
-                  <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded text-xs">{editingEmail ? 'Save Changes' : 'Create User'}</button>
-                  <button type="button" onClick={resetEmployeeForm} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold px-4 py-2 rounded text-xs">Cancel</button>
-                </div>
-              </form>
-              )}
-
-              <div className="space-y-2 pt-4">
-                <div className="flex justify-between items-center gap-3">
-                  <p className="text-xs text-slate-400 font-semibold uppercase">System Accounts</p>
-                  <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
-                    {(['active', 'inactive', 'all'] as const).map(f => (
-                      <button
-                        key={f}
-                        type="button"
-                        onClick={() => setAccountFilter(f)}
-                        className={`px-3 py-1 rounded text-xs font-semibold transition ${accountFilter === f ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-                      >
-                        {f === 'active' ? 'Active' : f === 'inactive' ? 'Inactive' : 'All'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="search"
-                    value={empSearch}
-                    onChange={(e) => setEmpSearch(e.target.value)}
-                    placeholder="Search by name or email..."
-                    className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-xs placeholder-slate-500"
-                  />
-                  <select
-                    value={empRoleFilter}
-                    onChange={(e) => setEmpRoleFilter(e.target.value)}
-                    aria-label="Filter by user type"
-                    className={`shrink-0 bg-slate-950 border rounded px-2.5 text-xs ${empRoleFilter ? 'border-blue-500 text-white' : 'border-slate-700 text-slate-300'}`}
-                  >
-                    <option value="">All User Types</option>
-                    {sortedUnique(employees.map(e => e.role)).map(r => (
-                      <option key={r} value={r}>{r} ({employees.filter(e => e.role === r && (accountFilter === 'all' || (accountFilter === 'active' ? e.active !== false : e.active === false))).length})</option>
-                    ))}
-                  </select>
-                </div>
-                {employees.filter(e => (accountFilter === 'all' || (accountFilter === 'active' ? e.active !== false : e.active === false)) && (!empRoleFilter || e.role === empRoleFilter) && (empSearch.trim() === '' || `${e.displayname} ${e.employeeemail} ${e.role}`.toLowerCase().includes(empSearch.toLowerCase()))).map(e => (
-                  <div key={e.employeeemail} className={`bg-slate-950 border p-3 rounded flex justify-between items-center gap-3 text-xs ${editingEmail === e.employeeemail ? 'border-blue-500' : 'border-slate-800'}`}>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-white truncate">{e.displayname}</p>
-                      <p className="text-slate-400 truncate">{e.employeeemail}</p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {e.active === false && <span className="bg-slate-700/50 text-slate-400 px-2 py-0.5 rounded font-semibold">Inactive</span>}
-                      <span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded font-semibold">{e.role}</span>
-                      {role === 'Business Administrator' && (
-                        <button type="button" onClick={() => startEditEmployee(e)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1 rounded font-semibold">Edit</button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
-              <div className="flex justify-between items-center gap-3 border-b border-slate-800 pb-3">
-                <h2 className="text-lg font-bold text-white">System Audit & Activity Logs</h2>
-                <button type="button" onClick={() => setShowSystemLogs(!showSystemLogs)} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded font-semibold text-xs shrink-0"><Activity size={14} /> {showSystemLogs ? 'Hide Logs' : 'Show Logs'}</button>
-              </div>
-              {showSystemLogs && (
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {systemLogs.map(l => (
-                  <div key={l.logid} className="bg-slate-950 border border-slate-800 p-3 rounded text-xs space-y-1">
-                    <div className="flex justify-between text-slate-400"><span>{l.useremail}</span><span>{new Date(l.timestamp).toLocaleString()}</span></div>
-                    <p className="text-white font-medium">{l.action}</p>
-                    <p className="text-slate-400">{l.details}</p>
-                  </div>
-                ))}
-              </div>
-              )}
-            </div>
-
-            <SessionPriceList userEmail={user.employeeemail} canEdit={role === 'Business Administrator'} onSuccess={setSuccessMsg} />
-          </div>
+          <AdminTab user={user} employees={employees} onEmployeesChanged={setEmployees} onSuccess={setSuccessMsg} onError={setError} />
         )}
 
         {bipIntakePrompt && (

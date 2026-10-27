@@ -827,18 +827,35 @@ export async function updateEmployee(email: string, data: { displayName: string;
     return body as { success: true };
 }
 
-export async function addEmployee(data: any) {
+export async function addEmployee(data: { employeeEmail: string; displayName: string; role: string; location: string; active: boolean; password: string }) {
     const res = await apiFetch(`${API_BASE}/admin/employees`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
     });
-    return res.json();
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(body.error || 'Failed to create the account.');
+    }
+    return body as { success: true };
 }
 
-export async function getSystemLogs() {
+export interface SystemLog {
+    logid: number;
+    useremail: string;
+    action: string;
+    details: string | null;
+    timestamp: string;
+}
+
+// Office Admins and Business Administrators only; the server checks the role
+export async function getSystemLogs(): Promise<SystemLog[]> {
     const res = await apiFetch(`${API_BASE}/admin/logs`);
-    return res.json();
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !Array.isArray(body)) {
+        throw new Error(body?.error || 'Failed to load the system logs.');
+    }
+    return body;
 }
 
 export interface SupervisingAgent {
