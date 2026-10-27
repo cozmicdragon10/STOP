@@ -60,9 +60,15 @@ router.post('/api/admin/employees', adminOnly, async (req, res) => {
         if (!String(password || '').trim()) {
             return res.status(400).json({ error: 'A password is required for a new account.' });
         }
+        // New User never overwrites an existing account (a mistyped email would reset someone's role and password);
+        // existing accounts are changed with Edit, which also signs them out when the password changes
+        const taken = await pool.query('SELECT 1 FROM EmployeeRoles WHERE LOWER(EmployeeEmail) = LOWER($1)', [employeeEmail || '']);
+        if (taken.rows.length > 0) {
+            return res.status(409).json({ error: 'An account with this email already exists. Use Edit on that account instead.' });
+        }
         const passwordHash = await hashPassword(String(password));
         await pool.query(
-            'INSERT INTO EmployeeRoles (EmployeeEmail, DisplayName, Role, Location, Active, PasswordHash) VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (EmployeeEmail) DO UPDATE SET Role = EXCLUDED.Role, Active = EXCLUDED.Active, PasswordHash = EXCLUDED.PasswordHash',
+            'INSERT INTO EmployeeRoles (EmployeeEmail, DisplayName, Role, Location, Active, PasswordHash) VALUES ($1, $2, $3, $4, $5, $6)',
             [employeeEmail, displayName, role, location, active, passwordHash]
         );
         res.status(201).json({ success: true });
