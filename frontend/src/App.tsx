@@ -1,8 +1,8 @@
-import React, { Fragment, useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
   DollarSign, Calendar, Activity, PhoneCall, ShieldAlert, 
-  Layers, CheckSquare, BarChart3, Settings, CheckCircle2, Trash2, RotateCcw, Home, History,
+  Layers, CheckSquare, BarChart3, Settings, Trash2, RotateCcw, Home, History,
   Paperclip, UserCheck, ClipboardList
 } from 'lucide-react';
 import {
@@ -10,7 +10,7 @@ import {
   getPolygraphSlots,
   deletePolygraphSlot,
   getClientAttendance, getClientFinancials,
-  getClientNotes, getClientPolygraphs, updateClient,
+  getClientNotes, getClientPolygraphs,
   deleteClient,
   getEmployees, fetchClientFeeOverride, fetchPolyFeeOverride,
   getOpenGroups, deleteOpenGroup, getClosedGroups, getSupervisingAgents
@@ -19,7 +19,6 @@ import type { ClosedGroupSession, OpenGroupSession, PolyFeeOverride, PolyFeeOver
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
-import { SO_PHASES, SO_TREATMENT_FEES } from './utils/soPhases';
 import CardPaymentFields from './components/payments/CardPaymentFields';
 import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
 import SupervisingAgentsTab from './components/agents/SupervisingAgentsTab';
@@ -33,7 +32,6 @@ import PolySchedule from './components/polygraph/PolySchedule';
 import PolyCancelDialog from './components/polygraph/PolyCancelDialog';
 import PolyAssignDialogs from './components/polygraph/PolyAssignDialogs';
 import { usePolyAssignment } from './hooks/usePolyAssignment';
-import AgentPicker from './components/agents/AgentPicker';
 import ReportsTab from './components/reports/ReportsTab';
 import ClientRoster from './components/clients/ClientRoster';
 import ClientAttachments from './components/clients/ClientAttachments';
@@ -45,18 +43,14 @@ import ClientLedger from './components/clients/ClientLedger';
 import TempFeeOverridePanel from './components/clients/TempFeeOverridePanel';
 import PolyFeeOverridePanel from './components/clients/PolyFeeOverridePanel';
 import ProgramStatusDialog from './components/clients/ProgramStatusDialog';
+import ClientInfoForm from './components/clients/ClientInfoForm';
 import type { LedgerRefresh } from './components/clients/ClientLedger';
 import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividualsTab';
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
-import {
-  EDITABLE_PROGRAM_STATUSES, DISCHARGE_STATUSES, SO_PROGRAM_TYPES,
-  STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase, CLIENT_FIELD_OPTIONS, SO_ATTENDANCE_LIMIT_MONTHS,
-  isAttendanceOverdue, GROUP_TYPES_BY_PROGRAM,
-} from './utils/clients';
-import { toLocalDay, ageFromBirthDate } from './utils/dates';
+import { DISCHARGE_STATUSES } from './utils/clients';
 import { formatMoney } from './utils/ledger';
-import { polygraphHistoryText, polygraphNotice, POLY_VOUCHER_MAX, slotStart, slotSummary } from './utils/polygraph';
+import { polygraphHistoryText, polygraphNotice, slotStart, slotSummary } from './utils/polygraph';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -97,10 +91,8 @@ export default function App() {
   const [clientPolygraphs, setClientPolygraphs] = useState<any[]>([]);
   // Client whose polygraphs are loaded, so the notice never uses the previous client's results
   const [clientPolygraphsFor, setClientPolygraphsFor] = useState<number | null>(null);
-  const [editingClientInfo, setEditingClientInfo] = useState(false);
-  const [savingClientInfo, setSavingClientInfo] = useState(false);
-  const [clientInfoError, setClientInfoError] = useState('');
-  const [clientInfoForm, setClientInfoForm] = useState<any>({});
+  // Shown at the top of the Information tab when part of the account could not be loaded
+  const [accountLoadError, setAccountLoadError] = useState('');
   const [clientFeeOverride, setClientFeeOverride] = useState<any>(null);
   // Temporary poly fee override: a reduced poly fee for a number of fills
   const [clientPolyOverride, setClientPolyOverride] = useState<PolyFeeOverride | null>(null);
@@ -343,7 +335,6 @@ export default function App() {
   const handleProgramStatusChanged = async (programstatus: string) => {
     const clientid = selectedClientDetail.clientid;
     setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, programstatus } : c));
-    setClientInfoForm((f: any) => (f && f.clientid === clientid ? { ...f, programstatus } : f));
     setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, programstatus } : c));
     const notes = await getClientNotes(clientid);
     // Skip if another account was opened while it saved
@@ -353,13 +344,21 @@ export default function App() {
     setAccountTabsVersion(v => v + 1);
   };
 
+  // Edit Info saved: update the client everywhere; a client just moved to BIP is asked about a BIP Intake or DV Assessment
+  const handleClientInfoSaved = (saved: any, previousProgramType: string | null) => {
+    setSelectedClientDetail((c: any) => (c && c.clientid === saved.clientid ? saved : c));
+    setClients(prev => prev.map(c => c.clientid === saved.clientid ? { ...c, ...saved } : c));
+    if (saved.programtype === 'BIP' && previousProgramType !== 'BIP') {
+      setBipIntakePrompt({ clientid: saved.clientid, name: `${saved.lastname}, ${saved.firstname}`, groupCounselor: counselorOfGroup(saved.groupid) });
+    }
+  };
+
   // Drawer Log Loading
   const openClientLogs = async (client: any) => {
     setStatusDialog(null);
     setSelectedClientDetail(client);
     setClientTab('information');
-    setEditingClientInfo(false);
-    setClientInfoForm({ ...client });
+    setAccountLoadError('');
     setClientFeeOverride(null);
     setClientPolyOverride(null);
     setPolyOverrideLoadError('');
@@ -378,7 +377,7 @@ export default function App() {
       const { override } = await fetchClientFeeOverride(client.clientid);
       setClientFeeOverride(override);
     } catch (err: any) {
-      setClientInfoError(err.message || 'Could not load the temporary fee override.');
+      setAccountLoadError(err.message || 'Could not load the temporary fee override.');
     }
     try {
       const { override } = await fetchPolyFeeOverride(client.clientid);
@@ -855,361 +854,18 @@ export default function App() {
 
               {clientTab === 'information' && (
                 <div className="space-y-5">
-                  {clientInfoError && (
-                    <div className="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-sm flex justify-between items-center gap-3">
-                      <span>{clientInfoError}</span>
-                      <button onClick={() => setClientInfoError('')} className="text-red-400 hover:text-red-200"><X size={14} /></button>
-                    </div>
-                  )}
-
-                  {/* Edit / Save toolbar */}
-                  <div className="flex justify-end">
-                    {!editingClientInfo ? (
-                      <button
-                        onClick={() => { setEditingClientInfo(true); setClientInfoForm({ ...selectedClientDetail }); }}
-                        className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
-                      >
-                        <Settings size={13} /> Edit Info
-                      </button>
-                    ) : (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setEditingClientInfo(false)}
-                          className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-1.5 rounded-lg text-xs font-semibold"
-                        >Cancel</button>
-                        <button
-                          disabled={savingClientInfo}
-                          onClick={async () => {
-                            setSavingClientInfo(true);
-                            setClientInfoError('');
-                            try {
-                              const res = await updateClient(selectedClientDetail.clientid, { ...clientInfoForm, updatedBy: user.employeeemail });
-                              // Prefer the row the server returned (includes joined group name); fall back to the form values
-                              const saved = { ...selectedClientDetail, ...clientInfoForm, ...(res.client ?? {}) };
-                              setSelectedClientDetail(saved);
-                              setClients(prev => prev.map(c => c.clientid === saved.clientid ? { ...c, ...saved } : c));
-                              setEditingClientInfo(false);
-                              if (saved.programtype === 'BIP' && selectedClientDetail.programtype !== 'BIP') {
-                                setBipIntakePrompt({ clientid: saved.clientid, name: `${saved.lastname}, ${saved.firstname}`, groupCounselor: counselorOfGroup(saved.groupid) });
-                              }
-                            } catch (err: unknown) {
-                              // Stay in edit mode so nothing typed is lost
-                              setClientInfoError(err instanceof Error ? err.message : 'Failed to save client information.');
-                            } finally {
-                              setSavingClientInfo(false);
-                            }
-                          }}
-                          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
-                        >
-                          <CheckCircle2 size={13} /> Save Changes
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Section 1 – Personal Info */}
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
-                    <h3 className="text-xs font-bold uppercase text-blue-400 mb-4 tracking-wider">Personal Information</h3>
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                      {[
-                        { label: 'First Name', field: 'firstname' },
-                        { label: 'Last Name', field: 'lastname' },
-                        { label: 'Middle Name', field: 'middlename' },
-                        { label: 'DOC #', field: 'docnumber' },
-                        { label: 'Date of Birth', field: 'dateofbirth' },
-                        { label: 'Sex', field: 'sex' },
-                        { label: 'Race', field: 'race' },
-                        { label: 'Supervising Agent', field: 'supervisingagent' },
-                        { label: 'Program Status', field: 'programstatus' },
-                        { label: 'Program Start Date', field: 'programstartdate' },
-                        { label: 'Last Date Attended', field: 'lastdateattended' },
-                      ].map(({ label, field }) => (
-                        <div key={field}>
-                          <p className="text-xs text-slate-500 mb-0.5">{label}</p>
-                          {editingClientInfo && field === 'programstatus' && clientIsDischarged ? (
-                            // Locked while discharged; the Activate button is the only way out
-                            <div>
-                              <p className="w-full bg-slate-900/50 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-400 text-sm cursor-not-allowed">{selectedClientDetail.programstatus}</p>
-                              <p className="text-xs text-slate-500 mt-1">Locked while discharged. Use Activate to change it.</p>
-                            </div>
-                          ) : editingClientInfo && field === 'programstatus' ? (
-                            <select
-                              value={clientInfoForm.programstatus || ''}
-                              onChange={e => setClientInfoForm((f: any) => ({ ...f, programstatus: e.target.value }))}
-                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                            >
-                              <option value="">-- Select status --</option>
-                              {EDITABLE_PROGRAM_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-                            </select>
-                          ) : editingClientInfo && CLIENT_FIELD_OPTIONS[field] ? (
-                            <select
-                              value={clientInfoForm[field] || ''}
-                              onChange={e => setClientInfoForm((f: any) => ({ ...f, [field]: e.target.value }))}
-                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                            >
-                              <option value="">-- Select {label.toLowerCase()} --</option>
-                              {CLIENT_FIELD_OPTIONS[field].map(o => <option key={o} value={o}>{o}</option>)}
-                            </select>
-                          ) : editingClientInfo && field === 'supervisingagent' ? (
-                            <AgentPicker
-                              value={clientInfoForm.supervisingagent || ''}
-                              onChange={v => setClientInfoForm((f: any) => ({ ...f, supervisingagent: v }))}
-                              agents={directoryAgents}
-                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                            />
-                          ) : editingClientInfo ? (
-                            <div className="flex items-center gap-3">
-                              <input
-                                type={field.includes('date') || field.includes('Date') ? 'date' : 'text'}
-                                value={clientInfoForm[field] ? (field.includes('date') || field.includes('Date') ? String(clientInfoForm[field]).split('T')[0] : clientInfoForm[field]) : ''}
-                                max={field === 'dateofbirth' ? todayLocal() : undefined}
-                                onChange={e => setClientInfoForm((f: any) => ({ ...f, [field]: e.target.value }))}
-                                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                              />
-                              {field === 'dateofbirth' && ageFromBirthDate(clientInfoForm.dateofbirth) !== null && (
-                                <span className="text-xs text-slate-400 whitespace-nowrap">Age {ageFromBirthDate(clientInfoForm.dateofbirth)}</span>
-                              )}
-                            </div>
-                          ) : (
-                            <p
-                              className={field === 'lastdateattended' && isAttendanceOverdue(selectedClientDetail) ? 'text-red-400 font-semibold' : 'text-white font-medium'}
-                              title={field === 'lastdateattended' && isAttendanceOverdue(selectedClientDetail)
-                                ? `Overdue: more than ${SO_ATTENDANCE_LIMIT_MONTHS[selectedClientDetail.phase]} month${SO_ATTENDANCE_LIMIT_MONTHS[selectedClientDetail.phase] === 1 ? '' : 's'} since last attended for ${selectedClientDetail.phase}`
-                                : undefined}
-                            >
-                              {field === 'dateofbirth'
-                                ? (selectedClientDetail.dateofbirth
-                                    ? <>{toLocalDay(selectedClientDetail.dateofbirth).toLocaleDateString()} <span className="text-slate-400 font-normal">(Age {ageFromBirthDate(selectedClientDetail.dateofbirth)})</span></>
-                                    : '—')
-                                : field.includes('date') || field.includes('Date')
-                                ? (selectedClientDetail[field] ? new Date(selectedClientDetail[field]).toLocaleDateString() : '—')
-                                : (selectedClientDetail[field] || '—')}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                      {/* Derived from polygraph results, so shown read-only and only for the SO programs */}
-                      {SO_PROGRAM_TYPES.includes((editingClientInfo ? clientInfoForm.programtype : selectedClientDetail.programtype) || '') && (
-                        <div>
-                          <p className="text-xs text-slate-500 mb-0.5">Last Polygraph</p>
-                          <p className="text-white font-medium">{selectedClientDetail.lastpoly ? new Date(selectedClientDetail.lastpoly).toLocaleDateString() : '—'}</p>
-                        </div>
-                      )}
-                      <div className="col-span-2">
-                        <p className="text-xs text-slate-500 mb-0.5">Comments</p>
-                        {editingClientInfo ? (
-                          <textarea
-                            rows={3}
-                            value={clientInfoForm.comments || ''}
-                            onChange={e => setClientInfoForm((f: any) => ({ ...f, comments: e.target.value }))}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                          />
-                        ) : (
-                          <p className="text-white font-medium">{selectedClientDetail.comments || '—'}</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Section 2 – Contact Info */}
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
-                    <h3 className="text-xs font-bold uppercase text-blue-400 mb-4 tracking-wider">Contact Information</h3>
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                      {[
-                        { label: 'Address', field: 'address' },
-                        { label: 'City', field: 'city' },
-                        { label: 'County', field: 'county' },
-                        { label: 'State', field: 'state' },
-                        { label: 'Zip', field: 'zip' },
-                        { label: 'Main Phone', field: 'mainphone' },
-                        { label: 'Alt Phone', field: 'altphone' },
-                        { label: 'Emergency Contact', field: 'emergencycontact' },
-                        { label: 'Emergency Contact Phone', field: 'emergencycontactphone' },
-                      ].map(({ label, field }) => (
-                        <div key={field}>
-                          <p className="text-xs text-slate-500 mb-0.5">{label}</p>
-                          {editingClientInfo ? (
-                            <input
-                              type="text"
-                              value={clientInfoForm[field] || ''}
-                              onChange={e => setClientInfoForm((f: any) => ({ ...f, [field]: e.target.value }))}
-                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                            />
-                          ) : (
-                            <p className="text-white font-medium">{selectedClientDetail[field] || '—'}</p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Section 3 – Program & Account Info */}
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
-                    <h3 className="text-xs font-bold uppercase text-blue-400 mb-4 tracking-wider">Program &amp; Account Info</h3>
-                    <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                      <div>
-                        <p className="text-xs text-slate-500 mb-0.5">Program Type</p>
-                        {editingClientInfo ? (
-                          <select
-                            value={clientInfoForm.programtype || ''}
-                            onChange={e => {
-                              const programType = e.target.value;
-                              setClientInfoForm((f: any) => {
-                                // Switching programs resets the phase/week to one that fits the new program
-                                const phase = SO_PROGRAM_TYPES.includes(programType) && !SO_PHASES.includes(f.phase) ? 'Phase 1 - Weekly'
-                                  : programType === 'BIP' && !isWholeNumber(f.phase) ? '0'
-                                  : f.phase;
-                                // BIP is $35; Federal SO has no treatment fee; State and Voluntary SO take the fee for the phase
-                                const treatmentfee = programType === 'BIP' ? 35
-                                  : programType === 'Federal SO' ? 0
-                                  : STATE_FEE_PROGRAM_TYPES.includes(programType) && SO_TREATMENT_FEES[phase] !== undefined ? SO_TREATMENT_FEES[phase]
-                                  : f.treatmentfee;
-                                return { ...f, programtype: programType, phase, treatmentfee };
-                              });
-                            }}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                          >
-                            <option value="">-- Select --</option>
-                            <option value="State SO">State SO</option>
-                            <option value="Federal SO">Federal SO</option>
-                            <option value="BIP">BIP</option>
-                            <option value="Voluntary SO">Voluntary SO</option>
-                            <option value="Poly Only">Poly Only</option>
-                          </select>
-                        ) : (
-                          <p className="text-white font-medium">{selectedClientDetail.programtype || '—'}</p>
-                        )}
-                      </div>
-                      {/* SO programs pick a phase (which sets the treatment fee); BIP clients store a whole-number week */}
-                      <div>
-                        <p className="text-xs text-slate-500 mb-0.5">{(editingClientInfo ? clientInfoForm.programtype : selectedClientDetail.programtype) === 'BIP' ? 'Week' : 'Phase'}</p>
-                        {editingClientInfo && SO_PROGRAM_TYPES.includes(clientInfoForm.programtype || '') ? (
-                          <select
-                            value={clientInfoForm.phase || ''}
-                            onChange={e => {
-                              const phase = e.target.value;
-                              setClientInfoForm((f: any) => ({
-                                ...f,
-                                phase,
-                                // Federal SO has no treatment fee, so its phase doesn't set one
-                                ...(STATE_FEE_PROGRAM_TYPES.includes(f.programtype) && SO_TREATMENT_FEES[phase] !== undefined ? { treatmentfee: SO_TREATMENT_FEES[phase] } : {}),
-                              }));
-                            }}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                          >
-                            <option value="">-- Select phase --</option>
-                            {SO_PHASES.map(p => <option key={p} value={p}>{p}</option>)}
-                            {clientInfoForm.phase && !SO_PHASES.includes(clientInfoForm.phase) && (
-                              <option value={clientInfoForm.phase}>{clientInfoForm.phase} (current)</option>
-                            )}
-                          </select>
-                        ) : editingClientInfo && clientInfoForm.programtype === 'BIP' ? (
-                          <input
-                            type="number"
-                            min={0}
-                            step={1}
-                            value={clientInfoForm.phase ?? ''}
-                            onChange={e => setClientInfoForm((f: any) => ({ ...f, phase: e.target.value }))}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                          />
-                        ) : editingClientInfo ? (
-                          <input
-                            type="text"
-                            value={clientInfoForm.phase || ''}
-                            onChange={e => setClientInfoForm((f: any) => ({ ...f, phase: e.target.value }))}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                          />
-                        ) : (
-                          <p className="text-white font-medium">{formatPhase(selectedClientDetail.programtype, selectedClientDetail.phase) || '—'}</p>
-                        )}
-                      </div>
-                      <div>
-                        <p className="text-xs text-slate-500 mb-0.5">Group</p>
-                        {editingClientInfo ? (
-                          <select
-                            value={clientInfoForm.groupid || ''}
-                            onChange={e => setClientInfoForm((f: any) => ({ ...f, groupid: e.target.value }))}
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                          >
-                            <option value="">-- None --</option>
-                            {groups.filter(g => (g.active !== false || g.groupid === clientInfoForm.groupid)
-                              && (!GROUP_TYPES_BY_PROGRAM[clientInfoForm.programtype || '']
-                                || GROUP_TYPES_BY_PROGRAM[clientInfoForm.programtype || ''].includes((g.programtype || '').trim().toUpperCase())
-                                || g.groupid === clientInfoForm.groupid)
-                            ).map(g => <option key={g.groupid} value={g.groupid}>{g.groupname}{g.active === false ? ' (inactive)' : ''}</option>)}
-                          </select>
-                        ) : (
-                          <p className="text-white font-medium">{groups.find(g => g.groupid === selectedClientDetail.groupid)?.groupname || selectedClientDetail.groupid || '—'}</p>
-                        )}
-                      </div>
-                      {[
-                        { label: 'Treatment Fee', field: 'treatmentfee', prefix: '$' },
-                        { label: 'Account Balance', field: 'accountbalance', prefix: '$' },
-                        { label: 'Vouchers', field: 'vouchers', prefix: '' },
-                        { label: 'Poly Fee Voucher', field: 'polyfeevoucher', prefix: '', step: '1', min: 0, max: POLY_VOUCHER_MAX },
-                      ].map(({ label, field, prefix, step = '0.01', min, max }) => (
-                        <div key={field}>
-                          <p className="text-xs text-slate-500 mb-0.5">{label}</p>
-                          {editingClientInfo ? (
-                            <input
-                              type="number"
-                              step={step}
-                              min={min}
-                              max={max}
-                              value={field === 'accountbalance' && clientInfoForm[field] !== '' && clientInfoForm[field] != null ? toDisplayBalance(clientInfoForm[field]) : (clientInfoForm[field] ?? '')}
-                              onChange={e => setClientInfoForm((f: any) => ({ ...f, [field]: field === 'accountbalance' && e.target.value !== '' ? toDisplayBalance(e.target.value) : e.target.value }))}
-                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm"
-                            />
-                          ) : field === 'accountbalance' ? (
-                            <p className={`font-medium ${toDisplayBalance(selectedClientDetail[field]) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(selectedClientDetail[field])}</p>
-                          ) : field === 'polyfeevoucher' ? (
-                            <p className="font-medium text-white">{Number(selectedClientDetail[field] ?? 0)}/{POLY_VOUCHER_MAX}</p>
-                          ) : (
-                            <p className="font-medium text-white">
-                              {prefix}{selectedClientDetail[field] != null ? Number(selectedClientDetail[field]).toFixed(2) : '—'}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                      {/* Poly fee progress: amount paid so far out of the total poly fee */}
-                      <div>
-                        <p className="text-xs text-slate-500 mb-0.5">Poly Fee (Paid / Total)</p>
-                        {editingClientInfo ? (
-                          <div className="flex items-center gap-2">
-                            {(['polyfeepaid', 'polyfee'] as const).map((field, i) => (
-                              <Fragment key={field}>
-                                {i === 1 && <span className="text-slate-500">/</span>}
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  min={0}
-                                  aria-label={field === 'polyfeepaid' ? 'Poly fee paid' : 'Poly fee total'}
-                                  value={clientInfoForm[field] ?? ''}
-                                  onChange={e => setClientInfoForm((f: any) => ({ ...f, [field]: e.target.value }))}
-                                  // The total belongs to an active poly fee override; change it there
-                                  disabled={field === 'polyfee' && !!clientPolyOverride}
-                                  title={field === 'polyfee' && clientPolyOverride ? 'Set by the Temporary Poly Fee Override' : undefined}
-                                  className="w-full min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm disabled:opacity-50"
-                                />
-                              </Fragment>
-                            ))}
-                          </div>
-                        ) : (() => {
-                          const paid = Number(selectedClientDetail.polyfeepaid ?? 0);
-                          const total = Number(selectedClientDetail.polyfee ?? 250);
-                          const status = paid >= total ? { text: 'Paid in full', color: 'text-emerald-400' }
-                            : paid > 0 ? { text: `$${(total - paid).toFixed(2)} remaining`, color: 'text-amber-400' }
-                            : { text: 'Not paid', color: 'text-slate-500' };
-                          return (
-                            <p className="font-medium text-white">
-                              ${paid.toFixed(2)} / ${total.toFixed(2)}
-                              <span className={`ml-2 text-xs font-normal ${status.color}`}>{status.text}</span>
-                            </p>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  </div>
+                  <ClientInfoForm
+                    key={selectedClientDetail.clientid}
+                    client={selectedClientDetail}
+                    discharged={clientIsDischarged}
+                    groups={groups}
+                    directoryAgents={directoryAgents}
+                    polyOverrideActive={!!clientPolyOverride}
+                    userEmail={user.employeeemail}
+                    loadError={accountLoadError}
+                    onDismissLoadError={() => setAccountLoadError('')}
+                    onSaved={handleClientInfoSaved}
+                  />
 
                   {/* Section 4 – Temporary Fee Override */}
                   <TempFeeOverridePanel
