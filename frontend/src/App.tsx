@@ -1,7 +1,7 @@
 import React, { Fragment, useState, useEffect } from 'react';
 import { 
   Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
-  DollarSign, Calendar, PlusCircle, Activity, PhoneCall, ShieldAlert, 
+  DollarSign, Calendar, Activity, PhoneCall, ShieldAlert, 
   Layers, CheckSquare, BarChart3, Settings, CheckCircle2, Trash2, RotateCcw, Home, History,
   Paperclip, Pencil, SlidersHorizontal, UserCheck, ClipboardList
 } from 'lucide-react';
@@ -10,7 +10,7 @@ import {
   getPolygraphSlots,
   deletePolygraphSlot,
   getClientAttendance, getClientFinancials, adjustCashPayment, recordCardPaymentAction,
-  getClientNotes, addClientNote, updateClientNote, deleteClientNote, getClientPolygraphs, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
+  getClientNotes, getClientPolygraphs, updateClient, setClientNoPolyRequired, changeClientProgramStatus,
   deleteClient,
   getEmployees, fetchClientFeeOverride, saveClientFeeOverride, deleteClientFeeOverride,
   fetchPolyFeeOverride, savePolyFeeOverride, deletePolyFeeOverride,
@@ -41,21 +41,21 @@ import ReportsTab from './components/reports/ReportsTab';
 import ClientRoster from './components/clients/ClientRoster';
 import ClientAttachments from './components/clients/ClientAttachments';
 import ClientChangeLog from './components/clients/ClientChangeLog';
+import ClientNotes from './components/clients/ClientNotes';
 import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividualsTab';
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
 import BipAssessmentPicker, { bipChoiceProblem, counselorChoices as bipCounselorChoices, openBipAssessment } from './components/sessions/BipAssessmentPicker';
 import type { BipAssessmentChoice } from './components/sessions/BipAssessmentPicker';
 import {
-  EDITABLE_PROGRAM_STATUSES, DISCHARGE_STATUSES, DISCHARGE_SUBCATEGORIES,SO_PROGRAM_TYPES,
+  EDITABLE_PROGRAM_STATUSES, DISCHARGE_STATUSES, DISCHARGE_SUBCATEGORIES, SO_PROGRAM_TYPES,
   STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase, CLIENT_FIELD_OPTIONS, SO_ATTENDANCE_LIMIT_MONTHS,
   isAttendanceOverdue, GROUP_TYPES_BY_PROGRAM,
 } from './utils/clients';
-import { caseNoteLabel } from './utils/notes';
-import { EMPTY_NOTE_FILTERS, EMPTY_ATTENDANCE_FILTERS, EMPTY_LEDGER_FILTERS, sortedUnique, groupByMonth, toggleInSet } from './utils/filters';
+import { EMPTY_ATTENDANCE_FILTERS, EMPTY_LEDGER_FILTERS, sortedUnique, groupByMonth, toggleInSet } from './utils/filters';
 import {
   localYmd, timeBetween, getLocalDateString, parseLogDate, formatLogMonthDay, formatLogYear,
-  formatLogTime, formatDisplayTime, toLocalDay, ageFromBirthDate,
+  formatDisplayTime, toLocalDay, ageFromBirthDate,
 } from './utils/dates';
 import { signedMoney, attendanceBalanceChange, PAYMENT_REVERSAL_TYPES, LEDGER_TONES, cardPaymentStatus, ledgerBalanceChange } from './utils/ledger';
 import { polygraphHistoryText, polygraphNotice, POLY_VOUCHER_MAX, polySchedulingNeeds, slotStart } from './utils/polygraph';
@@ -96,21 +96,12 @@ export default function App() {
   const [clientAttendance, setClientAttendance] = useState<any[]>([]);
   const [clientFinancials, setClientFinancials] = useState<any[]>([]);
   const [clientNotes, setClientNotes] = useState<any[]>([]);
-  // Case Notes and Financial Ledger filters in the client drawer; reset whenever a client is opened
-  const [noteFilters, setNoteFilters] = useState(EMPTY_NOTE_FILTERS);
-  // The new-note form and the filter row stay closed until their buttons open them
-  const [showNoteForm, setShowNoteForm] = useState(false);
-  const [showNoteFilters, setShowNoteFilters] = useState(false);
-  // Inline edit of one case note; noteError is shown under the note it belongs to
-  const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
+  // Financial Ledger filters in the client drawer; reset whenever a client is opened
   // Payment being corrected in the Financial Ledger (Business Administrators only): a cash adjustment, or a refund or dispute step on a card payment
   const [paymentAction, setPaymentAction] = useState<{ id: number; kind: 'adjust' | CardPaymentAction; amount: string; reason: string } | null>(null);
   const [paymentActionError, setPaymentActionError] = useState('');
   // Shown in the ledger after a poly fee payment change when the client is already booked into a polygraph with vouchers
   const [scheduledPolyNotice, setScheduledPolyNotice] = useState<{ slotId: number; text: string } | null>(null);
-  const [editNoteText, setEditNoteText] = useState('');
-  const [noteSaving, setNoteSaving] = useState(false);
-  const [noteError, setNoteError] = useState<{ noteId: number; message: string } | null>(null);
   const [attendanceFilters, setAttendanceFilters] = useState(EMPTY_ATTENDANCE_FILTERS);
   const [showAttendanceFilters, setShowAttendanceFilters] = useState(false);
   const [showLedgerFilters, setShowLedgerFilters] = useState(false);
@@ -121,8 +112,6 @@ export default function App() {
   const [clientPolygraphs, setClientPolygraphs] = useState<any[]>([]);
   // Client whose polygraphs are loaded, so the notice never uses the previous client's results
   const [clientPolygraphsFor, setClientPolygraphsFor] = useState<number | null>(null);
-  const [newNoteText, setNewNoteText] = useState('');
-  const [newNoteCategory] = useState('Therapist');
   const [editingClientInfo, setEditingClientInfo] = useState(false);
   const [savingClientInfo, setSavingClientInfo] = useState(false);
   const [clientInfoError, setClientInfoError] = useState('');
@@ -445,12 +434,6 @@ export default function App() {
   const openClientLogs = async (client: any) => {
     setNoPolyOverride(false);
     setStatusDialog(null);
-    setNoteFilters(EMPTY_NOTE_FILTERS);
-    setShowNoteForm(false);
-    setShowNoteFilters(false);
-    setNewNoteText('');
-    setEditingNoteId(null);
-    setNoteError(null);
     setAttendanceFilters(EMPTY_ATTENDANCE_FILTERS);
     setShowAttendanceFilters(false);
     setCollapsedAttendanceMonths(new Set());
@@ -508,54 +491,6 @@ export default function App() {
 
   // Bumped after a program status change so the Attachments and Change Log tabs reload if showing
   const [accountTabsVersion, setAccountTabsVersion] = useState(0);
-
-  const handleAddNote = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newNoteText.trim() || !selectedClientDetail) return;
-    await addClientNote(selectedClientDetail.clientid, {
-      user: user.employeeemail,
-      comments: newNoteText,
-      category: newNoteCategory
-    });
-    setNewNoteText('');
-    setShowNoteForm(false);
-    const updatedNotes = await getClientNotes(selectedClientDetail.clientid);
-    setClientNotes(updatedNotes);
-  };
-
-  // Matches the server rule: the note's author or a Business Administrator
-  const canChangeNote = (note: any) =>
-    user?.role === 'Business Administrator' || String(note.User || '').trim().toLowerCase() === String(user?.employeeemail || '').trim().toLowerCase();
-
-  const handleSaveNoteEdit = async (noteId: number) => {
-    if (!editNoteText.trim()) {
-      setNoteError({ noteId, message: 'The note cannot be empty.' });
-      return;
-    }
-    setNoteSaving(true);
-    setNoteError(null);
-    try {
-      const saved = await updateClientNote(noteId, { user: user.employeeemail, comments: editNoteText });
-      setClientNotes(notes => notes.map(n => (n.noteid === noteId ? saved : n)));
-      setEditingNoteId(null);
-    } catch (err: any) {
-      setNoteError({ noteId, message: err.message || 'Failed to save the note.' });
-    } finally {
-      setNoteSaving(false);
-    }
-  };
-
-  const handleDeleteNote = async (noteId: number) => {
-    if (!window.confirm('Delete this case note? This cannot be undone.')) return;
-    setNoteError(null);
-    try {
-      await deleteClientNote(noteId, user.employeeemail);
-      setClientNotes(notes => notes.filter(n => n.noteid !== noteId));
-      if (editingNoteId === noteId) setEditingNoteId(null);
-    } catch (err: any) {
-      setNoteError({ noteId, message: err.message || 'Failed to delete the note.' });
-    }
-  };
 
   const handleStandalonePaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -728,15 +663,6 @@ export default function App() {
     if (attendanceSearch && ![a.groupname, a.groupschedule, a.type, a.comments, a.paymentmethod].some(v => String(v ?? '').toLowerCase().includes(attendanceSearch))) return false;
     return true;
   }).sort(byDate(attendanceFilters.sort));
-  const noteSearch = noteFilters.search.trim().toLowerCase();
-  const shownNotes = clientNotes.filter(n => {
-    const day = localYmd(n.date);
-    if (noteFilters.category && n.category !== noteFilters.category) return false;
-    if (noteFilters.from && day < noteFilters.from) return false;
-    if (noteFilters.to && day > noteFilters.to) return false;
-    if (noteSearch && ![n.comments, n.User, caseNoteLabel(n)].some(v => String(v ?? '').toLowerCase().includes(noteSearch))) return false;
-    return true;
-  }).sort(byDate(noteFilters.sort));
 
   const ledgerSearch = ledgerFilters.search.trim().toLowerCase();
   const shownLedger = clientFinancials.filter(f => {
@@ -2194,107 +2120,7 @@ export default function App() {
               )}
 
               {clientTab === 'notes' && (
-                <div className="space-y-4">
-                  {(() => {
-                    // Filters set but hidden are counted on the button so they aren't forgotten
-                    const activeNoteFilters = [noteFilters.search.trim(), noteFilters.category, noteFilters.from, noteFilters.to].filter(Boolean).length;
-                    return (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setShowNoteForm(show => !show)}
-                          aria-expanded={showNoteForm}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border ${showNoteForm ? 'bg-blue-500/10 border-blue-500 text-blue-300' : 'bg-blue-600 hover:bg-blue-500 border-transparent text-white'}`}
-                        >
-                          <PlusCircle size={14} /> New Note
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowNoteFilters(show => !show)}
-                          aria-expanded={showNoteFilters}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border ${showNoteFilters ? 'bg-slate-700 border-slate-600 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
-                        >
-                          <SlidersHorizontal size={13} /> Filters
-                          {activeNoteFilters > 0 && (
-                            <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{activeNoteFilters}</span>
-                          )}
-                        </button>
-                        <span className="ml-auto text-xs text-slate-500">
-                          {shownNotes.length === clientNotes.length ? `${clientNotes.length} notes` : `Showing ${shownNotes.length} of ${clientNotes.length}`}
-                        </span>
-                      </div>
-                    );
-                  })()}
-                  {showNoteForm && (
-                    <form onSubmit={handleAddNote} className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-3">
-                      <textarea value={newNoteText} onChange={(e) => setNewNoteText(e.target.value)} placeholder="Type case note..." rows={3} autoFocus className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required />
-                      <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => { setShowNoteForm(false); setNewNoteText(''); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg text-xs font-semibold">Cancel</button>
-                        <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1"><PlusCircle size={14} /> Save Note</button>
-                      </div>
-                    </form>
-                  )}
-                  {showNoteFilters && <RecordFilterBar
-                    search={noteFilters.search}
-                    onSearch={v => setNoteFilters(f => ({ ...f, search: v }))}
-                    searchPlaceholder="Note text or author..."
-                    selects={[
-                      { label: 'Category', value: noteFilters.category, onChange: v => setNoteFilters(f => ({ ...f, category: v })), allLabel: 'All Categories', options: sortedUnique(clientNotes.map(n => n.category)) },
-                    ]}
-                    from={noteFilters.from}
-                    to={noteFilters.to}
-                    onFrom={v => setNoteFilters(f => ({ ...f, from: v }))}
-                    onTo={v => setNoteFilters(f => ({ ...f, to: v }))}
-                    sort={noteFilters.sort}
-                    onSort={v => setNoteFilters(f => ({ ...f, sort: v }))}
-                    sortOptions={[
-                      { value: 'newest', label: 'Newest First' },
-                      { value: 'oldest', label: 'Oldest First' },
-                    ]}
-                    shown={shownNotes.length}
-                    total={clientNotes.length}
-                    onClear={() => setNoteFilters(f => ({ ...EMPTY_NOTE_FILTERS, sort: f.sort }))}
-                  />}
-                  {shownNotes.length === 0 && clientNotes.length > 0 && (
-                    <p className="text-center text-slate-500 text-sm py-4">No case notes match these filters.</p>
-                  )}
-                  {shownNotes.map(n => (
-                    <div key={n.noteid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex gap-5">
-                      <div className="shrink-0 w-28 flex flex-col justify-center border-r border-slate-800 pr-5">
-                        <p className="text-2xl font-bold text-white leading-tight">{formatLogMonthDay(n.date)}</p>
-                        <p className="text-sm text-slate-400 mt-0.5">{formatLogYear(n.date)}</p>
-                        <p className="text-xs text-slate-500 mt-1">{formatLogTime(n.date)}</p>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-xs text-blue-400 font-semibold">{caseNoteLabel(n)}</span>
-                          {canChangeNote(n) && editingNoteId !== n.noteid && (
-                            <span className="flex gap-3 text-xs">
-                              <button type="button" onClick={() => { setEditingNoteId(n.noteid); setEditNoteText(n.comments || ''); setNoteError(null); }} className="inline-flex items-center gap-1 text-slate-400 hover:text-white"><Pencil size={12} /> Edit</button>
-                              <button type="button" onClick={() => handleDeleteNote(n.noteid)} className="inline-flex items-center gap-1 text-slate-400 hover:text-red-400"><Trash2 size={12} /> Delete</button>
-                            </span>
-                          )}
-                        </div>
-                        {editingNoteId === n.noteid ? (
-                          <div className="mt-2 space-y-2">
-                            <textarea value={editNoteText} onChange={(e) => setEditNoteText(e.target.value)} rows={3} autoFocus className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm" />
-                            <div className="flex justify-end gap-2">
-                              <button type="button" onClick={() => { setEditingNoteId(null); setNoteError(null); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Cancel</button>
-                              <button type="button" onClick={() => handleSaveNoteEdit(n.noteid)} disabled={noteSaving} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">{noteSaving ? 'Saving…' : 'Save Changes'}</button>
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="text-slate-200 mt-1 whitespace-pre-wrap">{n.comments}</p>
-                        )}
-                        {noteError && noteError.noteId === n.noteid && <p className="text-xs text-red-400 mt-1">{noteError.message}</p>}
-                        <p className="text-xs text-slate-500 text-right mt-2">
-                          — {n.User}
-                          {n.editedon && <span className="italic"> · edited {new Date(n.editedon).toLocaleString()}{n.editedby && n.editedby !== n.User ? ` by ${n.editedby}` : ''}</span>}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <ClientNotes key={selectedClientDetail.clientid} clientId={selectedClientDetail.clientid} user={user} notes={clientNotes} setNotes={setClientNotes} />
               )}
 
               {clientTab === 'polygraphs' && selectedClientDetail.programtype !== 'BIP' && (
