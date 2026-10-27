@@ -57,7 +57,8 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
 
     setSaving(true);
     try {
-      const res = await submitPolygraphResult({
+      // Throws unless the result was saved, so the slot is kept and nothing is lost
+      await submitPolygraphResult({
         client: clientId,
         date: getLocalDateString(),
         type: selected.type || 'Maintenance',
@@ -69,8 +70,6 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
         incentiveContinued: POLY_INCENTIVE_OVERRIDE_RESULTS.includes(resResultType) && resIncentiveOverride && resIncentiveContinued,
         user: userEmail
       });
-      // Keep the slot unless the result was saved, so nothing is lost
-      if (res?.error) throw new Error(res.error);
       await deletePolygraphSlot(selected.slotid);
 
       setSelectedId(null);

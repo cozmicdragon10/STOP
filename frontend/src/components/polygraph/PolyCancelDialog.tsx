@@ -38,11 +38,7 @@ export default function PolyCancelDialog({ slot, role, userEmail, onClose, onCan
     setSaving(true);
     try {
       const res = await reopenPolygraphSlot(slot.slotid, { reason, notes, returnVouchers: voucherRule ?? returnVouchers, overrideVoucherRule: voucherOverride, user: userEmail });
-      if (res?.error) {
-        onError(res.error);
-      } else {
-        onCancelled(res.reopened !== false);
-      }
+      onCancelled(res.reopened);
     } catch (err) {
       onError(err instanceof Error && err.message ? err.message : 'Failed to reopen slot.');
     } finally {

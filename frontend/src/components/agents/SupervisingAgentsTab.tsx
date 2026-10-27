@@ -106,10 +106,9 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
     e.preventDefault();
     setSaving(true);
     try {
-      const result = await saveSupervisingAgent(editingId || null, { ...form, user: user.employeeemail });
-      const saved: SupervisingAgent = editingId ? result.agent : result;
-      if (editingId && result.clientsRenamed > 0) {
-        onSuccess(`Agent updated. ${result.clientsRenamed} client record(s) moved to the new name.`);
+      const { agent: saved, clientsRenamed } = await saveSupervisingAgent(editingId || null, { ...form, user: user.employeeemail });
+      if (clientsRenamed > 0) {
+        onSuccess(`Agent updated. ${clientsRenamed} client record(s) moved to the new name.`);
         onClientsChanged();
       } else {
         onSuccess(editingId ? 'Agent updated.' : 'Agent added.');

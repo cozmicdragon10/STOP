@@ -31,10 +31,6 @@ export default function CustomChargeForm({ clients, userEmail, onCharged, onSucc
     setSaving(true);
     try {
       const res = await submitCustomCharge({ client: Number(clientId), amount, comments: notes.trim(), createdBy: userEmail });
-      if (!res.success) {
-        onError(res.error || 'Error charging custom fee.');
-        return;
-      }
       onSuccess(`Custom fee of ${formatMoney(amount)} charged! Updated Balance: ${formatBalance(res.newBalance)}`);
       onCharged();
       setAmountInput('');

@@ -41,10 +41,6 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
     setLastPayment(null);
     try {
       const res = await submitAccountPayment({ client: Number(clientId), amount, comments, createdBy: userEmail, paymentMethod });
-      if (!res.success) {
-        onError(res.error || 'Error recording payment.');
-        return;
-      }
       onSuccess(`${paymentMethod} payment recorded! Updated Balance: ${formatBalance(res.newBalance)}`);
       setLastPayment({
         clientName: client ? `${client.lastname}, ${client.firstname}` : `Client #${clientId}`,

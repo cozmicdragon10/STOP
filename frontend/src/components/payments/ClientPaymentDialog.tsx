@@ -78,9 +78,8 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
         paymentMethod: method,
         applyToPolyFee,
       });
-      if (!res.success) throw new Error(res.error || 'Payment could not be processed.');
-      const polyApplied = Number(res.polyApplied ?? 0);
-      const newPolyPaid = res.polyFeePaid != null ? Number(res.polyFeePaid) : polyPaid;
+      const polyApplied = Number(res.polyApplied);
+      const newPolyPaid = Number(res.polyFeePaid);
       setReceipt({
         clientName: `${client.lastname}, ${client.firstname}`,
         docNumber: client.docnumber || '',

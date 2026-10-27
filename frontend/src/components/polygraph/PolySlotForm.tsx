@@ -58,7 +58,7 @@ export default function PolySlotForm({ role, employees, onSuccess, onError, onCr
     setSaving(true);
     onError('');
     try {
-      const res = await createPolygraphSlot({
+      await createPolygraphSlot({
         location: polyLocation,
         address: polyAddress,
         date: polyDate,
@@ -68,12 +68,8 @@ export default function PolySlotForm({ role, employees, onSuccess, onError, onCr
         comments: 'Scheduled Slot',
         slots: 1
       });
-      if (res?.error) {
-        onError(res.error);
-      } else {
-        onSuccess('Polygraph appointment slot created successfully!');
-        onCreated();
-      }
+      onSuccess('Polygraph appointment slot created successfully!');
+      onCreated();
     } catch (err) {
       onError(err instanceof Error && err.message ? err.message : 'Failed to create slot.');
     } finally {

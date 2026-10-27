@@ -50,12 +50,10 @@ export default function CallInTab({ clients, groups, user, onLogged }: Props) {
     try {
       let message: string;
       if (mode === 'client') {
-        const res = await submitClientCallIn({ client: Number(selectedClient), date: new Date(), comment, createdBy: user.employeeemail, reason: reason || null });
-        if (!res?.success) throw new Error(res?.error || 'Could not log the call-in.');
+        await submitClientCallIn({ client: Number(selectedClient), date: new Date(), comment, createdBy: user.employeeemail, reason: reason || null });
         message = 'Client call-in logged successfully!';
       } else {
         const res = await submitGroupCallIn({ group: Number(selectedGroup), date: new Date(), comment, createdBy: user.employeeemail, reason: reason || null, callInDate: groupCallInDate || null });
-        if (!res?.success) throw new Error(res?.error || 'Could not log the group call-in.');
         const forText = res.forDate ? ` for ${new Date(`${res.forDate}T00:00:00`).toLocaleDateString()}` : '';
         message = `Group call-in logged${forText} for ${res.count} active clients!`;
       }

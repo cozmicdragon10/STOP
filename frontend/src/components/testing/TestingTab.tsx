@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { getClientTests, submitTestResult } from '../../api';
+import type { TestResult } from '../../api';
 import ClientPicker from '../ClientPicker';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 
@@ -8,14 +9,6 @@ interface TestingClient {
   firstname: string;
   lastname: string;
   docnumber?: string | null;
-}
-
-interface TestResult {
-  testid: number;
-  testtype: string;
-  score: string;
-  notes: string | null;
-  date: string;
 }
 
 interface Props {
@@ -43,7 +36,6 @@ export default function TestingTab({ clients, onSuccess }: Props) {
     const requestId = ++historyRequest.current;
     const data = await getClientTests(Number(clientId));
     if (requestId !== historyRequest.current) return;
-    if (!Array.isArray(data)) throw new Error(data?.error || 'Could not load the test history.');
     setHistory(data);
   };
 
@@ -65,7 +57,7 @@ export default function TestingTab({ clients, onSuccess }: Props) {
     setSaving(true);
     setError('');
     try {
-      const saved = await submitTestResult({
+      await submitTestResult({
         client: Number(testClient),
         testType,
         score: testScore,
@@ -73,7 +65,6 @@ export default function TestingTab({ clients, onSuccess }: Props) {
         // Local date; toISOString() is UTC and would date evening entries tomorrow
         date: todayLocal(),
       });
-      if (!saved?.testid) throw new Error(saved?.error || 'Could not save the test result.');
       onSuccess('Test result saved successfully!');
       setTestScore('');
       setTestNotes('');
@@ -130,7 +121,7 @@ export default function TestingTab({ clients, onSuccess }: Props) {
                 <span>{t.testtype}</span>
                 <span className="text-blue-400 font-bold">{t.score}</span>
               </div>
-              <p className="text-xs text-slate-400">{new Date(t.date).toLocaleDateString()} — {t.notes || 'No notes'}</p>
+              <p className="text-xs text-slate-400">{t.date ? new Date(t.date).toLocaleDateString() : 'No date'} —{t.notes || 'No notes'}</p>
             </div>
           ))
         )}

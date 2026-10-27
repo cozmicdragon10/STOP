@@ -143,9 +143,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
   }, [selectedGroupDetail]);
 
   const loadRoster = async (groupId: number) => {
-    const roster = await getGroupClients(groupId);
-    if (!Array.isArray(roster)) throw new Error(roster?.error || 'Could not load the group roster.');
-    setGroupRoster(roster);
+    setGroupRoster(await getGroupClients(groupId));
   };
 
   const handleOpenGroup = async (group: DirectoryGroup) => {
@@ -228,8 +226,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
   const handleAssignClient = async (clientId: number) => {
     if (!selectedGroupDetail) return;
     try {
-      const res = await assignClientToGroup(selectedGroupDetail.groupid, clientId, userEmail);
-      if (!res?.success) throw new Error(res?.error || 'Could not assign the client.');
+      await assignClientToGroup(selectedGroupDetail.groupid, clientId, userEmail);
       await loadRoster(selectedGroupDetail.groupid);
       setAssignClientSearch('');
       onSuccess('Client reassigned to group successfully!');

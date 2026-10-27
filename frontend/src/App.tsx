@@ -273,14 +273,9 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const res = await deletePolygraphSlot(slotId);
-      if (res?.error) {
-        setError(res.error);
-      } else {
-        setSuccessMsg('Open polygraph slot deleted successfully!');
-        const freshSlots = await getPolygraphSlots();
-        setPolySlots(freshSlots);
-      }
+      await deletePolygraphSlot(slotId);
+      setSuccessMsg('Open polygraph slot deleted successfully!');
+      setPolySlots(await getPolygraphSlots());
     } catch (err: any) {
       setError(err.message || 'Failed to delete slot.');
     } finally {

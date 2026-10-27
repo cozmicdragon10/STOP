@@ -86,7 +86,6 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
         createdBy,
         paymentMethod: 'Credit Card',
       });
-      if (!res.success) throw new Error(res.error || 'Payment could not be processed.');
       updateRow(c.clientid, {
         processing: false,
         receipt: {
