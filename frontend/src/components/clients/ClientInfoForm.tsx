@@ -11,7 +11,7 @@ import {
 import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { ageFromBirthDate, toLocalDay } from '../../utils/dates';
-import { POLY_VOUCHER_MAX } from '../../utils/polygraph';
+import { polyVoucherMax } from '../../utils/polygraph';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client and group rows are untyped throughout App */
 interface Props {
@@ -59,7 +59,8 @@ const ACCOUNT_FIELDS: { label: string; field: string; prefix: string; step?: str
   { label: 'Treatment Fee', field: 'treatmentfee', prefix: '$' },
   { label: 'Account Balance', field: 'accountbalance', prefix: '$' },
   { label: 'Vouchers', field: 'vouchers', prefix: '' },
-  { label: 'Poly Fee Voucher', field: 'polyfeevoucher', prefix: '', step: '1', min: 0, max: POLY_VOUCHER_MAX },
+  // max is the client's full set for their phase (polyVoucherMax), filled in where the field is shown
+  { label: 'Poly Fee Voucher', field: 'polyfeevoucher', prefix: '', step: '1', min: 0 },
 ];
 const isDateField = (field: string) => field.includes('date') || field.includes('Date');
 const inputClass = 'w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm';
@@ -272,6 +273,8 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                     phase,
                     // Federal SO has no treatment fee, so its phase doesn't set one
                     ...(STATE_FEE_PROGRAM_TYPES.includes(f.programtype) && SO_TREATMENT_FEES[phase] !== undefined ? { treatmentfee: SO_TREATMENT_FEES[phase] } : {}),
+                    // The server trims vouchers over the new phase's full set; show that here too
+                    ...(Number(f.polyfeevoucher ?? 0) > polyVoucherMax(phase) ? { polyfeevoucher: polyVoucherMax(phase) } : {}),
                   }));
                 }}
                 className={inputClass}
@@ -314,7 +317,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                   type="number"
                   step={step}
                   min={min}
-                  max={max}
+                  max={field === 'polyfeevoucher' ? polyVoucherMax(form.phase) : max}
                   value={field === 'accountbalance' && form[field] !== '' && form[field] != null ? toDisplayBalance(form[field]) : (form[field] ?? '')}
                   onChange={e => setField(field, field === 'accountbalance' && e.target.value !== '' ? toDisplayBalance(e.target.value) : e.target.value)}
                   className={inputClass}
@@ -322,7 +325,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
               ) : field === 'accountbalance' ? (
                 <p className={`font-medium ${toDisplayBalance(client[field]) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(client[field])}</p>
               ) : field === 'polyfeevoucher' ? (
-                <p className="font-medium text-white">{Number(client[field] ?? 0)}/{POLY_VOUCHER_MAX}</p>
+                <p className="font-medium text-white">{Number(client[field] ?? 0)}/{polyVoucherMax(client.phase)}</p>
               ) : (
                 <p className="font-medium text-white">
                   {prefix}{client[field] != null ? Number(client[field]).toFixed(2) : '—'}

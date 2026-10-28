@@ -4,7 +4,7 @@ const { logAction, pool } = require('../db');
 const { activeRoleFor } = require('../lib/access');
 const { requireRole } = require('../lib/auth');
 const { groupNameFor, logClientChange } = require('../lib/changeLog');
-const { POLY_VOUCHER_MAX, activePolyFeeOverride, countPolyFeeFill } = require('../lib/poly');
+const { POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, countPolyFeeFill } = require('../lib/poly');
 const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED } = require('../lib/sql');
 
 const router = express.Router();
@@ -536,14 +536,18 @@ router.put('/api/clients/:id', async (req, res) => {
             return res.status(400).json({ error: 'Date of birth cannot be in the future.' });
         }
 
-        const polyVoucher = polyfeevoucher !== undefined && polyfeevoucher !== null && polyfeevoucher !== '' ? Number(polyfeevoucher) : null;
-        if (polyVoucher !== null && (!Number.isInteger(polyVoucher) || polyVoucher < 0 || polyVoucher > POLY_VOUCHER_MAX)) {
-            return res.status(400).json({ error: `Poly fee voucher must be a whole number from 0 to ${POLY_VOUCHER_MAX}.` });
-        }
-
         // Tracked fields before the edit, for the change log
-        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, PolyFee, PolyFeePaid FROM Clients WHERE ClientId = $1', [id]);
+        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase FROM Clients WHERE ClientId = $1', [id]);
         const before = beforeRes.rows[0];
+
+        // The full set of poly fee vouchers depends on the phase the client will be in after this edit. A count sent back
+        // unchanged may be over a new phase's full set; the UPDATE below trims it.
+        const fullSet = polyVoucherMax(phase || before?.phase);
+        const polyVoucher = polyfeevoucher !== undefined && polyfeevoucher !== null && polyfeevoucher !== '' ? Number(polyfeevoucher) : null;
+        if (polyVoucher !== null && (!Number.isInteger(polyVoucher) || polyVoucher < 0
+            || (polyVoucher > fullSet && polyVoucher !== Number(before?.polyfeevoucher)))) {
+            return res.status(400).json({ error: `Poly fee voucher must be a whole number from 0 to ${fullSet}.` });
+        }
         // The poly fee total belongs to the override while one is active
         const polyOverride = await activePolyFeeOverride(pool, id);
         if (polyOverride && polyfee !== undefined && polyfee !== null && polyfee !== '' && Number(polyfee) !== Number(before?.polyfee)) {
@@ -583,10 +587,11 @@ router.put('/api/clients/:id', async (req, res) => {
                 EmergencyContactPhone = $21,
                 Comments = $22,
                 ProgramType = COALESCE($23, ProgramType),
-                -- Right-hand columns are the pre-update values: fill the vouchers when this edit makes the poly fee paid in full
+                -- Right-hand columns are the pre-update values: fill the vouchers when this edit makes the poly fee paid in full,
+                -- and never leave more than the full set for the client's phase after the edit
                 PolyFeeVoucher = CASE
-                    WHEN PolyFeePaid < PolyFee AND COALESCE($26, PolyFeePaid) >= COALESCE($27, PolyFee) THEN ${POLY_VOUCHER_MAX}
-                    ELSE COALESCE($25, PolyFeeVoucher)
+                    WHEN PolyFeePaid < PolyFee AND COALESCE($26, PolyFeePaid) >= COALESCE($27, PolyFee) THEN ${POLY_VOUCHER_MAX_SQL('COALESCE($8, Phase)')}
+                    ELSE LEAST(COALESCE($25, PolyFeeVoucher), ${POLY_VOUCHER_MAX_SQL('COALESCE($8, Phase)')})
                 END,
                 PolyVouchersBeforeFill = CASE
                     WHEN PolyFeePaid < PolyFee AND COALESCE($26, PolyFeePaid) >= COALESCE($27, PolyFee) THEN PolyFeeVoucher
@@ -631,6 +636,16 @@ router.put('/api/clients/:id', async (req, res) => {
             const wasFull = Number(before.polyfee) > 0 && Number(before.polyfeepaid) >= Number(before.polyfee);
             const isFull = Number(updated.rows[0].polyfee) > 0 && Number(updated.rows[0].polyfeepaid) >= Number(updated.rows[0].polyfee);
             if (!wasFull && isFull) await countPolyFeeFill(pool, id, 1);
+            // A phase change that trims the vouchers to the new phase's full set goes on the change log
+            const vouchersBefore = Number(before.polyfeevoucher || 0);
+            const vouchersAfter = Number(updated.rows[0].polyfeevoucher || 0);
+            if ((before.phase || '') !== (updated.rows[0].phase || '') && vouchersBefore > fullSet && vouchersAfter < vouchersBefore) {
+                await logClientChange(pool, {
+                    clientId: id, changedBy: updatedBy, changeType: 'Poly Fee Vouchers',
+                    oldValue: String(vouchersBefore), newValue: String(vouchersAfter),
+                    details: `Phase changed to ${updated.rows[0].phase}: poly fee vouchers trimmed to its full set of ${fullSet}.`,
+                });
+            }
             const tracked = [
                 ['Program Status', before.programstatus, now.programstatus],
                 ['Program Type', before.programtype, now.programtype],

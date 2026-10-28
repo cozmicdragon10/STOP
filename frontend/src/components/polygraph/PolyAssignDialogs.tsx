@@ -2,7 +2,7 @@ import { Fragment } from 'react';
 import ClientPaymentDialog from '../payments/ClientPaymentDialog';
 import type { PolyAssignment } from '../../hooks/usePolyAssignment';
 import { formatDisplayTime } from '../../utils/dates';
-import { POLY_VOUCHER_MAX, polySchedulingNeeds } from '../../utils/polygraph';
+import { polySchedulingNeeds } from '../../utils/polygraph';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- slot and client rows are untyped throughout App */
 interface Props {
@@ -135,8 +135,9 @@ export default function PolyAssignDialogs({ assignment: a, slots, clients, userE
           onProcessed={(newBalance, polyFeePaid, polyFeeVoucher) => {
             const updated = { ...a.paymentPrompt!.client, accountbalance: newBalance, polyfeepaid: polyFeePaid, polyfeevoucher: polyFeeVoucher };
             onClientUpdated(updated);
-            if (polySchedulingNeeds(updated).met) {
-              onSuccess(`${POLY_VOUCHER_MAX}/${POLY_VOUCHER_MAX} poly fee vouchers and the account is paid up. Click ${accountOpen ? 'Schedule' : 'Confirm & Assign Slot'} to schedule.`);
+            const { met, fullSet } = polySchedulingNeeds(updated);
+            if (met) {
+              onSuccess(`${fullSet}/${fullSet} poly fee vouchers and the account is paid up. Click ${accountOpen ? 'Schedule' : 'Confirm & Assign Slot'} to schedule.`);
             }
           }}
         />

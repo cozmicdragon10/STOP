@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import { setClientNoPolyRequired } from '../../api';
-import { POLY_VOUCHER_MAX, polySchedulingNeeds, slotStart, slotSummary } from '../../utils/polygraph';
+import { polySchedulingNeeds, slotStart, slotSummary } from '../../utils/polygraph';
 import { formatLogMonthDay, formatLogYear, localYmd, timeBetween } from '../../utils/dates';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client, slot, and polygraph rows are untyped throughout App */
@@ -158,7 +158,7 @@ export default function ClientPolygraphs({
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Schedule Polygraph</p>
             <p className={`text-xs ${needs.met ? 'text-emerald-400' : 'text-amber-400'}`}>
-              Vouchers {Number(client.polyfeevoucher ?? 0)}/{POLY_VOUCHER_MAX}
+              Vouchers {needs.vouchers}/{needs.fullSet}
               {!needs.met && ' · payment needed before scheduling'}
             </p>
           </div>

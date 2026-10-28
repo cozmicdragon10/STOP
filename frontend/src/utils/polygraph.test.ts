@@ -19,6 +19,13 @@ describe('polySchedulingNeeds', () => {
     const needs = polySchedulingNeeds({ polyfeevoucher: POLY_VOUCHER_MAX, polyfeepaid: '0', polyfee: '250', accountbalance: '40' });
     expect(needs).toMatchObject({ short: false, polyDue: 0, balanceDue: 40, met: false });
   });
+
+  it('needs only 2 vouchers for quarterly clients and 1 for semi-annual clients', () => {
+    expect(polySchedulingNeeds({ phase: 'Phase 3 - Quarterly', polyfeevoucher: 2, accountbalance: '0' })).toMatchObject({ fullSet: 2, met: true });
+    expect(polySchedulingNeeds({ phase: 'Phase 3 - Quarterly', polyfeevoucher: 1, accountbalance: '0' })).toMatchObject({ fullSet: 2, short: true });
+    expect(polySchedulingNeeds({ phase: 'Phase 4 - Semi Anual', polyfeevoucher: 1, accountbalance: '0' })).toMatchObject({ fullSet: 1, met: true });
+    expect(polySchedulingNeeds({ phase: 'Phase 2 - Monthly', polyfeevoucher: 2, accountbalance: '0' })).toMatchObject({ fullSet: POLY_VOUCHER_MAX, short: true });
+  });
 });
 
 describe('slotStart', () => {

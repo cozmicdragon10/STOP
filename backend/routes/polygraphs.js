@@ -1,7 +1,7 @@
 const express = require('express');
 const { logAction, pool } = require('../db');
 const { logClientChange } = require('../lib/changeLog');
-const { LAST_POLY_RESULT_SQL, POLY_INCENTIVE_OVERRIDE_RESULTS, POLY_NDI_WAIT, POLY_VOUCHER_MAX, activePolyFeeOverride, endPolyFeeOverride, polyOverrideText } = require('../lib/poly');
+const { LAST_POLY_RESULT_SQL, POLY_INCENTIVE_OVERRIDE_RESULTS, POLY_NDI_WAIT, POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, endPolyFeeOverride, polyOverrideText } = require('../lib/poly');
 
 const router = express.Router();
 
@@ -145,7 +145,7 @@ const slotNoteContext = async (slot) => {
     return `at ${slot.location} on ${Number(month)}/${Number(day)}/${year} @ ${formatSlotTime(slot.time)} with examiner ${examiner}`;
 };
 
-// Assign Client to Polygraph Slot. The client needs a full set of poly fee vouchers (POLY_VOUCHER_MAX) and an
+// Assign Client to Polygraph Slot. The client needs a full set of poly fee vouchers (polyVoucherMax) and an
 // account balance of $0.00 or better. Otherwise the request is refused with what is owed, so the front end can take
 // that payment. Scheduling uses all of the vouchers.
 router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
@@ -214,7 +214,7 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
         }
 
         await db.query('BEGIN');
-        const clientRes = await db.query('SELECT PolyFeeVoucher, PolyFeePaid, PolyFee, AccountBalance FROM Clients WHERE ClientId = $1 FOR UPDATE', [clientId]);
+        const clientRes = await db.query('SELECT PolyFeeVoucher, PolyFeePaid, PolyFee, AccountBalance, Phase FROM Clients WHERE ClientId = $1 FOR UPDATE', [clientId]);
         if (clientRes.rows.length === 0) {
             await db.query('ROLLBACK');
             return res.status(404).json({ error: 'Client not found.' });
@@ -236,21 +236,22 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
             });
         }
         const vouchers = Number(clientRes.rows[0].polyfeevoucher || 0);
+        const fullSet = polyVoucherMax(clientRes.rows[0].phase);
         // Stored sign: positive = owes
         const accountBalance = Number(clientRes.rows[0].accountbalance || 0);
-        if (vouchers < POLY_VOUCHER_MAX || accountBalance > 0) {
+        if (vouchers < fullSet || accountBalance > 0) {
             await db.query('ROLLBACK');
             const polyFeePaid = Number(clientRes.rows[0].polyfeepaid || 0);
             const polyFee = Number(clientRes.rows[0].polyfee || 0);
             // Paying off the poly fee is what fills the vouchers, so it is only owed while they are short
-            const amountDue = vouchers < POLY_VOUCHER_MAX ? Math.max(0, polyFee - polyFeePaid) : 0;
+            const amountDue = vouchers < fullSet ? Math.max(0, polyFee - polyFeePaid) : 0;
             const balanceDue = Math.max(0, accountBalance);
             const problems = [];
-            if (vouchers < POLY_VOUCHER_MAX) problems.push(`has ${vouchers}/${POLY_VOUCHER_MAX} poly fee vouchers`);
+            if (vouchers < fullSet) problems.push(`has ${vouchers}/${fullSet} poly fee vouchers`);
             if (balanceDue > 0) problems.push(`owes $${balanceDue.toFixed(2)} on the account`);
             return res.status(409).json({
                 code: 'POLY_SCHEDULING_REQUIREMENTS',
-                error: `Scheduling a polygraph needs ${POLY_VOUCHER_MAX} poly fee vouchers and an account balance of $0.00 or better; this client ${problems.join(' and ')}.`,
+                error: `Scheduling a polygraph needs ${fullSet} poly fee voucher${fullSet === 1 ? '' : 's'} and an account balance of $0.00 or better; this client ${problems.join(' and ')}.`,
                 vouchers, polyFeePaid, polyFee, accountBalance, amountDue, balanceDue
             });
         }
@@ -262,7 +263,7 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
         await db.query(
             `INSERT INTO PolygraphAppointments (SlotId, Client, ScheduledDateTime, Polygrapher, Type, Status, PolyVouchersUsed)
              VALUES ($1, $2, $3, $4, $5, 'Scheduled', $6)`,
-            [slotId, clientId, scheduledDateTime, slot.polygrapher, slotType, POLY_VOUCHER_MAX]
+            [slotId, clientId, scheduledDateTime, slot.polygrapher, slotType, fullSet]
         );
 
         // Mark slot as filled
@@ -275,13 +276,13 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
                 PolyFeePaid = CASE WHEN PolyFeePaid >= PolyFee THEN PolyFeePaid - PolyFee ELSE PolyFeePaid END,
                 PolyVouchersBeforeFill = NULL
              WHERE ClientId = $2`,
-            [POLY_VOUCHER_MAX, clientId]
+            [fullSet, clientId]
         );
         // The vouchers used go on the account's change log, not the case note
         await logClientChange(db, {
             clientId, changedBy: user, changeType: 'Poly Fee Vouchers',
-            oldValue: String(vouchers), newValue: String(vouchers - POLY_VOUCHER_MAX),
-            details: `${POLY_VOUCHER_MAX} poly fee vouchers used to schedule the polygraph ${noteContext}.`,
+            oldValue: String(vouchers), newValue: String(vouchers - fullSet),
+            details: `${fullSet} poly fee voucher${fullSet === 1 ? '' : 's'} used to schedule the polygraph ${noteContext}.`,
         });
 
         // Spending the last fill a poly fee override allows ends it and puts the regular poly fee back
@@ -418,10 +419,10 @@ router.post('/api/polygraphs/slots/:slotId/open', async (req, res) => {
             const overrideText = ruleOverridden ? ` Set to ${refunded > 0 ? 'returned' : 'not returned'} by Business Administrator override.` : '';
             if (refunded > 0) {
                 const voucherRes = await db.query(
-                    `UPDATE Clients c SET PolyFeeVoucher = LEAST(c.PolyFeeVoucher + $1, $2)
-                     FROM (SELECT PolyFeeVoucher FROM Clients WHERE ClientId = $3) before
-                     WHERE c.ClientId = $3 RETURNING before.PolyFeeVoucher AS before, c.PolyFeeVoucher AS after`,
-                    [refunded, POLY_VOUCHER_MAX, client]
+                    `UPDATE Clients c SET PolyFeeVoucher = LEAST(c.PolyFeeVoucher + $1, ${POLY_VOUCHER_MAX_SQL('c.Phase')})
+                     FROM (SELECT PolyFeeVoucher FROM Clients WHERE ClientId = $2) before
+                     WHERE c.ClientId = $2 RETURNING before.PolyFeeVoucher AS before, c.PolyFeeVoucher AS after`,
+                    [refunded, client]
                 );
                 const { before, after } = voucherRes.rows[0];
                 await logClientChange(db, {

@@ -1,4 +1,5 @@
 import { formatDisplayTime, localYmd, timeBetween, toLocalDay } from './dates';
+import { POLY_VOUCHER_MAX_BY_PHASE } from './soPhases';
 
 export const POLY_OVERDUE_MONTHS = 6;
 
@@ -33,17 +34,22 @@ export const polygraphNotice = (client: any, polygraphs: any[], today = new Date
 // A client's poly fee voucher runs 0 to this; the server fills it when the poly fee is paid in full
 export const POLY_VOUCHER_MAX = 6;
 
+// A client's full set of vouchers for their phase (smaller for quarterly and semi-annual clients): what they earn up to,
+// what paying the poly fee in full fills them to, and what scheduling needs and uses. Mirrors polyVoucherMax in backend/lib/poly.js.
+export const polyVoucherMax = (phase?: string | null): number => POLY_VOUCHER_MAX_BY_PHASE[phase ?? ''] ?? POLY_VOUCHER_MAX;
+
 // To be scheduled for a polygraph a client needs a full set of poly fee vouchers and an account balance of
 // $0.00 or better (stored sign: positive = owes). Mirrors the server's check on assignment.
-export const polySchedulingNeeds = (client: { polyfeevoucher?: unknown; polyfeepaid?: unknown; polyfee?: unknown; accountbalance?: unknown }) => {
+export const polySchedulingNeeds = (client: { polyfeevoucher?: unknown; polyfeepaid?: unknown; polyfee?: unknown; accountbalance?: unknown; phase?: string | null }) => {
   const vouchers = Number(client.polyfeevoucher ?? 0);
+  const fullSet = polyVoucherMax(client.phase);
   const polyFeePaid = Number(client.polyfeepaid ?? 0);
   const polyFee = Number(client.polyfee ?? 0);
-  const short = vouchers < POLY_VOUCHER_MAX;
+  const short = vouchers < fullSet;
   // Paying off the poly fee is what fills the vouchers, so it is only owed while they are short
   const polyDue = short ? Math.max(0, polyFee - polyFeePaid) : 0;
   const balanceDue = Math.max(0, Number(client.accountbalance) || 0);
-  return { vouchers, polyFeePaid, polyFee, short, polyDue, balanceDue, met: !short && balanceDue === 0 };
+  return { vouchers, fullSet, polyFeePaid, polyFee, short, polyDue, balanceDue, met: !short && balanceDue === 0 };
 };
 
 export const POLY_CANCEL_REASONS =['Client requested cancellation', 'Client late / did not show', 'Examiner rescheduled', 'Weather', 'Other'];

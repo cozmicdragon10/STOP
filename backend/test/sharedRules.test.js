@@ -6,6 +6,7 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 const { isMonthlyFeeClient, feePeriodMonths, FIRST_CHECKIN_MAX_OWED } = require('../lib/attendance');
 const { bipCheckInBlockMessage } = require('../lib/sql');
+const { POLY_VOUCHER_MAX_BY_PHASE } = require('../lib/poly');
 
 const frontend = (file) => import(pathToFileURL(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', file)).href);
 
@@ -30,6 +31,11 @@ test('Phase 3 and 4 fee periods are the same length', async () => {
             assert.equal(feePeriodMonths({ programtype, phase }), browser(programtype, phase), `${programtype} / ${phase}`);
         }
     }
+});
+
+test('quarterly and semi-annual clients have the same full set of poly fee vouchers', async () => {
+    const { POLY_VOUCHER_MAX_BY_PHASE: browser } = await frontend('soPhases.ts');
+    assert.deepEqual(POLY_VOUCHER_MAX_BY_PHASE, browser);
 });
 
 test('BIP check-in block messages match', async () => {

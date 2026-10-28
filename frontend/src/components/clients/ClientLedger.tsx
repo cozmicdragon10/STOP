@@ -9,7 +9,7 @@ import { LEDGER_TONES, PAYMENT_REVERSAL_TYPES, cardPaymentStatus, formatMoney, l
 import { formatBalance } from '../../utils/balance';
 import { formatDisplayTime, localYmd } from '../../utils/dates';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
-import { POLY_VOUCHER_MAX, slotSummary } from '../../utils/polygraph';
+import { polyVoucherMax, slotSummary } from '../../utils/polygraph';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client, ledger, and slot rows are untyped throughout App */
 export interface LedgerRefresh {
@@ -292,7 +292,7 @@ export default function ClientLedger({ client, role, userEmail, financials, book
                       preview = <>
                         Poly fee paid {formatMoney(paidBefore)} → {formatMoney(paidAfter)} of {formatMoney(fee)}.
                         {wasFull && !isFull && <span className="text-amber-400"> No longer paid in full: the vouchers that paying in full added are removed.</span>}
-                        {!wasFull && isFull && <span className="text-emerald-400"> Paid in full: vouchers fill to {POLY_VOUCHER_MAX}.</span>}
+                        {!wasFull && isFull && <span className="text-emerald-400"> Paid in full: vouchers fill to {polyVoucherMax(client.phase)}.</span>}
                         {owedOnAccount > 0 && (
                           <span className="text-amber-400"> {formatMoney(owedOnAccount)} more than was paid on the poly fee is owed on the account: balance {formatBalance(client.accountbalance)} → {formatBalance(Number(client.accountbalance || 0) + owedOnAccount)}.</span>
                         )}

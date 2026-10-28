@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { assignPolygraphSlot, getClients, getPolygraphSlots } from '../api';
-import { POLY_VOUCHER_MAX, polySchedulingNeeds } from '../utils/polygraph';
+import { polySchedulingNeeds } from '../utils/polygraph';
 import type { SlotChoices } from '../components/polygraph/PolySchedule';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- client rows are untyped throughout App
@@ -53,13 +53,13 @@ export function usePolyAssignment({ role, userEmail, clients, setClients, setPol
   // then the account balance. Short vouchers with nothing owed on the poly fee must be fixed in Edit Info.
   const promptPayment = (client: ClientRow) => {
     const name = `${client.firstname} ${client.lastname}`;
-    const { vouchers, polyFeePaid, polyFee, short, polyDue, balanceDue } = polySchedulingNeeds(client);
+    const { vouchers, fullSet, polyFeePaid, polyFee, short, polyDue, balanceDue } = polySchedulingNeeds(client);
     if (short && polyDue <= 0) {
-      onError(`${name} has ${vouchers}/${POLY_VOUCHER_MAX} poly fee vouchers but nothing is owed on the poly fee. Correct the vouchers in the client's Edit Info.`);
+      onError(`${name} has ${vouchers}/${fullSet} poly fee vouchers but nothing is owed on the poly fee. Correct the vouchers in the client's Edit Info.`);
       return;
     }
     const needs = [
-      short && `${POLY_VOUCHER_MAX} poly fee vouchers (has ${vouchers}/${POLY_VOUCHER_MAX}; poly fee paid $${polyFeePaid.toFixed(2)} / $${polyFee.toFixed(2)}, $${polyDue.toFixed(2)} remaining)`,
+      short && `${fullSet} poly fee voucher${fullSet === 1 ? '' : 's'} (has ${vouchers}/${fullSet}; poly fee paid $${polyFeePaid.toFixed(2)} / $${polyFee.toFixed(2)}, $${polyDue.toFixed(2)} remaining)`,
       balanceDue > 0 && `an account balance of $0.00 or better (owes $${balanceDue.toFixed(2)})`,
     ].filter(Boolean);
     setPaymentPrompt({

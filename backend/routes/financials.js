@@ -2,7 +2,7 @@ const express = require('express');
 const { logAction, pool } = require('../db');
 const { activeRoleFor } = require('../lib/access');
 const { logClientChange } = require('../lib/changeLog');
-const { POLY_VOUCHER_MAX, changePolyFeePaid, countPolyFeeFill, splitPolyPaidChange, voucherChangeText } = require('../lib/poly');
+const { polyVoucherMax, changePolyFeePaid, countPolyFeeFill, splitPolyPaidChange, voucherChangeText } = require('../lib/poly');
 
 const router = express.Router();
 
@@ -21,7 +21,7 @@ router.post('/api/financials/payment', async (req, res) => {
             return res.status(400).json({ error: 'Payment amount must be greater than zero.' });
         }
 
-        const clientRes = await clientDb.query('SELECT AccountBalance, PolyFeePaid, PolyFee, PolyFeeVoucher FROM Clients WHERE ClientId = $1 FOR UPDATE', [client]);
+        const clientRes = await clientDb.query('SELECT AccountBalance, PolyFeePaid, PolyFee, PolyFeeVoucher, Phase FROM Clients WHERE ClientId = $1 FOR UPDATE', [client]);
         const oldBalance = Number(clientRes.rows[0].accountbalance || 0);
         const payAmount = Number(amount || 0);
         const comment = comments || `Direct account payment processed by ${createdBy}`;
@@ -34,7 +34,7 @@ router.post('/api/financials/payment', async (req, res) => {
         const newBalance = oldBalance - accountAmount;
         const newPolyPaid = oldPolyPaid + polyAmount;
         // The payment that completes the poly fee fills the vouchers
-        const newPolyVoucher = polyAmount > 0 && polyAmount >= polyOwed ? POLY_VOUCHER_MAX : Number(clientRes.rows[0].polyfeevoucher || 0);
+        const newPolyVoucher = polyAmount > 0 && polyAmount >= polyOwed ? polyVoucherMax(clientRes.rows[0].phase) : Number(clientRes.rows[0].polyfeevoucher || 0);
 
         if (polyAmount > 0) {
             // The poly fee is tracked separately, so the account balance is unchanged by this row

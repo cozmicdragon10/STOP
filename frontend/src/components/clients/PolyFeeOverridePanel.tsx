@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { deletePolyFeeOverride, savePolyFeeOverride } from '../../api';
 import type { PolyFeeOverride, PolyFeeOverrideResult } from '../../api';
-import { POLY_VOUCHER_MAX } from '../../utils/polygraph';
+import { polyVoucherMax } from '../../utils/polygraph';
 
 interface Props {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- client rows are untyped throughout App
@@ -154,7 +154,7 @@ export default function PolyFeeOverridePanel({ client, role, userEmail, override
             </div>
           </div>
           <p className="text-xs text-slate-500">
-            A fill is the poly fee being paid in full, which fills the {POLY_VOUCHER_MAX} poly fee vouchers. The reduced fee applies until the last fill's vouchers
+            A fill is the poly fee being paid in full, which fills the client's full set of {polyVoucherMax(client.phase)} poly fee vouchers. The reduced fee applies until the last fill's vouchers
             are used to schedule a polygraph; then the regular fee (${Number(override?.regularfee ?? client.polyfee ?? 250).toFixed(2)}) returns.
           </p>
           <div className="flex gap-2">

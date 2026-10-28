@@ -1,4 +1,4 @@
-const { LAST_POLY_RESULT_SQL, POLY_VOUCHER_EARNING_RESULTS, POLY_VOUCHER_MAX } = require('./poly');
+const { LAST_POLY_RESULT_SQL, POLY_VOUCHER_EARNING_RESULTS, polyVoucherMax } = require('./poly');
 const {
     BIP_CHECKIN_BLOCK, FEE_ONCE_PER_PERIOD_PROGRAMS, FEE_PERIOD_MONTHS, GROUP_ATTENDANCE, INDIVIDUAL_SESSION_TYPES, MONTHLY_FEE_PHASES,
     bipCheckInBlockMessage,
@@ -28,7 +28,7 @@ const chargedWithinMonths = async (db, client, date, months) => {
 const FIRST_CHECKIN_MAX_OWED = 180;
 
 // awardNdiVoucher: when set (closing an SO group), a client charged the group fee whose most recent
-// polygraph earns vouchers (POLY_VOUCHER_EARNING_RESULTS, or kept in the incentive by override) earns one poly fee voucher, up to POLY_VOUCHER_MAX.
+// polygraph earns vouchers (POLY_VOUCHER_EARNING_RESULTS, or kept in the incentive by override) earns one poly fee voucher, up to their full set (polyVoucherMax).
 // sessionNumber: which session of the group that day (1 for the first); a group can meet again after its earlier session was closed
 // An Assessment or Individual type is charged its full fee and leaves the monthly fee rules and BIP weeks alone.
 // paymentComments: added after the standard text on the payment's ledger row
@@ -167,7 +167,7 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         if (lastPoly && (POLY_VOUCHER_EARNING_RESULTS.includes(lastPoly.results) || lastPoly.incentivecontinued)) {
             const voucherRes = await db.query(
                 'UPDATE Clients SET PolyFeeVoucher = PolyFeeVoucher + 1 WHERE ClientId = $1 AND PolyFeeVoucher < $2 RETURNING PolyFeeVoucher',
-                [client, POLY_VOUCHER_MAX]
+                [client, polyVoucherMax(phase)]
             );
             polyVoucherAwarded = voucherRes.rows.length > 0;
             // Deleting this attendance takes the voucher back (routes/attendance.js)

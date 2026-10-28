@@ -17,5 +17,8 @@ export const isMonthlyFeeClient = (programtype?: string | null, phase?: string |
 // many months, rolling from their last charged group attendance. null for everyone else.
 // The server applies the same rule (see feePeriodMonths in backend/lib/attendance.js).
 export const FEE_PERIOD_MONTHS: Record<string, number> = { 'Phase 3 - Quarterly': 3, 'Phase 4 - Semi Anual': 6 };
-export const feePeriodMonths = (programtype?: string | null, phase?: string | null): number | null =>
+// Quarterly and semi-annual clients are charged less often, so their full set of poly fee vouchers is smaller (see
+// polyVoucherMax in ./polygraph.ts). The server keeps the same map (POLY_VOUCHER_MAX_BY_PHASE in backend/lib/poly.js).
+export const POLY_VOUCHER_MAX_BY_PHASE: Record<string, number> = { 'Phase 3 - Quarterly': 2, 'Phase 4 - Semi Anual': 1 };
+export const feePeriodMonths =(programtype?: string | null, phase?: string | null): number | null =>
   ((programtype === 'State SO' || programtype === 'Voluntary SO') && FEE_PERIOD_MONTHS[phase ?? '']) || null;
