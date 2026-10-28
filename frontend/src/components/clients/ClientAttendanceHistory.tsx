@@ -1,23 +1,79 @@
 import { useState } from 'react';
-import { SlidersHorizontal } from 'lucide-react';
+import { SlidersHorizontal, Trash2 } from 'lucide-react';
+import { deleteAttendance, getClientAttendance, getClientFinancials } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
 import MonthHeader from './MonthHeader';
 import { EMPTY_ATTENDANCE_FILTERS, groupByMonth, sortedUnique, toggleInSet } from '../../utils/filters';
-import { attendanceBalanceChange, signedMoney } from '../../utils/ledger';
+import { attendanceBalanceChange, formatMoney, signedMoney } from '../../utils/ledger';
+import { formatBalance } from '../../utils/balance';
 import { formatLogMonthDay, formatLogYear, localYmd } from '../../utils/dates';
 
-interface Props {
-  // The client's attendance, loaded by App with the rest of the account
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- attendance rows are untyped throughout App
+/* eslint-disable @typescript-eslint/no-explicit-any -- attendance and ledger rows are untyped throughout App */
+export interface AttendanceDeleted {
+  // The client the attendance was deleted from (another client may be open by the time it finishes)
+  clientId: number;
+  // Client fields the deletion moved: balance, BIP week, and last attended
+  changes: Record<string, unknown>;
   attendance: any[];
+  financials: any[];
 }
 
-// The Attendance tab of a client's account: sessions by month with fee, payment, and the balance before and after
-export default function ClientAttendanceHistory({ attendance }: Props) {
+interface Props {
+  clientId: number;
+  // The client's current balance (stored sign: positive = owes), for the delete preview
+  balance: number;
+  // The client's attendance, loaded by App with the rest of the account
+  attendance: any[];
+  // Business Administrators can delete attendance
+  canDelete: boolean;
+  onDeleted: (refresh: AttendanceDeleted) => void;
+  onSuccess: (message: string) => void;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+// The Attendance tab of a client's account: sessions by month with fee, payment, and the balance before and after.
+// Business Administrators can delete a session, which takes back its fee and payment.
+export default function ClientAttendanceHistory({ clientId, balance, attendance, canDelete, onDeleted, onSuccess }: Props) {
   const [filters, setFilters] = useState(EMPTY_ATTENDANCE_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
   // Months (YYYY-MM) the user has collapsed
   const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(() => new Set());
+  // Session being deleted, with the reason typed so far
+  const [deleting, setDeleting] = useState<{ id: number; reason: string } | null>(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleDelete = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const reason = deleting?.reason.trim();
+    if (!deleting || !reason) return;
+    setSaving(true);
+    setDeleteError('');
+    try {
+      const res = await deleteAttendance(deleting.id, reason);
+      setDeleting(null);
+      const voucherText = res.voucher ? {
+        removed: ' The poly fee voucher it earned was removed.',
+        kept: ' The poly fee voucher it earned was kept because the client attended again later that month.',
+        used: ' The poly fee voucher it earned was already used, so none was removed.',
+      }[res.voucher] : '';
+      onSuccess(`Attendance deleted. Updated Balance: ${formatBalance(res.newBalance)}.${voucherText} The closed group and the Group Income Report were updated too.`);
+      const [fresh, financials] = await Promise.all([getClientAttendance(clientId), getClientFinancials(clientId)]);
+      onDeleted({
+        clientId,
+        changes: {
+          accountbalance: res.newBalance, phase: res.phase, polyfeevoucher: res.polyFeeVoucher,
+          lastdateattended: res.lastDateAttended, lastattended: res.lastAttended,
+        },
+        attendance: fresh,
+        financials,
+      });
+    } catch (err) {
+      setDeleteError(err instanceof Error && err.message ? err.message : 'Could not delete the attendance.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const search = filters.search.trim().toLowerCase();
   const shown = attendance.filter(a => {
@@ -102,8 +158,10 @@ export default function ClientAttendanceHistory({ attendance }: Props) {
               // One compact row per session: date, group, then fee, paid, and the balance before → after
               const c = attendanceBalanceChange(att);
               const change = Math.round((c.after - c.before) * 100) / 100;
+              const isDeleting = deleting?.id === att.attendanceid;
               return (
-                <div key={att.attendanceid} className="bg-slate-950 border border-slate-800 px-4 py-2.5 rounded-xl text-sm flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div key={att.attendanceid} className={`bg-slate-950 border px-4 py-2.5 rounded-xl text-sm ${isDeleting ? 'border-red-500/40' : 'border-slate-800'}`}>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                   <div className="shrink-0 w-16 border-r border-slate-800 pr-4">
                     <p className="font-bold text-white leading-tight">{formatLogMonthDay(att.date)}</p>
                     <p className="text-[11px] text-slate-500">{formatLogYear(att.date)}</p>
@@ -136,6 +194,60 @@ export default function ClientAttendanceHistory({ attendance }: Props) {
                       </p>
                     </div>
                   </div>
+                  {canDelete && (
+                    <button
+                      type="button"
+                      onClick={() => { setDeleting(isDeleting ? null : { id: att.attendanceid, reason: '' }); setDeleteError(''); }}
+                      title="Delete this attendance"
+                      aria-label="Delete this attendance"
+                      className="shrink-0 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 p-1.5 rounded"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
+                {isDeleting && deleting && (() => {
+                  // Deleting takes back the fee and what was kept of the payment
+                  const newBalance = balance - Number(att.groupfee || 0) + Number(att.accountpaid || 0);
+                  const removed = [
+                    Number(att.groupfee || 0) > 0 ? `the ${formatMoney(Number(att.groupfee))} fee` : '',
+                    Number(att.accountpaid || 0) > 0 ? `the ${formatMoney(Number(att.accountpaid))} payment` : '',
+                  ].filter(Boolean).join(' and ');
+                  return (
+                    <form onSubmit={handleDelete} className="mt-3 pt-3 border-t border-slate-800 space-y-2">
+                      <p className="text-xs font-semibold text-red-300">Delete this attendance</p>
+                      <input
+                        type="text"
+                        value={deleting.reason}
+                        onChange={(e) => setDeleting({ ...deleting, reason: e.target.value })}
+                        placeholder="Reason…"
+                        autoFocus
+                        required
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-sm"
+                      />
+                      <p className="text-xs text-slate-400">
+                        {removed
+                          ? <>Removes {removed} from the ledger. Balance {formatBalance(balance)} → {formatBalance(newBalance)}; later ledger and attendance balances move by the same amount.</>
+                          : 'No fee or payment was recorded, so the balance does not change.'}
+                        {/* Attendance rows keep the column's quoted name, "Group" */}
+                        {att.Group ? ' The closed group and the Group Income Report are updated too.' : ''}
+                        {att.polyvoucherawarded ? ' The poly fee voucher it earned is removed unless the client attended again later that month.' : ''}
+                        {' Last Date Attended becomes the most recent Group, Individual, or Assessment check-in left.'}
+                      </p>
+                      {deleteError && <p className="text-xs text-red-400">{deleteError}</p>}
+                      <div className="flex justify-end gap-2">
+                        <button type="button" onClick={() => { setDeleting(null); setDeleteError(''); }} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Cancel</button>
+                        <button
+                          type="submit"
+                          disabled={saving || !deleting.reason.trim()}
+                          className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
+                        >
+                          Delete Attendance
+                        </button>
+                      </div>
+                    </form>
+                  );
+                })()}
                 </div>
               );
             })}

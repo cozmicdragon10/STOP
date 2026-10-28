@@ -127,13 +127,43 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missedCheckInRequest]);
 
-  // Picking a group that already has an open check-in today picks up that sheet (its latest session) instead of starting over
-  const pickGroup = (id: number | null) => {
+  // "Group took place on a different date": the session date for the next group picked, instead of today
+  const [useCustomDate, setUseCustomDate] = useState(false);
+  const [customDate, setCustomDate] = useState(todayLocal);
+  const pickedDate = useCustomDate && customDate ? customDate : todayLocal();
+
+  // Follow the sheet's date when it's set elsewhere (an open group resumed, a closed session picked); once a sheet is
+  // saved or cleared, the next group is for today again
+  const [shownSessionDate, setShownSessionDate] = useState(wf.sessionDate);
+  if (!wf.sessionChoice && wf.sessionDate !== shownSessionDate) {
+    setShownSessionDate(wf.sessionDate);
+    if (wf.sessionDate) {
+      setUseCustomDate(true);
+      setCustomDate(wf.sessionDate);
+    } else if (wf.groupId === null) {
+      setUseCustomDate(false);
+      setCustomDate(todayLocal());
+    }
+  }
+
+  // Picking a group that already has an open check-in on the date picks up that sheet (its latest session) instead of starting over
+  const pickGroup = (id: number | null, date = pickedDate) => {
     const open = id === null ? undefined : openGroups
-      .filter(o => o.groupid === id && o.sessiondate === todayLocal())
+      .filter(o => o.groupid === id && o.sessiondate === date)
       .sort((a, b) => (b.sessionnumber ?? 1) - (a.sessionnumber ?? 1))[0];
     if (open) resume(open);
-    else wf.selectGroup(id);
+    else wf.selectGroup(id, date);
+  };
+
+  // A new date for the group already picked loads it again for that day
+  const changeDate = (enabled: boolean, date: string) => {
+    if (enabled && date > todayLocal()) {
+      onError('The group date can\'t be in the future.');
+      return;
+    }
+    setUseCustomDate(enabled);
+    setCustomDate(date);
+    if (wf.groupId !== null && date) pickGroup(wf.groupId, enabled ? date : todayLocal());
   };
 
   return (
@@ -160,6 +190,29 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
             <option key={g.groupid} value={g.groupid}>{g.groupname}</option>
           ))}
         </select>
+        <div className="flex flex-wrap items-center gap-3 min-h-9">
+          <label className="flex items-center gap-2 text-xs text-slate-300">
+            <input
+              type="checkbox"
+              checked={useCustomDate}
+              onChange={e => changeDate(e.target.checked, e.target.checked ? customDate : todayLocal())}
+              disabled={wf.submitting || wf.view === 'review'}
+              className="rounded accent-blue-500"
+            />
+            Group took place on a different date
+          </label>
+          {useCustomDate && (
+            <input
+              type="date"
+              aria-label="Date the group took place"
+              value={customDate}
+              max={todayLocal()}
+              onChange={e => changeDate(true, e.target.value)}
+              disabled={wf.submitting || wf.view === 'review'}
+              className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-xs"
+            />
+          )}
+        </div>
         {wf.sessionDate && wf.sessionDate !== todayLocal() && !wf.sessionChoice && (
           <p className="text-xs text-amber-400">
             Check-in for the session held {formatSessionDay(wf.sessionDate)}. Attendance will be saved for that date.
@@ -173,15 +226,18 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
         )}
       </section>
 
-      {/* The group was already opened and closed this week: a new session today, or more clients for the closed one */}
+      {/* The group was already opened and closed that week: a new session on the picked date, or more clients for the closed one */}
       {group && wf.sessionChoice && (() => {
         const closed = wf.sessionChoice.latestClosed;
         const closedToday = closed.date === todayLocal();
         const closedWhen = closedToday ? 'today' : `on ${formatSessionDay(closed.date)}`;
+        const newDay = wf.sessionChoice.date === todayLocal() ? 'today' : `on ${formatSessionDay(wf.sessionChoice.date)}`;
         return (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div role="dialog" aria-modal="true" aria-labelledby="session-choice-title" className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
-            <h3 id="session-choice-title" className="text-lg font-bold text-white">{group.groupname} was already held {closedToday ? 'today' : 'this week'}</h3>
+            <h3 id="session-choice-title" className="text-lg font-bold text-white">
+              {group.groupname} was already held {closed.date === wf.sessionChoice.date ? (closedToday ? 'today' : 'that day') : wf.sessionChoice.date === todayLocal() ? 'this week' : 'that week'}
+            </h3>
             <p className="text-sm text-slate-300">
               {closed.sessionNumber > 1 ? `Session ${closed.sessionNumber}` : 'A session'} of this group was
               closed {closedWhen} with {closed.clients.length} client(s). Is this a new group session, or are you adding clients to the one that was closed?
@@ -190,7 +246,7 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
               <button type="button" onClick={() => wf.chooseSession('new')} className="w-full text-left bg-blue-600 hover:bg-blue-500 text-white rounded-lg p-3">
                 <p className="font-semibold text-sm">New Group Session</p>
                 <p className="text-xs text-blue-100 mt-0.5">
-                  {wf.sessionChoice.nextNumber > 1 ? `Starts session ${wf.sessionChoice.nextNumber} today.` : 'Starts a new session today.'} Clients from the earlier session can be checked in again.
+                  {wf.sessionChoice.nextNumber > 1 ? `Starts session ${wf.sessionChoice.nextNumber} ${newDay}.` : `Starts a new session ${newDay}.`} Clients from the earlier session can be checked in again.
                 </p>
               </button>
               <button type="button" onClick={() => wf.chooseSession('existing')} className="w-full text-left bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 rounded-lg p-3">

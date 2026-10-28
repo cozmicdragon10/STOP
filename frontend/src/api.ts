@@ -865,6 +865,29 @@ export async function adjustCashPayment(transactionId: number, data: { amount: n
     return jsonResponse(res, 'Failed to adjust the payment.');
 }
 
+// What deleting a check-in changed on the client
+export interface AttendanceDeleteResult {
+    newBalance: number;
+    phase: string | null;
+    polyFeeVoucher: number;
+    // The poly fee voucher the check-in earned: removed, kept (attended again later that month), or already used; null if it earned none
+    voucher: 'removed' | 'kept' | 'used' | null;
+    lastDateAttended: string | null;
+    // Latest attendance left (the roster's Last Attended)
+    lastAttended: string | null;
+    ledgerRowsRemoved: number;
+}
+
+// Business Administrators only: deletes a check-in and undoes its fee, payment, and everything they moved
+export async function deleteAttendance(attendanceId: number, reason: string): Promise<AttendanceDeleteResult> {
+    const res = await apiFetch(`${API_BASE}/attendance/${attendanceId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+    });
+    return jsonResponse(res, 'Failed to delete the attendance.');
+}
+
 export type CardPaymentAction = 'refund' | 'dispute' | 'dispute-won' | 'dispute-lost';
 
 // Refund (full or partial), dispute, or dispute outcome on a credit card payment

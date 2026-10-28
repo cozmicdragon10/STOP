@@ -105,9 +105,9 @@ export const validateSession = (entries: SessionEntry[]): string | null => {
 // Local calendar date. toISOString() is UTC and would roll evening sessions to tomorrow.
 const localYmd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 export const todayLocal = () => localYmd(new Date());
-// Sunday of this week, the same week attendedThisWeek uses
-const weekStartLocal = () => {
-  const d = new Date();
+// Sunday of the week a date (YYYY-MM-DD) falls in; weeks run Sunday to Saturday like attendedThisWeek
+const weekStartOf = (ymd: string) => {
+  const d = new Date(`${ymd}T00:00:00`);
   d.setDate(d.getDate() - d.getDay());
   return localYmd(d);
 };
@@ -159,9 +159,9 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   const [attendedIds, setAttendedIds] = useState<Set<number>>(() => new Set());
   // Which session of the group on the session date this sheet is for (1 = the day's first)
   const [sessionNumber, setSessionNumber] = useState(1);
-  // Set when the picked group already has a closed session this week: the user chooses a new session today or adding to
-  // that one. nextNumber is the number a new session today would get.
-  const [sessionChoice, setSessionChoice] = useState<{ latestClosed: GroupDaySession; nextNumber: number } | null>(null);
+  // Set when the picked group already has a closed session that week: the user chooses a new session on the picked date
+  // (date) or adding to that one. nextNumber is the number a new session that day would get.
+  const [sessionChoice, setSessionChoice] = useState<{ latestClosed: GroupDaySession; nextNumber: number; date: string } | null>(null);
   // The sheet adds clients to a session that was already closed (Add to Closed Session, or a missed check-in)
   const [addingToClosed, setAddingToClosed] = useState(false);
   // Counselor covering the session (employee email), picked by the office; null means the group's usual counselor.
@@ -182,8 +182,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
 
   const allSelected = selectableRoster.length > 0 && selectableRoster.every(c => selectedIds.has(c.clientid));
 
-  // date is the session date (YYYY-MM-DD). session is the session the sheet is for; when omitted (a group was just picked
-  // for today) and the group already has a closed session this week, the user is asked whether this is a new session.
+  // date is the session date (YYYY-MM-DD). session is the session the sheet is for; when omitted (a group was just picked)
+  // and the group already has a closed session that week, the user is asked whether this is a new session.
   const loadRoster = useCallback(async (id: number, date: string, session?: number) => {
     const requestId = ++rosterRequestId.current;
     setRosterStatus('loading');
@@ -191,7 +191,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     try {
       const [data, sessions]: [unknown, GroupDaySession[]] = await Promise.all([
         getGroupClients(id),
-        getGroupSessions(id, date, session === undefined ? weekStartLocal() : undefined),
+        getGroupSessions(id, date, session === undefined ? weekStartOf(date) : undefined),
       ]);
       if (requestId !== rosterRequestId.current) return;
       if (!Array.isArray(data)) {
@@ -207,10 +207,10 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
         // Session numbers count up within a day, so a new session today follows today's sessions only
         const nextNumber = Math.max(0, ...sessions.filter(s => s.date === date).map(s => s.sessionNumber)) + 1;
         // Until the user answers, treat it as the closed session so nobody from it can be checked in again by accident
-        setSessionDate(latestClosed.date === date ? null : latestClosed.date);
+        setSessionDate(latestClosed.date === todayLocal() ? null : latestClosed.date);
         setSessionNumber(latestClosed.sessionNumber);
         setAttendedIds(new Set(latestClosed.clients));
-        setSessionChoice({ latestClosed, nextNumber });
+        setSessionChoice({ latestClosed, nextNumber, date });
       } else {
         const current = session ?? 1;
         setSessionNumber(current);
@@ -245,12 +245,12 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     setCoveredBy(null);
   };
 
-  // Answer to the "already held this week" question. 'new' starts another session today, so everyone can be checked in
-  // again; 'existing' adds clients to the closed session (saved on the day it was held), so those who attended it stay blocked.
+  // Answer to the "already held this week" question. 'new' starts another session on the picked date, so everyone can be
+  // checked in again; 'existing' adds clients to the closed session (saved on the day it was held), so those who attended it stay blocked.
   const chooseSession = (choice: 'new' | 'existing') => {
     if (!sessionChoice) return;
     if (choice === 'new') {
-      setSessionDate(null);
+      setSessionDate(sessionChoice.date === todayLocal() ? null : sessionChoice.date);
       setSessionNumber(sessionChoice.nextNumber);
       setAttendedIds(new Set());
     } else {
@@ -310,22 +310,24 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     }
   };
 
-  const selectGroup = (id: number | null) => {
-    if (id === groupId) return;
+  // date (YYYY-MM-DD) is the day the group took place; today unless a different date was picked
+  const selectGroup = (id: number | null, date = todayLocal()) => {
+    if (id === groupId && date === (sessionDate ?? todayLocal())) return;
     if (session.length > 0 && !window.confirm(
-      `Discard the ${session.length} client(s) on this attendance sheet and switch groups?`
+      `Discard the ${session.length} client(s) on this attendance sheet and ${id === groupId ? 'change the session date' : 'switch groups'}?`
     )) return;
 
     clearWorkflow();
     if (id === null) return;
     setGroupId(id);
-    loadRoster(id, todayLocal());
+    setSessionDate(date === todayLocal() ? null : date);
+    loadRoster(id, date);
   };
 
   const reloadRoster = () => {
     if (groupId === null) return;
-    // While the question is unanswered, sessionDate is only provisional; ask again from today
-    if (sessionChoice) loadRoster(groupId, todayLocal());
+    // While the question is unanswered, sessionDate is only provisional; ask again for the picked date
+    if (sessionChoice) loadRoster(groupId, sessionChoice.date);
     else loadRoster(groupId, sessionDate ?? todayLocal(), sessionNumber);
   };
 

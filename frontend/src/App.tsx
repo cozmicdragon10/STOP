@@ -49,6 +49,7 @@ import EmployeeLabelProvider from './components/EmployeeLabelProvider';
 import ProgramStatusDialog from './components/clients/ProgramStatusDialog';
 import ClientInfoForm from './components/clients/ClientInfoForm';
 import type { LedgerRefresh } from './components/clients/ClientLedger';
+import type { AttendanceDeleted } from './components/clients/ClientAttendanceHistory';
 import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividualsTab';
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
@@ -406,6 +407,17 @@ export default function App() {
     setClientAttendance(attendance);
     setClientFinancials(financials);
     setClientPolyOverride(polyOverride);
+  };
+
+  // An attendance was deleted on the Attendance tab: update the client, reload the account's lists, and the closed
+  // groups it may have been part of
+  const handleAttendanceDeleted = ({ clientId, changes, attendance, financials }: AttendanceDeleted) => {
+    setSelectedClientDetail((c: { clientid: number } | null) => (c && c.clientid === clientId ? { ...c, ...changes } : c));
+    setClients(prev => prev.map(c => c.clientid === clientId ? { ...c, ...changes } : c));
+    loadOpenGroups();
+    if (openClientIdRef.current !== clientId) return;
+    setClientAttendance(attendance);
+    setClientFinancials(financials);
   };
 
   // The account open right now, for saves that finish after the user may have moved to another client
@@ -871,7 +883,15 @@ export default function App() {
               )}
 
               {clientTab === 'attendance' && (
-                <ClientAttendanceHistory key={selectedClientDetail.clientid} attendance={clientAttendance} />
+                <ClientAttendanceHistory
+                  key={selectedClientDetail.clientid}
+                  clientId={selectedClientDetail.clientid}
+                  balance={Number(selectedClientDetail.accountbalance) || 0}
+                  attendance={clientAttendance}
+                  canDelete={role === 'Business Administrator'}
+                  onDeleted={handleAttendanceDeleted}
+                  onSuccess={setSuccessMsg}
+                />
               )}
 
               {clientTab === 'financials' && (

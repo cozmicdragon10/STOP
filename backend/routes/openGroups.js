@@ -73,6 +73,9 @@ router.put('/api/open-groups', async (req, res) => {
         if (!group || !date || !Array.isArray(entries) || entries.length === 0) {
             return res.status(400).json({ error: 'A group, session date, and at least one checked-in client are required.' });
         }
+        if (String(date) > new Date().toLocaleDateString('en-CA')) {
+            return res.status(400).json({ error: 'The group date can\'t be in the future.' });
+        }
         const sessionNum = Number(sessionNumber) > 0 ? Math.floor(Number(sessionNumber)) : 1;
         const existing = await pool.query(
             `SELECT o.CreatedBy, o.CoveredBy, g.Counselor FROM OpenGroupSessions o JOIN Groups g ON g.GroupId = o.GroupId

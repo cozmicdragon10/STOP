@@ -107,8 +107,9 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         ? String((/^\d+$/.test(String(phase ?? '').trim()) ? Number(phase) : 0) + 1)
         : null;
 
+    // Last Date Attended only moves forward: a missed check-in added for an earlier session leaves a later one in place
     await db.query(
-        'UPDATE Clients SET AccountBalance = $1, LastDateAttended = $2, Phase = COALESCE($3, Phase) WHERE ClientId = $4',
+        'UPDATE Clients SET AccountBalance = $1, LastDateAttended = GREATEST(LastDateAttended, $2::date), Phase = COALESCE($3, Phase) WHERE ClientId = $4',
         [newBalance, sessionDate, newPhase, client]
     );
 
@@ -122,6 +123,8 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
                 [client, POLY_VOUCHER_MAX]
             );
             polyVoucherAwarded = voucherRes.rows.length > 0;
+            // Deleting this attendance takes the voucher back (routes/attendance.js)
+            if (polyVoucherAwarded) await db.query('UPDATE Attendance SET PolyVoucherAwarded = TRUE WHERE AttendanceId = $1', [attendanceId]);
         }
     }
 

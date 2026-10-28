@@ -26,6 +26,7 @@ export const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
   { type: 'Payment Adjusted', label: 'Payment Adjusted' },
   { type: 'Payment Refunded', label: 'Payment Refunded' },
   { type: 'Payment Disputed', label: 'Payment Disputed' },
+  { type: 'Attendance Deleted', label: 'Attendance Deleted' },
 ];
 
 // Programs that use the SO phase schedule and show the last polygraph date
