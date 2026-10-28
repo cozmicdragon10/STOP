@@ -118,6 +118,8 @@ export default function App() {
   const [expandedClosedGroup, setExpandedClosedGroup] = useState<string | null>(null);
   // Open group picked in the Open Groups panel, handed to the check-in workflow to load
   const [resumeRequest, setResumeRequest] = useState<OpenGroupSession | null>(null);
+  // Closed group picked in the Closed Groups panel for missed check-ins (Business Administrators)
+  const [missedCheckInRequest, setMissedCheckInRequest] = useState<ClosedGroupSession | null>(null);
 
   // Bumped when a case note goes to or comes out of approval, so the Notes to Approve count reloads
   const [pendingNotesKey, setPendingNotesKey] = useState(0);
@@ -958,6 +960,8 @@ export default function App() {
                   onOpenGroupsChanged={loadOpenGroups}
                   resumeRequest={resumeRequest}
                   onResumeHandled={() => setResumeRequest(null)}
+                  missedCheckInRequest={missedCheckInRequest}
+                  onMissedCheckInHandled={() => setMissedCheckInRequest(null)}
                 />
               </div>
 
@@ -1025,6 +1029,20 @@ export default function App() {
                                     ))}
                                   </ul>
                                   <p className="text-right text-slate-300 font-semibold pt-1.5 border-t border-slate-800">Collected ${collected.toFixed(2)}</p>
+                                  {role === 'Business Administrator' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        // Back to group check-in if a payment form was showing
+                                        setIsAccountOnly(false);
+                                        setIsCustomCharge(false);
+                                        setMissedCheckInRequest(c);
+                                      }}
+                                      className="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white rounded py-1.5 font-semibold"
+                                    >
+                                      Add Missed Check-In
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </li>

@@ -295,24 +295,26 @@ export async function getGroupClients(groupId: number): Promise<GroupRosterClien
     return jsonResponse(res, 'Could not load the group roster.');
 }
 
-// A session of a group on a date: session 1 is the day's first, a later number means the group met again.
+// A session of a group on a date (YYYY-MM-DD): session 1 is the day's first, a later number means the group met again.
 // closed: attendance was saved; otherwise it is an open sheet (Finish Check-In) and clients is empty.
 export interface GroupDaySession {
+    date: string;
     sessionNumber: number;
     closed: boolean;
     clients: number[];
 }
 
-// Sessions of the group on the date (YYYY-MM-DD), oldest first
-export async function getGroupSessions(groupId: number, date: string): Promise<GroupDaySession[]> {
-    const res = await apiFetch(`${API_BASE}/groups/${groupId}/sessions?date=${encodeURIComponent(date)}`);
+// Sessions of the group on the date (YYYY-MM-DD), or from `from` through the date, oldest first
+export async function getGroupSessions(groupId: number, date: string, from?: string): Promise<GroupDaySession[]> {
+    const range = from ? `&from=${encodeURIComponent(from)}` : '';
+    const res = await apiFetch(`${API_BASE}/groups/${groupId}/sessions?date=${encodeURIComponent(date)}${range}`);
     const body = await res.json().catch(() => null);
     if (!res.ok || !Array.isArray(body)) {
         throw new Error(body?.error || (res.status === 404
             ? 'The server needs a restart (node server.js) before group sessions can be checked.'
             : 'Could not check who already attended this group today.'));
     }
-    return body.map(s => ({ sessionNumber: Number(s.sessionNumber), closed: s.closed !== false, clients: (s.clients || []).map(Number) }));
+    return body.map(s => ({ date: String(s.date ?? date), sessionNumber: Number(s.sessionNumber), closed: s.closed !== false, clients: (s.clients || []).map(Number) }));
 }
 
 // Business Administrators only; the server checks the role

@@ -23,29 +23,31 @@ router.post('/api/attendance', async (req, res) => {
     }
 });
 
-// Sessions of a group on a date (YYYY-MM-DD), oldest first. Closed sessions list the ids of the clients who attended;
-// open ones (saved with Finish Check-In, not yet closed) have no attendance yet and are listed so their numbers aren't reused.
-// A client cannot be checked in to the same session twice, but can attend a later session that day.
+// Sessions of a group on a date (YYYY-MM-DD), or from `from` through `date` when given, oldest first. Closed sessions list
+// the ids of the clients who attended; open ones (saved with Finish Check-In, not yet closed) have no attendance yet and
+// are listed so their numbers aren't reused. A client cannot be checked in to the same session twice, but can attend a
+// later session that day.
 router.get('/api/groups/:groupId/sessions', async (req, res) => {
     try {
         const { groupId } = req.params;
         const { date } = req.query;
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+        const from = req.query.from || date;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) || !/^\d{4}-\d{2}-\d{2}$/.test(String(from))) {
             return res.status(400).json({ error: 'A session date (YYYY-MM-DD) is required.' });
         }
         const result = await pool.query(
-            `SELECT SessionNumber, TRUE AS Closed, array_agg(DISTINCT Client) AS Clients
-             FROM Attendance WHERE "Group" = $1 AND Date = $2
-             GROUP BY SessionNumber
+            `SELECT to_char(Date, 'YYYY-MM-DD') AS Date, SessionNumber, TRUE AS Closed, array_agg(DISTINCT Client) AS Clients
+             FROM Attendance WHERE "Group" = $1 AND Date BETWEEN $2 AND $3
+             GROUP BY Date, SessionNumber
              UNION ALL
-             SELECT o.SessionNumber, FALSE, ARRAY[]::int[]
+             SELECT to_char(o.SessionDate, 'YYYY-MM-DD'), o.SessionNumber, FALSE, ARRAY[]::int[]
              FROM OpenGroupSessions o
-             WHERE o.GroupId = $1 AND o.SessionDate = $2
-               AND NOT EXISTS (SELECT 1 FROM Attendance a WHERE a."Group" = $1 AND a.Date = $2 AND a.SessionNumber = o.SessionNumber)
-             ORDER BY SessionNumber`,
-            [groupId, date]
+             WHERE o.GroupId = $1 AND o.SessionDate BETWEEN $2 AND $3
+               AND NOT EXISTS (SELECT 1 FROM Attendance a WHERE a."Group" = $1 AND a.Date = o.SessionDate AND a.SessionNumber = o.SessionNumber)
+             ORDER BY 1, 2`,
+            [groupId, from, date]
         );
-        res.json(result.rows.map(r => ({ sessionNumber: r.sessionnumber, closed: r.closed, clients: r.clients })));
+        res.json(result.rows.map(r => ({ date: r.date, sessionNumber: r.sessionnumber, closed: r.closed, clients: r.clients })));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -68,6 +70,16 @@ router.post('/api/attendance/batch', async (req, res) => {
     const clientDb = await pool.connect();
     try {
         await clientDb.query('BEGIN');
+        // Adding clients to a session that was closed before this week (Sunday on) is for Business Administrators only:
+        // missed check-ins from the Closed Groups panel. Within the week anyone checking the group in can add to it.
+        const closedEarlierRes = await clientDb.query(
+            `SELECT 1 FROM Attendance WHERE "Group" = $1 AND Date = $2 AND SessionNumber = $3
+               AND $2::date < date_trunc('week', CURRENT_DATE + 1)::date - 1 LIMIT 1`,
+            [group, date, sessionNum]
+        );
+        if (closedEarlierRes.rows.length > 0 && req.user?.role !== 'Business Administrator') {
+            throw Object.assign(new Error('This group session was closed before this week. Only a Business Administrator can add missed check-ins to it.'), { status: 403 });
+        }
         const groupRes = await clientDb.query('SELECT ProgramType FROM Groups WHERE GroupId = $1', [group]);
         const isSoGroup = SO_GROUP_TYPES.includes(String(groupRes.rows[0]?.programtype || '').trim().toUpperCase());
         const results = [];

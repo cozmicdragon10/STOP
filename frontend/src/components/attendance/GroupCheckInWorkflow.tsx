@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
 import { todayLocal, useGroupCheckIn } from '../../hooks/useGroupCheckIn';
 import type { ClientRecord, GroupRecord } from '../../hooks/useGroupCheckIn';
-import type { OpenGroupSession } from '../../api';
+import type { ClosedGroupSession, OpenGroupSession } from '../../api';
 import CheckInStep from './CheckInStep';
 import ReviewStep from './ReviewStep';
 import ClientSearchModal from './ClientSearchModal';
@@ -23,9 +23,16 @@ interface Props {
   // Open group picked from the Open Groups panel; cleared with onResumeHandled once loaded
   resumeRequest: OpenGroupSession | null;
   onResumeHandled: () => void;
+  // Closed session picked from the Closed Groups panel for missed check-ins (Business Administrators); cleared once loaded
+  missedCheckInRequest: ClosedGroupSession | null;
+  onMissedCheckInHandled: () => void;
 }
 
 const STEPS = ['Select Group', 'Check In Clients', 'Review & Save'];
+
+// A session date (YYYY-MM-DD) as e.g. "Monday, 10/26/2026"
+const formatSessionDay = (ymd: string) =>
+  new Date(`${ymd}T00:00:00`).toLocaleDateString([], { weekday: 'long', month: 'numeric', day: 'numeric', year: 'numeric' });
 
 function StepIndicator({ current }: { current: number }) {
   return (
@@ -84,7 +91,7 @@ function filterSearchableClients(clients: ClientRecord[], groupType: string | nu
   });
 }
 
-export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPickCover, onSuccess, onError, onSaved, openGroups, onOpenGroupsChanged, resumeRequest, onResumeHandled }: Props) {
+export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPickCover, onSuccess, onError, onSaved, openGroups, onOpenGroupsChanged, resumeRequest, onResumeHandled, missedCheckInRequest, onMissedCheckInHandled }: Props) {
   const wf = useGroupCheckIn(createdBy, { onSuccess, onError, onSaved, onOpenGroupsChanged });
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -109,6 +116,16 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
     onResumeHandled();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resumeRequest]);
+
+  useEffect(() => {
+    if (!missedCheckInRequest) return;
+    const { groupid, groupname, sessiondate, sessionnumber } = missedCheckInRequest;
+    // Only active groups can be checked in
+    if (groups.some(g => g.groupid === groupid)) wf.openClosedSession(groupid, groupname, sessiondate, sessionnumber ?? 1);
+    else onError(`${groupname} is inactive, so clients can't be checked in to it.`);
+    onMissedCheckInHandled();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missedCheckInRequest]);
 
   // Picking a group that already has an open check-in today picks up that sheet (its latest session) instead of starting over
   const pickGroup = (id: number | null) => {
@@ -143,39 +160,51 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
             <option key={g.groupid} value={g.groupid}>{g.groupname}</option>
           ))}
         </select>
-        {wf.sessionDate && wf.sessionDate !== todayLocal() && (
+        {wf.sessionDate && wf.sessionDate !== todayLocal() && !wf.sessionChoice && (
           <p className="text-xs text-amber-400">
-            Open check-in from {new Date(`${wf.sessionDate}T00:00:00`).toLocaleDateString()}. Attendance will be saved for that date.
+            Check-in for the session held {formatSessionDay(wf.sessionDate)}. Attendance will be saved for that date.
           </p>
         )}
+        {group && wf.addingToClosed && (
+          <p className="text-xs text-amber-400">Adding to the closed session. Clients who already attended it can't be checked in again.</p>
+        )}
         {group && !wf.sessionChoice && wf.sessionNumber > 1 && (
-          <p className="text-xs text-blue-400">Session {wf.sessionNumber} of {group.groupname} today.</p>
+          <p className="text-xs text-blue-400">Session {wf.sessionNumber} of {group.groupname} {wf.sessionDate && wf.sessionDate !== todayLocal() ? `on ${formatSessionDay(wf.sessionDate)}` : 'today'}.</p>
         )}
       </section>
 
-      {/* The group was already opened and closed today: a new session, or more clients for the closed one */}
-      {group && wf.sessionChoice && (
+      {/* The group was already opened and closed this week: a new session today, or more clients for the closed one */}
+      {group && wf.sessionChoice && (() => {
+        const closed = wf.sessionChoice.latestClosed;
+        const closedToday = closed.date === todayLocal();
+        const closedWhen = closedToday ? 'today' : `on ${formatSessionDay(closed.date)}`;
+        return (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div role="dialog" aria-modal="true" aria-labelledby="session-choice-title" className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
-            <h3 id="session-choice-title" className="text-lg font-bold text-white">{group.groupname} was already held today</h3>
+            <h3 id="session-choice-title" className="text-lg font-bold text-white">{group.groupname} was already held {closedToday ? 'today' : 'this week'}</h3>
             <p className="text-sm text-slate-300">
-              {wf.sessionChoice.latestClosed.sessionNumber > 1 ? `Session ${wf.sessionChoice.latestClosed.sessionNumber}` : 'A session'} of this group was
-              closed today with {wf.sessionChoice.latestClosed.clients.length} client(s). Is this a new group session, or are you adding clients to the one that was closed?
+              {closed.sessionNumber > 1 ? `Session ${closed.sessionNumber}` : 'A session'} of this group was
+              closed {closedWhen} with {closed.clients.length} client(s). Is this a new group session, or are you adding clients to the one that was closed?
             </p>
             <div className="space-y-2">
               <button type="button" onClick={() => wf.chooseSession('new')} className="w-full text-left bg-blue-600 hover:bg-blue-500 text-white rounded-lg p-3">
                 <p className="font-semibold text-sm">New Group Session</p>
-                <p className="text-xs text-blue-100 mt-0.5">Starts session {wf.sessionChoice.nextNumber}. Clients from the earlier session can be checked in again.</p>
+                <p className="text-xs text-blue-100 mt-0.5">
+                  {wf.sessionChoice.nextNumber > 1 ? `Starts session ${wf.sessionChoice.nextNumber} today.` : 'Starts a new session today.'} Clients from the earlier session can be checked in again.
+                </p>
               </button>
               <button type="button" onClick={() => wf.chooseSession('existing')} className="w-full text-left bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 rounded-lg p-3">
                 <p className="font-semibold text-sm">Add to Closed Session</p>
-                <p className="text-xs text-slate-400 mt-0.5">Adds clients to the session already closed. Clients who attended it can't be checked in again.</p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Adds clients to the session closed {closedWhen}{closedToday ? '' : ', saved for that date'}. Clients who attended it can't be checked in again.
+                </p>
               </button>
               <button type="button" onClick={() => pickGroup(null)} className="w-full text-center text-xs text-slate-400 hover:text-slate-200 py-2">Cancel</button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Steps 2 and 3 stay hidden until a group is chosen */}
       {group && wf.view === 'checkin' && (

@@ -103,9 +103,13 @@ export const validateSession = (entries: SessionEntry[]): string | null => {
 };
 
 // Local calendar date. toISOString() is UTC and would roll evening sessions to tomorrow.
-export const todayLocal = () => {
+const localYmd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export const todayLocal = () => localYmd(new Date());
+// Sunday of this week, the same week attendedThisWeek uses
+const weekStartLocal = () => {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  d.setDate(d.getDate() - d.getDay());
+  return localYmd(d);
 };
 
 const MAKEUP_COMMENT = 'Approved make-up attendance';
@@ -155,8 +159,11 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   const [attendedIds, setAttendedIds] = useState<Set<number>>(() => new Set());
   // Which session of the group on the session date this sheet is for (1 = the day's first)
   const [sessionNumber, setSessionNumber] = useState(1);
-  // Set when the picked group already has a closed session today: the user chooses a new session or adding to that one
+  // Set when the picked group already has a closed session this week: the user chooses a new session today or adding to
+  // that one. nextNumber is the number a new session today would get.
   const [sessionChoice, setSessionChoice] = useState<{ latestClosed: GroupDaySession; nextNumber: number } | null>(null);
+  // The sheet adds clients to a session that was already closed (Add to Closed Session, or a missed check-in)
+  const [addingToClosed, setAddingToClosed] = useState(false);
   // Counselor covering the session (employee email), picked by the office; null means the group's usual counselor.
   // The server ignores it unless an Office Admin or Business Administrator sends it.
   const [coveredBy, setCoveredBy] = useState<string | null>(null);
@@ -175,14 +182,17 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
 
   const allSelected = selectableRoster.length > 0 && selectableRoster.every(c => selectedIds.has(c.clientid));
 
-  // date is the session date (YYYY-MM-DD). session is the session the sheet is for; when omitted (a group was just picked)
-  // and the group already has a closed session that day, the user is asked whether this is a new session.
+  // date is the session date (YYYY-MM-DD). session is the session the sheet is for; when omitted (a group was just picked
+  // for today) and the group already has a closed session this week, the user is asked whether this is a new session.
   const loadRoster = useCallback(async (id: number, date: string, session?: number) => {
     const requestId = ++rosterRequestId.current;
     setRosterStatus('loading');
     setRosterError('');
     try {
-      const [data, sessions]: [unknown, GroupDaySession[]] = await Promise.all([getGroupClients(id), getGroupSessions(id, date)]);
+      const [data, sessions]: [unknown, GroupDaySession[]] = await Promise.all([
+        getGroupClients(id),
+        getGroupSessions(id, date, session === undefined ? weekStartLocal() : undefined),
+      ]);
       if (requestId !== rosterRequestId.current) return;
       if (!Array.isArray(data)) {
         const serverError = (data as { error?: string } | null)?.error;
@@ -192,16 +202,19 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
       setRoster((data as ClientRecord[]).filter(c => c.programstatus === 'Active'));
       const closed = sessions.filter(s => s.closed);
       if (session === undefined && closed.length > 0) {
+        // Sessions come oldest first, so the last closed one is the most recent this week
         const latestClosed = closed[closed.length - 1];
-        const nextNumber = Math.max(...sessions.map(s => s.sessionNumber)) + 1;
+        // Session numbers count up within a day, so a new session today follows today's sessions only
+        const nextNumber = Math.max(0, ...sessions.filter(s => s.date === date).map(s => s.sessionNumber)) + 1;
         // Until the user answers, treat it as the closed session so nobody from it can be checked in again by accident
+        setSessionDate(latestClosed.date === date ? null : latestClosed.date);
         setSessionNumber(latestClosed.sessionNumber);
         setAttendedIds(new Set(latestClosed.clients));
         setSessionChoice({ latestClosed, nextNumber });
       } else {
         const current = session ?? 1;
         setSessionNumber(current);
-        setAttendedIds(new Set(sessions.find(s => s.sessionNumber === current)?.clients ?? []));
+        setAttendedIds(new Set(sessions.find(s => s.date === date && s.sessionNumber === current)?.clients ?? []));
       }
       setRosterStatus('ready');
     } catch (err: unknown) {
@@ -228,18 +241,36 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     setAttendedIds(new Set());
     setSessionNumber(1);
     setSessionChoice(null);
+    setAddingToClosed(false);
     setCoveredBy(null);
   };
 
-  // Answer to the "already held today" question. 'new' starts another session, so everyone can be checked in again;
-  // 'existing' adds clients to the closed session, so those who attended it stay blocked.
+  // Answer to the "already held this week" question. 'new' starts another session today, so everyone can be checked in
+  // again; 'existing' adds clients to the closed session (saved on the day it was held), so those who attended it stay blocked.
   const chooseSession = (choice: 'new' | 'existing') => {
     if (!sessionChoice) return;
     if (choice === 'new') {
+      setSessionDate(null);
       setSessionNumber(sessionChoice.nextNumber);
       setAttendedIds(new Set());
+    } else {
+      setAddingToClosed(true);
     }
     setSessionChoice(null);
+  };
+
+  // Business Administrators: missed check-ins for a session already closed, picked from the Closed Groups panel. Saved on
+  // the day it was held; clients who attended it can't be checked in to it again.
+  const openClosedSession = (id: number, groupName: string, date: string, number: number) => {
+    if (session.length > 0 && !window.confirm(
+      `Discard the ${session.length} client(s) on this attendance sheet and add missed check-ins to ${groupName}?`
+    )) return;
+    clearWorkflow();
+    setGroupId(id);
+    setSessionDate(date === todayLocal() ? null : date);
+    setSessionNumber(number);
+    setAddingToClosed(true);
+    loadRoster(id, date, number);
   };
 
   // Loads a saved open group onto the sheet, ready to review and close
@@ -292,7 +323,10 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   };
 
   const reloadRoster = () => {
-    if (groupId !== null) loadRoster(groupId, sessionDate ?? todayLocal(), sessionChoice ? undefined : sessionNumber);
+    if (groupId === null) return;
+    // While the question is unanswered, sessionDate is only provisional; ask again from today
+    if (sessionChoice) loadRoster(groupId, todayLocal());
+    else loadRoster(groupId, sessionDate ?? todayLocal(), sessionNumber);
   };
 
   const toggleSelect = (clientId: number) => {
@@ -465,6 +499,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     sessionNumber,
     sessionChoice,
     chooseSession,
+    addingToClosed,
+    openClosedSession,
     resumeOpenGroup,
     finishCheckIn,
     coveredBy,
