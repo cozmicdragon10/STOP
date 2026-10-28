@@ -68,9 +68,9 @@ describe('polygraphNotice', () => {
     expect(polygraphNotice(client, [{ date: '2026-01-16' }], today)).toBeNull();
   });
 
-  it('counts days since attending when no polygraph has been taken', () => {
+  it('says the first polygraph is still to come once the client has attended', () => {
     expect(polygraphNotice({ programtype: 'State SO', lastdateattended: '2026-07-05' }, [], today))
-      .toBe("Client hasn't taken their first polygraph in 10 days");
+      .toBe("Client hasn't taken their first polygraph yet");
     expect(polygraphNotice({ programtype: 'State SO' }, [], today)).toBeNull();
   });
 });

@@ -12,3 +12,10 @@ export const SO_TREATMENT_FEES: Record<string, number> = {
 // The server applies the same rule when saving (see isMonthlyFeeClient in backend/lib/attendance.js).
 export const isMonthlyFeeClient = (programtype?: string | null, phase?: string | null): boolean =>
   (programtype === 'State SO' || programtype === 'Voluntary SO') && (phase === 'Phase 1 - Weekly' || phase === 'Phase 2 - Monthly');
+
+// State SO and Voluntary SO Phase 3 (quarterly) and Phase 4 (semi-annual) clients pay the treatment fee once per this
+// many months, rolling from their last charged group attendance. null for everyone else.
+// The server applies the same rule (see feePeriodMonths in backend/lib/attendance.js).
+export const FEE_PERIOD_MONTHS: Record<string, number> = { 'Phase 3 - Quarterly': 3, 'Phase 4 - Semi Anual': 6 };
+export const feePeriodMonths = (programtype?: string | null, phase?: string | null): number | null =>
+  ((programtype === 'State SO' || programtype === 'Voluntary SO') && FEE_PERIOD_MONTHS[phase ?? '']) || null;

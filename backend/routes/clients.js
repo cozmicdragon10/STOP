@@ -5,7 +5,7 @@ const { activeRoleFor } = require('../lib/access');
 const { requireRole } = require('../lib/auth');
 const { groupNameFor, logClientChange } = require('../lib/changeLog');
 const { POLY_VOUCHER_MAX, activePolyFeeOverride, countPolyFeeFill } = require('../lib/poly');
-const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK } = require('../lib/sql');
+const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED } = require('../lib/sql');
 
 const router = express.Router();
 
@@ -21,6 +21,7 @@ const clientRowsSql = (where) => `
         (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
         (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly,
         ${ATTENDED_THIS_MONTH} AS AttendedThisMonth,
+        ${FEE_ALREADY_CHARGED} AS FeeAlreadyCharged,
         ${ACTIVE_FEE_OVERRIDE} AS ActiveFeeOverride,
         ${BIP_CHECKIN_BLOCK} AS BipCheckInBlock
     FROM Clients c

@@ -1,6 +1,6 @@
 const express = require('express');
 const { logAction, pool } = require('../db');
-const { recordAttendance } = require('../lib/attendance');
+const { chargedWithinMonths, feePeriodMonths, isMonthlyFeeClient, recordAttendance } = require('../lib/attendance');
 const { requireRole } = require('../lib/auth');
 const { coveringCounselorFor } = require('../lib/cashResponsibility');
 const { logClientChange } = require('../lib/changeLog');
@@ -133,20 +133,23 @@ const money = (n) => Math.round(Number(n || 0) * 100) / 100;
 const LAST_DATE_ATTENDED_TYPES = ['Group', 'Individual', 'Assessment'];
 
 // Takes an entry's effect on the balance (positive: it raised what the client owes) back off the balance stored on every
-// ledger and attendance row recorded after it. at is when the entry was recorded; afterAttendanceId orders check-ins
-// saved before Attendance.CreatedOn existed, and is only given when the entry itself is one of those.
+// ledger and attendance row recorded after it. at is when the entry was recorded, as full-precision text (TIMESTAMP_TEXT):
+// a JavaScript Date keeps only milliseconds, so rows recorded in the same instant would count as later. afterAttendanceId
+// orders check-ins saved before Attendance.CreatedOn existed, and is only given when the entry itself is one of those.
 const takeBackFromLaterRows = async (db, clientId, effect, at, afterAttendanceId = null) => {
     if (!effect) return;
     await db.query(
-        'UPDATE FinancialTransactions SET FinalBalance = FinalBalance - $1 WHERE Client = $2 AND FinalBalance IS NOT NULL AND Date > $3',
+        'UPDATE FinancialTransactions SET FinalBalance = FinalBalance - $1 WHERE Client = $2 AND FinalBalance IS NOT NULL AND Date > $3::timestamp',
         [effect, clientId, at]
     );
     await db.query(
         `UPDATE Attendance SET AccountTotal = AccountTotal - $1
-         WHERE Client = $2 AND (CreatedOn > $3 OR (CreatedOn IS NULL AND $4::int IS NOT NULL AND AttendanceId > $4))`,
+         WHERE Client = $2 AND (CreatedOn > $3::timestamp OR (CreatedOn IS NULL AND $4::int IS NOT NULL AND AttendanceId > $4))`,
         [effect, clientId, at, afterAttendanceId]
     );
 };
+// A timestamp column as text with its microseconds, for takeBackFromLaterRows
+const TIMESTAMP_TEXT = (column) => `to_char(${column}, 'YYYY-MM-DD HH24:MI:SS.US')`;
 
 // Deletes a check-in (Business Administrators only) and undoes what it did: its charge and payment come off the ledger
 // (with any refund or dispute on that payment, and the payment's cash drop-off check-off), the client's balance and the
@@ -164,7 +167,8 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
     try {
         await db.query('BEGIN');
         const attRes = await db.query(
-            `SELECT a.*, a."Group" AS GroupId, to_char(a.Date, 'YYYY-MM-DD') AS Day, g.GroupName, st.Name AS SessionTypeName
+            `SELECT a.*, a."Group" AS GroupId, to_char(a.Date, 'YYYY-MM-DD') AS Day, ${TIMESTAMP_TEXT('a.CreatedOn')} AS CreatedAt,
+                    g.GroupName, st.Name AS SessionTypeName
              FROM Attendance a LEFT JOIN Groups g ON g.GroupId = a."Group" LEFT JOIN SessionTypes st ON st.SessionTypeId = a.SessionTypeId
              WHERE a.AttendanceId = $1 FOR UPDATE OF a`,
             [req.params.id]
@@ -179,7 +183,7 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
 
         // The check-in's ledger rows, and refunds and disputes on its payment
         const ledger = (await db.query(
-            `SELECT * FROM FinancialTransactions
+            `SELECT *, ${TIMESTAMP_TEXT('Date')} AS At FROM FinancialTransactions
              WHERE AttendanceId = $1 OR RelatedTransactionId IN (SELECT TransactionId FROM FinancialTransactions WHERE AttendanceId = $1)
              ORDER BY Date, TransactionId`,
             [att.attendanceid]
@@ -187,7 +191,7 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
         // Check-ins saved before ledger rows were linked to them: the one payment or charge whose comment matches
         const legacy = async (type, comments) => {
             const r = await db.query(
-                'SELECT * FROM FinancialTransactions WHERE Client = $1 AND Type = $2 AND Comments = $3 AND AttendanceId IS NULL',
+                `SELECT *, ${TIMESTAMP_TEXT('Date')} AS At FROM FinancialTransactions WHERE Client = $1 AND Type = $2 AND Comments = $3 AND AttendanceId IS NULL`,
                 [att.client, type, comments]
             );
             return r.rows.length === 1 ? r.rows[0] : null;
@@ -205,7 +209,7 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
         // Effects on the balance (positive: owes more): the check-in itself, then each refund or dispute step after it
         const checkInEffect = money(money(att.groupfee) - (payment ? money(payment.amount) : money(att.accountpaid)));
         const reversals = ledger.filter(f => f.relatedtransactionid).map(f => ({
-            at: f.date,
+            at: f.at,
             effect: f.type === 'Dispute Won' ? -money(f.amount) : ['Refund', 'Dispute'].includes(f.type) ? money(f.amount) : 0,
         }));
         const totalEffect = money(checkInEffect + reversals.reduce((t, r) => t + r.effect, 0));
@@ -238,9 +242,69 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
         await db.query('DELETE FROM Attendance WHERE AttendanceId = $1', [att.attendanceid]);
 
         // When the check-in was recorded: its CreatedOn, else its ledger row, else the end of the session day
-        const checkInAt = att.createdon || checkInRow?.date || `${att.day} 23:59:59`;
+        const checkInAt = att.createdat || checkInRow?.at || `${att.day} 23:59:59`;
         await takeBackFromLaterRows(db, att.client, checkInEffect, checkInAt, att.createdon ? null : att.attendanceid);
         for (const r of reversals) await takeBackFromLaterRows(db, att.client, r.effect, r.at);
+
+        const what = att.groupid ? att.groupname || `Group ${att.groupid}` : `${att.type}${att.sessiontypename ? ` - ${att.sessiontypename}` : ''}`;
+
+        // The treatment fee for the period moves when the deleted check-in was the one charged it, to the check-in that is
+        // now the period's first: for a monthly-fee client, the earliest group check-in left that month (when none of them
+        // is charged); for Phase 3 and 4, the earliest uncharged group check-in from the deleted one's date to the end of
+        // its period that has no other charged check-in in the period before it. That check-in is charged the same fee as
+        // of when it was recorded, so its balance and every later one go up by it (its payment row's balance too, or a
+        // Charge row is added when it has none).
+        let feeMoved = null;
+        const deletedFee = money(att.groupfee);
+        const periodMonths = feePeriodMonths(client);
+        let next = null;
+        if (att.groupid && !INDIVIDUAL_SESSION_TYPES.includes(att.type) && deletedFee > 0 && (isMonthlyFeeClient(client) || periodMonths)) {
+            const inPeriod = periodMonths
+                ? 'a.Date >= $2::date AND a.Date < $2::date + make_interval(months => $4) AND a.GroupFee = 0'
+                : `date_trunc('month', a.Date) = date_trunc('month', $2::date)`;
+            const rows = (await db.query(
+                `SELECT a.*, a."Group" AS GroupId, to_char(a.Date, 'YYYY-MM-DD') AS Day, ${TIMESTAMP_TEXT('a.CreatedOn')} AS CreatedAt, g.GroupName
+                 FROM Attendance a LEFT JOIN Groups g ON g.GroupId = a."Group"
+                 WHERE a.Client = $1 AND a.Type <> ALL($3::text[]) AND ${inPeriod}
+                 ORDER BY a.Date, a.CreatedOn NULLS FIRST, a.AttendanceId`,
+                [att.client, att.day, INDIVIDUAL_SESSION_TYPES, ...(periodMonths ? [periodMonths] : [])]
+            )).rows;
+            if (periodMonths) {
+                for (const r of rows) {
+                    if (!(await chargedWithinMonths(db, att.client, r.day, periodMonths))) {
+                        next = r;
+                        break;
+                    }
+                }
+            } else if (rows.length > 0 && !rows.some(r => money(r.groupfee) > 0)) {
+                next = rows[0];
+            }
+            if (next) {
+                const nextWhat = next.groupid ? next.groupname || `Group ${next.groupid}` : next.type;
+                const updatedNext = await db.query(
+                    'UPDATE Attendance SET GroupFee = $1, AccountTotal = AccountTotal + $1 WHERE AttendanceId = $2 RETURNING AccountTotal',
+                    [deletedFee, next.attendanceid]
+                );
+                const nextPayment = await db.query(
+                    `UPDATE FinancialTransactions SET FinalBalance = FinalBalance + $1
+                     WHERE AttendanceId = $2 AND Type = 'Payment' AND RelatedTransactionId IS NULL RETURNING ${TIMESTAMP_TEXT('Date')} AS At`,
+                    [deletedFee, next.attendanceid]
+                );
+                const nextAt = next.createdat || nextPayment.rows[0]?.at || `${next.day} 23:59:59`;
+                if (nextPayment.rows.length === 0) {
+                    await db.query(
+                        `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, AttendanceId, EnteredBy)
+                         VALUES ($1, $2::timestamp, 'Charge', $3, 'Group Fee', $4, $5, $6, $7)`,
+                        [att.client, nextAt, deletedFee, updatedNext.rows[0].accounttotal,
+                            `${next.type} fee assessed on ${next.day}. Moved from the deleted ${what} check-in on ${att.day}.`, next.attendanceid, user]
+                    );
+                }
+                await takeBackFromLaterRows(db, att.client, -deletedFee, nextAt, next.createdon ? null : next.attendanceid);
+                feeMoved = { amount: deletedFee, to: `${nextWhat} on ${next.day}` };
+            }
+        }
+        // What the client's balance goes down by: the deleted check-in's effect, less a fee moved to another check-in
+        const balanceTakenBack = money(totalEffect - (feeMoved?.amount ?? 0));
 
         // BIP clients count one week per group attendance. Last Date Attended becomes the most recent Group, Individual,
         // or Assessment check-in left on the account (none: cleared).
@@ -252,10 +316,9 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
              WHERE ClientId = $2
              RETURNING AccountBalance, Phase, PolyFeeVoucher, LastDateAttended,
                  (SELECT MAX(Date) FROM Attendance WHERE Client = $2) AS LastAttended`,
-            [totalEffect, att.client, Boolean(isBipWeek), LAST_DATE_ATTENDED_TYPES]
+            [balanceTakenBack, att.client, Boolean(isBipWeek), LAST_DATE_ATTENDED_TYPES]
         );
 
-        const what = att.groupid ? att.groupname || `Group ${att.groupid}` :`${att.type}${att.sessiontypename ? ` - ${att.sessiontypename}` : ''}`;
         const session = att.sessionnumber > 1 ? ` (session ${att.sessionnumber})` : '';
         const paid = money(att.accountpaid) > 0 ? `paid $${money(att.accountpaid).toFixed(2)}${att.paymentmethod ? ` ${att.paymentmethod}` : ''}` : 'no payment';
         const voucherText = {
@@ -263,7 +326,8 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
             kept: ' The poly fee voucher it earned was kept (attended again later that month).',
             used: ' The poly fee voucher it earned was already used, so none was removed.',
         }[voucher] ?? '';
-        const details = `${what} on ${att.day}${session}: fee $${money(att.groupfee).toFixed(2)}, ${paid}.${voucherText} ${reason}`;
+        const feeMovedText = feeMoved ? ` The $${feeMoved.amount.toFixed(2)} treatment fee moved to ${feeMoved.to}.` : '';
+        const details = `${what} on ${att.day}${session}: fee $${money(att.groupfee).toFixed(2)}, ${paid}.${feeMovedText}${voucherText} ${reason}`;
         await logClientChange(db, { clientId: att.client, changedBy: user, changeType: 'Attendance Deleted', oldValue: `${what} ${att.day}`, details });
         await db.query('COMMIT');
         await logAction(user, 'Attendance Deleted', `Client ID ${att.client}, attendance ${att.attendanceid}: ${details}`);
@@ -275,6 +339,7 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
             phase: row.phase,
             polyFeeVoucher: row.polyfeevoucher,
             voucher,
+            feeMoved,
             // Sent like the client list sends them (not 'YYYY-MM-DD' text, which the browser reads as UTC midnight: a day early)
             lastDateAttended: row.lastdateattended,
             lastAttended: row.lastattended,

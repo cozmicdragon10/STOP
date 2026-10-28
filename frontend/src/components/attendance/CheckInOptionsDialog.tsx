@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { clientFee, type ClientRecord, type PaymentMethod, type PaymentTerms } from '../../hooks/useGroupCheckIn';
+import { clientFee, feeAlreadyCharged, type ClientRecord, type PaymentMethod, type PaymentTerms } from '../../hooks/useGroupCheckIn';
 import { submitAccountPayment } from '../../api';
 import { FIRST_CHECKIN_MAX_OWED, formatBalance } from '../../utils/balance';
-import { isMonthlyFeeClient } from '../../utils/soPhases';
+import { feePeriodMonths } from '../../utils/soPhases';
 import { printReceipt, type Receipt } from '../../utils/receipt';
 import CardPaymentFields from '../payments/CardPaymentFields';
 import { emptyCardBilling, type CardBilling } from '../payments/cardBilling';
@@ -32,7 +32,10 @@ const PAYMENT_METHODS: PaymentMethod[] = ['Cash', 'Credit Card'];
 // Explains the fee line: where it comes from, or why nothing is charged
 const feeLabel = (c: ClientRecord, fee: number): string => {
   if (fee > 0) return 'Treatment fee (from account)';
-  if (isMonthlyFeeClient(c.programtype, c.phase) && c.attendedthismonth) return 'Already charged this month (nothing charged)';
+  if (feeAlreadyCharged(c)) {
+    const months = feePeriodMonths(c.programtype, c.phase);
+    return months ? `Already charged in the last ${months} months (nothing charged)` : 'Already charged this month (nothing charged)';
+  }
   return 'No treatment fee on account (nothing charged)';
 };
 // How much a client still has to pay before their first check-in of the month is allowed (0 when they may check in).

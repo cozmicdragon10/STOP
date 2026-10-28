@@ -2,7 +2,7 @@ const express = require('express');
 const { pool } = require('../db');
 const { requireRole } = require('../lib/auth');
 const { groupNameFor, logClientChange } = require('../lib/changeLog');
-const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, GROUP_ATTENDANCE } = require('../lib/sql');
+const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED, GROUP_ATTENDANCE } = require('../lib/sql');
 
 const router = express.Router();
 
@@ -32,7 +32,7 @@ router.get('/api/groups/:id/clients', async (req, res) => {
     try {
         const { id } = req.params;
         const result = await pool.query(
-            `SELECT c.*, ${ATTENDED_THIS_MONTH} AS AttendedThisMonth, ${ACTIVE_FEE_OVERRIDE} AS ActiveFeeOverride,
+            `SELECT c.*, ${ATTENDED_THIS_MONTH} AS AttendedThisMonth, ${FEE_ALREADY_CHARGED} AS FeeAlreadyCharged, ${ACTIVE_FEE_OVERRIDE} AS ActiveFeeOverride,
                     (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
                     (SELECT Date FROM Attendance WHERE Client = c.ClientId AND ${GROUP_ATTENDANCE} ORDER BY Date DESC LIMIT 1) AS LastGroupAttended,
                     ${BIP_CHECKIN_BLOCK} AS BipCheckInBlock

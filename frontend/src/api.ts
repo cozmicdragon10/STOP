@@ -91,6 +91,8 @@ export interface Client extends Omit<ClientColumns, 'programtype'> {
     lastattended: string | null;
     lastpoly: string | null;
     attendedthismonth: boolean;
+    // This period's treatment fee was already charged (month for SO Phase 1 and 2, 3 or 6 months for Phase 3 and 4)
+    feealreadycharged: boolean;
     // Unexpired temporary reduced fee; replaces treatmentfee while set
     activefeeoverride: Money | null;
     bipcheckinblock: BipCheckInBlock;
@@ -99,6 +101,7 @@ export interface Client extends Omit<ClientColumns, 'programtype'> {
 // A client on a group's roster
 export interface GroupRosterClient extends ClientColumns {
     attendedthismonth: boolean;
+    feealreadycharged: boolean;
     activefeeoverride: Money | null;
     lastattended: string | null;
     // Most recent group attendance (not an assessment or individual session)
@@ -874,6 +877,8 @@ export interface AttendanceDeleteResult {
     polyFeeVoucher: number;
     // The poly fee voucher the check-in earned: removed, kept (attended again later that month), or already used; null if it earned none
     voucher: 'removed' | 'kept' | 'used' | null;
+    // The monthly treatment fee the deleted check-in paid, moved to the earliest group check-in left that month
+    feeMoved: { amount: number; to: string } | null;
     lastDateAttended: string | null;
     // Latest attendance left (the roster's Last Attended)
     lastAttended: string | null;

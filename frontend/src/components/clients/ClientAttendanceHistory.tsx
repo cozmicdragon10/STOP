@@ -57,7 +57,8 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
         kept: ' The poly fee voucher it earned was kept because the client attended again later that month.',
         used: ' The poly fee voucher it earned was already used, so none was removed.',
       }[res.voucher] : '';
-      onSuccess(`Attendance deleted. Updated Balance: ${formatBalance(res.newBalance)}.${voucherText} The closed group and the Group Income Report were updated too.`);
+      const feeMovedText = res.feeMoved ? ` The ${formatMoney(res.feeMoved.amount)} treatment fee moved to ${res.feeMoved.to}.` : '';
+      onSuccess(`Attendance deleted. Updated Balance: ${formatBalance(res.newBalance)}.${feeMovedText}${voucherText} The closed group and the Group Income Report were updated too.`);
       // The whole client record is loaded again: besides the balance, BIP week, vouchers, and last attended, the deletion
       // can change what check-in works out from it, like whether the monthly treatment fee was already charged
       const [fresh, financials, client] = await Promise.all([getClientAttendance(clientId), getClientFinancials(clientId), getClient(clientId)]);
@@ -225,6 +226,7 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
                           : 'No fee or payment was recorded, so the balance does not change.'}
                         {/* Attendance rows keep the column's quoted name, "Group" */}
                         {att.Group ? ' The closed group and the Group Income Report are updated too.' : ''}
+                        {att.Group && Number(att.groupfee || 0) > 0 ? ' If it paid the treatment fee for the month (or the quarter / 6 months for Phase 3 and 4) and an uncharged group check-in in that period is left, the fee moves to the earliest one.' : ''}
                         {att.polyvoucherawarded ? ' The poly fee voucher it earned is removed unless the client attended again later that month.' : ''}
                         {' Last Date Attended becomes the most recent Group, Individual, or Assessment check-in left.'}
                       </p>

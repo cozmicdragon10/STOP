@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 const { pathToFileURL } = require('url');
-const { isMonthlyFeeClient, FIRST_CHECKIN_MAX_OWED } = require('../lib/attendance');
+const { isMonthlyFeeClient, feePeriodMonths, FIRST_CHECKIN_MAX_OWED } = require('../lib/attendance');
 const { bipCheckInBlockMessage } = require('../lib/sql');
 
 const frontend = (file) => import(pathToFileURL(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', file)).href);
@@ -19,6 +19,15 @@ test('monthly treatment fee applies to the same programs and phases', async () =
     for (const programtype of ['State SO', 'Federal SO', 'Voluntary SO', 'BIP', null]) {
         for (const phase of [...SO_PHASES, '0', null]) {
             assert.equal(isMonthlyFeeClient({ programtype, phase }), browser(programtype, phase), `${programtype} / ${phase}`);
+        }
+    }
+});
+
+test('Phase 3 and 4 fee periods are the same length', async () => {
+    const { feePeriodMonths: browser, SO_PHASES } = await frontend('soPhases.ts');
+    for (const programtype of ['State SO', 'Federal SO', 'Voluntary SO', 'BIP', null]) {
+        for (const phase of [...SO_PHASES, '0', null]) {
+            assert.equal(feePeriodMonths({ programtype, phase }), browser(programtype, phase), `${programtype} / ${phase}`);
         }
     }
 });

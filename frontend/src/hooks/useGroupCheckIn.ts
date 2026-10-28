@@ -21,6 +21,8 @@ export interface ClientRecord {
   activefeeoverride?: number | string | null;
   // True when the client already has an attendance this calendar month
   attendedthismonth?: boolean | null;
+  // This period's treatment fee was already charged (month for Phase 1 and 2, 3 or 6 months for Phase 3 and 4)
+  feealreadycharged?: boolean | null;
   // Date of the client's most recent attendance
   lastattended?: string | null;
   // Most recent group attendance (not an assessment or individual session); sent with the group roster
@@ -83,10 +85,15 @@ export interface WorkflowNotifier {
   onOpenGroupsChanged?: () => void;
 }
 
+// Whether this period's treatment fee was already charged: State/Voluntary SO Phase 1 and 2 once per calendar month,
+// Phase 3 and 4 once per 3 or 6 months. The server works it out (feealreadycharged); attendedthismonth covers lists without it.
+export const feeAlreadyCharged = (client: ClientRecord): boolean =>
+  client.feealreadycharged ?? (isMonthlyFeeClient(client.programtype, client.phase) && Boolean(client.attendedthismonth));
+
 // Each client is charged the treatment fee on their own account. A client with no fee set is charged nothing.
 // State SO Phase 1 clients are charged only on their first attendance of the month.
 export const clientFee = (client: ClientRecord): number => {
-  if (isMonthlyFeeClient(client.programtype, client.phase) && client.attendedthismonth) return 0;
+  if (feeAlreadyCharged(client)) return 0;
   if (client.activefeeoverride !== null && client.activefeeoverride !== undefined) return Number(client.activefeeoverride) || 0;
   return Number(client.treatmentfee) || 0;
 };

@@ -21,14 +21,13 @@ export const polygraphHistoryText = (polygraphs: any[], today = new Date()) => {
 // Red polygraph notice for a client's account, or null when none applies. BIP clients don't take polygraphs.
 export const polygraphNotice = (client: any, polygraphs: any[], today = new Date()) => {
   if (client.programtype === 'BIP' || client.nopolyrequired) return null;
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const last = lastPolygraphTaken(polygraphs);
   if (last) {
     return isPolygraphOverdue(last, today) ? 'Client is overdue for their next Polygraph' : null;
   }
+  // Shown once the client has attended
   if (!client.lastdateattended) return null;
-  const days = Math.round((startOfToday.getTime() - toLocalDay(client.lastdateattended).getTime()) / 86400000);
-  return `Client hasn't taken their first polygraph in ${days} day${days === 1 ? '' : 's'}`;
+  return "Client hasn't taken their first polygraph yet";
 };
 
 // A client's poly fee voucher runs 0 to this; the server fills it when the poly fee is paid in full

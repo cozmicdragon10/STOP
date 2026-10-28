@@ -1,12 +1,27 @@
 const { LAST_POLY_RESULT_SQL, POLY_VOUCHER_EARNING_RESULTS, POLY_VOUCHER_MAX } = require('./poly');
-const { BIP_CHECKIN_BLOCK, GROUP_ATTENDANCE, INDIVIDUAL_SESSION_TYPES, bipCheckInBlockMessage } = require('./sql');
+const {
+    BIP_CHECKIN_BLOCK, FEE_ONCE_PER_PERIOD_PROGRAMS, FEE_PERIOD_MONTHS, GROUP_ATTENDANCE, INDIVIDUAL_SESSION_TYPES, MONTHLY_FEE_PHASES,
+    bipCheckInBlockMessage,
+} = require('./sql');
 
 // Writes one attendance row, its ledger entry, and the client's balance.
 // Takes the caller's transaction client so batch check-ins stay all-or-nothing.
 // State SO and Voluntary SO Phase 1 (weekly) and Phase 2 (monthly) clients are charged the treatment fee once per calendar month,
 // on their first attendance. Mirrors isMonthlyFeeClient in frontend/src/utils/soPhases.ts.
-const isMonthlyFeeClient = (row) => (row.programtype === 'State SO' || row.programtype === 'Voluntary SO')
-    && (row.phase === 'Phase 1 - Weekly' || row.phase === 'Phase 2 - Monthly');
+const isMonthlyFeeClient = (row) => FEE_ONCE_PER_PERIOD_PROGRAMS.includes(row.programtype) && MONTHLY_FEE_PHASES.includes(row.phase);
+// State SO and Voluntary SO Phase 3 (quarterly) and Phase 4 (semi-annual) clients are charged once per this many months,
+// rolling from their last charged group attendance; null for everyone else. Mirrors feePeriodMonths in frontend/src/utils/soPhases.ts.
+const feePeriodMonths = (row) => (FEE_ONCE_PER_PERIOD_PROGRAMS.includes(row.programtype) && FEE_PERIOD_MONTHS[row.phase]) || null;
+// The client's most recent charged group attendance in the given months up to and including date (YYYY-MM-DD), or null
+const chargedWithinMonths = async (db, client, date, months) => {
+    const r = await db.query(
+        `SELECT to_char(Date, 'MM/DD/YYYY') AS Day FROM Attendance
+         WHERE Client = $1 AND ${GROUP_ATTENDANCE} AND GroupFee > 0 AND Date <= $2::date AND Date > $2::date - make_interval(months => $3)
+         ORDER BY Date DESC LIMIT 1`,
+        [client, date, months]
+    );
+    return r.rows[0]?.day ?? null;
+};
 
 // A client's first group check-in of a calendar month needs a balance of -$180.00 or better, i.e. owing at most this much
 // (stored sign: positive = owes) after any payment taken at check-in. BIP clients are exempt. Mirrors FIRST_CHECKIN_MAX_OWED in frontend/src/utils/balance.ts.
@@ -68,16 +83,22 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
 
     // A group check-in's fee is worked out here from the account, by the same rules as the check-in screen (clientFee in
     // frontend/src/hooks/useGroupCheckIn.ts), so a screen that's out of date or a session on an earlier date can't charge
-    // the wrong fee: a monthly-fee client who already attended a group in the session's month pays nothing; otherwise a fee
-    // override covering the session date, or the treatment fee. Assessments and individual sessions keep the fee they were priced at.
+    // the wrong fee: a monthly-fee client who already attended a group in the session's month, or a Phase 3 or 4 client
+    // charged in the period before the session date, pays nothing; otherwise a fee override covering the session date,
+    // or the treatment fee. Assessments and individual sessions keep the fee they were priced at.
     let feeNum = Number(groupFee || 0);
     let feeReason = null;
     if (group && !isIndividualSession) {
         const monthName = new Date(`${sessionDate}T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
         const monthly = isMonthlyFeeClient(clientRes.rows[0]);
+        const periodMonths = feePeriodMonths(clientRes.rows[0]);
+        const chargedOn = periodMonths ? await chargedWithinMonths(db, client, sessionDate, periodMonths) : null;
         if (monthly && attendedThatMonth) {
             feeNum = 0;
             feeReason = `already charged for ${monthName}`;
+        } else if (chargedOn) {
+            feeNum = 0;
+            feeReason = `already charged on ${chargedOn}; charged once every ${periodMonths} months`;
         } else {
             const overrideRes = await db.query(
                 `SELECT ReducedFee FROM TemporaryFeeOverrides
@@ -90,7 +111,9 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
                 feeReason = 'the fee override for that date';
             } else {
                 feeNum = Number(clientRes.rows[0].treatmentfee) || 0;
-                feeReason = monthly ? `first group attendance of ${monthName}` : 'the treatment fee on the account';
+                feeReason = monthly ? `first group attendance of ${monthName}`
+                    : periodMonths ? `no group fee charged in the ${periodMonths} months before`
+                        : 'the treatment fee on the account';
             }
         }
         feeNum = Math.round(feeNum * 100) / 100;
@@ -156,4 +179,4 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
     return { attendanceId, newBalance, polyVoucherAwarded, feeCharged: feeNum, feeReason };
 };
 
-module.exports = { isMonthlyFeeClient, FIRST_CHECKIN_MAX_OWED, recordAttendance };
+module.exports = { isMonthlyFeeClient, feePeriodMonths, chargedWithinMonths, FIRST_CHECKIN_MAX_OWED, recordAttendance };

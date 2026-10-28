@@ -43,8 +43,27 @@ const bipCheckInBlockMessage = (block, name) => (block === 'intake'
 // Used for the State SO Phase 1 rule: the treatment fee is charged once per month.
 const ATTENDED_THIS_MONTH = `EXISTS (SELECT 1 FROM Attendance a WHERE a.Client = c.ClientId AND a.${GROUP_ATTENDANCE} AND date_trunc('month', a.Date) = date_trunc('month', CURRENT_DATE))`;
 
-const ACTIVE_FEE_OVERRIDE = `(SELECT o.ReducedFee FROM TemporaryFeeOverrides o WHERE o.ClientId = c.ClientId AND o.ExpirationDate >= CURRENT_DATE ORDER BY o.CreatedOn DESC LIMIT 1)`;
+// State SO and Voluntary SO clients pay the treatment fee once per period: Phase 1 and 2 once per calendar month (on their
+// first group attendance), Phase 3 and 4 once per this many months, rolling from their last charged group attendance.
+// Mirrors frontend/src/utils/soPhases.ts.
+const MONTHLY_FEE_PHASES = ['Phase 1 - Weekly', 'Phase 2 - Monthly'];
+const FEE_PERIOD_MONTHS = { 'Phase 3 - Quarterly': 3, 'Phase 4 - Semi Anual': 6 };
+const FEE_ONCE_PER_PERIOD_PROGRAMS = ['State SO', 'Voluntary SO'];
+const sqlList = (values) => values.map(v => `'${v}'`).join(', ');
+// True when a group check-in today would charge no treatment fee because this period's was already charged
+const FEE_ALREADY_CHARGED = `CASE
+    WHEN c.ProgramType NOT IN (${sqlList(FEE_ONCE_PER_PERIOD_PROGRAMS)}) THEN FALSE
+    WHEN c.Phase IN (${sqlList(MONTHLY_FEE_PHASES)}) THEN ${ATTENDED_THIS_MONTH}
+    WHEN c.Phase IN (${sqlList(Object.keys(FEE_PERIOD_MONTHS))}) THEN EXISTS (
+        SELECT 1 FROM Attendance a WHERE a.Client = c.ClientId AND a.${GROUP_ATTENDANCE} AND a.GroupFee > 0 AND a.Date <= CURRENT_DATE
+          AND a.Date > CURRENT_DATE - make_interval(months => CASE c.Phase ${Object.entries(FEE_PERIOD_MONTHS).map(([p, m]) => `WHEN '${p}' THEN ${m}`).join(' ')} END))
+    ELSE FALSE END`;
+
+const ACTIVE_FEE_OVERRIDE =`(SELECT o.ReducedFee FROM TemporaryFeeOverrides o WHERE o.ClientId = c.ClientId AND o.ExpirationDate >= CURRENT_DATE ORDER BY o.CreatedOn DESC LIMIT 1)`;
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
-module.exports = { INDIVIDUAL_SESSION_TYPES, GROUP_ATTENDANCE, NEEDS_OUR_INTAKE, BIP_CHECKIN_BLOCK, bipCheckInBlockMessage, ATTENDED_THIS_MONTH, ACTIVE_FEE_OVERRIDE, YMD };
+module.exports = {
+    INDIVIDUAL_SESSION_TYPES, GROUP_ATTENDANCE, NEEDS_OUR_INTAKE, BIP_CHECKIN_BLOCK, bipCheckInBlockMessage, ATTENDED_THIS_MONTH,
+    MONTHLY_FEE_PHASES, FEE_PERIOD_MONTHS, FEE_ONCE_PER_PERIOD_PROGRAMS, FEE_ALREADY_CHARGED, ACTIVE_FEE_OVERRIDE, YMD,
+};
