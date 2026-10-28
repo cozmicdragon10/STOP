@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { SlidersHorizontal, Trash2 } from 'lucide-react';
-import { deleteAttendance, getClientAttendance, getClientFinancials } from '../../api';
+import { deleteAttendance, getClient, getClientAttendance, getClientFinancials } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
 import MonthHeader from './MonthHeader';
 import { EMPTY_ATTENDANCE_FILTERS, groupByMonth, sortedUnique, toggleInSet } from '../../utils/filters';
@@ -12,7 +12,7 @@ import { formatLogMonthDay, formatLogYear, localYmd } from '../../utils/dates';
 export interface AttendanceDeleted {
   // The client the attendance was deleted from (another client may be open by the time it finishes)
   clientId: number;
-  // Client fields the deletion moved: balance, BIP week, and last attended
+  // The client's record as it is after the deletion
   changes: Record<string, unknown>;
   attendance: any[];
   financials: any[];
@@ -58,16 +58,10 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
         used: ' The poly fee voucher it earned was already used, so none was removed.',
       }[res.voucher] : '';
       onSuccess(`Attendance deleted. Updated Balance: ${formatBalance(res.newBalance)}.${voucherText} The closed group and the Group Income Report were updated too.`);
-      const [fresh, financials] = await Promise.all([getClientAttendance(clientId), getClientFinancials(clientId)]);
-      onDeleted({
-        clientId,
-        changes: {
-          accountbalance: res.newBalance, phase: res.phase, polyfeevoucher: res.polyFeeVoucher,
-          lastdateattended: res.lastDateAttended, lastattended: res.lastAttended,
-        },
-        attendance: fresh,
-        financials,
-      });
+      // The whole client record is loaded again: besides the balance, BIP week, vouchers, and last attended, the deletion
+      // can change what check-in works out from it, like whether the monthly treatment fee was already charged
+      const [fresh, financials, client] = await Promise.all([getClientAttendance(clientId), getClientFinancials(clientId), getClient(clientId)]);
+      onDeleted({ clientId, changes: client as unknown as Record<string, unknown>, attendance: fresh, financials });
     } catch (err) {
       setDeleteError(err instanceof Error && err.message ? err.message : 'Could not delete the attendance.');
     } finally {

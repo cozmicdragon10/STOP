@@ -92,10 +92,13 @@ router.post('/api/attendance/batch', async (req, res) => {
         const isSoGroup = SO_GROUP_TYPES.includes(String(groupRes.rows[0]?.programtype || '').trim().toUpperCase());
         const results = [];
         for (const entry of entries) {
-            const { attendanceId, newBalance, polyVoucherAwarded } = await recordAttendance(clientDb, {
+            const { attendanceId, newBalance, polyVoucherAwarded, feeCharged, feeReason } = await recordAttendance(clientDb, {
                 ...entry, group, date, sessionNumber: sessionNum, type: type || 'Group', createdBy, paid: true, awardNdiVoucher: isSoGroup
             });
-            results.push({ client: entry.client, attendanceId, newBalance, polyVoucherAwarded });
+            // The fee is worked out from the account when saving; a sheet shown with a different fee is reported back
+            const feeSent = Math.round(Number(entry.groupFee || 0) * 100) / 100;
+            const feeChange = feeCharged !== feeSent ? { feeSent, feeCharged, feeReason } : null;
+            results.push({ client: entry.client, attendanceId, newBalance, polyVoucherAwarded, feeChange });
         }
         // Closing the group clears its saved open sheet for this session. Who opened it is kept on the attendance rows
         // so the closed group stays visible to them; a group closed without being opened first was opened by the closer.
@@ -111,8 +114,11 @@ router.post('/api/attendance/batch', async (req, res) => {
             'UPDATE Attendance SET OpenedBy = $1, CoveredBy = $2 WHERE AttendanceId = ANY($3::int[])',
             [openedBy, covering, results.map(r => r.attendanceId)]
         );
+        const names = await clientDb.query('SELECT ClientId, LastName || \', \' || FirstName AS Name FROM Clients WHERE ClientId = ANY($1::int[])', [clientIds]);
+        const nameOf = Object.fromEntries(names.rows.map(r => [r.clientid, r.name]));
+        const feeChanges = results.filter(r => r.feeChange).map(r => ({ client: r.client, name: nameOf[Number(r.client)], ...r.feeChange }));
         await clientDb.query('COMMIT');
-        res.status(201).json({ success: true, count: results.length, results, polyVouchersAwarded: results.filter(r => r.polyVoucherAwarded).length });
+        res.status(201).json({ success: true, count: results.length, results, polyVouchersAwarded: results.filter(r => r.polyVoucherAwarded).length, feeChanges });
     } catch (error) {
         await clientDb.query('ROLLBACK');
         res.status(error.status || 500).json({ error: error.message });
@@ -244,8 +250,8 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
                  Phase = CASE WHEN $3::boolean AND TRIM(Phase) ~ '^\\d+$' THEN GREATEST(TRIM(Phase)::int - 1, 0)::text ELSE Phase END,
                  LastDateAttended = (SELECT MAX(Date) FROM Attendance WHERE Client = $2 AND Type = ANY($4::text[]))
              WHERE ClientId = $2
-             RETURNING AccountBalance, Phase, PolyFeeVoucher, to_char(LastDateAttended, 'YYYY-MM-DD') AS LastDateAttended,
-                 (SELECT to_char(MAX(Date), 'YYYY-MM-DD') FROM Attendance WHERE Client = $2) AS LastAttended`,
+             RETURNING AccountBalance, Phase, PolyFeeVoucher, LastDateAttended,
+                 (SELECT MAX(Date) FROM Attendance WHERE Client = $2) AS LastAttended`,
             [totalEffect, att.client, Boolean(isBipWeek), LAST_DATE_ATTENDED_TYPES]
         );
 
@@ -269,6 +275,7 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
             phase: row.phase,
             polyFeeVoucher: row.polyfeevoucher,
             voucher,
+            // Sent like the client list sends them (not 'YYYY-MM-DD' text, which the browser reads as UTC midnight: a day early)
             lastDateAttended: row.lastdateattended,
             lastAttended: row.lastattended,
             ledgerRowsRemoved: ledgerIds.length,

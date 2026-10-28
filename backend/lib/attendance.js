@@ -19,7 +19,7 @@ const FIRST_CHECKIN_MAX_OWED = 180;
 // paymentComments: added after the standard text on the payment's ledger row
 const recordAttendance = async (db, { client, group, date, sessionNumber, paid, groupFee, accountPaid, paymentMethod, voucherUsed, type, comments, createdBy, awardNdiVoucher, feeType = 'Group Fee', paymentComments = '' }) => {
     const isIndividualSession = INDIVIDUAL_SESSION_TYPES.includes(type);
-    const clientRes = await db.query('SELECT AccountBalance, ProgramType, Phase, FirstName, LastName FROM Clients WHERE ClientId = $1 FOR UPDATE', [client]);
+    const clientRes = await db.query('SELECT AccountBalance, ProgramType, Phase, FirstName, LastName, TreatmentFee FROM Clients WHERE ClientId = $1 FOR UPDATE', [client]);
     if (clientRes.rows.length === 0) {
         throw new Error(`Client ${client} not found.`);
     }
@@ -47,29 +47,53 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
     }
     const oldBalance = Number(clientRes.rows[0].accountbalance || 0);
 
-    // First group check-in of the calendar month: after any payment taken now, the client may owe at most FIRST_CHECKIN_MAX_OWED.
-    // BIP clients are exempt.
-    if (group && clientRes.rows[0].programtype !== 'BIP') {
-        const monthRes = await db.query(
+    // Whether the client already attended a group in the session's month (assessments and individual sessions don't count)
+    const attendedThatMonth = group && !isIndividualSession
+        ? (await db.query(
             `SELECT 1 FROM Attendance WHERE Client = $1 AND ${GROUP_ATTENDANCE} AND date_trunc('month', Date) = date_trunc('month', $2::date) LIMIT 1`,
             [client, sessionDate]
-        );
+        )).rows.length > 0
+        : false;
+
+    // First group check-in of the calendar month: after any payment taken now, the client may owe at most FIRST_CHECKIN_MAX_OWED.
+    // BIP clients are exempt.
+    if (group && !isIndividualSession && clientRes.rows[0].programtype !== 'BIP') {
         const owedAfterPayment = oldBalance - Number(accountPaid || 0);
-        if (monthRes.rows.length === 0 && owedAfterPayment > FIRST_CHECKIN_MAX_OWED) {
+        if (!attendedThatMonth && owedAfterPayment > FIRST_CHECKIN_MAX_OWED) {
             const { lastname, firstname } = clientRes.rows[0];
             throw new Error(`${lastname}, ${firstname} must pay their existing balance before their first group check-in of the month: `
                 + `the balance must be -$${FIRST_CHECKIN_MAX_OWED.toFixed(2)} or better (pay at least $${(owedAfterPayment - FIRST_CHECKIN_MAX_OWED).toFixed(2)} more).`);
         }
     }
 
+    // A group check-in's fee is worked out here from the account, by the same rules as the check-in screen (clientFee in
+    // frontend/src/hooks/useGroupCheckIn.ts), so a screen that's out of date or a session on an earlier date can't charge
+    // the wrong fee: a monthly-fee client who already attended a group in the session's month pays nothing; otherwise a fee
+    // override covering the session date, or the treatment fee. Assessments and individual sessions keep the fee they were priced at.
     let feeNum = Number(groupFee || 0);
-    if (!isIndividualSession && isMonthlyFeeClient(clientRes.rows[0]) && feeNum > 0) {
-        const priorRes = await db.query(
-            `SELECT 1 FROM Attendance WHERE Client = $1 AND ${GROUP_ATTENDANCE} AND date_trunc('month', Date) = date_trunc('month', $2::date) LIMIT 1`,
-            [client, sessionDate]
-        );
-        // Already charged this month: the fee does not apply again
-        if (priorRes.rows.length > 0) feeNum = 0;
+    let feeReason = null;
+    if (group && !isIndividualSession) {
+        const monthName = new Date(`${sessionDate}T00:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+        const monthly = isMonthlyFeeClient(clientRes.rows[0]);
+        if (monthly && attendedThatMonth) {
+            feeNum = 0;
+            feeReason = `already charged for ${monthName}`;
+        } else {
+            const overrideRes = await db.query(
+                `SELECT ReducedFee FROM TemporaryFeeOverrides
+                 WHERE ClientId = $1 AND CreatedOn::date <= $2::date AND ExpirationDate >= $2::date
+                 ORDER BY CreatedOn DESC LIMIT 1`,
+                [client, sessionDate]
+            );
+            if (overrideRes.rows.length > 0) {
+                feeNum = Number(overrideRes.rows[0].reducedfee) || 0;
+                feeReason = 'the fee override for that date';
+            } else {
+                feeNum = Number(clientRes.rows[0].treatmentfee) || 0;
+                feeReason = monthly ? `first group attendance of ${monthName}` : 'the treatment fee on the account';
+            }
+        }
+        feeNum = Math.round(feeNum * 100) / 100;
     }
     const paidNum = Number(accountPaid || 0);
     const newBalance = oldBalance - paidNum + feeNum;
@@ -128,7 +152,8 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         }
     }
 
-    return { attendanceId, newBalance, polyVoucherAwarded };
+    // feeCharged and feeReason: what the account was charged and why, for telling the user when it differs from what was sent
+    return { attendanceId, newBalance, polyVoucherAwarded, feeCharged: feeNum, feeReason };
 };
 
 module.exports = { isMonthlyFeeClient, FIRST_CHECKIN_MAX_OWED, recordAttendance };

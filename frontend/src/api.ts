@@ -520,10 +520,12 @@ export async function submitBatchAttendance(data: BatchAttendancePayload) {
     if (!res.ok) {
         throw new Error(body.error || 'Failed to save attendance.');
     }
-    // polyVouchersAwarded: SO clients charged the group fee whose last polygraph was NDI earn one poly fee voucher
+    // polyVouchersAwarded: SO clients charged the group fee whose last polygraph was NDI earn one poly fee voucher.
+    // feeChanges: clients the server charged a different fee than the sheet showed (it works the fee out from the account), and why.
     return body as {
         success: true; count: number; polyVouchersAwarded: number;
         results: { client: number; attendanceId: number; newBalance: number; polyVoucherAwarded: boolean }[];
+        feeChanges?: { client: number; name: string; feeSent: number; feeCharged: number; feeReason: string }[];
     };
 }
 

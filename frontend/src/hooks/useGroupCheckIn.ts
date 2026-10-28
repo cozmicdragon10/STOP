@@ -458,7 +458,11 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
       const awarded = res.polyVouchersAwarded
         ? ` ${res.polyVouchersAwarded} client(s) earned a poly fee voucher (last polygraph NDI).`
         : '';
-      notify.onSuccess(`Attendance saved for ${res.count} client(s).${awarded}`);
+      // The server works each fee out from the account; say so where that differs from what the sheet showed
+      const feeChanges = (res.feeChanges ?? [])
+        .map(f => ` ${f.name} was charged $${f.feeCharged.toFixed(2)}, not $${f.feeSent.toFixed(2)} (${f.feeReason}).`)
+        .join('');
+      notify.onSuccess(`Attendance saved for ${res.count} client(s).${awarded}${feeChanges}`);
       clearWorkflow();
       notify.onSaved?.();
       notify.onOpenGroupsChanged?.();
