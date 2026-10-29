@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Activity, PlusCircle } from 'lucide-react';
+import { Activity, Moon, PlusCircle, Sun } from 'lucide-react';
 import { addEmployee, getEmployees, getSystemLogs, updateEmployee } from '../../api';
 import type { SystemLog } from '../../api';
 import SessionPriceList from '../sessions/SessionPriceList';
 import { sortedUnique } from '../../utils/filters';
+import { useTheme } from '../../hooks/useTheme';
 
 interface Employee {
   employeeemail: string;
@@ -30,6 +31,8 @@ const errorText = (err: unknown, fallback: string) => (err instanceof Error && e
 // User accounts (Business Administrators create and edit them), the system audit log, and session prices
 export default function AdminTab({ user, employees, onEmployeesChanged, onSuccess, onError }: Props) {
   const isBusinessAdmin = user.role === 'Business Administrator';
+  // Saved per browser, not per account
+  const { theme, toggleTheme } = useTheme();
 
   // The account form stays closed until New User or an account's Edit opens it
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
@@ -238,6 +241,21 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
       </div>
 
       <SessionPriceList userEmail={user.employeeemail} canEdit={isBusinessAdmin} onSuccess={onSuccess} />
+
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4 self-start">
+        <div className="flex justify-between items-center gap-3 border-b border-slate-800 pb-3">
+          <h2 className="text-lg font-bold text-white">Appearance</h2>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title="Click to switch theme"
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded font-semibold text-xs shrink-0"
+          >
+            {theme === 'dark' ? <Moon size={14} /> : <Sun size={14} />} {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
+          </button>
+        </div>
+        <p className="text-xs text-slate-400">Click the button to switch between dark and light mode. Your choice is remembered on this computer.</p>
+      </div>
     </div>
   );
 }

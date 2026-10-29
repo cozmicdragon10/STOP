@@ -1,1 +1,63 @@
 @import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+/*
+  Light mode. The app is styled with dark slate classes, so instead of restyling every component this flips the
+  slate scale (bg-slate-950 becomes a light page, text-slate-400 becomes a readable gray, and so on) and darkens the
+  pale accent shades that are used as text on dark backgrounds.
+*/
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-slate-50: oklch(12.9% 0.042 264.695);
+  --color-slate-100: oklch(20.8% 0.042 265.755);
+  --color-slate-200: oklch(27.9% 0.041 260.031);
+  --color-slate-300: oklch(37.2% 0.044 257.287);
+  --color-slate-400: oklch(44.6% 0.043 257.281);
+  --color-slate-500: oklch(55.4% 0.046 257.417);
+  --color-slate-600: oklch(70.4% 0.04 256.788);
+  --color-slate-700: oklch(86.9% 0.022 252.894);
+  --color-slate-800: oklch(92.9% 0.013 255.508);
+  --color-slate-900: #ffffff;
+  --color-slate-950: oklch(96.8% 0.007 247.896);
+
+  --color-gray-300: oklch(37.3% 0.034 259.733);
+  --color-gray-600: oklch(70.7% 0.022 261.325);
+
+  --color-blue-100: oklch(37.9% 0.146 265.522);
+  --color-blue-300: oklch(48.8% 0.243 264.376);
+  --color-blue-400: oklch(54.6% 0.245 262.881);
+  --color-red-200: oklch(44.4% 0.177 26.899);
+  --color-red-300: oklch(50.5% 0.213 27.518);
+  --color-red-400: oklch(57.7% 0.245 27.325);
+  --color-emerald-200: oklch(43.2% 0.095 166.913);
+  --color-emerald-300: oklch(50.8% 0.118 165.612);
+  --color-emerald-400: oklch(59.6% 0.145 163.225);
+  --color-amber-300: oklch(55.5% 0.163 48.998);
+  --color-amber-400: oklch(55.5% 0.163 48.998);
+  --color-sky-400: oklch(50% 0.134 242.749);
+  --color-violet-300: oklch(49.1% 0.27 292.581);
+  --color-rose-300: oklch(51.4% 0.222 16.935);
+}
+
+/*
+  White text sits on slate surfaces that are now light, so it turns dark, except on solid colored buttons and badges.
+  ~= matches whole class names only, so faint tints like bg-amber-500/10 (light in this theme) still get dark text.
+*/
+:root[data-theme="light"] :is(.text-white, .hover\:text-white:hover):not(
+  [class~="bg-blue-500"], [class~="bg-blue-600"],
+  [class~="bg-red-500"], [class~="bg-red-600"],
+  [class~="bg-emerald-500"], [class~="bg-emerald-600"],
+  [class~="bg-amber-500"], [class~="bg-amber-600"],
+  [class~="bg-rose-500"], [class~="bg-rose-600"],
+  [class~="bg-violet-500"], [class~="bg-violet-600"]
+) {
+  color: var(--color-slate-100);
+}
+
+:root[data-theme="light"] .\[color-scheme\:dark\] {
+  color-scheme: light;
+}
