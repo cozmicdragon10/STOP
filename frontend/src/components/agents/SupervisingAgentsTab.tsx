@@ -223,12 +223,12 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
                     onClick={() => { setSelectedKey(r.key); setShowDischarged(false); }}
                     className={`cursor-pointer transition ${selectedKey === r.key ? 'bg-blue-500/10' : 'hover:bg-slate-800/50'}`}
                   >
-                    <td className="p-3 font-medium text-white whitespace-nowrap">
+                    <td className="p-3 font-medium text-white">
                       {r.name}
-                      {!r.agent && <span className="ml-2 bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[10px] font-semibold">Not in directory</span>}
+                      {!r.agent && <span className="ml-2 inline-block whitespace-nowrap bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[10px] font-semibold">Not in directory</span>}
                     </td>
                     <td className="p-3 text-slate-300 text-xs whitespace-nowrap">{r.agent?.phone ? <a href={`tel:${r.agent.phone}`} onClick={(e) => e.stopPropagation()} className="hover:text-blue-400">{r.agent.phone}</a> : <span className="text-slate-600">—</span>}</td>
-                    <td className="p-3 text-slate-300 text-xs">{r.agent?.email ? <a href={`mailto:${r.agent.email}`} onClick={(e) => e.stopPropagation()} className="hover:text-blue-400 break-all">{r.agent.email}</a> : <span className="text-slate-600">—</span>}</td>
+                    <td className="p-3 text-slate-300 text-xs min-w-[12rem]">{r.agent?.email ? <a href={`mailto:${r.agent.email}`} onClick={(e) => e.stopPropagation()} className="hover:text-blue-400 break-all">{r.agent.email}</a> : <span className="text-slate-600">—</span>}</td>
                     <td className="p-3 text-right"><span className="bg-slate-800 text-slate-200 px-2 py-0.5 rounded font-semibold text-xs">{current}</span></td>
                     {canEdit && (
                       <td className="p-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
@@ -238,7 +238,9 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
                             {canDelete && <button type="button" onClick={() => handleDelete(r.agent!)} title="Delete" className="bg-slate-800 hover:bg-red-500/20 text-slate-300 hover:text-red-400 p-1.5 rounded"><Trash2 size={12} /></button>}
                           </div>
                         ) : (
-                          <button type="button" onClick={() => openForm(r)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1 rounded font-semibold text-xs">Add to Directory</button>
+                          <div className="flex justify-end">
+                            <button type="button" onClick={() => openForm(r)} title="Add to Directory" className="bg-slate-800 hover:bg-slate-700 text-slate-300 p-1.5 rounded"><PlusCircle size={12} /></button>
+                          </div>
                         )}
                       </td>
                     )}
