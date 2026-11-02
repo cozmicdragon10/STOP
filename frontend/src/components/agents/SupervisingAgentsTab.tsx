@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Mail, Pencil, Phone, PlusCircle, Search, Trash2, UserCheck } from 'lucide-react';
 import { deleteSupervisingAgent, getClients, getSupervisingAgents, saveSupervisingAgent } from '../../api';
 import type { SupervisingAgent } from '../../api';
+import { usePagination } from '../../hooks/usePagination';
+import Pagination from '../Pagination';
 
 interface Props {
   // Current clients (not discharged); the selected agent's discharged clients are loaded on their own
@@ -80,6 +82,8 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
   const term = search.trim().toLowerCase();
   const visibleRows = rows.filter(r => !term || [r.name, r.agent?.phone, r.agent?.email].some(v => String(v ?? '').toLowerCase().includes(term)));
   const unlistedCount = rows.filter(r => !r.agent).length;
+  // 50 agents per page; a new search starts again on page 1
+  const pager = usePagination(visibleRows, term);
 
   const selected = rows.find(r => r.key === selectedKey) || null;
   const selectedName = selected?.name;
@@ -215,7 +219,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800 text-sm">
-              {visibleRows.map(r => {
+              {pager.pageItems.map(r => {
                 const current = r.clients.filter(c => !isDischarged(c)).length;
                 return (
                   <tr
@@ -255,6 +259,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
             </tbody>
           </table>
         </div>
+        <Pagination page={pager.page} pageCount={pager.pageCount} pageSize={pager.pageSize} total={pager.total} onPageChange={pager.setPage} noun="agents" />
       </div>
 
       <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4 self-start">

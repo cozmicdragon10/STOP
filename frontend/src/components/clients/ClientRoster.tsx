@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import { SlidersHorizontal } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, SlidersHorizontal } from 'lucide-react';
 import { createClient } from '../../api';
 import type { SupervisingAgent } from '../../api';
 import AgentPicker from '../agents/AgentPicker';
 import { useClientsByStatus } from '../../hooks/useClientsByStatus';
+import { usePagination } from '../../hooks/usePagination';
+import Pagination from '../Pagination';
 import {
   PROGRAM_STATUSES, EDITABLE_PROGRAM_STATUSES, SO_PROGRAM_TYPES, STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase,
   DEFAULT_CLIENT_FILTERS, SO_ATTENDANCE_LIMIT_MONTHS, isAttendanceOverdue, GROUP_TYPES_BY_PROGRAM,
@@ -43,6 +45,37 @@ const getEmptyNewClient = () => ({
 });
 type NewClient = ReturnType<typeof getEmptyNewClient>;
 type FilterKey = 'agent' | 'programtype' | 'phase' | 'currentgroup' | 'status';
+
+// SO phases in phase order, then BIP weeks by number, then anything else
+const phaseRank = (p: string) => SO_PHASES.includes(p) ? SO_PHASES.indexOf(p) : isWholeNumber(p) ? 100 + Number(p) : Infinity;
+const textOrNull = (v: unknown) => String(v ?? '').trim().toLowerCase() || null;
+const timeOrNull = (v: unknown) => {
+  const t = v ? new Date(String(v)).getTime() : NaN;
+  return isNaN(t) ? null : t;
+};
+// The client fields the roster sorts on
+type RosterRow = Partial<Record<'firstname' | 'lastname' | 'docnumber' | 'supervisingagent' | 'programtype' | 'phase' | 'groupname'
+  | 'lastattended' | 'lastpoly' | 'programstatus' | 'accountbalance', string | number | null>>;
+const byName = (a: RosterRow, b: RosterRow) => `${a.lastname}, ${a.firstname}`.localeCompare(`${b.lastname}, ${b.firstname}`);
+// What each sortable column sorts on, matching what the column shows. null is an empty cell.
+const SORT_VALUES = {
+  name: (c: RosterRow) => textOrNull(`${c.lastname}, ${c.firstname}`),
+  doc: (c: RosterRow) => textOrNull(c.docnumber),
+  agent: (c: RosterRow) => textOrNull(c.supervisingagent),
+  programtype: (c: RosterRow) => textOrNull(c.programtype || 'State SO'),
+  // Phase order (see phaseRank), with phases outside it after, alphabetically
+  phase: (c: RosterRow) => {
+    const p = String(c.phase ?? '').trim();
+    const rank = phaseRank(p);
+    return p ? `${String(isFinite(rank) ? rank : 999999).padStart(6, '0')} ${p.toLowerCase()}` : null;
+  },
+  group: (c: RosterRow) => textOrNull(c.groupname),
+  lastattended: (c: RosterRow) => timeOrNull(c.lastattended),
+  lastpoly: (c: RosterRow) => (c.programtype === 'BIP' ? null : timeOrNull(c.lastpoly)),
+  status: (c: RosterRow) => textOrNull(c.programstatus),
+  balance: (c: RosterRow) => toDisplayBalance(c.accountbalance),
+} satisfies Record<string, (c: RosterRow) => string | number | null>;
+type SortKey = keyof typeof SORT_VALUES;
 
 // The Client Roster tab: searchable, filterable client list and the New Client form. Clicking a row opens the
 // client's account (App's drawer).
@@ -100,10 +133,8 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
   const distinctClientValues = (key: FilterKey): string[] => {
     if (key === 'status') return PROGRAM_STATUSES;
     if (key === 'phase') {
-      // SO phases in phase order, then BIP weeks by number, then anything else
-      const rank = (p: string) => SO_PHASES.includes(p) ? SO_PHASES.indexOf(p) : isWholeNumber(p) ? 100 + Number(p) : Infinity;
       return Array.from(new Set(statusClients.map(c => String(c.phase ?? '').trim()).filter(Boolean)))
-        .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+        .sort((a, b) => phaseRank(a) - phaseRank(b) || a.localeCompare(b));
     }
     const field = key === 'agent' ? 'supervisingagent' : key === 'currentgroup' ? 'groupname' : 'programtype';
     return Array.from(new Set(statusClients.map(c => c[field]).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
@@ -125,6 +156,29 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
 
       return true;
     });
+  // Column sorting: clicking a header sorts by it ascending, clicking again flips the direction
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'name', dir: 1 });
+  const toggleSort = (key: SortKey) => setSort(s => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
+  const sortedClients = [...filteredClients].sort((a, b) => {
+    const va = SORT_VALUES[sort.key](a), vb = SORT_VALUES[sort.key](b);
+    // Empty values go last in either direction
+    if (va === null || vb === null) return va === vb ? byName(a, b) : va === null ? 1 : -1;
+    const diff = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb));
+    return diff * sort.dir || byName(a, b);
+  });
+  // 50 clients per page; a new search, filter, or sort starts again on page 1
+  const pager = usePagination(sortedClients, JSON.stringify([clientSearchTerm, clientFilters, sort]));
+  const sortHeader = (key: SortKey, label: string) => {
+    const Icon = sort.key !== key ? ArrowUpDown : sort.dir === 1 ? ArrowUp : ArrowDown;
+    return (
+      <th className="p-0" aria-sort={sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined}>
+        <button type="button" onClick={() => toggleSort(key)} className={`w-full p-3 flex items-center gap-1 uppercase tracking-wider text-left hover:text-white ${sort.key === key ? 'text-white' : ''}`}>
+          {label}
+          <Icon size={12} className={`shrink-0 ${sort.key === key ? 'text-blue-400' : 'text-slate-600'}`} />
+        </button>
+      </th>
+    );
+  };
 
   const filterSelect = (key: FilterKey, allLabel: string, label: (v: string) => string = v => v) => (
     <select
@@ -321,20 +375,20 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
         <table className="w-full text-left border-collapse text-xs">
           <thead>
             <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
-              <th className="p-3">Full Name</th>
-              <th className="p-3">DOC #</th>
-              <th className="p-3">Agent</th>
-              <th className="p-3">Program Type</th>
-              <th className="p-3">Phase</th>
-              <th className="p-3">Current Group</th>
-              <th className="p-3">Last Attended</th>
-              <th className="p-3">Last Poly</th>
-              <th className="p-3">Status</th>
-              <th className="p-3">Balance</th>
+              {sortHeader('name', 'Full Name')}
+              {sortHeader('doc', 'DOC #')}
+              {sortHeader('agent', 'Agent')}
+              {sortHeader('programtype', 'Program Type')}
+              {sortHeader('phase', 'Phase')}
+              {sortHeader('group', 'Current Group')}
+              {sortHeader('lastattended', 'Last Attended')}
+              {sortHeader('lastpoly', 'Last Poly')}
+              {sortHeader('status', 'Status')}
+              {sortHeader('balance', 'Balance')}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800 text-sm">
-            {filteredClients.map((c) => (
+            {pager.pageItems.map((c) => (
               <tr key={c.clientid} onClick={() => onOpenClient(c)} className="hover:bg-slate-800/50 cursor-pointer transition">
                 <td className="p-3 font-medium text-white whitespace-nowrap">{c.lastname}, {c.firstname}</td>
                 <td className="p-3 text-slate-400 font-mono text-xs">{c.docnumber}</td>
@@ -363,6 +417,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
           </tbody>
         </table>
       </div>
+      <Pagination page={pager.page} pageCount={pager.pageCount} pageSize={pager.pageSize} total={pager.total} onPageChange={pager.setPage} noun="clients" />
     </div>
   );
 }
