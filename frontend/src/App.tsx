@@ -133,6 +133,8 @@ export default function App() {
   const [polyLocationFilter, setPolyLocationFilter] = useState('');
   const [polyDateFrom, setPolyDateFrom] = useState('');
   const [polyDateTo, setPolyDateTo] = useState('');
+  // Poly Schedule only: '', 'Open', 'Assigned', or 'Closed'
+  const [polyStatusFilter, setPolyStatusFilter] = useState('');
   const [polyDateSort, setPolyDateSort] = useState<'asc' | 'desc'>('asc');
   const [polySlots, setPolySlots] = useState<any[]>([]);
   // Slot opened from a client's account; outlined on the Poly Schedule for a few seconds
@@ -503,6 +505,20 @@ export default function App() {
   // Filter assigned slots for Poly Results tab
   const assignedSlots = examinerSlots.filter(s => s.status === 'Assigned' || s.assignedClientId);
 
+  // Poly Schedule also filters by slot status; the counts are for the slots the other filters leave
+  const POLY_SLOT_STATUSES = ['Open', 'Assigned', 'Closed'];
+  const slotStatus = (s: { status?: string | null }) => s.status || 'Open';
+  const polyStatusCounts = Object.fromEntries(POLY_SLOT_STATUSES.map(st => [st, examinerSlots.filter(s => slotStatus(s) === st).length]));
+  const scheduleSlots = polyStatusFilter ? examinerSlots.filter(s => slotStatus(s) === polyStatusFilter) : examinerSlots;
+  const scheduleFiltersActive = polyFiltersActive || !!polyStatusFilter;
+  const clearPolyFilters = () => {
+    setPolyExaminerFilter('');
+    setPolyLocationFilter('');
+    setPolyDateFrom('');
+    setPolyDateTo('');
+    setPolyStatusFilter('');
+  };
+
   // The polygraph slot a client is booked into, if any
   const assignedSlotFor = (clientId: number) =>
     polySlots.find(s => s.status === 'Assigned' && Number(s.assignedClientId) === Number(clientId)) ?? null;
@@ -510,10 +526,7 @@ export default function App() {
   // Leaves the client account for the Poly Schedule with filters cleared, so the slot is in the list, and outlines it
   const openPolySlot = (slotId: number) => {
     setSelectedClientDetail(null);
-    setPolyExaminerFilter('');
-    setPolyLocationFilter('');
-    setPolyDateFrom('');
-    setPolyDateTo('');
+    clearPolyFilters();
     setPolySubTab('schedule');
     setActiveTab('polygraph');
     setHighlightedSlotId(slotId);
@@ -1220,16 +1233,24 @@ export default function App() {
                 <label className="text-xs text-slate-400">To
                   <input type="date" value={polyDateTo} min={polyDateFrom || undefined} onChange={(e) => setPolyDateTo(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200" />
                 </label>
+                {polySubTab === 'schedule' && (
+                  <label className="text-xs text-slate-400">Status
+                    <select value={polyStatusFilter} onChange={(e) => setPolyStatusFilter(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
+                      <option value="">All Statuses ({examinerSlots.length})</option>
+                      {POLY_SLOT_STATUSES.map(st => <option key={st} value={st}>{st} ({polyStatusCounts[st]})</option>)}
+                    </select>
+                  </label>
+                )}
                 <label className="text-xs text-slate-400">Sort
                   <select value={polyDateSort} onChange={(e) => setPolyDateSort(e.target.value as 'asc' | 'desc')} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
                     <option value="asc">Date: Soonest First</option>
                     <option value="desc">Date: Latest First</option>
                   </select>
                 </label>
-                {polyFiltersActive && (
+                {(polySubTab === 'schedule' ? scheduleFiltersActive : polyFiltersActive) && (
                   <button
                     type="button"
-                    onClick={() => { setPolyExaminerFilter(''); setPolyLocationFilter(''); setPolyDateFrom(''); setPolyDateTo(''); }}
+                    onClick={clearPolyFilters}
                     className="flex items-center gap-1 text-xs text-slate-400 hover:text-white px-2 py-2"
                   >
                     <X size={12} /> Clear Filters
@@ -1261,8 +1282,8 @@ export default function App() {
 
             {polySubTab === 'schedule' && (
               <PolySchedule
-                slots={examinerSlots}
-                filtersActive={polyFiltersActive}
+                slots={scheduleSlots}
+                filtersActive={scheduleFiltersActive}
                 role={role}
                 assignableClients={clients.filter(c => c.programstatus === 'Active' && c.programtype !== 'BIP' && !assignedSlotFor(c.clientid))}
                 highlightedSlotId={highlightedSlotId}

@@ -8,11 +8,15 @@ interface StatusClient {
   programstatus?: string | null;
 }
 
-// Clients with a program status ('' for every client). Current clients come from the list App keeps; discharged
-// clients are fetched from the server only while asked for, since they pile up over the years. They are fetched again
-// whenever App's list changes, so a status change or payment made in the account shows here too.
-export function useClientsByStatus<C extends StatusClient>(currentClients: C[], status: string) {
-  const dischargedStatus = !status ? 'discharged' : DISCHARGE_STATUSES.includes(status) ? status : null;
+// Clients with a program status, or any of several ('' or [] for every client). Current clients come from the list App
+// keeps; discharged clients are fetched from the server only while asked for, since they pile up over the years. They
+// are fetched again whenever App's list changes, so a status change or payment made in the account shows here too.
+export function useClientsByStatus<C extends StatusClient>(currentClients: C[], status: string | string[]) {
+  const statuses = Array.isArray(status) ? status : status ? [status] : [];
+  const statusKey = statuses.join('|');
+  const dischargeWanted = statuses.filter(s => DISCHARGE_STATUSES.includes(s));
+  // One discharge status is fetched on its own; several (or every status) fetch all discharged clients
+  const dischargedStatus = !statuses.length || dischargeWanted.length > 1 ? 'discharged' : dischargeWanted[0] ?? null;
   const [fetched, setFetched] = useState<{ status: string; rows: C[] } | null>(null);
   const [error, setError] = useState('');
 
@@ -33,13 +37,15 @@ export function useClientsByStatus<C extends StatusClient>(currentClients: C[], 
 
   const loaded = !dischargedStatus || fetched?.status === dischargedStatus;
   const clients = useMemo(() => {
-    const current = status ? currentClients.filter(c => c.programstatus === status) : currentClients;
+    const wanted = statusKey ? new Set(statusKey.split('|')) : null;
+    const matches = (c: C) => !wanted || wanted.has(String(c.programstatus ?? ''));
+    const current = currentClients.filter(matches);
     if (!dischargedStatus || fetched?.status !== dischargedStatus) return current;
     // A client discharged during this session is in both lists until App's list is reloaded
     const currentIds = new Set(current.map(c => c.clientid));
-    return [...current, ...fetched.rows.filter(c => !currentIds.has(c.clientid))]
+    return [...current, ...fetched.rows.filter(c => matches(c) && !currentIds.has(c.clientid))]
       .sort((a, b) => String(a.lastname ?? '').localeCompare(String(b.lastname ?? '')));
-  }, [currentClients, status, dischargedStatus, fetched]);
+  }, [currentClients, statusKey, dischargedStatus, fetched]);
 
   return { clients, loading: !loaded && !error, error };
 }

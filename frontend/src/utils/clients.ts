@@ -38,8 +38,16 @@ export const isWholeNumber = (value: unknown) => /^\d+$/.test(String(value ?? ''
 export const formatPhase = (programtype?: string | null, phase?: string | null) =>
   programtype === 'BIP' && isWholeNumber(phase) ? `Week ${phase}` : phase;
 
-// Client Roster filters start on active clients only
-export const DEFAULT_CLIENT_FILTERS = { agent: '', programtype: '', phase: '', currentgroup: '', status: 'Active', feeoverride: '' };
+// Client Roster filters: each list holds the values picked (empty = all). They start on active clients only.
+export interface ClientFilters {
+  agent: string[];
+  programtype: string[];
+  phase: string[];
+  currentgroup: string[];
+  status: string[];
+  feeoverride: '' | 'active' | 'none';
+}
+export const DEFAULT_CLIENT_FILTERS: ClientFilters = { agent: [], programtype: [], phase: [], currentgroup: [], status: ['Active'], feeoverride: '' };
 // Dropdown choices for client Information fields; must match the server's lists
 export const CLIENT_FIELD_OPTIONS: Record<string, string[]> = {
   race: ['American Indian or Alaska Native', 'Asian', 'Black or African American', 'Hispanic or Latino', 'Native Hawaiian or Other Pacific Islander', 'White', 'Two or More Races', 'Other'],
