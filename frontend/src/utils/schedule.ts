@@ -5,7 +5,10 @@ export const SCHEDULE_TIMES = Array.from({ length: 96 }, (_, i) => {
   const m = String((i % 4) * 15).padStart(2, '0');
   return `${h % 12 || 12}:${m} ${h < 12 ? 'AM' : 'PM'}`;
 });
-export const formatSchedule = (day: string, time: string) => (day && time ? `${day}s @ ${time}` : '');
+// Drug-test groups may have no fixed day and time; their schedule is stored as this text
+export const BY_APPOINTMENT = 'By Appointment';
+export const isByAppointment = (value: string | null | undefined) => (value || '').trim().toLowerCase() === BY_APPOINTMENT.toLowerCase();
+export const formatSchedule =(day: string, time: string) => (day && time ? `${day}s @ ${time}` : '');
 export const parseSchedule = (value: string) => {
   const match = /^\s*([A-Za-z]+?)s?\s*@\s*(\d{1,2}):(\d{2})\s*(AM|PM)\s*$/i.exec(value || '');
   const day = SCHEDULE_DAYS.find(d => match && d.toLowerCase() === match[1].toLowerCase()) || '';

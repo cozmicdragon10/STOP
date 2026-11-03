@@ -87,6 +87,11 @@ export const GROUP_TYPES_BY_PROGRAM: Record<string, string[]> = {
   'BIP': ['BIP'],
   'Fed Drug Test': ['DRUG TEST'],
 };
+// Drug-test groups are run by an observer, who is an Office Admin or Business Administrator, instead of a counselor.
+// The observer is kept in the group's Counselor field.
+export const isDrugTestGroup = (groupProgram?: string | null) => (groupProgram || '').trim().toUpperCase() === 'DRUG TEST';
+export const groupLeadLabel = (groupProgram?: string | null) => (isDrugTestGroup(groupProgram) ? 'Observer' : 'Counselor');
+export const OBSERVER_ROLES = ['Office Admin', 'Business Administrator'];
 // Whether a client of this program can be put in a group of this program type: BIP groups take BIP clients, SO groups
 // take SO clients, DRUG TEST groups take Fed Drug Test clients. A group without a program type takes anyone. Mirrors the server's check on assignment.
 export const clientFitsGroup = (clientProgram?: string | null, groupProgram?: string | null) => {

@@ -131,7 +131,7 @@ export default function ReviewStep({ group, wf, createdBy, canPickCover, onSucce
       </div>
 
       {canPickCover && (
-        <CoveringCounselorPicker usualCounselor={group.counselor} value={wf.coveredBy} onChange={wf.setCoveredBy} disabled={wf.submitting} />
+        <CoveringCounselorPicker usualCounselor={group.counselor} groupProgram={group.programtype} value={wf.coveredBy} onChange={wf.setCoveredBy} disabled={wf.submitting} />
       )}
 
       {problem && (

@@ -2,9 +2,10 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { SlidersHorizontal, X } from 'lucide-react';
 import { assignClientToGroup, createGroup, deleteGroup, getGroupClients, updateGroup } from '../../api';
 import ScheduleSelect from '../ScheduleSelect';
+import { BY_APPOINTMENT } from '../../utils/schedule';
 import { DEFAULT_GROUP_FILTERS } from '../../utils/filters';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
-import { clientFitsGroup, formatPhase } from '../../utils/clients';
+import { OBSERVER_ROLES, clientFitsGroup, formatPhase, groupLeadLabel, isDrugTestGroup } from '../../utils/clients';
 import { toLocalDay } from '../../utils/dates';
 
 interface DirectoryGroup {
@@ -68,6 +69,23 @@ const denormalizeLocation = (loc: string) => (loc === 'OKC' ? 'Oklahoma City' : 
 
 const emptyNewGroup = { groupName: '', location: '', counselor: '', programType: '', schedule: '', address: '' };
 
+// The directory's sub-tabs. BIP and DRUG TEST groups have their own; SO, FED SO and anything else are under SO.
+const GROUP_SECTIONS = [
+  { key: 'SO', label: 'SO', newGroupType: 'SO' },
+  { key: 'BIP', label: 'BIP', newGroupType: 'BIP' },
+  { key: 'DRUG TEST', label: 'Drug Test', newGroupType: 'DRUG TEST' },
+] as const;
+type GroupSection = typeof GROUP_SECTIONS[number]['key'];
+// A new group starts with the open sub-tab's program type; a drug-test group starts By Appointment
+const withNewGroupDefaults = (g: typeof emptyNewGroup, section: GroupSection) => {
+  const programType = g.programType || GROUP_SECTIONS.find(s => s.key === section)!.newGroupType;
+  return { ...g, programType, schedule: g.schedule || (isDrugTestGroup(programType) ? BY_APPOINTMENT : '') };
+};
+const groupSection = (g: { programtype?: string | null }): GroupSection => {
+  const type = (g.programtype || '').trim().toUpperCase();
+  return type === 'BIP' || type === 'DRUG TEST' ? type : 'SO';
+};
+
 const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 
 // The Group Directory: filters, sorting, the New Group form, and the Roster / Assign Clients / Group Details panel
@@ -92,8 +110,25 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
   const [editAddress, setEditAddress] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // SO / BIP / Drug Test sub-tab, remembered in this browser
+  const [section, setSection] = useState<GroupSection>(() => {
+    try {
+      const saved = localStorage.getItem('groupSection');
+      return GROUP_SECTIONS.some(s => s.key === saved) ? saved as GroupSection : 'SO';
+    } catch { return 'SO'; }
+  });
+  const sectionGroups = groups.filter(g => groupSection(g) === section);
+
   // Directory filters; an empty string means "all". The list starts on active groups only.
   const [groupFilters, setGroupFilters] = useState(DEFAULT_GROUP_FILTERS);
+  const changeSection = (next: GroupSection) => {
+    setSection(next);
+    try { localStorage.setItem('groupSection', next); } catch { /* storage unavailable */ }
+    // The open group and a picked program type belong to the old sub-tab
+    setSelectedGroupDetail(null);
+    setGroupFilters(f => ({ ...f, programtype: '' }));
+    setNewGroup(g => withNewGroupDefaults(g, next));
+  };
   const changedGroupFilterCount = (Object.keys(DEFAULT_GROUP_FILTERS) as FilterKey[])
     .filter(k => groupFilters[k] !== DEFAULT_GROUP_FILTERS[k]).length;
   const groupFilterActive = changedGroupFilterCount > 0;
@@ -107,7 +142,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
   });
   const distinctGroupValues = (key: FilterKey) => {
     if (key === 'status') return ['Active', 'Inactive'];
-    return Array.from(new Set(groups.map(g => {
+    return Array.from(new Set(sectionGroups.map(g => {
       const val = g[key];
       return key === 'location' && val ? normalizeLocation(val) : val;
     }).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
@@ -121,7 +156,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
     setGroupSort(s => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
   };
   const groupSortArrow = (key: GroupSortKey) => (groupSort.key === key ? (groupSort.dir === 'asc' ? ' ▲' : ' ▼') : '');
-  const sortedDirectoryGroups = groups
+  const sortedDirectoryGroups = sectionGroups
     .filter(g => (!groupFilters.location || normalizeLocation(g.location) === groupFilters.location)
       && (!groupFilters.counselor || g.counselor === groupFilters.counselor)
       && (!groupFilters.programtype || g.programtype === groupFilters.programtype)
@@ -138,9 +173,16 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
       return groupSort.dir === 'asc' ? result : -result;
     });
 
-  // Counselor dropdown choices: active employees with the Counselor role. A group's saved counselor is kept as an option even if that account is no longer listed
-  const counselorOptions = employees.filter(e => e.role === 'Counselor' && e.active !== false).map(e => e.displayname as string).filter(Boolean);
-  const counselorChoices = (current: string) => (current && !counselorOptions.includes(current) ? [current, ...counselorOptions] : counselorOptions);
+  // Counselor dropdown choices: active employees with the Counselor role, or for a drug-test group (its observer) active
+  // Office Admins and Business Administrators. A group's saved name is kept as an option even if that account is no longer listed.
+  const counselorChoices = (current: string, programType: string) => {
+    const roles = isDrugTestGroup(programType) ? OBSERVER_ROLES : ['Counselor'];
+    const options = employees.filter(e => roles.includes(e.role) && e.active !== false).map(e => e.displayname as string).filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+    return current && !options.includes(current) ? [current, ...options] : options;
+  };
+  // Column and filter labels for the open sub-tab
+  const leadLabel = groupLeadLabel(section);
 
   const locationOptions = Array.from(new Set(groups.map(g => normalizeLocation(g.location)).filter(Boolean)));
   const programTypeOptions = Array.from(new Set(groups.map(g => g.programtype).filter(Boolean) as string[]));
@@ -343,7 +385,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
                   ))
                 ) : (
                   <p className="text-xs text-slate-500 italic col-span-2">
-                    {searchTerm ? 'No clients match your search.' : `No other active${selectedGroupDetail.programtype ? ` ${selectedGroupDetail.programtype.trim().toUpperCase() === 'BIP' ? 'BIP' : 'SO'}` : ''} clients to assign.`}
+                    {searchTerm ? 'No clients match your search.' : `No other active${selectedGroupDetail.programtype ? ` ${groupSection(selectedGroupDetail) === 'DRUG TEST' ? 'Fed Drug Test' : groupSection(selectedGroupDetail)}` : ''} clients to assign.`}
                   </p>
                 )}
               </div>
@@ -367,9 +409,9 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div><label className="block text-xs text-slate-400 mb-1">Group Name *</label><input type="text" required value={editGroupName} onChange={(e) => setEditGroupName(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
             <div><label className="block text-xs text-slate-400 mb-1">Location *</label><input type="text" required list="edit-group-locations" value={editLocation} onChange={(e) => setEditLocation(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
-            <div><label className="block text-xs text-slate-400 mb-1">Counselor *</label><select required value={editCounselor} onChange={(e) => setEditCounselor(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm"><option value="">Select a counselor...</option>{counselorChoices(editCounselor).map(name => <option key={name} value={name}>{name}</option>)}</select></div>
+            <div><label className="block text-xs text-slate-400 mb-1">{groupLeadLabel(editProgramType)} *</label><select required value={editCounselor} onChange={(e) => setEditCounselor(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm"><option value="">Select {isDrugTestGroup(editProgramType) ? 'an observer' : 'a counselor'}...</option>{counselorChoices(editCounselor, editProgramType).map(name => <option key={name} value={name}>{name}</option>)}</select></div>
             <div><label className="block text-xs text-slate-400 mb-1">Program Type *</label><input type="text" required list="edit-group-program-types" value={editProgramType} onChange={(e) => setEditProgramType(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
-            <div><label className="block text-xs text-slate-400 mb-1">Schedule *</label><ScheduleSelect value={editSchedule} onChange={setEditSchedule} className="bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Schedule *</label><ScheduleSelect value={editSchedule} onChange={setEditSchedule} allowByAppointment={isDrugTestGroup(editProgramType)} className="bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
             <div><label className="block text-xs text-slate-400 mb-1">Address</label><input type="text" value={editAddress} onChange={(e) => setEditAddress(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
           </div>
           <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
@@ -391,7 +433,26 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-3">
             <h2 className="font-semibold text-white">Group Directory</h2>
-            <button type="button" onClick={() => setShowNewGroupForm(s => !s)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-semibold">+ New Group</button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!showNewGroupForm) setNewGroup(withNewGroupDefaults(newGroup, section));
+                setShowNewGroupForm(s => !s);
+              }}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-semibold"
+            >+ New Group</button>
+          </div>
+          <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800" role="tablist" aria-label="Group type">
+            {GROUP_SECTIONS.map(s => (
+              <button
+                key={s.key}
+                type="button"
+                role="tab"
+                aria-selected={section === s.key}
+                onClick={() => changeSection(s.key)}
+                className={`px-3 py-1.5 rounded text-xs font-semibold ${section === s.key ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+              >{s.label}</button>
+            ))}
           </div>
           <button
             type="button"
@@ -410,7 +471,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
         <div className="flex flex-wrap items-end gap-3 mb-4 text-xs">
           {([
             ['location', 'Location', 'All locations'],
-            ['counselor', 'Counselor', 'All counselors'],
+            ['counselor', leadLabel, `All ${leadLabel.toLowerCase()}s`],
             ['programtype', 'Program Type', 'All program types'],
             ['status', 'Status', 'All statuses'],
           ] as const).map(([key, label, allLabel]) => (
@@ -438,9 +499,13 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
             </datalist>
             <div><label className="block text-xs text-slate-400 mb-1">Group Name *</label><input type="text" required value={newGroup.groupName} onChange={(e) => setNewGroup({ ...newGroup, groupName: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
             <div><label className="block text-xs text-slate-400 mb-1">Location *</label><input type="text" required list="group-locations" value={newGroup.location} onChange={(e) => setNewGroup({ ...newGroup, location: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
-            <div><label className="block text-xs text-slate-400 mb-1">Counselor *</label><select required value={newGroup.counselor} onChange={(e) => setNewGroup({ ...newGroup, counselor: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm"><option value="">Select a counselor...</option>{counselorChoices(newGroup.counselor).map(name => <option key={name} value={name}>{name}</option>)}</select></div>
-            <div><label className="block text-xs text-slate-400 mb-1">Program Type *</label><input type="text" required list="group-program-types" value={newGroup.programType} onChange={(e) => setNewGroup({ ...newGroup, programType: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
-            <div><label className="block text-xs text-slate-400 mb-1">Schedule *</label><ScheduleSelect value={newGroup.schedule} onChange={(v) => setNewGroup({ ...newGroup, schedule: v })} className="bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1">{groupLeadLabel(newGroup.programType)} *</label><select required value={newGroup.counselor} onChange={(e) => setNewGroup({ ...newGroup, counselor: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm"><option value="">Select {isDrugTestGroup(newGroup.programType) ? 'an observer' : 'a counselor'}...</option>{counselorChoices(newGroup.counselor, newGroup.programType).map(name => <option key={name} value={name}>{name}</option>)}</select></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Program Type *</label><input type="text" required list="group-program-types" value={newGroup.programType} onChange={(e) => setNewGroup({
+              ...newGroup, programType: e.target.value,
+              // Typing DRUG TEST into a blank schedule starts it By Appointment
+              schedule: newGroup.schedule || (isDrugTestGroup(e.target.value) ? BY_APPOINTMENT : ''),
+            })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Schedule *</label><ScheduleSelect value={newGroup.schedule} onChange={(v) => setNewGroup({ ...newGroup, schedule: v })} allowByAppointment={isDrugTestGroup(newGroup.programType)} className="bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
             <div><label className="block text-xs text-slate-400 mb-1">Address</label><input type="text" value={newGroup.address} onChange={(e) => setNewGroup({ ...newGroup, address: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
             <div className="col-span-2 flex justify-end gap-2">
               <button type="button" onClick={() => { setShowNewGroupForm(false); setNewGroup(emptyNewGroup); }} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Cancel</button>
@@ -454,7 +519,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
             <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
               <th className="p-3"><button onClick={() => toggleGroupSort('groupname')} className="uppercase tracking-wider hover:text-slate-200">Group Name{groupSortArrow('groupname')}</button></th>
               <th className="p-3"><button onClick={() => toggleGroupSort('location')} className="uppercase tracking-wider hover:text-slate-200">Location{groupSortArrow('location')}</button></th>
-              <th className="p-3"><button onClick={() => toggleGroupSort('counselor')} className="uppercase tracking-wider hover:text-slate-200">Counselor{groupSortArrow('counselor')}</button></th>
+              <th className="p-3"><button onClick={() => toggleGroupSort('counselor')} className="uppercase tracking-wider hover:text-slate-200">{leadLabel}{groupSortArrow('counselor')}</button></th>
               <th className="p-3"><button onClick={() => toggleGroupSort('programtype')} className="uppercase tracking-wider hover:text-slate-200">Program Type{groupSortArrow('programtype')}</button></th>
               <th className="p-3"><button onClick={() => toggleGroupSort('schedule')} className="uppercase tracking-wider hover:text-slate-200">Schedule{groupSortArrow('schedule')}</button></th>
               <th className="p-3"><button onClick={() => toggleGroupSort('clientcount')} className="uppercase tracking-wider hover:text-slate-200">Assigned Clients{groupSortArrow('clientcount')}</button></th>
@@ -462,6 +527,15 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800 text-sm">
+            {sortedDirectoryGroups.length === 0 && (
+              <tr>
+                <td colSpan={7} className="p-6 text-center text-slate-500 italic">
+                  {sectionGroups.length === 0
+                    ? `No ${GROUP_SECTIONS.find(s => s.key === section)!.label} groups yet.`
+                    : `No ${GROUP_SECTIONS.find(s => s.key === section)!.label} groups match the filters.`}
+                </td>
+              </tr>
+            )}
             {sortedDirectoryGroups.map(g => {
               const open = selectedGroupDetail?.groupid === g.groupid;
               return (

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { formatPhase, isAttendanceOverdue } from './clients';
 import { caseNoteLabel, parseGroupCallInNote } from './notes';
 import { currentReportFor, reportTabsFor } from './reports';
-import { SCHEDULE_TIMES, formatSchedule, parseSchedule } from './schedule';
+import { SCHEDULE_TIMES, formatSchedule, isByAppointment, parseSchedule } from './schedule';
 import { groupByMonth, sortedUnique, toggleInSet } from './filters';
 import { isMonthlyFeeClient } from './soPhases';
 
@@ -64,6 +64,13 @@ describe('group schedules', () => {
     expect(formatSchedule('Thursday', '7:00 PM')).toBe('Thursdays @ 7:00 PM');
     expect(parseSchedule('Thursdays @ 7:00 PM')).toEqual({ day: 'Thursday', time: '7:00 PM' });
     expect(parseSchedule('thursday @ 07:00 pm')).toEqual({ day: 'Thursday', time: '7:00 PM' });
+  });
+
+  it('recognises the By Appointment schedule used by drug-test groups', () => {
+    expect(isByAppointment('By Appointment')).toBe(true);
+    expect(isByAppointment(' by appointment ')).toBe(true);
+    expect(isByAppointment('Thursdays @ 7:00 PM')).toBe(false);
+    expect(isByAppointment(null)).toBe(false);
   });
 
   it('returns empty picks for text it cannot read', () => {
