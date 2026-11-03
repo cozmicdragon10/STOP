@@ -1,5 +1,5 @@
 // Old GroupId (GroupData.csv) -> current group name. Old groups with no clear match (assessments, individuals,
-// accounts, drug testing, "Okc", "Shawnee", ...) are left out; clients and attendance from them get no group.
+// accounts, "Okc", "Shawnee", ...) are left out; clients and attendance from them get no group.
 const GROUP_MAP = {
     1: 'Ada SO', 113: 'Ada BIP',
     3: 'Ardmore SO',
@@ -22,6 +22,10 @@ const GROUP_MAP = {
     64: 'Tulsa SO 1', 25: 'Tulsa SO 2',
     66: 'Tulsa BIP 1', 26: 'Tulsa BIP 2',
     132: 'Woodward SO 1', 45: 'Woodward SO 2',
+    42: 'Shawnee Drug Testing', 59: 'Okemah Drug Testing', 67: 'Tulsa North Drug Testing', 70: 'Tulsa Drug Testing',
+    101: 'Okmulgee Drug Testing', 102: 'Tulsa UA', 119: 'Muskogee Drug Testing',
 };
+// Old drug-testing groups; their clients are Fed Drug Test clients
+const DRUG_TEST_GROUPS = [42, 59, 67, 70, 101, 102, 119];
 
-module.exports = { GROUP_MAP };
+module.exports = { GROUP_MAP, DRUG_TEST_GROUPS };

@@ -5,13 +5,13 @@ import type { SupervisingAgent } from '../../api';
 import AgentPicker from '../agents/AgentPicker';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import {
-  CLIENT_FIELD_OPTIONS, EDITABLE_PROGRAM_STATUSES, GROUP_TYPES_BY_PROGRAM, SO_ATTENDANCE_LIMIT_MONTHS, SO_PROGRAM_TYPES,
+  CLIENT_FIELD_OPTIONS, EDITABLE_PROGRAM_STATUSES, GROUP_TYPES_BY_PROGRAM, POLY_PROGRAM_TYPES, SO_ATTENDANCE_LIMIT_MONTHS, SO_PROGRAM_TYPES,
   STATE_FEE_PROGRAM_TYPES, formatPhase, isAttendanceOverdue, isWholeNumber,
 } from '../../utils/clients';
 import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { ageFromBirthDate, toLocalDay } from '../../utils/dates';
-import { polyVoucherMax } from '../../utils/polygraph';
+import { polyVoucherMax, takesPolygraphs } from '../../utils/polygraph';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client and group rows are untyped throughout App */
 interface Props {
@@ -189,8 +189,8 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
               )}
             </div>
           ))}
-          {/* Derived from polygraph results, so shown read-only and only for the SO programs */}
-          {SO_PROGRAM_TYPES.includes(programType || '') && (
+          {/* Derived from polygraph results, so shown read-only and only for the SO and Poly Only programs */}
+          {POLY_PROGRAM_TYPES.includes(programType || '') && (
             <div>
               <p className="text-xs text-slate-500 mb-0.5">Last Polygraph</p>
               <p className="text-white font-medium">{client.lastpoly ? new Date(client.lastpoly).toLocaleDateString() : '—'}</p>
@@ -256,6 +256,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                 <option value="BIP">BIP</option>
                 <option value="Voluntary SO">Voluntary SO</option>
                 <option value="Poly Only">Poly Only</option>
+                <option value="Fed Drug Test">Fed Drug Test</option>
               </select>
             ) : (
               <p className="text-white font-medium">{client.programtype || '—'}</p>
@@ -308,8 +309,8 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
               <p className="text-white font-medium">{groups.find(g => g.groupid === client.groupid)?.groupname || client.groupid || '—'}</p>
             )}
           </div>
-          {/* BIP clients don't take polygraphs, so their poly fee and vouchers aren't shown */}
-          {ACCOUNT_FIELDS.filter(({ field }) => !(programType === 'BIP' && field === 'polyfeevoucher')).map(({ label, field, prefix, step = '0.01', min, max }) => (
+          {/* BIP and Fed Drug Test clients don't take polygraphs, so their poly fee and vouchers aren't shown */}
+          {ACCOUNT_FIELDS.filter(({ field }) => !(!takesPolygraphs(programType) && field === 'polyfeevoucher')).map(({ label, field, prefix, step = '0.01', min, max }) => (
             <div key={field}>
               <p className="text-xs text-slate-500 mb-0.5">{label}</p>
               {editing ? (
@@ -334,7 +335,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
             </div>
           ))}
           {/* Poly fee progress: amount paid so far out of the total poly fee */}
-          {programType !== 'BIP' && <div>
+          {takesPolygraphs(programType) && <div>
             <p className="text-xs text-slate-500 mb-0.5">Poly Fee (Paid / Total)</p>
             {editing ? (
               <div className="flex items-center gap-2">

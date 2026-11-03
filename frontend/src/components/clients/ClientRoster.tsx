@@ -17,6 +17,7 @@ import {
 import type { ClientFilters } from '../../utils/clients';
 import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
+import { takesPolygraphs } from '../../utils/polygraph';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client and group rows are untyped throughout App */
 interface Props {
@@ -75,7 +76,7 @@ const SORT_VALUES = {
   },
   group: (c: RosterRow) => textOrNull(c.groupname),
   lastattended: (c: RosterRow) => timeOrNull(c.lastattended),
-  lastpoly: (c: RosterRow) => (c.programtype === 'BIP' ? null : timeOrNull(c.lastpoly)),
+  lastpoly: (c: RosterRow) => (!takesPolygraphs(c.programtype) ? null : timeOrNull(c.lastpoly)),
   status: (c: RosterRow) => textOrNull(c.programstatus),
   balance: (c: RosterRow) => toDisplayBalance(c.accountbalance),
 } satisfies Record<string, (c: RosterRow) => string | number | null>;
@@ -104,7 +105,7 @@ const ROSTER_CELLS: Record<SortKey, (c: any) => ReactNode> = {
       {c.lastattended ? new Date(c.lastattended).toLocaleDateString() : 'Never'}
     </td>
   ),
-  lastpoly: c => <td className="p-3 text-slate-400 text-xs">{c.programtype === 'BIP' ? '—' : c.lastpoly ? new Date(c.lastpoly).toLocaleDateString() : 'None'}</td>,
+  lastpoly: c => <td className="p-3 text-slate-400 text-xs">{!takesPolygraphs(c.programtype) ? '—' : c.lastpoly ? new Date(c.lastpoly).toLocaleDateString() : 'None'}</td>,
   status: c => <td className="p-3"><span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium ${c.programstatus === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`} title={c.programstatus}>{c.programstatus === 'Discharged Supervision' ? 'Discharged' : c.programstatus}</span></td>,
   balance: c => <td className={`p-3 font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</td>,
 };
@@ -365,6 +366,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                 <option value="BIP">BIP</option>
                 <option value="Voluntary SO">Voluntary SO</option>
                 <option value="Poly Only">Poly Only</option>
+                <option value="Fed Drug Test">Fed Drug Test</option>
               </select>
             </div>
 

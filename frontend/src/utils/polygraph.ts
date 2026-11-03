@@ -3,6 +3,11 @@ import { POLY_VOUCHER_MAX_BY_PHASE } from './soPhases';
 
 export const POLY_OVERDUE_MONTHS = 6;
 
+// BIP and Fed Drug Test clients don't take polygraphs, so they have no polygraph notices, poly fee or bookings.
+// Mirrors NO_POLY_PROGRAM_TYPES in backend/routes/polygraphs.js.
+export const NO_POLY_PROGRAM_TYPES = ['BIP', 'Fed Drug Test'];
+export const takesPolygraphs = (programtype?: string | null) => !NO_POLY_PROGRAM_TYPES.includes(programtype ?? '');
+
 // When the client's most recent polygraph was taken: the actual polygraph date, falling back to the recorded date for older results without one
 export const lastPolygraphTaken = (polygraphs: any[]): Date | null => {
   const taken = polygraphs
@@ -19,9 +24,9 @@ export const polygraphHistoryText = (polygraphs: any[], today = new Date()) => {
   const since = timeBetween(localYmd(last), localYmd(today));
   return `${since === 'Same day' ? 'Last polygraph was today' : `${since} since last polygraph`} (${last.toLocaleDateString()})${isPolygraphOverdue(last, today) ? ', overdue' : ''}.`;
 };
-// Red polygraph notice for a client's account, or null when none applies. BIP clients don't take polygraphs.
+// Red polygraph notice for a client's account, or null when none applies (none for programs that don't take polygraphs)
 export const polygraphNotice = (client: any, polygraphs: any[], today = new Date()) => {
-  if (client.programtype === 'BIP' || client.nopolyrequired) return null;
+  if (!takesPolygraphs(client.programtype) || client.nopolyrequired) return null;
   const last = lastPolygraphTaken(polygraphs);
   if (last) {
     return isPolygraphOverdue(last, today) ? 'Client is overdue for their next Polygraph' : null;

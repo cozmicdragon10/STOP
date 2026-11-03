@@ -9,7 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 const { pool } = require('../db');
-const { GROUP_MAP } = require('./oldGroups');
+const { GROUP_MAP, DRUG_TEST_GROUPS } = require('./oldGroups');
 
 const args = process.argv.slice(2);
 const COMMIT = args.includes('--commit');
@@ -70,14 +70,14 @@ const PHASE_MAP = {
     26: [null, 'AM Assessment'],
     27: ['BIP', '0'],                        // BIP Exit
     32: ['BIP', '0'],                        // BIP Reinstatement
-    33: ['Federal SO', 'Phase 1 - Weekly'],  // Federal Drug Testing
+    33: ['Fed Drug Test', 'Phase 1 - Weekly'], // Federal Drug Testing
     34: ['Federal SO', 'Phase 1 - Weekly'],  // Federal Individual
-    35: ['Federal SO', 'Phase 1 - Weekly'],  // Federal Polygraphs
+    35: ['Poly Only', 'Polygraphs'],         // Federal Polygraphs
     36: ['Federal SO', 'Phase 1 - Weekly'],  // Federal Chaperon
 };
 
 // Group program types each client program may join (mirrors GROUP_TYPES_BY_PROGRAM in the frontend)
-const GROUP_TYPES_BY_PROGRAM = { 'State SO': ['SO', 'FED SO'], 'Federal SO': ['SO', 'FED SO'], 'BIP': ['BIP'] };
+const GROUP_TYPES_BY_PROGRAM = { 'State SO': ['SO', 'FED SO'], 'Federal SO': ['SO', 'FED SO'], 'BIP': ['BIP'], 'Fed Drug Test': ['DRUG TEST'] };
 
 // Splits one record into fields; quoted fields may hold commas, doubled quotes and line breaks
 const parseFields = (record) => {
@@ -180,6 +180,8 @@ const main = async () => {
             const phaseCode = num(r.TreatmentPhase);
             let [programtype, phase] = PHASE_MAP[phaseCode] || [];
             if (!phase) { programtype = null; phase = `Old phase ${r.TreatmentPhase}`; stats.unknownPhase++; }
+            // Clients in an old drug-testing group are drug-testing clients whatever their phase says
+            if (DRUG_TEST_GROUPS.includes(num(r.GroupId))) programtype = 'Fed Drug Test';
 
             let groupid = null;
             const group = groups.get(GROUP_MAP[num(r.GroupId)]);

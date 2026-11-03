@@ -29,8 +29,10 @@ export const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
   { type: 'Attendance Deleted', label: 'Attendance Deleted' },
 ];
 
-// Programs that use the SO phase schedule and show the last polygraph date
+// Programs that use the SO phase schedule
 export const SO_PROGRAM_TYPES = ['State SO', 'Federal SO', 'Voluntary SO'];
+// Programs that show the last polygraph date
+export const POLY_PROGRAM_TYPES = [...SO_PROGRAM_TYPES, 'Poly Only'];
 // Programs that start at the State SO default treatment fee (Phase 1 - Weekly)
 export const STATE_FEE_PROGRAM_TYPES = ['State SO', 'Voluntary SO'];
 // BIP clients store a whole-number week (starting at 0) in the phase column instead of an SO phase
@@ -79,9 +81,10 @@ export const GROUP_TYPES_BY_PROGRAM: Record<string, string[]> = {
   'Federal SO': ['SO', 'FED SO'],
   'Voluntary SO': ['SO', 'FED SO'],
   'BIP': ['BIP'],
+  'Fed Drug Test': ['DRUG TEST'],
 };
 // Whether a client of this program can be put in a group of this program type: BIP groups take BIP clients, SO groups
-// take SO clients. A group without a program type takes anyone. Mirrors the server's check on assignment.
+// take SO clients, DRUG TEST groups take Fed Drug Test clients. A group without a program type takes anyone. Mirrors the server's check on assignment.
 export const clientFitsGroup = (clientProgram?: string | null, groupProgram?: string | null) => {
   const groupType = (groupProgram || '').trim().toUpperCase();
   return !groupType || (GROUP_TYPES_BY_PROGRAM[clientProgram || ''] ?? []).includes(groupType);

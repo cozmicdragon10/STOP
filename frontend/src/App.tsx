@@ -54,7 +54,7 @@ import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividu
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
 import { DISCHARGE_STATUSES } from './utils/clients';
-import { polygraphHistoryText, polygraphNotice, slotStart, slotSummary } from './utils/polygraph';
+import { polygraphHistoryText, polygraphNotice, slotStart, slotSummary, takesPolygraphs } from './utils/polygraph';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -825,7 +825,7 @@ export default function App() {
                 <button onClick={() => setClientTab('attendance')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'attendance' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Calendar size={14} /> Attendance</button>
                 <button onClick={() => setClientTab('financials')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'financials' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><DollarSign size={14} /> Financial Ledger</button>
                 <button onClick={() => setClientTab('notes')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'notes' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><FileText size={14} /> Case Notes</button>
-                {selectedClientDetail.programtype !== 'BIP' && (
+                {takesPolygraphs(selectedClientDetail.programtype) && (
                   <button onClick={() => setClientTab('polygraphs')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'polygraphs' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Activity size={14} /> Polygraphs</button>
                 )}
                 <button onClick={() => setClientTab('attachments')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'attachments' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Paperclip size={14} /> Attachments</button>
@@ -865,8 +865,8 @@ export default function App() {
                   />
 
                   {/* Section 5 – Temporary Poly Fee Override: a reduced poly fee for a number of fills, not a date.
-                      BIP clients don't take polygraphs, so they have no poly fee. */}
-                  {selectedClientDetail.programtype !== 'BIP' && <PolyFeeOverridePanel
+                      BIP and Fed Drug Test clients don't take polygraphs, so they have no poly fee. */}
+                  {takesPolygraphs(selectedClientDetail.programtype) && <PolyFeeOverridePanel
                     key={`poly-${selectedClientDetail.clientid}`}
                     client={selectedClientDetail}
                     role={role}
@@ -926,7 +926,7 @@ export default function App() {
                 <ClientNotes key={selectedClientDetail.clientid} clientId={selectedClientDetail.clientid} user={user} notes={clientNotes} setNotes={setClientNotes} onApprovalChanged={refreshPendingNotes} />
               )}
 
-              {clientTab === 'polygraphs' && selectedClientDetail.programtype !== 'BIP' && (
+              {clientTab === 'polygraphs' && takesPolygraphs(selectedClientDetail.programtype) && (
                 <ClientPolygraphs
                   key={selectedClientDetail.clientid}
                   client={selectedClientDetail}
@@ -1285,7 +1285,7 @@ export default function App() {
                 slots={scheduleSlots}
                 filtersActive={scheduleFiltersActive}
                 role={role}
-                assignableClients={clients.filter(c => c.programstatus === 'Active' && c.programtype !== 'BIP' && !assignedSlotFor(c.clientid))}
+                assignableClients={clients.filter(c => c.programstatus === 'Active' && takesPolygraphs(c.programtype) && !assignedSlotFor(c.clientid))}
                 highlightedSlotId={highlightedSlotId}
                 examinerName={getExaminerDisplayName}
                 choices={polyAssign.choices}
