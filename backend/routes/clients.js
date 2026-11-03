@@ -108,6 +108,9 @@ router.put('/api/clients/:id/no-poly-required', async (req, res) => {
 
 // Statuses that can be set when adding or editing a client; the discharge statuses below are only set through discharge
 const EDITABLE_PROGRAM_STATUSES = ['Active', 'Inactive'];
+// Programs whose clients can be marked Pretrial; other programs' clients never are.
+// Mirrors PRETRIAL_PROGRAM_TYPES in frontend/src/utils/clients.ts.
+const PRETRIAL_PROGRAM_TYPES = ['Federal SO', 'Fed Drug Test'];
 
 // Discharge types that require a subcategory; each discharge is kept in ClientDischarges for recidivism reporting
 const DISCHARGE_SUBCATEGORIES = {
@@ -523,7 +526,7 @@ router.put('/api/clients/:id', async (req, res) => {
             treatmentfee, accountbalance, vouchers, polyfeevoucher, polyfeepaid, polyfee,
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
-            comments, programtype, race, dateofbirth, sex, updatedBy
+            comments, programtype, race, dateofbirth, sex, pretrial, updatedBy
         } = req.body;
 
         if (race && !CLIENT_RACES.includes(race)) {
@@ -537,7 +540,7 @@ router.put('/api/clients/:id', async (req, res) => {
         }
 
         // Tracked fields before the edit, for the change log
-        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase FROM Clients WHERE ClientId = $1', [id]);
+        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial FROM Clients WHERE ClientId = $1', [id]);
         const before = beforeRes.rows[0];
 
         // The full set of poly fee vouchers depends on the phase the client will be in after this edit. A count sent back
@@ -601,7 +604,9 @@ router.put('/api/clients/:id', async (req, res) => {
                 PolyFee = COALESCE($27, PolyFee),
                 Race = $28,
                 DateOfBirth = $29,
-                Sex = $30
+                Sex = $30,
+                -- Kept only while the client's program (after this edit) is one that has pretrial clients
+                Pretrial = COALESCE($31, Pretrial) AND COALESCE($23, ProgramType) = ANY($32::text[])
             WHERE ClientId = $24`,
             [
                 firstname || null, middlename || null, lastname || null, docnumber || null, supervisingagent || null,
@@ -615,7 +620,8 @@ router.put('/api/clients/:id', async (req, res) => {
                 polyVoucher,
                 polyfeepaid !== undefined && polyfeepaid !== null && polyfeepaid !== '' ? Number(polyfeepaid) : null,
                 polyfee !== undefined && polyfee !== null && polyfee !== '' ? Number(polyfee) : null,
-                race || null, dateofbirth || null, sex || null
+                race || null, dateofbirth || null, sex || null,
+                typeof pretrial === 'boolean' ? pretrial : null, PRETRIAL_PROGRAM_TYPES
             ]
         );
 
@@ -630,7 +636,7 @@ router.put('/api/clients/:id', async (req, res) => {
         );
 
         if (before && updated.rows[0]) {
-            const after = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId FROM Clients WHERE ClientId = $1', [id]);
+            const after = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, Pretrial FROM Clients WHERE ClientId = $1', [id]);
             const now = after.rows[0];
             // An edit that makes the poly fee paid in full filled the vouchers (see the CASE above); that counts toward an override
             const wasFull = Number(before.polyfee) > 0 && Number(before.polyfeepaid) >= Number(before.polyfee);
@@ -656,6 +662,13 @@ router.put('/api/clients/:id', async (req, res) => {
                     await logClientChange(pool, { clientId: id, changedBy: updatedBy, changeType, oldValue: oldValue || 'None', newValue: newValue || 'None' });
                 }
             }
+            if (!!before.pretrial !== !!now.pretrial) {
+                await logClientChange(pool, {
+                    clientId: id, changedBy: updatedBy, changeType: 'Pretrial',
+                    oldValue: before.pretrial ? 'Checked' : 'Unchecked', newValue: now.pretrial ? 'Checked' : 'Unchecked',
+                    details: !now.pretrial && pretrial === true ? `Cleared: ${now.programtype} clients are not pretrial.` : undefined,
+                });
+            }
             if ((before.groupid || null) !== (now.groupid || null)) {
                 await logClientChange(pool, {
                     clientId: id, changedBy: updatedBy, changeType: 'Group',
@@ -679,11 +692,12 @@ router.post('/api/clients', async (req, res) => {
             programstartdate, programstatus, phase, groupid,
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
-            comments, programtype, treatmentfee, vouchers, createdBy
+            comments, programtype, treatmentfee, vouchers, pretrial, createdBy
         } = req.body;
 
         // BIP clients have no phase; they store a whole-number week in the same column. New BIP clients always start at week 0.
         const clientPhase = programtype === 'BIP' ? '0' : phase;
+        const isPretrial = pretrial === true && PRETRIAL_PROGRAM_TYPES.includes(programtype);
 
         // DOC # and supervising agent are optional; blanks are stored as NULL so the unique DOC # index allows many of them
         const required = {
@@ -704,13 +718,13 @@ router.post('/api/clients', async (req, res) => {
                 ProgramStartDate, ProgramStatus, Phase, GroupId,
                 Address, City, County, State, Zip,
                 MainPhone, AltPhone, EmergencyContact, EmergencyContactPhone,
-                Comments, ProgramType, TreatmentFee, Vouchers
+                Comments, ProgramType, TreatmentFee, Vouchers, Pretrial
             ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8, $9,
                 $10, $11, $12, $13, $14,
                 $15, $16, $17, $18,
-                $19, COALESCE($20, 'State SO'), COALESCE($21, 0), COALESCE($22, 0)
+                $19, COALESCE($20, 'State SO'), COALESCE($21, 0), COALESCE($22, 0), $23
             ) RETURNING ClientId`,
             [
                 firstname.trim(), middlename?.trim() || null, lastname.trim(), docnumber?.trim() || null, supervisingagent?.trim() || null,
@@ -719,12 +733,13 @@ router.post('/api/clients', async (req, res) => {
                 mainphone || null, altphone || null, emergencycontact || null, emergencycontactphone || null,
                 comments || null, programtype || null,
                 treatmentfee !== undefined && treatmentfee !== null && treatmentfee !== '' ? Number(treatmentfee) : null,
-                vouchers !== undefined && vouchers !== null && vouchers !== '' ? Number(vouchers) : null
+                vouchers !== undefined && vouchers !== null && vouchers !== '' ? Number(vouchers) : null,
+                isPretrial
             ]
         );
         await logClientChange(pool, {
             clientId: result.rows[0].clientid, changedBy: createdBy, changeType: 'Client Created',
-            details: `Created as ${programtype}, ${programstatus}, group: ${await groupNameFor(groupid ? Number(groupid) : null)}`
+            details: `Created as ${programtype}${isPretrial ? ' (Pretrial)' : ''}, ${programstatus}, group: ${await groupNameFor(groupid ? Number(groupid) : null)}`
                 + `${supervisingagent?.trim() ? `, agent: ${supervisingagent.trim()}` : ''}.`,
         });
         res.status(201).json({ success: true, clientId: result.rows[0].clientid, message: 'Client added successfully.' });

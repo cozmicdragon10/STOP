@@ -5,7 +5,7 @@ import type { SupervisingAgent } from '../../api';
 import AgentPicker from '../agents/AgentPicker';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import {
-  CLIENT_FIELD_OPTIONS, EDITABLE_PROGRAM_STATUSES, GROUP_TYPES_BY_PROGRAM, POLY_PROGRAM_TYPES, SO_ATTENDANCE_LIMIT_MONTHS, SO_PROGRAM_TYPES,
+  CLIENT_FIELD_OPTIONS, EDITABLE_PROGRAM_STATUSES, GROUP_TYPES_BY_PROGRAM, POLY_PROGRAM_TYPES, PRETRIAL_PROGRAM_TYPES, SO_ATTENDANCE_LIMIT_MONTHS, SO_PROGRAM_TYPES,
   STATE_FEE_PROGRAM_TYPES, formatPhase, isAttendanceOverdue, isWholeNumber,
 } from '../../utils/clients';
 import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
@@ -260,6 +260,19 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
               </select>
             ) : (
               <p className="text-white font-medium">{client.programtype || '—'}</p>
+            )}
+            {/* Federal SO and Fed Drug Test clients can be pretrial; changed with Edit Info */}
+            {PRETRIAL_PROGRAM_TYPES.includes(programType || '') && (
+              <label className={`mt-2 flex items-center gap-1.5 text-slate-200 text-sm whitespace-nowrap ${editing ? 'cursor-pointer' : 'cursor-default'}`}>
+                <input
+                  type="checkbox"
+                  checked={!!form.pretrial}
+                  disabled={!editing}
+                  onChange={e => setField('pretrial', e.target.checked)}
+                  className="accent-blue-500 disabled:opacity-60"
+                />
+                Pretrial
+              </label>
             )}
           </div>
           {/* SO programs pick a phase (which sets the treatment fee); BIP clients store a whole-number week */}

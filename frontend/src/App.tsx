@@ -719,6 +719,8 @@ export default function App() {
                     >
                       {formatBalance(selectedClientDetail.accountbalance)} Balance
                     </span>
+                    {/* Ticked on the Information tab; only Federal SO and Fed Drug Test clients can be pretrial */}
+                    {selectedClientDetail.pretrial && <span className="-ml-1 text-sm font-semibold text-amber-300">(Pretrial)</span>}
                   </div>
                   <p className="text-xs text-slate-400 mt-1">DOC #: <span className="text-slate-200 font-mono">{selectedClientDetail.docnumber}</span> | Program: <span className="text-blue-400 font-semibold">{selectedClientDetail.programtype || 'State SO'}</span> | Agent: {selectedClientDetail.supervisingagent}</p>
                 </div>

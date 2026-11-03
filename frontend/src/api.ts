@@ -77,6 +77,7 @@ export interface ClientColumns {
     polyfeepaid: Money;
     polyfee: Money;
     nopolyrequired: boolean;
+    pretrial: boolean;
     race: string | null;
     dateofbirth: string | null;
     sex: string | null;

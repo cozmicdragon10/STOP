@@ -20,6 +20,7 @@ export const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
   { type: 'Program Type', label: 'Program Type' },
   { type: 'Supervising Agent', label: 'Supervising Agent' },
   { type: 'Group', label: 'Group' },
+  { type: 'Pretrial', label: 'Pretrial' },
   { type: 'No Poly Required', label: 'No Poly Required' },
   { type: 'Fee Override', label: 'Temporary Fee Override' },
   { type: 'Poly Fee Override', label: 'Poly Fee Override' },
@@ -33,6 +34,8 @@ export const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
 export const SO_PROGRAM_TYPES = ['State SO', 'Federal SO', 'Voluntary SO'];
 // Programs that show the last polygraph date
 export const POLY_PROGRAM_TYPES = [...SO_PROGRAM_TYPES, 'Poly Only'];
+// Programs whose clients can be marked Pretrial. Mirrors PRETRIAL_PROGRAM_TYPES in backend/routes/clients.js.
+export const PRETRIAL_PROGRAM_TYPES = ['Federal SO', 'Fed Drug Test'];
 // Programs that start at the State SO default treatment fee (Phase 1 - Weekly)
 export const STATE_FEE_PROGRAM_TYPES = ['State SO', 'Voluntary SO'];
 // BIP clients store a whole-number week (starting at 0) in the phase column instead of an SO phase
@@ -48,8 +51,9 @@ export interface ClientFilters {
   currentgroup: string[];
   status: string[];
   feeoverride: '' | 'active' | 'none';
+  pretrial: '' | 'yes' | 'no';
 }
-export const DEFAULT_CLIENT_FILTERS: ClientFilters = { agent: [], programtype: [], phase: [], currentgroup: [], status: ['Active'], feeoverride: '' };
+export const DEFAULT_CLIENT_FILTERS: ClientFilters = { agent: [], programtype: [], phase: [], currentgroup: [], status: ['Active'], feeoverride: '', pretrial: '' };
 // Dropdown choices for client Information fields; must match the server's lists
 export const CLIENT_FIELD_OPTIONS: Record<string, string[]> = {
   race: ['American Indian or Alaska Native', 'Asian', 'Black or African American', 'Hispanic or Latino', 'Native Hawaiian or Other Pacific Islander', 'White', 'Two or More Races', 'Other'],

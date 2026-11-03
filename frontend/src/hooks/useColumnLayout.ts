@@ -6,17 +6,20 @@ interface SavedLayout {
 }
 
 // Which table columns show and in what order, remembered in this browser under storageKey. allKeys is the default
-// order; locked columns can be moved but not hidden. A saved layout from an older version is tidied up: columns that no
-// longer exist are dropped and new ones are added at the end.
-export function useColumnLayout<K extends string>(storageKey: string, allKeys: readonly K[], locked: readonly K[] = []) {
+// order; locked columns can be moved but not hidden; defaultHidden columns start hidden until shown with the picker.
+// A saved layout from an older version is tidied up: columns that no longer exist are dropped and new ones are added at
+// the end (hidden if they are defaultHidden).
+export function useColumnLayout<K extends string>(storageKey: string, allKeys: readonly K[], locked: readonly K[] = [], defaultHidden: readonly K[] = []) {
   const [layout, setLayout] = useState<{ order: K[]; hidden: Set<K> }>(() => {
     let saved: Partial<SavedLayout> = {};
     try { saved = JSON.parse(localStorage.getItem(storageKey) || '{}'); } catch { /* storage unavailable or bad JSON */ }
     const known = (keys: unknown) => (Array.isArray(keys) ? keys : []).filter((k): k is K => allKeys.includes(k as K));
     const order = [...new Set(known(saved.order))];
+    // A column missing from the saved order is new to this browser, so it takes its default
+    const unseen = allKeys.filter(k => !order.includes(k));
     return {
-      order: [...order, ...allKeys.filter(k => !order.includes(k))],
-      hidden: new Set(known(saved.hidden).filter(k => !locked.includes(k))),
+      order: [...order, ...unseen],
+      hidden: new Set([...known(saved.hidden), ...unseen.filter(k => defaultHidden.includes(k))].filter(k => !locked.includes(k))),
     };
   });
 
@@ -45,9 +48,10 @@ export function useColumnLayout<K extends string>(storageKey: string, allKeys: r
       save(order, layout.hidden);
     },
     reset: () => {
-      setLayout({ order: [...allKeys], hidden: new Set() });
+      setLayout({ order: [...allKeys], hidden: new Set(defaultHidden) });
       try { localStorage.removeItem(storageKey); } catch { /* storage unavailable */ }
     },
-    isDefault: layout.hidden.size === 0 && layout.order.every((k, i) => k === allKeys[i]),
+    isDefault: layout.hidden.size === defaultHidden.length && defaultHidden.every(k => layout.hidden.has(k))
+      && layout.order.every((k, i) => k === allKeys[i]),
   };
 }

@@ -11,7 +11,7 @@ import MultiSelect from '../MultiSelect';
 import ColumnPicker from '../ColumnPicker';
 import { useColumnLayout } from '../../hooks/useColumnLayout';
 import {
-  PROGRAM_STATUSES, EDITABLE_PROGRAM_STATUSES, SO_PROGRAM_TYPES, STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase,
+  PROGRAM_STATUSES, EDITABLE_PROGRAM_STATUSES, PRETRIAL_PROGRAM_TYPES, SO_PROGRAM_TYPES, STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase,
   DEFAULT_CLIENT_FILTERS, SO_ATTENDANCE_LIMIT_MONTHS, isAttendanceOverdue, GROUP_TYPES_BY_PROGRAM,
 } from '../../utils/clients';
 import type { ClientFilters } from '../../utils/clients';
@@ -46,7 +46,7 @@ const getEmptyNewClient = () => ({
   programstatus: 'Active', phase: '', programtype: '', groupid: '',
   address: '', city: '', county: '', state: '', zip: '',
   mainphone: '', altphone: '', emergencycontact: '', emergencycontactphone: '', comments: '',
-  treatmentfee: 0, vouchers: ''
+  treatmentfee: 0, vouchers: '', pretrial: false
 });
 type NewClient = ReturnType<typeof getEmptyNewClient>;
 type FilterKey = 'agent' | 'programtype' | 'phase' | 'currentgroup' | 'status';
@@ -60,7 +60,9 @@ const timeOrNull = (v: unknown) => {
 };
 // The client fields the roster sorts on
 type RosterRow = Partial<Record<'firstname' | 'lastname' | 'docnumber' | 'supervisingagent' | 'programtype' | 'phase' | 'groupname'
-  | 'lastattended' | 'lastpoly' | 'programstatus' | 'accountbalance', string | number | null>>;
+  | 'lastattended' | 'lastpoly' | 'programstatus' | 'accountbalance', string | number | null>> & { pretrial?: boolean | null };
+// Pretrial applies only to Federal SO and Fed Drug Test clients; null for everyone else
+const pretrialValue = (c: RosterRow) => (PRETRIAL_PROGRAM_TYPES.includes(String(c.programtype ?? '')) ? !!c.pretrial : null);
 const byName = (a: RosterRow, b: RosterRow) => `${a.lastname}, ${a.firstname}`.localeCompare(`${b.lastname}, ${b.firstname}`);
 // What each sortable column sorts on, matching what the column shows. null is an empty cell.
 const SORT_VALUES = {
@@ -68,6 +70,8 @@ const SORT_VALUES = {
   doc: (c: RosterRow) => textOrNull(c.docnumber),
   agent: (c: RosterRow) => textOrNull(c.supervisingagent),
   programtype: (c: RosterRow) => textOrNull(c.programtype || 'State SO'),
+  // Pretrial clients first, then the rest of their programs; other programs are empty
+  pretrial: (c: RosterRow) => { const p = pretrialValue(c); return p === null ? null : p ? 0 : 1; },
   // Phase order (see phaseRank), with phases outside it after, alphabetically
   phase: (c: RosterRow) => {
     const p = String(c.phase ?? '').trim();
@@ -83,18 +87,25 @@ const SORT_VALUES = {
 type SortKey = keyof typeof SORT_VALUES;
 
 // Roster columns in their default order. Each column sorts on its own SORT_VALUES entry; the Columns button lets each
-// user hide and reorder them (Full Name always shows).
+// user hide and reorder them (Full Name always shows; the ROSTER_DEFAULT_HIDDEN ones start hidden).
 const ROSTER_COLUMN_LABELS: Record<SortKey, string> = {
-  name: 'Full Name', doc: 'DOC #', agent: 'Agent', programtype: 'Program Type', phase: 'Phase', group: 'Current Group',
+  name: 'Full Name', doc: 'DOC #', agent: 'Agent', programtype: 'Program Type', pretrial: 'Pretrial', phase: 'Phase', group: 'Current Group',
   lastattended: 'Last Attended', lastpoly: 'Last Poly', status: 'Status', balance: 'Balance',
 };
 const ROSTER_COLUMN_KEYS = Object.keys(ROSTER_COLUMN_LABELS) as SortKey[];
+const ROSTER_DEFAULT_HIDDEN: SortKey[] = ['pretrial'];
 /* eslint-disable @typescript-eslint/no-explicit-any -- client rows are untyped throughout App */
 const ROSTER_CELLS: Record<SortKey, (c: any) => ReactNode> = {
   name: c => <td className="p-3 font-medium text-white whitespace-nowrap">{c.lastname}, {c.firstname}</td>,
   doc: c => <td className="p-3 text-slate-400 font-mono text-xs">{c.docnumber}</td>,
   agent: c => <td className="p-3 text-slate-300 text-xs">{c.supervisingagent}</td>,
   programtype: c => <td className="p-3"><span className="bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2 py-0.5 rounded text-xs font-semibold">{c.programtype || 'State SO'}</span></td>,
+  pretrial: c => {
+    const p = pretrialValue(c);
+    return <td className="p-3 text-xs">{p === null ? <span className="text-slate-600">—</span> : p
+      ? <span className="bg-amber-500/10 border border-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-semibold">Pretrial</span>
+      : <span className="text-slate-400">No</span>}</td>;
+  },
   phase: c => <td className="p-3 text-xs"><span className="bg-slate-800 px-2 py-0.5 rounded text-slate-300">{formatPhase(c.programtype, c.phase) || 'N/A'}</span></td>,
   group: c => <td className="p-3 text-slate-300 text-xs">{c.groupname || 'Unassigned'}</td>,
   lastattended: c => (
@@ -133,7 +144,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
   const [showNewClientForm, setShowNewClientForm] = useState(false);
   const [newClient, setNewClient] = useState(getEmptyNewClient);
   const [saving, setSaving] = useState(false);
-  const newClientField = (label: string, key: keyof NewClient, type = 'text', required = false, listId?: string) => (
+  const newClientField = (label: string, key: Exclude<keyof NewClient, 'pretrial'>, type = 'text', required = false, listId?: string) => (
     <div>
       <label className="block text-xs text-slate-400 mb-1">{label}{required ? ' *' : ''}</label>
       <input type={type} required={required} list={listId} value={newClient[key]} onChange={(e) => setNewClient({ ...newClient, [key]: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
@@ -189,6 +200,9 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
       if (!allowed(clientFilters.status, c.programstatus)) return false;
       if (clientFilters.feeoverride === 'active' && (c.activefeeoverride === null || c.activefeeoverride === undefined)) return false;
       if (clientFilters.feeoverride === 'none' && c.activefeeoverride !== null && c.activefeeoverride !== undefined) return false;
+      // Not pretrial: Federal SO and Fed Drug Test clients without the box ticked
+      if (clientFilters.pretrial === 'yes' && pretrialValue(c) !== true) return false;
+      if (clientFilters.pretrial === 'no' && pretrialValue(c) !== false) return false;
 
       return true;
     });
@@ -208,7 +222,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
   });
 
   // Which columns show and in what order, saved in this browser
-  const columns = useColumnLayout('clientRosterColumns', ROSTER_COLUMN_KEYS, ['name']);
+  const columns = useColumnLayout('clientRosterColumns', ROSTER_COLUMN_KEYS, ['name'], ROSTER_DEFAULT_HIDDEN);
 
   // Column sorting: clicking a header sorts by it ascending, clicking again flips the direction
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'name', dir: 1 });
@@ -305,6 +319,17 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
             <option value="none">No override</option>
           </select>
 
+          {/* Only Federal SO and Fed Drug Test clients can be pretrial */}
+          <select
+            value={clientFilters.pretrial}
+            onChange={(e) => setClientFilters({ ...clientFilters, pretrial: e.target.value as ClientFilters['pretrial'] })}
+            className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+          >
+            <option value="">Pretrial: All</option>
+            <option value="yes">Pretrial</option>
+            <option value="no">Not pretrial (Federal SO / Fed Drug Test)</option>
+          </select>
+
           {clientFilterActive && (
             <button
               type="button"
@@ -357,7 +382,8 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                   ...newClient,
                   programtype: programType,
                   phase: SO_PROGRAM_TYPES.includes(programType) ? 'Phase 1 - Weekly' : programType === 'BIP' ? '0' : '',
-                  treatmentfee: programType === 'BIP' ? 35 : (STATE_FEE_PROGRAM_TYPES.includes(programType) ? SO_TREATMENT_FEES['Phase 1 - Weekly'] : 0)
+                  treatmentfee: programType === 'BIP' ? 35 : (STATE_FEE_PROGRAM_TYPES.includes(programType) ? SO_TREATMENT_FEES['Phase 1 - Weekly'] : 0),
+                  pretrial: PRETRIAL_PROGRAM_TYPES.includes(programType) && newClient.pretrial,
                 });
               }} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm">
                 <option value="">Select a program type...</option>
@@ -368,6 +394,12 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                 <option value="Poly Only">Poly Only</option>
                 <option value="Fed Drug Test">Fed Drug Test</option>
               </select>
+              {PRETRIAL_PROGRAM_TYPES.includes(newClient.programtype) && (
+                <label className="mt-2 flex items-center gap-1.5 text-slate-200 text-sm cursor-pointer">
+                  <input type="checkbox" checked={newClient.pretrial} onChange={(e) => setNewClient({ ...newClient, pretrial: e.target.checked })} className="accent-blue-500" />
+                  Pretrial
+                </label>
+              )}
             </div>
 
             {SO_PROGRAM_TYPES.includes(newClient.programtype) && (

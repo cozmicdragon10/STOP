@@ -96,6 +96,7 @@ export interface Clients {
   polyfeepaid: number;
   polyfee: number;
   nopolyrequired: boolean;
+  pretrial: boolean;
   race?: string;
   dateofbirth?: Date | string;
   sex?: string;
