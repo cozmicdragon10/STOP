@@ -121,7 +121,8 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
     const paidNum = Number(accountPaid || 0);
     const newBalance = oldBalance - paidNum + feeNum;
 
-    // Every payment needs a method (Cash or Credit Card). Credit card payments are recorded only; processing comes later.
+    // Every payment needs a method (Cash or Credit Card). Group check-ins and individual sessions take cards through
+    // POST /api/financials/payment, so the payment stands whether or not the attendance is ever recorded.
     if (paidNum > 0 && !['Cash', 'Credit Card'].includes(paymentMethod)) {
         throw new Error(`Choose a payment method for the payment on client ${client}: Cash or Credit Card.`);
     }

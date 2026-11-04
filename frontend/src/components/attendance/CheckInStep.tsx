@@ -14,7 +14,7 @@ const buttonBase = 'px-4 py-2 rounded-lg text-sm font-semibold transition disabl
 const primaryButton = `${buttonBase} bg-blue-600 hover:bg-blue-500 text-white`;
 const secondaryButton = `${buttonBase} bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700`;
 
-function RosterCard({ client, checked, attended, selected, onToggle }: {
+function RosterRow({ client, checked, attended, selected, onToggle }: {
   client: ClientRecord;
   checked: boolean;
   // Already attended this group today, so cannot be checked in again
@@ -33,24 +33,24 @@ function RosterCard({ client, checked, attended, selected, onToggle }: {
       : 'border-slate-700 bg-slate-950 hover:border-slate-500 cursor-pointer';
 
   return (
-    <label className={`flex items-start gap-3 p-3 rounded-lg border transition ${tone}`}>
+    <label className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition ${tone}`}>
       <input
         type="checkbox"
         checked={checked || (selected && !attended && !bipBlocked)}
         disabled={checked || attended || bipBlocked}
         onChange={onToggle}
-        className="mt-1 accent-blue-500"
+        className="accent-blue-500"
       />
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1 flex flex-wrap items-baseline gap-x-3">
         <p className="text-sm font-medium text-white truncate">{client.lastname}, {client.firstname}</p>
-        <p className="text-xs text-slate-400">DOC # {client.docnumber || '—'} · Bal {formatBalance(client.accountbalance)}</p>
-        {checked && <span className="inline-block mt-1 text-[10px] font-semibold uppercase text-emerald-400">Checked in</span>}
-        {!checked && attended && <span className="inline-block mt-1 text-[10px] font-semibold uppercase text-amber-400">Already attended today</span>}
+        {checked && <span className="text-[10px] font-semibold uppercase text-emerald-400">Checked in</span>}
+        {!checked && attended && <span className="text-[10px] font-semibold uppercase text-amber-400">Already attended today</span>}
         {bipBlocked && (
-          <span className="inline-block mt-1 text-[10px] font-semibold uppercase text-amber-400" title={bipCheckInBlockMessage(client.bipcheckinblock, `${client.lastname}, ${client.firstname}`)}>
+          <span className="text-[10px] font-semibold uppercase text-amber-400" title={bipCheckInBlockMessage(client.bipcheckinblock, `${client.lastname}, ${client.firstname}`)}>
             {bipCheckInBlockLabel(client.bipcheckinblock)}
           </span>
         )}
+        <p className="text-xs text-slate-400 sm:ml-auto">DOC # {client.docnumber || '—'} · Bal {formatBalance(client.accountbalance)}</p>
       </div>
     </label>
   );
@@ -58,9 +58,9 @@ function RosterCard({ client, checked, attended, selected, onToggle }: {
 
 function RosterSkeleton() {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" aria-label="Loading clients" aria-busy="true">
+    <div className="space-y-2" aria-label="Loading clients" aria-busy="true">
       {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="animate-pulse h-16 rounded-lg bg-slate-800/60" />
+        <div key={i} className="animate-pulse h-10 rounded-lg bg-slate-800/60" />
       ))}
     </div>
   );
@@ -128,9 +128,9 @@ export default function CheckInStep({ group, wf, onOpenSearch }: Props) {
             No clients are currently assigned to {group.groupname}. Use “Check In Client From Another Group” to add someone to this session.
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-2">
             {wf.roster.map(c => (
-              <RosterCard
+              <RosterRow
                 key={c.clientid}
                 client={c}
                 checked={wf.checkedInIds.has(c.clientid)}

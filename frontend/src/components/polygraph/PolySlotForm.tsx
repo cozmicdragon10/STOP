@@ -32,7 +32,7 @@ export default function PolySlotForm({ role, employees, onSuccess, onError, onCr
   const [polyAddress, setPolyAddress] = useState('123 Main St, OKC');
   const [polyDate, setPolyDate] = useState(() => getLocalDateString());
   const [polyTime, setPolyTime] = useState(() => getDefaultPolyTime());
-  const [polyExaminer, setPolyExaminer] = useState('jvance@chandlercbt.com');
+  const [polyExaminer, setPolyExaminer] = useState('');
   const [polyType, setPolyType] = useState('Maintenance');
   const [saving, setSaving] = useState(false);
 

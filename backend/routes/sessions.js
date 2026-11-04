@@ -276,6 +276,8 @@ const checkIndividualSession = async (db, body, viewer) => {
     if (paymentNum > 0 && !['Cash', 'Credit Card'].includes(paymentMethod)) return { error: 'Choose a payment method: Cash or Credit Card.' };
     // Assessments are paid in cash only
     if (paymentNum > 0 && category === 'Assessment' && paymentMethod !== 'Cash') return { error: 'Assessments can only be paid in cash.' };
+    // Card payments are applied to the account when processed, so a session never records one
+    if (paymentNum > 0 && paymentMethod === 'Credit Card') return { error: 'Press Process Payment to apply the card payment, or clear the amount.' };
     const typeRes = await db.query('SELECT Category, Name, Fee, Kind, BipOnly, SoOnly, LateFee FROM SessionTypes WHERE SessionTypeId = $1', [sessionTypeId]);
     const type = typeRes.rows[0];
     if (!type || type.category !== category) return { error: `Choose ${category === 'Assessment' ? 'an assessment' : 'an individual session'} type from the price list.` };
@@ -311,7 +313,7 @@ const checkIndividualSession = async (db, body, viewer) => {
     };
 };
 
-// Saves a session as open (new, or an update of openSessionId). Nothing is charged until it is closed.
+// Saves a session as open (new, or an update of openSessionId). The fee is not charged until it is closed.
 router.put('/api/individual-sessions/open', async (req, res) => {
     try {
         const { openSessionId, comments, paymentComments, user } = req.body;

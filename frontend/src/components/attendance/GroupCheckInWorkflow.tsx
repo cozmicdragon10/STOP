@@ -293,7 +293,8 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
           onCancel={wf.cancelCheckIn}
           onSuccess={onSuccess}
           onError={onError}
-          onProcessed={onSaved}
+          // The payment is already on the account, so the roster must show it even if this check-in is canceled
+          onProcessed={() => { onSaved(); wf.reloadRoster(); }}
         />
       )}
     </div>

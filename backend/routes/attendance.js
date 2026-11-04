@@ -75,6 +75,11 @@ router.post('/api/attendance/batch', async (req, res) => {
         return res.status(400).json({ error: 'The same client cannot be checked in twice in one session.' });
     }
 
+    // Card payments are applied to the account when processed at check-in, so closing a group never records one
+    if (entries.some(e => e.paymentMethod === 'Credit Card' && Number(e.accountPaid) > 0)) {
+        return res.status(400).json({ error: 'A card payment on this sheet was not processed. Process it at check-in, or remove the client and check them in again.' });
+    }
+
     const clientDb = await pool.connect();
     try {
         await clientDb.query('BEGIN');
