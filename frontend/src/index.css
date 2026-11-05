@@ -61,3 +61,110 @@
 :root[data-theme="light"] .\[color-scheme\:dark\] {
   color-scheme: light;
 }
+
+/*
+  Color blind settings. Like light mode, these swap palette colors rather than restyling components, so every status
+  color follows. Status colors were chosen to stay furthest apart under simulated color blindness. Red and rose keep
+  their hue; green, amber and blue move. Light mode needs its own darker text shades, so it gets a second block for each.
+*/
+:root[data-color-vision="red-green"] {
+  --color-blue-100: oklch(93% 0.034 272.788);
+  --color-blue-300: oklch(78.5% 0.115 274.713);
+  --color-blue-400: oklch(67.3% 0.182 276.935);
+  --color-blue-500: oklch(58.5% 0.233 277.117);
+  --color-blue-600: oklch(51.1% 0.262 276.966);
+  --color-emerald-200: oklch(91.7% 0.08 205.041);
+  --color-emerald-300: oklch(86.5% 0.127 207.078);
+  --color-emerald-400: oklch(78.9% 0.154 211.53);
+  --color-emerald-500: oklch(71.5% 0.143 215.221);
+  --color-emerald-600: oklch(60.9% 0.126 221.723);
+  --color-emerald-950: oklch(30.2% 0.056 229.695);
+  --color-amber-300: oklch(90.5% 0.182 98.111);
+  --color-amber-400: oklch(85.2% 0.199 91.936);
+  --color-amber-500: oklch(79.5% 0.184 86.047);
+  --color-amber-600: oklch(68.1% 0.162 75.834);
+}
+
+:root[data-color-vision="blue-yellow"] {
+  --color-emerald-200: oklch(93.8% 0.127 124.321);
+  --color-emerald-300: oklch(89.7% 0.196 126.665);
+  --color-emerald-400: oklch(84.1% 0.238 128.85);
+  --color-emerald-500: oklch(64.8% 0.2 131.684);
+  --color-emerald-600: oklch(53.2% 0.157 131.589);
+  --color-emerald-950: oklch(27.4% 0.072 132.109);
+  --color-amber-300: oklch(83.3% 0.145 321.434);
+  --color-amber-400: oklch(74% 0.238 322.16);
+  --color-amber-500: oklch(66.7% 0.295 322.15);
+  --color-amber-600: oklch(59.1% 0.293 322.896);
+}
+
+:root[data-theme="light"][data-color-vision="red-green"] {
+  --color-blue-100: oklch(39.8% 0.195 277.366);
+  --color-blue-300: oklch(45.7% 0.24 277.023);
+  --color-blue-400: oklch(51.1% 0.262 276.966);
+  --color-emerald-200: oklch(45% 0.085 224.283);
+  --color-emerald-300: oklch(52% 0.105 223.128);
+  --color-emerald-400: oklch(60.9% 0.126 221.723);
+  --color-amber-300: oklch(55.4% 0.135 66.442);
+  --color-amber-400: oklch(55.4% 0.135 66.442);
+  /* Darker red keeps it apart from the amber, which can't get lighter and stay readable on white */
+  --color-red-200: oklch(39.6% 0.141 25.723);
+  --color-red-300: oklch(44.4% 0.177 26.899);
+  --color-red-400: oklch(44.4% 0.177 26.899);
+}
+
+:root[data-theme="light"][data-color-vision="blue-yellow"] {
+  --color-emerald-200: oklch(45.3% 0.124 130.933);
+  --color-emerald-300: oklch(53.2% 0.157 131.589);
+  --color-emerald-400: oklch(53.2% 0.157 131.589);
+  --color-amber-300: oklch(51.8% 0.253 323.949);
+  --color-amber-400: oklch(51.8% 0.253 323.949);
+}
+
+/*
+  Custom colors. The four --custom-* colors are set by useTheme from the Admin tab. The picked color is used as is for text
+  on dark backgrounds; the other shades are mixed from it, and light mode darkens the text shades to stay readable on white.
+  Rose follows the problem color here so Delete buttons and errors change with it.
+*/
+:root[data-color-vision="custom"] {
+  --color-emerald-200: color-mix(in oklab, var(--custom-success) 55%, white);
+  --color-red-200: color-mix(in oklab, var(--custom-problem) 55%, white);
+  --color-blue-100: color-mix(in oklab, var(--custom-info) 35%, white);
+  --color-emerald-300: color-mix(in oklab, var(--custom-success) 75%, white);
+  --color-emerald-400: var(--custom-success);
+  --color-emerald-500: var(--custom-success);
+  --color-emerald-600: color-mix(in oklab, var(--custom-success) 75%, black);
+  --color-amber-300: color-mix(in oklab, var(--custom-warning) 75%, white);
+  --color-amber-400: var(--custom-warning);
+  --color-amber-500: var(--custom-warning);
+  --color-amber-600: color-mix(in oklab, var(--custom-warning) 75%, black);
+  --color-red-300: color-mix(in oklab, var(--custom-problem) 75%, white);
+  --color-red-400: var(--custom-problem);
+  --color-red-500: var(--custom-problem);
+  --color-red-600: color-mix(in oklab, var(--custom-problem) 75%, black);
+  --color-blue-300: color-mix(in oklab, var(--custom-info) 75%, white);
+  --color-blue-400: var(--custom-info);
+  --color-blue-500: var(--custom-info);
+  --color-blue-600: color-mix(in oklab, var(--custom-info) 75%, black);
+  --color-emerald-950: color-mix(in oklab, var(--custom-success) 20%, black);
+  --color-rose-300: color-mix(in oklab, var(--custom-problem) 75%, white);
+  --color-rose-500: var(--custom-problem);
+  --color-rose-800: color-mix(in oklab, var(--custom-problem) 50%, black);
+  --color-rose-900: color-mix(in oklab, var(--custom-problem) 35%, black);
+  --color-rose-950: color-mix(in oklab, var(--custom-problem) 20%, black);
+}
+
+:root[data-theme="light"][data-color-vision="custom"] {
+  --color-emerald-200: color-mix(in oklab, var(--custom-success) 50%, black);
+  --color-emerald-300: color-mix(in oklab, var(--custom-success) 65%, black);
+  --color-emerald-400: color-mix(in oklab, var(--custom-success) 75%, black);
+  --color-red-200: color-mix(in oklab, var(--custom-problem) 50%, black);
+  --color-red-300: color-mix(in oklab, var(--custom-problem) 65%, black);
+  --color-red-400: color-mix(in oklab, var(--custom-problem) 75%, black);
+  --color-blue-100: color-mix(in oklab, var(--custom-info) 50%, black);
+  --color-blue-300: color-mix(in oklab, var(--custom-info) 65%, black);
+  --color-blue-400: color-mix(in oklab, var(--custom-info) 75%, black);
+  --color-amber-300: color-mix(in oklab, var(--custom-warning) 70%, black);
+  --color-amber-400: color-mix(in oklab, var(--custom-warning) 70%, black);
+  --color-rose-300: color-mix(in oklab, var(--custom-problem) 65%, black);
+}

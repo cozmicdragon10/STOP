@@ -147,7 +147,7 @@ export default function ClientLedger({ client, role, userEmail, financials, book
         >
           <SlidersHorizontal size={13} /> Filters
           {activeFilterCount > 0 && (
-            <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{activeFilterCount}</span>
+            <span className="bg-blue-600 text-white rounded-full px-1.5 text-[0.625rem] leading-4">{activeFilterCount}</span>
           )}
         </button>
         <span className="ml-auto text-xs text-slate-500">
@@ -219,12 +219,12 @@ export default function ClientLedger({ client, role, userEmail, financials, book
                     <div>
                       <p className="font-semibold text-white">
                         {fin.feetype || fin.type}
-                        <span className={`ml-2 align-middle text-[10px] uppercase tracking-wide px-2 py-0.5 rounded border ${tone.badge}`}>{badge}</span>
+                        <span className={`ml-2 align-middle text-[0.625rem] uppercase tracking-wide px-2 py-0.5 rounded border ${tone.badge}`}>{badge}</span>
                         {!charge && fin.paymentmethod && (
-                          <span className="ml-2 align-middle text-[10px] uppercase tracking-wide bg-slate-800 text-slate-300 px-2 py-0.5 rounded">{fin.paymentmethod}</span>
+                          <span className="ml-2 align-middle text-[0.625rem] uppercase tracking-wide bg-slate-800 text-slate-300 px-2 py-0.5 rounded">{fin.paymentmethod}</span>
                         )}
                         {fin.disputestatus && (
-                          <span className={`ml-2 align-middle text-[10px] uppercase tracking-wide px-2 py-0.5 rounded border ${disputeOpen ? 'text-amber-400 bg-amber-500/10 border-amber-500/30' : fin.disputestatus === 'Won' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-red-400 bg-red-500/10 border-red-500/30'}`}>Dispute {fin.disputestatus}</span>
+                          <span className={`ml-2 align-middle text-[0.625rem] uppercase tracking-wide px-2 py-0.5 rounded border ${disputeOpen ? 'text-amber-400 bg-amber-500/10 border-amber-500/30' : fin.disputestatus === 'Won' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-red-400 bg-red-500/10 border-red-500/30'}`}>Dispute {fin.disputestatus}</span>
                         )}
                       </p>
                       <p className="text-xs text-slate-400">{new Date(fin.date).toLocaleString()} — {fin.comments}</p>

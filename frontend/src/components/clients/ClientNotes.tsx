@@ -157,7 +157,7 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
         >
           <SlidersHorizontal size={13} /> Filters
           {activeFilterCount > 0 && (
-            <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{activeFilterCount}</span>
+            <span className="bg-blue-600 text-white rounded-full px-1.5 text-[0.625rem] leading-4">{activeFilterCount}</span>
           )}
         </button>
         <span className="ml-auto text-xs text-slate-500">
@@ -222,12 +222,12 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
               <span className="flex items-center gap-2">
                 <span className="text-xs text-blue-400 font-semibold">{caseNoteLabel(n)}</span>
                 {n.approvalstatus === 'Pending' && (
-                  <span className="text-[10px] uppercase font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded">Awaiting approval</span>
+                  <span className="text-[0.625rem] uppercase font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded">Awaiting approval</span>
                 )}
                 {n.approvalstatus === 'Pending' && isBusinessAdmin && editingNoteId !== n.noteid && (
                   <span className="flex gap-1.5">
-                    <button type="button" disabled={reviewingId === n.noteid} onClick={() => handleReview(n.noteid, 'approve')} className="text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-2 py-0.5 rounded">Approve</button>
-                    <button type="button" disabled={reviewingId === n.noteid} onClick={() => handleReview(n.noteid, 'deny')} className="text-[11px] font-semibold bg-slate-800 hover:bg-red-600 border border-slate-700 disabled:opacity-50 text-slate-200 px-2 py-0.5 rounded">Deny</button>
+                    <button type="button" disabled={reviewingId === n.noteid} onClick={() => handleReview(n.noteid, 'approve')} className="text-[0.6875rem] font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-2 py-0.5 rounded">Approve</button>
+                    <button type="button" disabled={reviewingId === n.noteid} onClick={() => handleReview(n.noteid, 'deny')} className="text-[0.6875rem] font-semibold bg-slate-800 hover:bg-red-600 border border-slate-700 disabled:opacity-50 text-slate-200 px-2 py-0.5 rounded">Deny</button>
                   </span>
                 )}
               </span>

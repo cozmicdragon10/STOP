@@ -1051,10 +1051,10 @@ export default function App() {
                                 <p className="text-xs text-slate-400">
                                   {c.sessiondate === todayLocal() ? 'Today' : new Date(`${c.sessiondate}T00:00:00`).toLocaleDateString()}{(c.sessionnumber ?? 1) > 1 ? ` · Session ${c.sessionnumber}` : ''} · {c.entries.length} client(s)
                                 </p>
-                                <p className="text-[11px] text-slate-500 truncate">
+                                <p className="text-[0.6875rem] text-slate-500 truncate">
                                   Closed{c.closedon ? ` ${new Date(c.closedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}{c.closedby ? ` by ${c.closedby}` : ''}
                                 </p>
-                                {c.openedby && c.openedby !== c.closedby && <p className="text-[11px] text-slate-500 truncate">Opened by {c.openedby}</p>}
+                                {c.openedby && c.openedby !== c.closedby && <p className="text-[0.6875rem] text-slate-500 truncate">Opened by {c.openedby}</p>}
                               </button>
                               {expanded && (
                                 <div className="border-t border-slate-800 px-3 py-2 text-xs">
@@ -1106,7 +1106,7 @@ export default function App() {
                             <p className={`text-xs ${o.sessiondate === todayLocal() ? 'text-slate-400' : 'text-amber-400'}`}>
                               {o.sessiondate === todayLocal() ? 'Today' : new Date(`${o.sessiondate}T00:00:00`).toLocaleDateString()}{(o.sessionnumber ?? 1) > 1 ? ` · Session ${o.sessionnumber}` : ''} · {o.entries.length} client(s)
                             </p>
-                            <p className="text-[11px] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${o.createdby}` : ''}</p>
+                            <p className="text-[0.6875rem] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${o.createdby}` : ''}</p>
                           </div>
                           <button
                             type="button"

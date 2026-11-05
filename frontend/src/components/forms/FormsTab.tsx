@@ -160,7 +160,7 @@ export default function FormsTab({ role, onSuccess }: Props) {
           <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()} className="h-[34px] bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 rounded-lg text-xs font-semibold flex items-center gap-1.5">
             <Upload size={14} /> {uploading ? 'Uploading…' : 'Upload Forms'}
           </button>
-          <p className="text-[11px] text-slate-500 basis-full">Up to 25 MB each. PDFs print straight from here; Word and other files download to print.</p>
+          <p className="text-[0.6875rem] text-slate-500 basis-full">Up to 25 MB each. PDFs print straight from here; Word and other files download to print.</p>
         </div>
       )}
 
@@ -195,7 +195,7 @@ export default function FormsTab({ role, onSuccess }: Props) {
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-white truncate">{d.filename}</p>
                     {d.description && <p className="text-xs text-slate-400">{d.description}</p>}
-                    <p className="text-[11px] text-slate-500">{formatFileSize(d.filesize)} · Added {new Date(d.uploadedon).toLocaleDateString()}{d.uploadedby ? ` by ${employeeLabel(d.uploadedby)}` : ''}</p>
+                    <p className="text-[0.6875rem] text-slate-500">{formatFileSize(d.filesize)} · Added {new Date(d.uploadedon).toLocaleDateString()}{d.uploadedby ? ` by ${employeeLabel(d.uploadedby)}` : ''}</p>
                   </div>
                   <div className="flex flex-wrap gap-1.5 shrink-0">
                     <button type="button" disabled={!canView(d)} title={canView(d) ? 'Open in a new tab' : 'This file type downloads instead'} onClick={() => handleOpen(d, 'view')} className={iconButton}><Eye size={13} /> View</button>

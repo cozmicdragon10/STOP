@@ -77,7 +77,7 @@ export default function PendingNotesButton({ userEmail, refreshKey, onOpenClient
         className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border ${notes.length > 0 ? 'bg-amber-500/10 border-amber-500/50 text-amber-300 hover:bg-amber-500/20' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
       >
         <ClipboardCheck size={14} /> Notes to Approve
-        <span className={`rounded-full px-1.5 text-[10px] leading-4 ${notes.length > 0 ? 'bg-amber-500 text-slate-950' : 'bg-slate-700 text-slate-300'}`}>{loadError ? '!' : notes.length}</span>
+        <span className={`rounded-full px-1.5 text-[0.625rem] leading-4 ${notes.length > 0 ? 'bg-amber-500 text-slate-950' : 'bg-slate-700 text-slate-300'}`}>{loadError ? '!' : notes.length}</span>
       </button>
 
       {open && (
@@ -120,7 +120,7 @@ export default function PendingNotesButton({ userEmail, refreshKey, onOpenClient
                         />
                         {rowError?.noteId === n.noteid && <p className="text-xs text-red-400">{rowError.message}</p>}
                         <div className="flex justify-end items-center gap-2">
-                          {drafts[n.noteid] !== undefined && drafts[n.noteid] !== n.comments && <span className="mr-auto text-[11px] text-slate-500 italic">Edited; your changes are saved when you approve.</span>}
+                          {drafts[n.noteid] !== undefined && drafts[n.noteid] !== n.comments && <span className="mr-auto text-[0.6875rem] text-slate-500 italic">Edited; your changes are saved when you approve.</span>}
                           <button type="button" disabled={busy === n.noteid} onClick={() => review(n, 'deny')} className="bg-slate-800 hover:bg-red-600 border border-slate-700 disabled:opacity-50 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Deny</button>
                           <button type="button" disabled={busy === n.noteid || !text.trim()} onClick={() => review(n, 'approve')} className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">{busy === n.noteid ? 'Saving…' : 'Approve'}</button>
                         </div>

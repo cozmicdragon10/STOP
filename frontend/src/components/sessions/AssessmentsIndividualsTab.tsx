@@ -431,7 +431,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                 ) : (
                   <p className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-slate-300">{listFee !== null ? money(listFee) : '—'}</p>
                 )}
-                <p className="text-[11px] text-slate-500 mt-1">{isAdmin ? 'From the price list; you can change it for this session.' : 'From the price list.'}</p>
+                <p className="text-[0.6875rem] text-slate-500 mt-1">{isAdmin ? 'From the price list; you can change it for this session.' : 'From the price list.'}</p>
               </div>
               {/* An assessment's payment is taken when it is reviewed and closed */}
               {!cashOnly && (
@@ -619,7 +619,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                         <p className="text-sm font-semibold text-white truncate">{o.lastname}, {o.firstname}</p>
                         <p className="text-xs text-slate-300 truncate">{o.category} · {o.sessiontypename}</p>
                         <p className={`text-xs ${o.sessiondate === todayLocal() ? 'text-slate-400' : 'text-amber-400'}`}>{formatDay(o.sessiondate)}{o.provider ? ` · ${o.provider}` : ''}</p>
-                        <p className="text-[11px] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${employeeLabel(o.createdby)}` : ''}</p>
+                        <p className="text-[0.6875rem] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${employeeLabel(o.createdby)}` : ''}</p>
                       </div>
                       <button type="button" onClick={() => discard(o)} className="text-slate-500 hover:text-red-400 p-1 rounded shrink-0" aria-label={`Discard open ${o.category.toLowerCase()} for ${o.lastname}, ${o.firstname}`}>
                         <Trash2 size={14} />
@@ -653,7 +653,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                           <div className="flex justify-between"><span className="text-slate-400">Paid</span><span className="text-slate-200">{Number(c.payment) > 0 ? `${money(Number(c.payment))} ${c.paymentmethod || ''}`.trim() : 'No payment'}</span></div>
                           {c.paymentcomments && <p className="text-slate-400 pt-1"><span className="text-slate-500">Payment:</span> {c.paymentcomments}</p>}
                           {c.comments && <p className="text-slate-400 pt-1"><span className="text-slate-500">{c.category === 'Assessment' ? 'Assessment' : 'Session'}:</span> {c.comments}</p>}
-                          <p className="text-[11px] text-slate-500 pt-1">
+                          <p className="text-[0.6875rem] text-slate-500 pt-1">
                             Closed{c.closedon ? ` ${new Date(c.closedon).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}` : ''}{c.closedby ? ` by ${c.closedby}` : ''}
                             {c.openedby && c.openedby !== c.closedby ? ` · Opened by ${c.openedby}` : ''}
                           </p>

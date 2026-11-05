@@ -281,7 +281,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
             >
               <SlidersHorizontal size={13} /> Filters
               {changedClientFilterCount > 0 && (
-                <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{changedClientFilterCount}</span>
+                <span className="bg-blue-600 text-white rounded-full px-1.5 text-[0.625rem] leading-4">{changedClientFilterCount}</span>
               )}
             </button>
             <button
@@ -291,7 +291,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
               title={hideMode ? 'Stop hiding and show every client again' : 'Hide clients from view while you look through the list (just for you, until you turn this off)'}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border ${hideMode ? 'bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
             >
-              {hideMode ? <><Eye size={13} /> Show All{hiddenIds.size > 0 && <span className="bg-amber-500 text-slate-950 rounded-full px-1.5 text-[10px] leading-4">{hiddenIds.size} hidden</span>}</> : <><EyeOff size={13} /> Hide Clients</>}
+              {hideMode ? <><Eye size={13} /> Show All{hiddenIds.size > 0 && <span className="bg-amber-500 text-slate-950 rounded-full px-1.5 text-[0.625rem] leading-4">{hiddenIds.size} hidden</span>}</> : <><EyeOff size={13} /> Hide Clients</>}
             </button>
             <ColumnPicker layout={columns} labels={ROSTER_COLUMN_LABELS} />
             <span className="text-xs bg-slate-800 px-3 py-1 rounded-full text-slate-300 whitespace-nowrap">

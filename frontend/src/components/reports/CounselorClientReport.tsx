@@ -347,7 +347,7 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
                       <td className="p-3 font-medium text-white whitespace-nowrap">
                         <span className="inline-flex items-center gap-1.5">
                           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}{group.groupname}
-                          {group.active === false && <span className="text-[10px] uppercase bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded">Inactive</span>}
+                          {group.active === false && <span className="text-[0.625rem] uppercase bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded">Inactive</span>}
                         </span>
                       </td>
                       <td className="p-3 text-slate-300 whitespace-nowrap">{c.name}</td>

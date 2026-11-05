@@ -35,30 +35,30 @@ export default function RecordFilterBar({ search, onSearch, searchPlaceholder, s
   return (
     <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2">
       <div className="flex flex-wrap items-end gap-2">
-        <label className="text-[11px] text-slate-400 flex-1 min-w-[10rem]">Search
+        <label className="text-[0.6875rem] text-slate-400 flex-1 min-w-[10rem]">Search
           <input type="search" value={search} onChange={(e) => onSearch(e.target.value)} placeholder={searchPlaceholder} className={`${control} w-full placeholder-slate-500`} />
         </label>
         {selects.map(s => (
-          <label key={s.label} className="text-[11px] text-slate-400">{s.label}
+          <label key={s.label} className="text-[0.6875rem] text-slate-400">{s.label}
             <select value={s.value} onChange={(e) => s.onChange(e.target.value)} className={control}>
               <option value="">{s.allLabel}</option>
               {s.options.map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           </label>
         ))}
-        <label className="text-[11px] text-slate-400">From
+        <label className="text-[0.6875rem] text-slate-400">From
           <input type="date" value={from} max={to || undefined} onChange={(e) => onFrom(e.target.value)} className={control} />
         </label>
-        <label className="text-[11px] text-slate-400">To
+        <label className="text-[0.6875rem] text-slate-400">To
           <input type="date" value={to} min={from || undefined} onChange={(e) => onTo(e.target.value)} className={control} />
         </label>
-        <label className="text-[11px] text-slate-400">Sort
+        <label className="text-[0.6875rem] text-slate-400">Sort
           <select value={sort} onChange={(e) => onSort(e.target.value)} className={control}>
             {sortOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </label>
       </div>
-      <div className="flex justify-between items-center text-[11px] text-slate-500">
+      <div className="flex justify-between items-center text-[0.6875rem] text-slate-500">
         <span>Showing {shown} of {total}</span>
         {active && (
           <button type="button" onClick={onClear} className="flex items-center gap-1 text-slate-400 hover:text-white">

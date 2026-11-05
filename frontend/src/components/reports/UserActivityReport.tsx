@@ -235,19 +235,19 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
                 </td>
                 <td className="p-3 whitespace-nowrap">
                   <span className="text-white font-medium">{clientOf(r)}</span>
-                  {r.docnumber && <span className="block text-[11px] text-slate-500 font-mono">{r.docnumber}</span>}
+                  {r.docnumber && <span className="block text-[0.6875rem] text-slate-500 font-mono">{r.docnumber}</span>}
                 </td>
                 <td className="p-3 text-right whitespace-nowrap">
                   {r.kind === 'Payment' && (
                     <>
                       <span className={signedAmount(r) < 0 ? 'text-red-400' : 'text-emerald-400'}>{money(signedAmount(r))}</span>
-                      <span className="block text-[11px] text-slate-500">{[r.paymentmethod, r.feetype].filter(Boolean).join(' · ')}</span>
+                      <span className="block text-[0.6875rem] text-slate-500">{[r.paymentmethod, r.feetype].filter(Boolean).join(' · ')}</span>
                     </>
                   )}
                 </td>
                 <td className="p-3 text-slate-300 min-w-[16rem] whitespace-pre-wrap break-words">
                   {r.comments || <span className="text-slate-500">—</span>}
-                  {r.editedon && <span className="block text-[11px] text-slate-500">Edited {formatWhen(r.editedon)}{r.editedby ? ` by ${employeeLabel(r.editedby)}` : ''}</span>}
+                  {r.editedon && <span className="block text-[0.6875rem] text-slate-500">Edited {formatWhen(r.editedon)}{r.editedby ? ` by ${employeeLabel(r.editedby)}` : ''}</span>}
                 </td>
               </tr>
               )),
@@ -260,7 +260,7 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
           </tbody>
         </table>
       </div>
-      <p className="text-[11px] text-slate-500">Payments entered before this report was added show "{NOT_RECORDED}" for who entered them unless they were taken at a check-in.</p>
+      <p className="text-[0.6875rem] text-slate-500">Payments entered before this report was added show "{NOT_RECORDED}" for who entered them unless they were taken at a check-in.</p>
     </div>
   );
 }

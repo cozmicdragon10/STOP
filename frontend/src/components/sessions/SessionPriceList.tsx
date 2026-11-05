@@ -162,14 +162,14 @@ export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Prop
                   <div className="min-w-0">
                     <p className={`font-semibold truncate ${t.active ? 'text-white' : 'text-slate-500'}`}>{t.name}</p>
                     {(t.biponly || t.soonly || t.kind !== 'Standard') && (
-                      <p className="text-[11px] text-slate-500 truncate">{[t.biponly && 'BIP only', t.soonly && 'SO only',t.kind === 'BIP Intake' && 'Starts reinstate clock', t.kind === 'BIP Reinstate' && 'Reinstate'].filter(Boolean).join(' · ')}</p>
+                      <p className="text-[0.6875rem] text-slate-500 truncate">{[t.biponly && 'BIP only', t.soonly && 'SO only',t.kind === 'BIP Intake' && 'Starts reinstate clock', t.kind === 'BIP Reinstate' && 'Reinstate'].filter(Boolean).join(' · ')}</p>
                     )}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {!t.active && <span className="bg-slate-700/50 text-slate-400 px-2 py-0.5 rounded font-semibold">Inactive</span>}
                     <span className="text-emerald-400 font-semibold text-right">
                       ${Number(t.fee).toFixed(2)}
-                      {t.kind === 'BIP Reinstate' && t.latefee !== null && <span className="block text-[11px] font-normal text-slate-400">${Number(t.latefee).toFixed(2)} after 6 mo.</span>}
+                      {t.kind === 'BIP Reinstate' && t.latefee !== null && <span className="block text-[0.6875rem] font-normal text-slate-400">${Number(t.latefee).toFixed(2)} after 6 mo.</span>}
                     </span>
                     {canEdit && (
                       <button type="button" onClick={() => { setError(''); setEditing({ id: t.sessiontypeid, category: t.category, name: t.name, fee: Number(t.fee).toFixed(2), active: t.active, kind: t.kind, bipOnly: t.biponly, soOnly: t.soonly, lateFee: t.latefee !== null ? Number(t.latefee).toFixed(2) : '' }); }} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1 rounded font-semibold">Edit</button>

@@ -36,11 +36,11 @@ export default function ColumnPicker<K extends string>({ layout, labels }: Props
         className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border ${open || !layout.isDefault ? 'bg-slate-700 border-slate-600 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
       >
         <Columns3 size={13} /> Columns
-        {hiddenCount > 0 && <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{hiddenCount} off</span>}
+        {hiddenCount > 0 && <span className="bg-blue-600 text-white rounded-full px-1.5 text-[0.625rem] leading-4">{hiddenCount} off</span>}
       </button>
       {open && (
         <div className="absolute right-0 z-30 mt-1 w-64 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-2">
-          <p className="px-1 pb-2 text-[11px] text-slate-400">Tick to show a column. Drag or use the arrows to change the order.</p>
+          <p className="px-1 pb-2 text-[0.6875rem] text-slate-400">Tick to show a column. Drag or use the arrows to change the order.</p>
           <ul className="space-y-0.5">
             {layout.order.map((key, i) => (
               <li

@@ -108,8 +108,8 @@ export default function ClientSearchModal({ clients, checkedInIds, attendedIds, 
                       <p className="text-white truncate">{c.lastname}, {c.firstname}</p>
                       <p className="text-xs text-slate-400 truncate">DOC # {c.docnumber || '—'} · {c.groupname || 'Unassigned'}</p>
                     </div>
-                    {onSheet && <span className="text-[10px] font-semibold uppercase text-emerald-400">On sheet</span>}
-                    {attended && <span className="text-[10px] font-semibold uppercase text-amber-400">Attended today</span>}
+                    {onSheet && <span className="text-[0.625rem] font-semibold uppercase text-emerald-400">On sheet</span>}
+                    {attended && <span className="text-[0.625rem] font-semibold uppercase text-amber-400">Attended today</span>}
                   </label>
                 </li>
               );

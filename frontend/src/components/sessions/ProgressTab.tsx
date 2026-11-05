@@ -144,7 +144,7 @@ export default function ProgressTab({ clientId, role, userEmail, onChanged, onSu
             {progress.open.map(o => (
               <li key={o.opensessionid} className="flex justify-between items-start gap-3 px-3 py-2 text-xs">
                 <div className="min-w-0">
-                  <p className="text-white font-semibold">{o.name} <span className="ml-1 bg-amber-500/10 text-amber-300 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase">Open</span></p>
+                  <p className="text-white font-semibold">{o.name} <span className="ml-1 bg-amber-500/10 text-amber-300 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold uppercase">Open</span></p>
                   <p className="text-slate-400">{formatDay(o.date)}{o.provider ? ` · ${o.provider}` : ''}</p>
                 </div>
                 <span className="text-slate-400 shrink-0">Fee {money(o.fee)}</span>
@@ -168,7 +168,7 @@ export default function ProgressTab({ clientId, role, userEmail, onChanged, onSu
                   <div className="min-w-0 space-y-0.5">
                     <p className="text-white font-semibold">
                       {a.name}
-                      {badge && <span className="ml-2 bg-slate-700/50 text-slate-300 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase">{badge}</span>}
+                      {badge && <span className="ml-2 bg-slate-700/50 text-slate-300 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold uppercase">{badge}</span>}
                     </p>
                     <p className="text-slate-400">{formatDay(a.date)}{a.provider ? ` · ${a.provider}` : ''}</p>
                     {a.notes && <p className="text-slate-500">{a.notes}</p>}

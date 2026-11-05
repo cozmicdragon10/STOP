@@ -100,7 +100,7 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
         >
           <SlidersHorizontal size={13} /> Filters
           {activeFilterCount > 0 && (
-            <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{activeFilterCount}</span>
+            <span className="bg-blue-600 text-white rounded-full px-1.5 text-[0.625rem] leading-4">{activeFilterCount}</span>
           )}
         </button>
         <span className="ml-auto text-xs text-slate-500">
@@ -159,7 +159,7 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                   <div className="shrink-0 w-16 border-r border-slate-800 pr-4">
                     <p className="font-bold text-white leading-tight">{formatLogMonthDay(att.date)}</p>
-                    <p className="text-[11px] text-slate-500">{formatLogYear(att.date)}</p>
+                    <p className="text-[0.6875rem] text-slate-500">{formatLogYear(att.date)}</p>
                   </div>
                   <div className="flex-1 min-w-[10rem]">
                     <p className="font-semibold text-white truncate">
@@ -170,19 +170,19 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
                   </div>
                   <div className="shrink-0 flex gap-5 text-xs text-right">
                     <div>
-                      <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Fee</p>
+                      <p className="text-slate-500 uppercase tracking-wide text-[0.625rem] font-semibold">Fee</p>
                       <p className="text-red-400 font-semibold">{signedMoney(c.fee)}</p>
                     </div>
                     <div>
-                      <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Paid</p>
+                      <p className="text-slate-500 uppercase tracking-wide text-[0.625rem] font-semibold">Paid</p>
                       <p className="text-emerald-400 font-semibold">{signedMoney(c.paid)}</p>
                     </div>
                     <div>
-                      <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Change</p>
+                      <p className="text-slate-500 uppercase tracking-wide text-[0.625rem] font-semibold">Change</p>
                       <p className={`font-semibold ${change > 0 ? 'text-emerald-400' : change < 0 ? 'text-red-400' : 'text-slate-400'}`}>{change > 0 ? '+' : ''}{signedMoney(change)}</p>
                     </div>
                     <div>
-                      <p className="text-slate-500 uppercase tracking-wide text-[10px] font-semibold">Balance</p>
+                      <p className="text-slate-500 uppercase tracking-wide text-[0.625rem] font-semibold">Balance</p>
                       <p className="whitespace-nowrap">
                         <span className="text-slate-400">{signedMoney(c.before)} → </span>
                         <span className={`font-semibold ${c.after < 0 ? 'text-red-400' : 'text-white'}`}>{signedMoney(c.after)}</span>

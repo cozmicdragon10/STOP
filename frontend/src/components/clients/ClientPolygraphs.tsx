@@ -146,7 +146,7 @@ export default function ClientPolygraphs({
             type="button"
             disabled={noPolySaving}
             onClick={() => setNoPolyOverride(o => !o)}
-            className="shrink-0 text-[11px] font-semibold px-2 py-0.5 rounded border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
+            className="shrink-0 text-[0.6875rem] font-semibold px-2 py-0.5 rounded border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 disabled:opacity-50"
           >
             {noPolyOverride ? 'Cancel Override' : 'Override'}
           </button>
@@ -198,7 +198,7 @@ export default function ClientPolygraphs({
             {label && (
               <div className={`flex items-center gap-3 px-4 ${since ? '' : '-my-1'}`}>
                 <div className="flex-1 border-t border-dashed border-slate-800" />
-                <span className={`text-[11px] rounded-full px-2.5 py-0.5 whitespace-nowrap border ${since ? 'text-blue-300 bg-blue-500/10 border-blue-500/30 font-semibold' : 'text-slate-400 bg-slate-900 border-slate-800'}`}>{label}</span>
+                <span className={`text-[0.6875rem] rounded-full px-2.5 py-0.5 whitespace-nowrap border ${since ? 'text-blue-300 bg-blue-500/10 border-blue-500/30 font-semibold' : 'text-slate-400 bg-slate-900 border-slate-800'}`}>{label}</span>
                 <div className="flex-1 border-t border-dashed border-slate-800" />
               </div>
             )}

@@ -462,7 +462,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
           >
             <SlidersHorizontal size={13} /> Filters
             {changedGroupFilterCount > 0 && (
-              <span className="bg-blue-600 text-white rounded-full px-1.5 text-[10px] leading-4">{changedGroupFilterCount}</span>
+              <span className="bg-blue-600 text-white rounded-full px-1.5 text-[0.625rem] leading-4">{changedGroupFilterCount}</span>
             )}
           </button>
         </div>

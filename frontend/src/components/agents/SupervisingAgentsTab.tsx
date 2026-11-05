@@ -229,7 +229,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
                   >
                     <td className="p-3 font-medium text-white">
                       {r.name}
-                      {!r.agent && <span className="ml-2 inline-block whitespace-nowrap bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[10px] font-semibold">Not in directory</span>}
+                      {!r.agent && <span className="ml-2 inline-block whitespace-nowrap bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[0.625rem] font-semibold">Not in directory</span>}
                     </td>
                     <td className="p-3 text-slate-300 text-xs whitespace-nowrap">{r.agent?.phone ? <a href={`tel:${r.agent.phone}`} onClick={(e) => e.stopPropagation()} className="hover:text-blue-400">{r.agent.phone}</a> : <span className="text-slate-600">—</span>}</td>
                     <td className="p-3 text-slate-300 text-xs min-w-[12rem]">{r.agent?.email ? <a href={`mailto:${r.agent.email}`} onClick={(e) => e.stopPropagation()} className="hover:text-blue-400 break-all">{r.agent.email}</a> : <span className="text-slate-600">—</span>}</td>

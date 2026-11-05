@@ -117,7 +117,7 @@ export default function PolySlotForm({ role, employees, onSuccess, onError, onCr
             className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm [color-scheme:dark]"
             required
           />
-          <span className="text-[10px] text-slate-500 mt-1 block">Min date: Today ({today})</span>
+          <span className="text-[0.625rem] text-slate-500 mt-1 block">Min date: Today ({today})</span>
         </div>
         <div>
           <label className="block text-xs text-slate-400 uppercase mb-1">Time</label>
@@ -129,7 +129,7 @@ export default function PolySlotForm({ role, employees, onSuccess, onError, onCr
             className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm [color-scheme:dark]"
             required
           />
-          <span className="text-[10px] text-slate-500 mt-1 block">
+          <span className="text-[0.625rem] text-slate-500 mt-1 block">
             {polyDate === today
               ? `Min time: ${formatDisplayTime(getLocalTimeString())} (active time)`
               : 'Future date: any time'}
