@@ -1,5 +1,6 @@
 const express = require('express');
 const { logAction, pool } = require('../db');
+const { requireRole } = require('../lib/auth');
 const { logClientChange } = require('../lib/changeLog');
 const { LAST_POLY_RESULT_SQL, POLY_INCENTIVE_OVERRIDE_RESULTS, POLY_NDI_WAIT, POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, endPolyFeeOverride, polyOverrideText } = require('../lib/poly');
 
@@ -461,6 +462,144 @@ router.post('/api/polygraphs/slots/:slotId/open', async (req, res) => {
     } catch (err) {
         await db.query('ROLLBACK').catch(() => {});
         console.error('Error reopening slot:', err);
+        res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
+    }
+});
+
+// Reschedule Polygraph Slot: moves an open or assigned slot to a new date, time, examiner or location. A booked client
+// stays on the slot and keeps the vouchers already used, so client-requested moves go through a cancellation instead,
+// where the notice rule decides the vouchers. An appointment whose time has passed can still be moved, since the
+// examiner may not have made it.
+router.post('/api/polygraphs/slots/:slotId/reschedule', requireRole('Business Administrator', 'Polygrapher'), async (req, res) => {
+    const db = await pool.connect();
+    try {
+        const { slotId } = req.params;
+        const { date, time, polygrapher, reason, notes, user, bypassWaitPeriod } = req.body;
+        const location = String(req.body.location || '').trim();
+        const address = String(req.body.address || '').trim();
+
+        const start = slotStart({ date, time });
+        if (!start) {
+            return res.status(400).json({ error: 'Choose a new date and time.' });
+        }
+        if (start.getTime() <= Date.now()) {
+            return res.status(400).json({ error: 'The new date and time must be in the future.' });
+        }
+        if (!location) {
+            return res.status(400).json({ error: 'Enter the office location.' });
+        }
+
+        await db.query('BEGIN');
+        const refuse = async (status, body) => {
+            await db.query('ROLLBACK');
+            return res.status(status).json(body);
+        };
+
+        const slotRes = await db.query('SELECT * FROM PolygraphSlots WHERE SlotId = $1 FOR UPDATE', [slotId]);
+        const slot = slotRes.rows[0];
+        if (!slot) return refuse(404, { error: 'Slot not found.' });
+        const apptRes = await db.query("SELECT Client FROM PolygraphAppointments WHERE SlotId = $1 AND Status = 'Scheduled'", [slotId]);
+        const client = apptRes.rows[0]?.client ?? null;
+        if (slot.isfilled && client === null) {
+            return refuse(409, { error: 'This slot is closed: its reservation was cancelled after the appointment time.' });
+        }
+        if (client !== null && !String(reason || '').trim()) {
+            return refuse(400, { error: 'A reason is required to reschedule a booked polygraph.' });
+        }
+
+        const moved = { ...slot, date, time, polygrapher, location, address };
+        const oldStart = slotStart(slot);
+        if (oldStart?.getTime() === start.getTime() && polygrapher === slot.polygrapher && location === slot.location && address === slot.address) {
+            return refuse(400, { error: 'Nothing was changed. Choose a new date, time, examiner or location.' });
+        }
+
+        // An examiner kept from before may have been deactivated since; a new one must be active
+        if (polygrapher !== slot.polygrapher) {
+            const examinerRes = await db.query(
+                "SELECT 1 FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Role = 'Polygrapher' AND Active = TRUE", [polygrapher]
+            );
+            if (examinerRes.rows.length === 0) {
+                return refuse(400, { error: 'Choose an active polygrapher as the examiner.' });
+            }
+        }
+
+        // Closed slots no longer hold their time
+        const clashRes = await db.query(
+            `SELECT s.IsFilled FROM PolygraphSlots s
+             WHERE s.Date = $1 AND s.Time = $2::time AND s.Polygrapher = $3 AND s.SlotId <> $4
+               AND (s.IsFilled = FALSE OR EXISTS (SELECT 1 FROM PolygraphAppointments a WHERE a.SlotId = s.SlotId AND a.Status = 'Scheduled'))
+             ORDER BY s.IsFilled DESC LIMIT 1`,
+            [date, time, polygrapher, slotId]
+        );
+        if (clashRes.rows.length > 0) {
+            return refuse(409, {
+                error: clashRes.rows[0].isfilled
+                    ? 'This examiner already has a client booked at that date and time. Choose another time.'
+                    : 'This examiner already has an open slot at that date and time. Delete that open slot first, or choose another time.',
+            });
+        }
+
+        // Moving a booking earlier can't land inside the post-NDI waiting period without the same override as assigning.
+        // Moving it later is allowed: that can only widen the gap.
+        let waitBypassed = null;
+        if (client !== null && oldStart && start.getTime() < oldStart.getTime()) {
+            const waitRes = await db.query(
+                `SELECT r.Results,
+                        to_char(r.Taken, 'MM/DD/YYYY') AS lastTaken,
+                        to_char(r.Taken::date + INTERVAL '${POLY_NDI_WAIT}', 'MM/DD/YYYY') AS earliest,
+                        $2::date < (r.Taken::date + INTERVAL '${POLY_NDI_WAIT}')::date AS tooSoon
+                 FROM (${LAST_POLY_RESULT_SQL('$1')}) r`,
+                [client, date]
+            );
+            const lastPoly = waitRes.rows[0];
+            if (lastPoly && lastPoly.results === 'No Deception Indicated' && lastPoly.toosoon) {
+                if (!bypassWaitPeriod) {
+                    return refuse(409, {
+                        code: 'POLY_TOO_SOON',
+                        error: `This client's last polygraph (${lastPoly.lasttaken}) was No Deception Indicated, so the next one must be at least 5 months and 2 weeks later: on or after ${lastPoly.earliest}. Choose a later date.`,
+                        lastPolyDate: lastPoly.lasttaken, earliestDate: lastPoly.earliest
+                    });
+                }
+                if (req.user?.role !== 'Business Administrator') {
+                    return refuse(403, { error: 'Only Business Administrators can bypass the polygraph waiting period.' });
+                }
+                waitBypassed = lastPoly;
+            }
+        }
+
+        const oldContext = await slotNoteContext(slot);
+        const newContext = await slotNoteContext(moved);
+
+        await db.query(
+            'UPDATE PolygraphSlots SET Date = $1, Time = $2, Polygrapher = $3, Location = $4, Address = $5 WHERE SlotId = $6',
+            [date, time, polygrapher, location, address, slotId]
+        );
+
+        const bypassText = waitBypassed
+            ? `Moved inside the waiting period after the No Deception Indicated polygraph on ${waitBypassed.lasttaken} (earliest normal date ${waitBypassed.earliest}) by Business Administrator override.`
+            : '';
+        if (client !== null) {
+            await db.query(
+                "UPDATE PolygraphAppointments SET ScheduledDateTime = $1, Polygrapher = $2 WHERE SlotId = $3 AND Status = 'Scheduled'",
+                [`${date} ${time}`, polygrapher, slotId]
+            );
+            const noteText = `Polygraph rescheduled. Was ${oldContext}. Now ${newContext}. Reason: ${String(reason).trim()}.`
+                + (bypassText ? ` ${bypassText}` : '')
+                + (String(notes || '').trim() ? ` Notes: ${String(notes).trim()}` : '');
+            await db.query(
+                `INSERT INTO Notes (Client, Date, "User", Comments, Category) VALUES ($1, NOW(), $2, $3, 'Polygraph')`,
+                [client, user || 'Unknown', noteText]
+            );
+        }
+
+        await db.query('COMMIT');
+        await logAction(user, 'Polygraph Rescheduled', `Slot ${slotId}${client !== null ? ` (client ID ${client})` : ''} moved. Was ${oldContext}. Now ${newContext}.${bypassText ? ` ${bypassText}` : ''}`);
+        res.json({ success: true, message: client !== null ? 'Polygraph rescheduled and added to the client\'s case notes.' : 'Polygraph slot rescheduled.' });
+    } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
+        console.error('Error rescheduling slot:', err);
         res.status(500).json({ error: err.message });
     } finally {
         db.release();

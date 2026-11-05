@@ -59,6 +59,10 @@ export const polySchedulingNeeds = (client: { polyfeevoucher?: unknown; polyfeep
 
 export const POLY_CANCEL_REASONS =['Client requested cancellation', 'Client late / did not show', 'Examiner rescheduled', 'Weather', 'Other'];
 
+// Rescheduling keeps the vouchers already used, so a client's own request isn't one of these: it goes through a
+// cancellation, where the notice rule decides the vouchers
+export const POLY_RESCHEDULE_REASONS = ['Examiner rescheduled', 'Weather', 'Other'];
+
 // Results that can keep the client in the NDI voucher incentive, but only by Business Administrator override
 export const POLY_INCENTIVE_OVERRIDE_RESULTS = ['Inconclusive', 'No Opinion'];
 

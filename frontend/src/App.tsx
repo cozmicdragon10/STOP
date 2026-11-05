@@ -32,6 +32,7 @@ import PolySlotForm from './components/polygraph/PolySlotForm';
 import PolyResults from './components/polygraph/PolyResults';
 import PolySchedule from './components/polygraph/PolySchedule';
 import PolyCancelDialog from './components/polygraph/PolyCancelDialog';
+import PolyRescheduleDialog from './components/polygraph/PolyRescheduleDialog';
 import PolyAssignDialogs from './components/polygraph/PolyAssignDialogs';
 import { usePolyAssignment } from './hooks/usePolyAssignment';
 import ReportsTab from './components/reports/ReportsTab';
@@ -142,6 +143,8 @@ export default function App() {
   
   // Assigned slot whose reservation is being cancelled (PolyCancelDialog)
   const [reopenTarget, setReopenTarget] = useState<any>(null);
+  // Open or assigned slot being moved (PolyRescheduleDialog)
+  const [rescheduleTarget, setRescheduleTarget] = useState<any>(null);
 
   // Inactive groups stay in the directory but are hidden from every picker for new assignments and sessions
   const activeGroups = groups.filter(g => g.active !== false);
@@ -1282,6 +1285,22 @@ export default function App() {
               />
             )}
 
+            {rescheduleTarget && (
+              <PolyRescheduleDialog
+                slot={rescheduleTarget}
+                role={role}
+                userEmail={user.employeeemail}
+                employees={employees}
+                examinerName={getExaminerDisplayName}
+                onClose={() => setRescheduleTarget(null)}
+                onRescheduled={async (message) => {
+                  setRescheduleTarget(null);
+                  setSuccessMsg(message);
+                  setPolySlots(await getPolygraphSlots());
+                }}
+              />
+            )}
+
             {polySubTab === 'schedule' && (
               <PolySchedule
                 slots={scheduleSlots}
@@ -1293,6 +1312,7 @@ export default function App() {
                 choices={polyAssign.choices}
                 onAssign={(slotId) => polyAssign.openAssignConfirm(slotId)}
                 onCancelReservation={handleReopenSlot}
+                onReschedule={(slotId) => setRescheduleTarget(polySlots.find(s => s.slotid === slotId) ?? null)}
                 onDelete={handleDeleteSlot}
               />
             )}

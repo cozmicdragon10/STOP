@@ -1500,6 +1500,25 @@ export async function reopenPolygraphSlot(slotId: number, cancellation: { reason
     return jsonResponse(res, 'Failed to cancel the reservation.');
 }
 
+export type PolyRescheduleReply =
+    | { success: true; message: string; code?: undefined; error?: undefined }
+    // Moved earlier, inside the waiting period after a No Deception Indicated result; a Business Administrator can bypass it
+    | { success?: false; code: 'POLY_TOO_SOON'; error: string; lastPolyDate: string; earliestDate: string }
+    | { success?: false; code?: undefined; error: string };
+
+// date is YYYY-MM-DD and time HH:MM, in the future. reason is required when a client is booked on the slot.
+// Refusals come back as the reply instead of being thrown, so the caller can offer the bypass.
+export async function reschedulePolygraphSlot(slotId: number, data: { date: string; time: string; polygrapher: string; location: string; address: string; reason: string; notes: string; bypassWaitPeriod: boolean; user: string }): Promise<PolyRescheduleReply> {
+    const res = await apiFetch(`${API_BASE}/polygraphs/slots/${slotId}/reschedule`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    const body = await readJson(res) as PolyRescheduleReply;
+    if (!res.ok && !body?.error) return { error: 'Failed to reschedule the slot.' };
+    return body;
+}
+
 export async function deletePolygraphSlot(slotId: number): Promise<{ success: true; message: string }> {
     const res = await apiFetch(`${API_BASE}/polygraphs/slots/${slotId}`, {
         method: 'DELETE',
