@@ -141,7 +141,7 @@ export default function FormsTab({ role, onSuccess }: Props) {
   const iconButton = 'inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed';
 
   return (
-    <div className="max-w-5xl mx-auto bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-5">
+    <div className="max-w-5xl mx-auto bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl space-y-5">
       <div className="flex flex-wrap justify-between items-end gap-4 border-b border-slate-800 pb-4">
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2"><FileText size={18} className="text-blue-400" /> Forms</h2>

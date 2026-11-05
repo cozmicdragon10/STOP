@@ -1,7 +1,93 @@
 @import "tailwindcss";
 
+/* The Admin tab's Layout settings. By default the tab bars sit at the bottom and the client view opens on the right. */
+@custom-variant tabs-top (:root[data-tabs-position="top"] &);
+@custom-variant client-tabs-top (:root[data-client-tabs-position="top"] &);
+@custom-variant client-left (:root[data-client-side="left"] &);
+@custom-variant client-full (:root[data-client-side="full"] &);
+
+/* Keeps anything scrolled to from landing under the pinned tab bar */
+:root[data-tabs-position="top"] {
+  scroll-padding-top: 5rem;
+}
+
 :root {
   color-scheme: dark;
+}
+
+/*
+  Touch screens. Sizes are set once here rather than on every control, and are left out for mouse users so desktop keeps
+  its dense layout. iOS zooms the whole page when a field under 16px is tapped, so fields never go smaller than that.
+*/
+@media (pointer: coarse) {
+  input:not([type="checkbox"], [type="radio"], [type="file"]), select, textarea {
+    font-size: 1rem;
+  }
+
+  input:not([type="checkbox"], [type="radio"], [type="file"]), select, button {
+    min-height: 2.75rem;
+  }
+
+  button {
+    min-width: 2.75rem;
+    touch-action: manipulation;
+  }
+
+  /* Icons are block level, so in a button widened by the rule above they would sit at the left */
+  button > svg:only-child {
+    margin-inline: auto;
+  }
+
+  input[type="checkbox"], input[type="radio"] {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  /* iOS gives date and time fields a fixed width that ignores w-full, and long options stretch a select past its container */
+  input[type="date"], input[type="time"], input[type="datetime-local"], select {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+/*
+  Phones. A .stack-table shows each row as a card instead of columns. A cell with data-label becomes a "label: value" line;
+  a cell without one (the row's name, a message spanning the table) keeps its own styling.
+*/
+@media (max-width: 767px) {
+  .stack-table, .stack-table > tbody, .stack-table > tbody > tr, .stack-table > tbody > tr > td {
+    display: block;
+    width: 100%;
+  }
+
+  .stack-table > thead {
+    display: none;
+  }
+
+  .stack-table > tbody > tr {
+    padding-block: 0.5rem;
+  }
+
+  .stack-table > tbody > tr > td {
+    white-space: normal;
+  }
+
+  .stack-table > tbody > tr > td[data-label] {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.25rem 0.75rem;
+    text-align: right;
+  }
+
+  .stack-table > tbody > tr > td[data-label]::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--color-slate-400);
+  }
 }
 
 /*

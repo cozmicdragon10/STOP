@@ -48,7 +48,7 @@ export default function MultiSelect({ label, options, selected, onChange, option
         <ChevronDown size={13} className="shrink-0 text-slate-400" />
       </button>
       {open && (
-        <div className="absolute z-30 mt-1 min-w-full w-64 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1">
+        <div className="absolute z-30 mt-1 min-w-full w-64 max-md:fixed max-md:z-50 max-md:top-16 max-md:inset-x-4 max-md:w-auto max-md:min-w-0 max-md:mt-0 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl p-1">
           {options.length > 12 && (
             <input
               type="search"
@@ -59,9 +59,9 @@ export default function MultiSelect({ label, options, selected, onChange, option
               className="w-full mb-1 bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white placeholder-slate-500"
             />
           )}
-          <div role="listbox" aria-multiselectable="true" aria-label={label} className="max-h-72 overflow-y-auto">
+          <div role="listbox" aria-multiselectable="true" aria-label={label} className="max-h-72 max-md:max-h-[60dvh] overflow-y-auto">
             {shown.map(value => (
-              <label key={value} role="option" aria-selected={picked.has(value)} className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-slate-200 hover:bg-slate-800 cursor-pointer">
+              <label key={value} role="option" aria-selected={picked.has(value)} className="flex items-center gap-2 px-2 py-1.5 max-md:py-2.5 max-md:text-sm rounded text-xs text-slate-200 hover:bg-slate-800 cursor-pointer">
                 <input type="checkbox" checked={picked.has(value)} onChange={() => toggle(value)} className="accent-blue-500" />
                 <span className="truncate">{optionLabel(value)}</span>
               </label>

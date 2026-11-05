@@ -1,4 +1,5 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { CheckCircle2, Settings, X } from 'lucide-react';
 import { updateClient } from '../../api';
 import type { SupervisingAgent } from '../../api';
@@ -26,6 +27,13 @@ interface Props {
   // An error from loading the account (shown with this form's own errors)
   loadError: string;
   onDismissLoadError: () => void;
+  // Where the Edit Info, Cancel, and Save Changes buttons go: the account header, with Make Payment and Discharge
+  actionsSlot: HTMLElement | null;
+  // Tells App whether there are unsaved changes, so it can ask before leaving the form
+  onDirtyChange: (dirty: boolean) => void;
+  // App wants to leave; shows the save or discard prompt. onLeaveResolved(true) goes ahead, false stays here.
+  leaveRequested: boolean;
+  onLeaveResolved: (leave: boolean) => void;
   // Saved; previousProgramType lets App ask about a BIP intake when the client was just moved to BIP
   onSaved: (saved: any, previousProgramType: string | null) => void;
 }
@@ -68,7 +76,7 @@ const inputClass = 'w-full bg-slate-900 border border-slate-700 rounded-lg px-2.
 // The Information tab's details: Personal, Contact, and Program & Account sections, shown read-only until Edit Info.
 // While editing, only the changed fields are kept, laid over the current client, so a status change made meanwhile
 // (Discharge / Activate) still shows and is saved.
-export default function ClientInfoForm({ client, discharged, groups, directoryAgents, polyOverrideActive, userEmail, loadError, onDismissLoadError, onSaved }: Props) {
+export default function ClientInfoForm({ client, discharged, groups, directoryAgents, polyOverrideActive, userEmail, loadError, onDismissLoadError, actionsSlot, onDirtyChange, leaveRequested, onLeaveResolved, onSaved }: Props) {
   // null while not editing; otherwise the fields changed so far
   const [edits, setEdits] = useState<Record<string, any> | null>(null); // eslint-disable-line @typescript-eslint/no-explicit-any
   const [saving, setSaving] = useState(false);
@@ -79,6 +87,14 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
   const update = (changes: (f: any) => Record<string, any>) => setEdits(prev => ({ ...(prev ?? {}), ...changes({ ...client, ...(prev ?? {}) }) }));
   const setField = (field: string, value: unknown) => update(() => ({ [field]: value }));
 
+  // A field typed back to what it was doesn't count as a change
+  const dirty = Object.entries(edits ?? {}).some(([field, value]) => String(value ?? '') !== String(client[field] ?? ''));
+  useEffect(() => {
+    onDirtyChange(dirty);
+    return () => onDirtyChange(false);
+  }, [dirty, onDirtyChange]);
+
+  // Returns whether the save worked
   const handleSave = async () => {
     setSaving(true);
     setError('');
@@ -87,9 +103,11 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
       // Prefer the row the server returned (includes joined group name); fall back to the form values
       onSaved({ ...form, ...(res.client ?? {}) }, client.programtype ?? null);
       setEdits(null);
+      return true;
     } catch (err) {
       // Stay in edit mode so nothing typed is lost
       setError(err instanceof Error ? err.message : 'Failed to save client information.');
+      return false;
     } finally {
       setSaving(false);
     }
@@ -107,36 +125,54 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
         </div>
       )}
 
-      {/* Edit / Save toolbar */}
-      <div className="flex justify-end">
-        {!editing ? (
-          <button
-            onClick={() => setEdits({})}
-            className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
-          >
-            <Settings size={13} /> Edit Info
-          </button>
-        ) : (
-          <div className="flex gap-2">
-            <button
-              onClick={() => { setEdits(null); setError(''); }}
-              className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-1.5 rounded-lg text-xs font-semibold"
-            >Cancel</button>
-            <button
-              disabled={saving}
-              onClick={handleSave}
-              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
-            >
-              <CheckCircle2 size={13} /> Save Changes
-            </button>
+      {leaveRequested && (
+        // mb-0! because the parent's space-y spacing would otherwise stop the backdrop short of the bottom of the screen
+        <div className="fixed inset-0 mb-0! bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="unsaved-changes-title">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
+            <div>
+              <h3 id="unsaved-changes-title" className="font-semibold text-white">Save your changes?</h3>
+              <p className="text-xs text-slate-400 mt-1">You changed {client.firstname} {client.lastname}'s information and haven't saved it.</p>
+            </div>
+            {error && <p role="alert" className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{error}</p>}
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" disabled={saving} onClick={() => { setError(''); onLeaveResolved(false); }} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Keep Editing</button>
+              <button type="button" disabled={saving} onClick={() => { setEdits(null); setError(''); onLeaveResolved(true); }} className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">Discard Changes</button>
+              <button type="button" disabled={saving} onClick={async () => { if (await handleSave()) onLeaveResolved(true); }} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1">
+                <CheckCircle2 size={14} /> {saving ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Edit / Save toolbar */}
+      {actionsSlot && createPortal(!editing ? (
+        <button
+          onClick={() => setEdits({})}
+          className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
+        >
+          <Settings size={14} /> Edit Info
+        </button>
+      ) : (
+        <>
+          <button
+            onClick={() => { setEdits(null); setError(''); }}
+            className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
+          >Cancel</button>
+          <button
+            disabled={saving}
+            onClick={handleSave}
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
+          >
+            <CheckCircle2 size={14} /> Save Changes
+          </button>
+        </>
+      ), actionsSlot)}
 
       {/* Section 1 – Personal Info */}
       <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
         <h3 className="text-xs font-bold uppercase text-blue-400 mb-4 tracking-wider">Personal Information</h3>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
           {PERSONAL_FIELDS.map(({ label, field }) => (
             <div key={field}>
               <p className="text-xs text-slate-500 mb-0.5">{label}</p>
@@ -196,7 +232,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
               <p className="text-white font-medium">{client.lastpoly ? new Date(client.lastpoly).toLocaleDateString() : '—'}</p>
             </div>
           )}
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <p className="text-xs text-slate-500 mb-0.5">Comments</p>
             {editing ? (
               <textarea rows={3} value={form.comments || ''} onChange={e => setField('comments', e.target.value)} className={inputClass} />
@@ -210,7 +246,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
       {/* Section 2 – Contact Info */}
       <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
         <h3 className="text-xs font-bold uppercase text-blue-400 mb-4 tracking-wider">Contact Information</h3>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
           {CONTACT_FIELDS.map(({ label, field }) => (
             <div key={field}>
               <p className="text-xs text-slate-500 mb-0.5">{label}</p>
@@ -227,7 +263,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
       {/* Section 3 – Program & Account Info */}
       <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
         <h3 className="text-xs font-bold uppercase text-blue-400 mb-4 tracking-wider">Program &amp; Account Info</h3>
-        <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
           <div>
             <p className="text-xs text-slate-500 mb-0.5">Program Type</p>
             {editing ? (

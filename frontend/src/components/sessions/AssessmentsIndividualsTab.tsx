@@ -342,8 +342,8 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
-        <div className="flex justify-between items-center gap-4 mb-6 border-b border-slate-800 pb-4">
+      <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl">
+        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 md:gap-4 mb-4 md:mb-6 border-b border-slate-800 pb-4">
           <div>
             <h2 className="text-lg font-bold text-white">Assessments & Individuals</h2>
             <p className="text-xs text-slate-400 mt-0.5">One client per session. Save it as open, then review and close it to record the attendance, fee, and payment.</p>
@@ -406,7 +406,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={label}>Session Date</label>
                 <input type="date" value={form.date} max={todayLocal()} onChange={e => set({ date: e.target.value })} className={input} required />
@@ -420,7 +420,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={label}>Fee</label>
                 {isAdmin ? (
@@ -512,7 +512,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                   <p className="text-white text-lg font-bold">{money(amountDue)}</p>
                   <p className="text-xs text-slate-500">{sessionType!.name} {money(fee)}{pastDue > 0 ? ` + past due balance ${money(pastDue)}` : ''}{balanceBefore < 0 ? ` − account credit ${money(-balanceBefore)}` : ''}</p>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className={label}>Payment</label>
                     <div className="relative">
@@ -549,7 +549,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
 
             {cashOnly && !needsChecks && (
               <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4 text-sm">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className={label}>Payment <span className="normal-case font-normal text-slate-500">(optional)</span></label>
                     <div className="relative">
@@ -579,7 +579,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
         )}
       </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl">
         <div className="flex items-center justify-between gap-2 mb-1">
           <h3 className="font-semibold text-white flex items-center gap-2"><ClipboardList size={18} className="text-blue-400" /> {panelTab === 'open' ? 'Open Sessions' : 'Closed Sessions'}</h3>
           <div className="flex bg-slate-950 border border-slate-800 rounded-lg p-0.5">

@@ -48,7 +48,7 @@ export default function PolyCancelDialog({ slot, role, userEmail, onClose, onCan
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
+      <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
         <div>
           <h3 className="font-semibold text-white">Cancel Polygraph Reservation</h3>
           <p className="text-xs text-slate-400 mt-1">

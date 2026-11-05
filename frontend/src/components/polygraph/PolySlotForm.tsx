@@ -89,7 +89,7 @@ export default function PolySlotForm({ role, employees, onSuccess, onError, onCr
   return (
     <form onSubmit={handleCreateSlot} className="space-y-4 max-w-2xl">
       <h3 className="text-sm font-semibold text-blue-400">Create Single Appointment Slot</h3>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-xs text-slate-400 uppercase mb-1">Office Location</label>
           <input type="text" value={polyLocation} onChange={(e) => setPolyLocation(e.target.value)} placeholder="Location" className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required />
@@ -99,7 +99,7 @@ export default function PolySlotForm({ role, employees, onSuccess, onError, onCr
           <input type="text" value={polyAddress} onChange={(e) => setPolyAddress(e.target.value)} placeholder="Address" className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required />
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-xs text-slate-400 uppercase mb-1">Date</label>
           <input
@@ -136,7 +136,7 @@ export default function PolySlotForm({ role, employees, onSuccess, onError, onCr
           </span>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="block text-xs text-slate-400 uppercase mb-1">Examiner</label>
           <select

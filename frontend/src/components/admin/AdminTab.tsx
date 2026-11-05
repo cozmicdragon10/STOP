@@ -4,7 +4,7 @@ import { addEmployee, getEmployees, getSystemLogs, updateEmployee } from '../../
 import type { SystemLog } from '../../api';
 import SessionPriceList from '../sessions/SessionPriceList';
 import { sortedUnique } from '../../utils/filters';
-import { COLOR_VISION_OPTIONS, DEFAULT_CUSTOM_COLORS, FONT_SIZE_OPTIONS, FONT_TYPE_OPTIONS, useTheme, type ColorVision, type FontSize, type FontType, type StatusColor } from '../../hooks/useTheme';
+import { CLIENT_SIDE_OPTIONS, COLOR_VISION_OPTIONS, DEFAULT_CUSTOM_COLORS, FONT_SIZE_OPTIONS, FONT_TYPE_OPTIONS, TABS_POSITION_OPTIONS, useTheme, type ClientSide, type ColorVision, type FontSize, type FontType, type StatusColor, type TabsPosition } from '../../hooks/useTheme';
 
 interface Employee {
   employeeemail: string;
@@ -40,7 +40,7 @@ const errorText = (err: unknown, fallback: string) => (err instanceof Error && e
 export default function AdminTab({ user, employees, onEmployeesChanged, onSuccess, onError }: Props) {
   const isBusinessAdmin = user.role === 'Business Administrator';
   // Saved per browser, not per account
-  const { theme, toggleTheme, colorVision, setColorVision, customColors, setCustomColors, fontSize, setFontSize, fontType, setFontType } = useTheme();
+  const { theme, toggleTheme, colorVision, setColorVision, customColors, setCustomColors, fontSize, setFontSize, fontType, setFontType, tabsPosition, setTabsPosition, clientSide, setClientSide, clientTabsPosition, setClientTabsPosition } = useTheme();
 
   // The account form stays closed until New User or an account's Edit opens it
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
@@ -133,7 +133,7 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl space-y-4">
         <div className="flex justify-between items-center gap-3 border-b border-slate-800 pb-3">
           <h2 className="text-lg font-bold text-white">User Management</h2>
           {isBusinessAdmin && !showEmployeeForm && (
@@ -175,7 +175,7 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
         )}
 
         <div className="space-y-2 pt-4">
-          <div className="flex justify-between items-center gap-3">
+          <div className="flex flex-wrap justify-between items-center gap-3">
             <p className="text-xs text-slate-400 font-semibold uppercase">System Accounts</p>
             <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
               {(['active', 'inactive', 'all'] as const).map(f => (
@@ -190,7 +190,7 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
               ))}
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <input
               type="search"
               value={empSearch}
@@ -202,7 +202,7 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
               value={empRoleFilter}
               onChange={(e) => setEmpRoleFilter(e.target.value)}
               aria-label="Filter by user type"
-              className={`shrink-0 bg-slate-950 border rounded px-2.5 text-xs ${empRoleFilter ? 'border-blue-500 text-white' : 'border-slate-700 text-slate-300'}`}
+              className={`sm:shrink-0 bg-slate-950 border rounded px-2.5 text-xs ${empRoleFilter ? 'border-blue-500 text-white' : 'border-slate-700 text-slate-300'}`}
             >
               <option value="">All User Types</option>
               {sortedUnique(employees.map(e => e.role)).map(r => (
@@ -211,12 +211,12 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
             </select>
           </div>
           {visibleEmployees.map(e => (
-            <div key={e.employeeemail} className={`bg-slate-950 border p-3 rounded flex justify-between items-center gap-3 text-xs ${editingEmail === e.employeeemail ? 'border-blue-500' : 'border-slate-800'}`}>
+            <div key={e.employeeemail} className={`bg-slate-950 border p-3 rounded flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-3 text-xs ${editingEmail === e.employeeemail ? 'border-blue-500' : 'border-slate-800'}`}>
               <div className="min-w-0">
                 <p className="font-semibold text-white truncate">{e.displayname}</p>
                 <p className="text-slate-400 truncate">{e.employeeemail}</p>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0 max-sm:justify-between">
                 {e.active === false && <span className="bg-slate-700/50 text-slate-400 px-2 py-0.5 rounded font-semibold">Inactive</span>}
                 <span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded font-semibold">{e.role}</span>
                 {isBusinessAdmin && (
@@ -228,7 +228,7 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
         </div>
       </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl space-y-4">
         <div className="flex justify-between items-center gap-3 border-b border-slate-800 pb-3">
           <h2 className="text-lg font-bold text-white">System Audit & Activity Logs</h2>
           <button type="button" onClick={toggleSystemLogs} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded font-semibold text-xs shrink-0"><Activity size={14} /> {showSystemLogs ? 'Hide Logs' : 'Show Logs'}</button>
@@ -250,7 +250,7 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
 
       <SessionPriceList userEmail={user.employeeemail} canEdit={isBusinessAdmin} onSuccess={onSuccess} />
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4 self-start">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl space-y-4 self-start">
         <div className="flex justify-between items-center gap-3 border-b border-slate-800 pb-3">
           <h2 className="text-lg font-bold text-white">Appearance</h2>
           <button
@@ -263,7 +263,7 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
           </button>
         </div>
         <p className="text-xs text-slate-400">Click the button to switch between dark and light mode. Your choice is remembered on this computer.</p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="font-size" className="block text-xs text-slate-400 uppercase mb-1">Font Size</label>
             <select
@@ -322,6 +322,48 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
               : 'Changes the green, amber and blue used across the app so statuses are easier to tell apart. Remembered on this computer, like dark mode.'}
           </p>
         </div>
+      </div>
+
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl space-y-4 self-start">
+        <div className="border-b border-slate-800 pb-3">
+          <h2 className="text-lg font-bold text-white">Layout</h2>
+        </div>
+        <div>
+          <label htmlFor="tabs-position" className="block text-xs text-slate-400 uppercase mb-1">Main Tabs Position</label>
+          <select
+            id="tabs-position"
+            value={tabsPosition}
+            onChange={(e) => setTabsPosition(e.target.value as TabsPosition)}
+            className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm"
+          >
+            {TABS_POSITION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="client-side" className="block text-xs text-slate-400 uppercase mb-1">Client View Side</label>
+            <select
+              id="client-side"
+              value={clientSide}
+              onChange={(e) => setClientSide(e.target.value as ClientSide)}
+              className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm"
+            >
+              {CLIENT_SIDE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="client-tabs-position" className="block text-xs text-slate-400 uppercase mb-1">Client Tabs Position</label>
+            <select
+              id="client-tabs-position"
+              value={clientTabsPosition}
+              onChange={(e) => setClientTabsPosition(e.target.value as TabsPosition)}
+              className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm"
+            >
+              {TABS_POSITION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+        </div>
+        <p className="text-xs text-slate-400">Left and right only show on wide screens; on smaller ones the client view fills the screen. Remembered on this device, like dark mode.</p>
       </div>
     </div>
   );

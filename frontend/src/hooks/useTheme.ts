@@ -121,8 +121,76 @@ export function applyFontType(fontType: FontType) {
   else document.documentElement.style.removeProperty('--font-sans');
 }
 
+export const TABS_POSITION_OPTIONS = [
+  { value: 'bottom', label: 'Bottom of the page' },
+  { value: 'top', label: 'Top of the page' },
+] as const;
+export type TabsPosition = (typeof TABS_POSITION_OPTIONS)[number]['value'];
+
+const TABS_POSITION_KEY = 'stop-tabs-position';
+
+// The saved choice for this browser; bottom is the default
+export const getSavedTabsPosition = () => savedChoice<TabsPosition>(TABS_POSITION_KEY, TABS_POSITION_OPTIONS, 'bottom');
+
+// index.css and the tabs-top: classes move the tab bars when <html data-tabs-position="top"> is set
+export function applyTabsPosition(tabsPosition: TabsPosition) {
+  document.documentElement.dataset.tabsPosition = tabsPosition;
+}
+
+export const CLIENT_SIDE_OPTIONS = [
+  { value: 'right', label: 'Right side of the screen' },
+  { value: 'left', label: 'Left side of the screen' },
+  { value: 'full', label: 'Full page' },
+] as const;
+export type ClientSide = (typeof CLIENT_SIDE_OPTIONS)[number]['value'];
+
+const CLIENT_SIDE_KEY = 'stop-client-side';
+const CLIENT_TABS_POSITION_KEY = 'stop-client-tabs-position';
+
+// The saved choices for this browser; the client view opens on the right with its tabs at the bottom by default
+export const getSavedClientSide = () => savedChoice<ClientSide>(CLIENT_SIDE_KEY, CLIENT_SIDE_OPTIONS, 'right');
+export const getSavedClientTabsPosition = () => savedChoice<TabsPosition>(CLIENT_TABS_POSITION_KEY, TABS_POSITION_OPTIONS, 'bottom');
+
+// The client-left:, client-full:, and client-tabs-top: classes change the client view when these are set on <html>
+export function applyClientSide(clientSide: ClientSide) {
+  document.documentElement.dataset.clientSide = clientSide;
+}
+export function applyClientTabsPosition(clientTabsPosition: TabsPosition) {
+  document.documentElement.dataset.clientTabsPosition = clientTabsPosition;
+}
+
 export function useTheme() {
   const [theme, setTheme] = useState<Theme>(getSavedTheme);
+  const [clientSide, setClientSideState] = useState<ClientSide>(getSavedClientSide);
+  const setClientSide = useCallback((next: ClientSide) => {
+    setClientSideState(next);
+    applyClientSide(next);
+    try {
+      localStorage.setItem(CLIENT_SIDE_KEY, next);
+    } catch {
+      // Not saved (private window, blocked storage); the side still applies for this visit
+    }
+  }, []);
+  const [clientTabsPosition, setClientTabsPositionState] = useState<TabsPosition>(getSavedClientTabsPosition);
+  const setClientTabsPosition = useCallback((next: TabsPosition) => {
+    setClientTabsPositionState(next);
+    applyClientTabsPosition(next);
+    try {
+      localStorage.setItem(CLIENT_TABS_POSITION_KEY, next);
+    } catch {
+      // Not saved (private window, blocked storage); the position still applies for this visit
+    }
+  }, []);
+  const [tabsPosition, setTabsPositionState] = useState<TabsPosition>(getSavedTabsPosition);
+  const setTabsPosition = useCallback((next: TabsPosition) => {
+    setTabsPositionState(next);
+    applyTabsPosition(next);
+    try {
+      localStorage.setItem(TABS_POSITION_KEY, next);
+    } catch {
+      // Not saved (private window, blocked storage); the position still applies for this visit
+    }
+  }, []);
   const [fontSize, setFontSizeState] = useState<FontSize>(getSavedFontSize);
   const setFontSize = useCallback((next: FontSize) => {
     setFontSizeState(next);
@@ -175,5 +243,5 @@ export function useTheme() {
       return next;
     });
   }, []);
-  return { theme, toggleTheme, colorVision, setColorVision, customColors, setCustomColors, fontSize, setFontSize, fontType, setFontType };
+  return { theme, toggleTheme, colorVision, setColorVision, customColors, setCustomColors, fontSize, setFontSize, fontType, setFontType, tabsPosition, setTabsPosition, clientSide, setClientSide, clientTabsPosition, setClientTabsPosition };
 }

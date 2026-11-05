@@ -104,7 +104,7 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="client-payment-title">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[90dvh] flex flex-col">
         <header className="p-5 border-b border-slate-800">
           <h3 id="client-payment-title" className="font-semibold text-white">Payment: {client.lastname}, {client.firstname}</h3>
           <p className="text-xs text-slate-400 mt-1">DOC # {client.docnumber || '—'}</p>

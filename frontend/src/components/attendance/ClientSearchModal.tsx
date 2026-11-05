@@ -59,7 +59,7 @@ export default function ClientSearchModal({ clients, checkedInIds, attendedIds, 
       onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div role="dialog" aria-modal="true" aria-labelledby="client-search-title"
-        className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85vh]">
+        className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85dvh]">
         <header className="flex justify-between items-center p-5 border-b border-slate-800">
           <div>
             <h3 id="client-search-title" className="font-semibold text-white">Check In Client From Another Group</h3>

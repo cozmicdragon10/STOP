@@ -293,8 +293,8 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
 
   // Roster, Assign Clients, and Group Details for the open group. Shown under the group's row.
   const renderGroupDetailPanel = () => selectedGroupDetail && (
-    <div ref={groupDetailRef} className="p-6 space-y-4 text-left">
-      <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+    <div ref={groupDetailRef} className="p-4 md:p-6 space-y-4 text-left">
+      <div className="flex flex-wrap justify-between items-center gap-3 border-b border-slate-800 pb-4">
         <h3 className="text-lg font-bold text-white">Managing: {selectedGroupDetail.groupname}</h3>
         <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
           <button onClick={() => setGroupTab('roster')} className={`px-3 py-1 rounded text-xs font-semibold ${groupTab === 'roster' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Roster</button>
@@ -315,7 +315,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
           {activeRoster.length === 0 && <p className="text-xs text-slate-500 italic">No active clients in this group.</p>}
           {activeRoster.length > 0 && (
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
+              <table className="stack-table w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="text-slate-500 uppercase tracking-wider border-b border-slate-800">
                     <th className="p-2.5">Client</th>
@@ -337,9 +337,9 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
                         <span className="font-medium text-white">{c.lastname}, {c.firstname}</span>
                         {c.docnumber && <span className="ml-2 text-xs text-slate-500 font-mono">{c.docnumber}</span>}
                       </td>
-                      <td className="p-2.5 text-slate-300">{formatPhase(c.programtype, c.phase) || '—'}</td>
-                      <td className="p-2.5 text-slate-300">{c.lastattended ? toLocalDay(c.lastattended).toLocaleDateString() : 'Never'}</td>
-                      <td className={`p-2.5 text-right font-medium ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</td>
+                      <td data-label="Phase" className="p-2.5 text-slate-300">{formatPhase(c.programtype, c.phase) || '—'}</td>
+                      <td data-label="Last Attended" className="p-2.5 text-slate-300">{c.lastattended ? toLocalDay(c.lastattended).toLocaleDateString() : 'Never'}</td>
+                      <td data-label="Balance" className={`p-2.5 text-right font-medium ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -351,7 +351,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
 
       {groupTab === 'assign' && (
         <div className="space-y-3">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap justify-between items-center gap-2">
             <p className="text-xs text-slate-400 uppercase font-semibold">Assign Client to this Group</p>
             <input
               type="search"
@@ -375,16 +375,16 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
               : unassignedClients;
 
             return (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4">
                 {filteredClients.length > 0 ? (
                   filteredClients.map(c => (
-                    <div key={c.clientid} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center text-xs">
+                    <div key={c.clientid} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center gap-2 text-xs">
                       <span>{c.lastname}, {c.firstname} ({c.docnumber})</span>
                       <button onClick={() => handleAssignClient(c.clientid)} className="bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded">Assign</button>
                     </div>
                   ))
                 ) : (
-                  <p className="text-xs text-slate-500 italic col-span-2">
+                  <p className="text-xs text-slate-500 italic md:col-span-2">
                     {searchTerm ? 'No clients match your search.' : `No other active${selectedGroupDetail.programtype ? ` ${groupSection(selectedGroupDetail) === 'DRUG TEST' ? 'Fed Drug Test' : groupSection(selectedGroupDetail)}` : ''} clients to assign.`}
                   </p>
                 )}
@@ -429,8 +429,8 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
 
   return (
     <div className="space-y-6">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl p-5">
-        <div className="flex justify-between items-center mb-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl p-4 md:p-5">
+        <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
           <div className="flex items-center gap-3">
             <h2 className="font-semibold text-white">Group Directory</h2>
             <button
@@ -475,9 +475,9 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
             ['programtype', 'Program Type', 'All program types'],
             ['status', 'Status', 'All statuses'],
           ] as const).map(([key, label, allLabel]) => (
-            <div key={key} className="flex flex-col gap-1">
+            <div key={key} className="flex flex-col gap-1 w-full md:w-auto">
               <label className="text-slate-400">{label}</label>
-              <select value={groupFilters[key]} onChange={(e) => setGroupFilters({ ...groupFilters, [key]: e.target.value })} className="bg-slate-900 border border-slate-700 rounded p-1.5 text-white text-sm min-w-[12rem]">
+              <select value={groupFilters[key]} onChange={(e) => setGroupFilters({ ...groupFilters, [key]: e.target.value })} className="bg-slate-900 border border-slate-700 rounded p-1.5 text-white text-sm w-full md:w-auto md:min-w-[12rem]">
                 <option value="">{allLabel}</option>
                 {distinctGroupValues(key).map(v => <option key={v} value={v}>{v}</option>)}
               </select>
@@ -490,7 +490,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
         )}
 
         {showNewGroupForm && (
-          <form onSubmit={handleCreateGroup} className="bg-slate-950 border border-slate-800 rounded-lg p-4 mb-5 grid grid-cols-2 gap-4 text-sm">
+          <form onSubmit={handleCreateGroup} className="bg-slate-950 border border-slate-800 rounded-lg p-4 mb-5 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             <datalist id="group-locations">
               {locationOptions.map(v => <option key={v} value={v} />)}
             </datalist>
@@ -507,14 +507,15 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
             })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
             <div><label className="block text-xs text-slate-400 mb-1">Schedule *</label><ScheduleSelect value={newGroup.schedule} onChange={(v) => setNewGroup({ ...newGroup, schedule: v })} allowByAppointment={isDrugTestGroup(newGroup.programType)} className="bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
             <div><label className="block text-xs text-slate-400 mb-1">Address</label><input type="text" value={newGroup.address} onChange={(e) => setNewGroup({ ...newGroup, address: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
-            <div className="col-span-2 flex justify-end gap-2">
+            <div className="md:col-span-2 flex justify-end gap-2">
               <button type="button" onClick={() => { setShowNewGroupForm(false); setNewGroup(emptyNewGroup); }} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Cancel</button>
               <button type="submit" disabled={saving} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded text-xs font-semibold">Create Group</button>
             </div>
           </form>
         )}
 
-        <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
+        <div className="overflow-x-auto">
+        <table className="stack-table w-full text-left border-collapse text-xs whitespace-nowrap">
           <thead>
             <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
               <th className="p-3"><button onClick={() => toggleGroupSort('groupname')} className="uppercase tracking-wider hover:text-slate-200">Group Name{groupSortArrow('groupname')}</button></th>
@@ -543,12 +544,12 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
               {/* Clicking the open group again closes it */}
               <tr onClick={() => (open ? setSelectedGroupDetail(null) : handleOpenGroup(g))} className={`transition cursor-pointer ${open ? 'bg-blue-500/10' : 'hover:bg-slate-800/50'}`}>
                 <td className="p-3 font-medium text-white">{g.groupname}</td>
-                <td className="p-3 text-slate-400">{normalizeLocation(g.location)}</td>
-                <td className="p-3 text-slate-300">{g.counselor}</td>
-                <td className="p-3"><span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-xs">{g.programtype}</span></td>
-                <td className="p-3 text-slate-400">{g.schedule}</td>
-                <td className="p-3 font-bold text-slate-200">{g.clientcount || 0} Clients</td>
-                <td className="p-3">
+                <td data-label="Location" className="p-3 text-slate-400">{normalizeLocation(g.location)}</td>
+                <td data-label={leadLabel} className="p-3 text-slate-300">{g.counselor}</td>
+                <td data-label="Program Type" className="p-3"><span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-xs">{g.programtype}</span></td>
+                <td data-label="Schedule" className="p-3 text-slate-400">{g.schedule}</td>
+                <td data-label="Assigned" className="p-3 font-bold text-slate-200">{g.clientcount || 0} Clients</td>
+                <td data-label="Status" className="p-3">
                   {g.active === false
                     ? <span className="bg-slate-700/50 text-slate-400 px-2 py-0.5 rounded text-xs">Inactive</span>
                     : <span className="bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded text-xs">Active</span>}
@@ -566,6 +567,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* The open group is shown under its row; when filters hide that row (e.g. just set inactive), it's shown here instead */}

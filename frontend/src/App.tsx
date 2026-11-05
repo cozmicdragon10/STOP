@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { 
   Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
   DollarSign, Calendar, Activity, PhoneCall, ShieldAlert, 
   Layers, CheckSquare, BarChart3, Settings, Trash2, RotateCcw, Home, History,
-  Paperclip, UserCheck, ClipboardList
+  Paperclip, UserCheck, ClipboardList, SlidersHorizontal
 } from 'lucide-react';
 import {
   loginUser, logoutUser, setSessionEndedHandler, getClient, getClients, getGroups,
@@ -47,6 +47,9 @@ import TempFeeOverridePanel from './components/clients/TempFeeOverridePanel';
 import PolyFeeOverridePanel from './components/clients/PolyFeeOverridePanel';
 import PendingNotesButton from './components/clients/PendingNotesButton';
 import EmployeeLabelProvider from './components/EmployeeLabelProvider';
+import MainNav from './components/MainNav';
+import BarTabs from './components/BarTabs';
+import type { NavItem } from './components/BarTabs';
 import ProgramStatusDialog from './components/clients/ProgramStatusDialog';
 import ClientInfoForm from './components/clients/ClientInfoForm';
 import type { LedgerRefresh } from './components/clients/ClientLedger';
@@ -55,6 +58,7 @@ import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividu
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
 import { DISCHARGE_STATUSES } from './utils/clients';
+import { scrollToStackedPanel } from './utils/layout';
 import { polygraphHistoryText, polygraphNotice, slotStart, slotSummary, takesPolygraphs } from './utils/polygraph';
 
 export default function App() {
@@ -90,6 +94,18 @@ export default function App() {
   const [selectedClientDetail, setSelectedClientDetail] = useState<any>(null);
   const [showClientPayment, setShowClientPayment] = useState(false);
   const [clientTab, setClientTab] = useState<'information' | 'progress' | 'attendance' | 'financials' | 'notes' | 'polygraphs' | 'attachments' | 'changelog'>('information');
+  // The account page's scrolling area; switching tabs starts the new tab at the top
+  const accountScrollRef = useRef<HTMLDivElement>(null);
+  // The spot in the account header where the Information tab puts Edit Info
+  const [accountActionsSlot, setAccountActionsSlot] = useState<HTMLDivElement | null>(null);
+  // Set while the Information tab has unsaved changes. Leaving it then waits in pendingAccountLeave for the save or discard prompt.
+  const accountEditsDirty = useRef(false);
+  const setAccountEditsDirty = useCallback((dirty: boolean) => { accountEditsDirty.current = dirty; }, []);
+  const [pendingAccountLeave, setPendingAccountLeave] = useState<(() => void) | null>(null);
+  const leaveAccountEdits = (leave: () => void) => {
+    if (accountEditsDirty.current) setPendingAccountLeave(() => leave);
+    else leave();
+  };
   const [clientAttendance, setClientAttendance] = useState<any[]>([]);
   const [clientFinancials, setClientFinancials] = useState<any[]>([]);
   const [clientNotes, setClientNotes] = useState<any[]>([]);
@@ -123,12 +139,23 @@ export default function App() {
   // Closed group picked in the Closed Groups panel for missed check-ins (Business Administrators)
   const [missedCheckInRequest, setMissedCheckInRequest] = useState<ClosedGroupSession | null>(null);
 
+  // Group check-in panel; on phones the Open Groups list sits below it, so picking a group scrolls back up to it
+  const checkInPanelRef = useRef<HTMLDivElement>(null);
+
   // Bumped when a case note goes to or comes out of approval, so the Notes to Approve count reloads
   const [pendingNotesKey, setPendingNotesKey] = useState(0);
   const refreshPendingNotes = () => setPendingNotesKey(k => k + 1);
 
   // Polygraph State
   const [polySubTab, setPolySubTab] = useState<'admin' | 'schedule' | 'results'>('schedule');
+  // Filter row is hidden until toggled; the choice is remembered in this browser. Filters still apply while hidden.
+  const [showPolyFilters, setShowPolyFilters] = useState(() => {
+    try { return localStorage.getItem('showPolyFilters') === 'true'; } catch { return false; }
+  });
+  const togglePolyFilters = () => setShowPolyFilters(show => {
+    try { localStorage.setItem('showPolyFilters', String(!show)); } catch { /* storage unavailable */ }
+    return !show;
+  });
   // Poly Schedule and Poly Results filters; '' means no filter. Dates are YYYY-MM-DD, inclusive.
   const [polyExaminerFilter, setPolyExaminerFilter] = useState('');
   const [polyLocationFilter, setPolyLocationFilter] = useState('');
@@ -431,6 +458,15 @@ export default function App() {
     openClientIdRef.current = selectedClientDetail?.clientid ?? null;
   }, [selectedClientDetail]);
 
+  // The page behind an open account doesn't scroll or show its scrollbar. Checks user too: an expired session swaps the
+  // account for the login screen with the client still selected.
+  const accountOpen = !!user && !!selectedClientDetail;
+  useEffect(() => {
+    if (!accountOpen) return;
+    document.documentElement.style.overflow = 'hidden';
+    return () => { document.documentElement.style.overflow = ''; };
+  }, [accountOpen]);
+
   // Scrolls to and briefly outlines a slot opened from a client's account. Kept above the sign-in return so the hook count never changes.
   useEffect(() => {
     if (highlightedSlotId === null || activeTab !== 'polygraph') return;
@@ -441,8 +477,8 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-        <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-8 max-w-md w-full">
+      <div className="min-h-dvh bg-slate-900 flex items-center justify-center p-4">
+        <div className="bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-6 sm:p-8 max-w-md w-full">
           <div className="text-center mb-6">
             <h1 className="text-2xl font-bold text-white tracking-wide">STOP System</h1>
             <p className="text-slate-400 text-sm mt-1">Chandler & Associates Management</p>
@@ -459,7 +495,7 @@ export default function App() {
             </div>
             <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
               <input type="checkbox" checked={rememberMe} onChange={(e) => setRememberMe(e.target.checked)} className="rounded accent-blue-500" />
-              Remember me on this computer
+              Remember me on this device
             </label>
             <button type="submit" className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-lg transition text-sm shadow-lg shadow-blue-600/30">Secure Login</button>
           </form>
@@ -479,6 +515,22 @@ export default function App() {
     return false;
   };
 
+  // Every section, in tab bar order; Home is open to all roles
+  const navItems: NavItem[] = [
+    { tab: 'home', icon: Home, label: 'Home' },
+    { tab: 'clients', icon: Users, label: 'Client Roster', shortLabel: 'Clients' },
+    { tab: 'attendance', icon: ClipboardCheck, label: 'Attendance & Sign-In', shortLabel: 'Attendance' },
+    { tab: 'sessions', icon: ClipboardList, label: 'Assessments & Individuals', shortLabel: 'Assessments' },
+    { tab: 'callin', icon: PhoneCall, label: 'Call-In Log', shortLabel: 'Call-In' },
+    { tab: 'groups', icon: Layers, label: 'Groups' },
+    { tab: 'testing', icon: CheckSquare, label: 'Testing' },
+    { tab: 'polygraph', icon: ShieldAlert, label: 'Polygraphs' },
+    { tab: 'reports', icon: BarChart3, label: 'Reports' },
+    { tab: 'agents', icon: UserCheck, label: 'Supervising Agents', shortLabel: 'Agents' },
+    { tab: 'forms', icon: FileText, label: 'Forms' },
+    { tab: 'admin', icon: Settings, label: 'Admin' },
+  ].filter(item => item.tab === 'home' || isAllowed(item.tab));
+
   const getExaminerDisplayName = (email: string) =>
     employees.find(e => e.employeeemail === email)?.displayname || email;
 
@@ -488,6 +540,8 @@ export default function App() {
     .sort((a, b) => a.name.localeCompare(b.name));
   const polyLocationChoices = Array.from(new Set(polySlots.map(s => s.location).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b));
   const polyFiltersActive = !!(polyExaminerFilter || polyLocationFilter || polyDateFrom || polyDateTo);
+  // Shown on the Filters button so hidden filters aren't forgotten; Status only applies to Poly Schedule
+  const polyFilterCount = [polyExaminerFilter, polyLocationFilter, polyDateFrom, polyDateTo, polySubTab === 'schedule' ? polyStatusFilter : ''].filter(Boolean).length;
   const examinerSlots = polySlots.filter(s => {
     const day = String(s.date || '').split('T')[0];
     if (polyExaminerFilter && s.polygrapher !== polyExaminerFilter) return false;
@@ -535,21 +589,32 @@ export default function App() {
     setHighlightedSlotId(slotId);
   };
 
+  // The tabs of the open client's account
+  const clientTabItems: NavItem[] = [
+    { tab: 'information', icon: Users, label: 'Information', shortLabel: 'Info' },
+    { tab: 'progress', icon: ClipboardList, label: 'Progress' },
+    { tab: 'attendance', icon: Calendar, label: 'Attendance' },
+    { tab: 'financials', icon: DollarSign, label: 'Financial Ledger', shortLabel: 'Ledger' },
+    { tab: 'notes', icon: FileText, label: 'Case Notes', shortLabel: 'Notes' },
+    { tab: 'polygraphs', icon: Activity, label: 'Polygraphs' },
+    { tab: 'attachments', icon: Paperclip, label: 'Attachments' },
+    { tab: 'changelog', icon: History, label: 'Change Log' },
+  ].filter(item => (item.tab !== 'polygraphs' || takesPolygraphs(selectedClientDetail?.programtype))
+    && (item.tab !== 'changelog' || role === 'Business Administrator'));
+
   return (
     <EmployeeLabelProvider employees={employees}>
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+    <div className="min-h-dvh bg-slate-950 text-slate-100 flex flex-col">
       {/* Top Header Navigation */}
-      <header className="bg-slate-900 border-b border-slate-800 px-6 py-4 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <div className="bg-blue-600/20 border border-blue-500/30 p-2 rounded-lg text-blue-400"><ShieldCheck size={24} /></div>
-          <div>
-            <h1 className="font-bold text-lg text-white">STOP Software Suite</h1>
-            <p className="text-xs text-slate-400">Chandler & Associates — {user.location}</p>
+      <header className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 md:px-6 md:py-4 flex justify-between items-center gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="bg-blue-600/20 border border-blue-500/30 p-1.5 md:p-2 rounded-lg text-blue-400 shrink-0"><ShieldCheck size={24} /></div>
+          <div className="min-w-0">
+            <h1 className="font-bold text-base md:text-lg text-white truncate">STOP Software Suite</h1>
+            <p className="text-xs text-slate-400 truncate">Chandler & Associates — {user.location}</p>
           </div>
         </div>
-        <div className="flex items-center gap-4">
-          {isAllowed('forms') && <button onClick={() => setActiveTab('forms')} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'forms' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30' : 'bg-slate-800 border border-transparent text-slate-400 hover:bg-slate-700 hover:text-white'}`}><FileText size={16} /> Forms</button>}
-          {isAllowed('admin') && <button onClick={() => setActiveTab('admin')} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition ${activeTab === 'admin' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30' : 'bg-slate-800 border border-transparent text-slate-400 hover:bg-slate-700 hover:text-white'}`}><Settings size={16} /> Admin</button>}
+        <div className="hidden md:flex items-center gap-4 shrink-0">
           <div className="text-right">
             <p className="text-sm font-medium text-white">{user.displayname}</p>
             <span className="text-xs bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/20 font-semibold">{user.role}</span>
@@ -558,32 +623,27 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Navigation Tabs */}
-      <nav className="bg-slate-900/60 border-b border-slate-800 px-6 flex gap-1 overflow-x-auto">
-        <button onClick={() => setActiveTab('home')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'home' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><Home size={16} /> Home</button>
-        {isAllowed('clients') && <button onClick={() => setActiveTab('clients')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'clients' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><Users size={16} /> Client Roster</button>}
-        {isAllowed('attendance') && <button onClick={() => setActiveTab('attendance')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'attendance' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><ClipboardCheck size={16} /> Attendance & Sign-In</button>}
-        {isAllowed('sessions') && <button onClick={() => setActiveTab('sessions')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'sessions' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><ClipboardList size={16} /> Assessments & Individuals</button>}
-        {isAllowed('callin') && <button onClick={() => setActiveTab('callin')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'callin' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><PhoneCall size={16} /> Call-In Log</button>}
-        {isAllowed('groups') && <button onClick={() => setActiveTab('groups')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'groups' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><Layers size={16} /> Groups</button>}
-        {isAllowed('testing') && <button onClick={() => setActiveTab('testing')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'testing' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><CheckSquare size={16} /> Testing</button>}
-        {isAllowed('polygraph') && <button onClick={() => setActiveTab('polygraph')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'polygraph' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><ShieldAlert size={16} /> Polygraphs</button>}
-        {isAllowed('reports') && <button onClick={() => setActiveTab('reports')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'reports' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><BarChart3 size={16} /> Reports</button>}
-        {isAllowed('agents') && <button onClick={() => setActiveTab('agents')} className={`flex items-center gap-2 px-4 py-3 border-b-2 font-medium text-sm whitespace-nowrap transition ${activeTab === 'agents' ? 'border-blue-500 text-blue-400 bg-blue-500/5' : 'border-transparent text-slate-400 hover:text-slate-200'}`}><UserCheck size={16} /> Supervising Agents</button>}
-      </nav>
+      {/* Main Navigation */}
+      <MainNav items={navItems} activeTab={activeTab} onSelect={setActiveTab} user={user} onLogout={handleLogout} />
 
       {/* Main Content Area */}
-      <main className="flex-1 p-6 max-w-7xl mx-auto w-full">
+      {/* Bottom padding keeps the end of each page clear of the tab bar when it sits at the bottom */}
+      <main className="flex-1 p-4 pb-24 md:p-6 md:pb-24 tabs-top:pb-4 md:tabs-top:pb-6 max-w-7xl mx-auto w-full min-w-0">
+        {/* On phones these stay on screen, since the save button is often a long scroll below the top of the page */}
         {successMsg && (
-          <div className="bg-emerald-500/10 border border-emerald-500 text-emerald-400 p-4 rounded-xl mb-6 text-sm flex justify-between items-center">
-            <span>{successMsg}</span>
-            <button onClick={() => setSuccessMsg('')} className="text-emerald-400 hover:text-emerald-200 ml-4"><X size={16} /></button>
+          <div className="max-md:sticky max-md:top-2 tabs-top:max-md:top-16 max-md:z-30 max-md:bg-slate-950 rounded-xl mb-4 md:mb-6">
+            <div className="bg-emerald-500/10 border border-emerald-500 text-emerald-400 p-4 rounded-xl text-sm flex justify-between items-center">
+              <span>{successMsg}</span>
+              <button onClick={() => setSuccessMsg('')} className="text-emerald-400 hover:text-emerald-200 ml-4"><X size={16} /></button>
+            </div>
           </div>
         )}
         {error && (
-          <div className="bg-red-500/10 border border-red-500 text-red-400 p-4 rounded-xl mb-6 text-sm flex justify-between items-center">
-            <span>{error}</span>
-            <button onClick={() => setError('')} className="text-red-400 hover:text-red-200 ml-4"><X size={16} /></button>
+          <div className="max-md:sticky max-md:top-2 tabs-top:max-md:top-16 max-md:z-30 max-md:bg-slate-950 rounded-xl mb-4 md:mb-6">
+            <div className="bg-red-500/10 border border-red-500 text-red-400 p-4 rounded-xl text-sm flex justify-between items-center">
+              <span>{error}</span>
+              <button onClick={() => setError('')} className="text-red-400 hover:text-red-200 ml-4"><X size={16} /></button>
+            </div>
           </div>
         )}
 
@@ -710,10 +770,15 @@ export default function App() {
 
         {/* CLIENT DETAILS DRAWER */}
         {selectedClientDetail && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex justify-end z-50">
-            <div className="bg-slate-900 w-full max-w-6xl h-full border-l border-slate-800 flex flex-col shadow-2xl p-6 overflow-y-auto">
-              <div className="flex justify-between items-start border-b border-slate-800 pb-4 mb-6">
-                <div>
+          <div
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex justify-end client-left:justify-start z-50"
+            onMouseDown={e => { if (e.target === e.currentTarget) leaveAccountEdits(() => setSelectedClientDetail(null)); }}
+          >
+            <div className="bg-slate-900 w-full max-w-6xl client-full:max-w-none h-full border-l client-left:border-l-0 client-left:border-r client-full:border-0 border-slate-800 flex flex-col shadow-2xl">
+              <div ref={accountScrollRef} className="flex-1 min-h-0 flex flex-col overflow-y-auto overscroll-contain">
+              <div className="shrink-0 flex flex-col md:flex-row md:justify-between md:items-start gap-3 border-b client-tabs-top:border-b-0 border-slate-800 p-4 md:px-6">
+
+                <div className="min-w-0 pr-12 md:pr-0">
                   <div className="flex flex-wrap items-center gap-3">
                     <h2 className="text-xl font-bold text-white">{selectedClientDetail.firstname} {selectedClientDetail.lastname}</h2>
                     <span
@@ -727,7 +792,8 @@ export default function App() {
                   </div>
                   <p className="text-xs text-slate-400 mt-1">DOC #: <span className="text-slate-200 font-mono">{selectedClientDetail.docnumber}</span> | Program: <span className="text-blue-400 font-semibold">{selectedClientDetail.programtype || 'State SO'}</span> | Agent: {selectedClientDetail.supervisingagent}</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2 md:shrink-0 max-md:pr-12">
+                  <div ref={setAccountActionsSlot} className="contents" />
                   <button
                     type="button"
                     onClick={() => setShowClientPayment(true)}
@@ -774,10 +840,28 @@ export default function App() {
                       <Trash2 size={20} />
                     </button>
                   )}
-                  <button onClick={() => setSelectedClientDetail(null)} className="text-slate-400 hover:text-white p-1 rounded-lg bg-slate-800"><X size={20} /></button>
+                  {/* Pinned on phones: an account page is long, and this is the only way back to the list.
+                      z-40 keeps it under the dialogs that open over the account. */}
+                  <button onClick={() => leaveAccountEdits(() => setSelectedClientDetail(null))} aria-label="Close account" className="max-md:fixed max-md:top-3 client-tabs-top:max-md:top-[4.25rem] max-md:right-3 max-md:z-40 max-md:shadow-lg text-slate-400 hover:text-white p-1 rounded-lg bg-slate-800"><X size={20} /></button>
                 </div>
               </div>
 
+              {/* Under the client's name at the top, like the main tabs under the page header, or at the bottom of the view.
+                  Stays on screen either way. The scrollbar stays because a narrow window with a mouse can't swipe, and this
+                  bar has no Menu to fall back on. */}
+              <nav aria-label="Client account" className="shrink-0 sticky z-20 order-last bottom-0 mt-auto flex bg-slate-900 border-t border-slate-800 client-tabs-top:order-none client-tabs-top:top-0 client-tabs-top:bottom-auto client-tabs-top:mt-0 client-tabs-top:border-b">
+                <BarTabs
+                  items={clientTabItems}
+                  activeTab={clientTab}
+                  onSelect={(tab) => leaveAccountEdits(() => {
+                    setClientTab(tab as typeof clientTab);
+                    accountScrollRef.current?.scrollTo({ top: 0 });
+                  })}
+                  className="[scrollbar-width:thin] [scrollbar-color:#334155_transparent]"
+                />
+              </nav>
+
+              <div className="grow shrink-0 p-4 md:p-6">
               {statusDialog && (statusDialog === 'activate' || role === 'Business Administrator') && (
                 <ProgramStatusDialog
                   action={statusDialog}
@@ -809,7 +893,7 @@ export default function App() {
                         </span>
                       </p>
                       {isAllowed('polygraph') && (
-                        <button type="button" onClick={() => openPolySlot(slot.slotid)} className="shrink-0 text-xs font-semibold underline hover:text-white">View Slot</button>
+                        <button type="button" onClick={() => leaveAccountEdits(() => openPolySlot(slot.slotid))} className="shrink-0 text-xs font-semibold underline hover:text-white">View Slot</button>
                       )}
                     </div>
                   );
@@ -821,23 +905,6 @@ export default function App() {
                   </div>
                 );
               })()}
-
-              {/* Labels stay on one line; the row scrolls sideways when the drawer is too narrow for every tab.
-                  shrink-0 keeps the drawer's column layout from squeezing the scrolling row down to nothing. */}
-              <div className="flex shrink-0 border-b border-slate-800 gap-4 mb-6 overflow-x-auto overflow-y-hidden [scrollbar-width:thin] [scrollbar-color:#334155_transparent]">
-                <button onClick={() => setClientTab('information')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'information' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Users size={14} /> Information</button>
-                <button onClick={() => setClientTab('progress')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'progress' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><ClipboardList size={14} /> Progress</button>
-                <button onClick={() => setClientTab('attendance')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'attendance' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Calendar size={14} /> Attendance</button>
-                <button onClick={() => setClientTab('financials')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'financials' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><DollarSign size={14} /> Financial Ledger</button>
-                <button onClick={() => setClientTab('notes')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'notes' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><FileText size={14} /> Case Notes</button>
-                {takesPolygraphs(selectedClientDetail.programtype) && (
-                  <button onClick={() => setClientTab('polygraphs')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'polygraphs' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Activity size={14} /> Polygraphs</button>
-                )}
-                <button onClick={() => setClientTab('attachments')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'attachments' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><Paperclip size={14} /> Attachments</button>
-                {role === 'Business Administrator' && (
-                  <button onClick={() => setClientTab('changelog')} className={`flex items-center gap-2 pb-3 border-b-2 text-xs font-semibold uppercase whitespace-nowrap shrink-0 ${clientTab === 'changelog' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400'}`}><History size={14} /> Change Log</button>
-                )}
-              </div>
 
               {clientTab === 'information' && (
                 <div className="space-y-5">
@@ -851,6 +918,13 @@ export default function App() {
                     userEmail={user.employeeemail}
                     loadError={accountLoadError}
                     onDismissLoadError={() => setAccountLoadError('')}
+                    actionsSlot={accountActionsSlot}
+                    onDirtyChange={setAccountEditsDirty}
+                    leaveRequested={pendingAccountLeave !== null}
+                    onLeaveResolved={(leave) => {
+                      if (leave) pendingAccountLeave?.();
+                      setPendingAccountLeave(null);
+                    }}
                     onSaved={handleClientInfoSaved}
                   />
 
@@ -964,6 +1038,8 @@ export default function App() {
               {clientTab === 'changelog' && role === 'Business Administrator' && (
                 <ClientChangeLog key={`${selectedClientDetail.clientid}-${accountTabsVersion}`} clientId={selectedClientDetail.clientid} userEmail={user.employeeemail} />
               )}
+              </div>
+              </div>
             </div>
           </div>
         )}
@@ -972,14 +1048,14 @@ export default function App() {
         {/* Stays mounted on other tabs so a group check-in in progress isn't lost */}
         {isAllowed('attendance') && (
           <div className={`${activeTab === 'attendance' ? 'grid' : 'hidden'} grid-cols-1 lg:grid-cols-3 gap-6`}>
-            <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
-              <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+            <div ref={checkInPanelRef} className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl min-w-0 scroll-mt-4">
+              <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3 mb-4 md:mb-6 border-b border-slate-800 pb-4">
                 <div><h2 className="text-lg font-bold text-white">Attendance Sign-In & Payment Entry</h2><p className="text-xs text-slate-400 mt-0.5">Record attendance, cross-group makeups, or standalone ledger payments.</p></div>
-                <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
-                  <button onClick={() => { setIsAccountOnly(false); setIsCustomCharge(false); }} className={`px-3 py-1.5 rounded text-xs font-semibold ${!isAccountOnly && !isCustomCharge ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Attendance + Payment</button>
-                  <button onClick={() => { setIsAccountOnly(true); setIsCustomCharge(false); }} className={`px-3 py-1.5 rounded text-xs font-semibold ${isAccountOnly && !isCustomCharge ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Account-Only Payment</button>
+                <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 lg:shrink-0">
+                  <button onClick={() => { setIsAccountOnly(false); setIsCustomCharge(false); }} className={`flex-1 lg:flex-none px-3 py-1.5 rounded text-xs font-semibold ${!isAccountOnly && !isCustomCharge ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Attendance + Payment</button>
+                  <button onClick={() => { setIsAccountOnly(true); setIsCustomCharge(false); }} className={`flex-1 lg:flex-none px-3 py-1.5 rounded text-xs font-semibold ${isAccountOnly && !isCustomCharge ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Account-Only Payment</button>
                   {role === 'Business Administrator' && (
-                    <button onClick={() => setIsCustomCharge(true)} className={`px-3 py-1.5 rounded text-xs font-semibold ${isCustomCharge ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Custom Charge</button>
+                    <button onClick={() => setIsCustomCharge(true)} className={`flex-1 lg:flex-none px-3 py-1.5 rounded text-xs font-semibold ${isCustomCharge ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Custom Charge</button>
                   )}
                 </div>
               </div>
@@ -1014,7 +1090,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl min-w-0">
               <div>
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <h3 className="font-semibold text-white flex items-center gap-2"><ClipboardCheck size={18} className="text-blue-400" /> {groupPanelTab === 'open' ? 'Open Groups' : 'Closed Groups'}</h3>
@@ -1075,6 +1151,7 @@ export default function App() {
                                         setIsAccountOnly(false);
                                         setIsCustomCharge(false);
                                         setMissedCheckInRequest(c);
+                                        scrollToStackedPanel(checkInPanelRef.current);
                                       }}
                                       className="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white rounded py-1.5 font-semibold"
                                     >
@@ -1128,7 +1205,7 @@ export default function App() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => { setIsAccountOnly(false); setIsCustomCharge(false); setResumeRequest(o); }}
+                          onClick={() => { setIsAccountOnly(false); setIsCustomCharge(false); setResumeRequest(o); scrollToStackedPanel(checkInPanelRef.current); }}
                           className="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-1.5 rounded-lg"
                         >
                           Open & Close Group
@@ -1208,46 +1285,61 @@ export default function App() {
 
         {/* POLYGRAPH TAB */}
         {activeTab === 'polygraph' && (
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-6">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl space-y-6">
+            <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 border-b border-slate-800 pb-4">
               <h2 className="text-lg font-bold text-white">Polygraph Management Module</h2>
-              <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
-                <button onClick={() => setPolySubTab('admin')} className={`px-3 py-1.5 rounded text-xs font-semibold ${polySubTab === 'admin' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Poly Admin</button>
-                <button onClick={() => setPolySubTab('schedule')} className={`px-3 py-1.5 rounded text-xs font-semibold ${polySubTab === 'schedule' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Poly Schedule</button>
-                <button onClick={() => setPolySubTab('results')} className={`px-3 py-1.5 rounded text-xs font-semibold ${polySubTab === 'results' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Poly Results</button>
+              <div className="flex flex-wrap items-center gap-2 md:gap-3">
+              {polySubTab !== 'admin' && (
+                <button
+                  type="button"
+                  onClick={togglePolyFilters}
+                  aria-expanded={showPolyFilters}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border ${showPolyFilters ? 'bg-slate-700 border-slate-600 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+                >
+                  <SlidersHorizontal size={13} /> Filters
+                  {polyFilterCount > 0 && (
+                    <span className="bg-blue-600 text-white rounded-full px-1.5 text-[0.625rem] leading-4">{polyFilterCount}</span>
+                  )}
+                </button>
+              )}
+              <div className="max-md:order-first w-full md:w-auto flex bg-slate-950 p-1 rounded-lg border border-slate-800 md:shrink-0">
+                <button onClick={() => setPolySubTab('admin')} className={`flex-1 md:flex-none px-3 py-1.5 rounded text-xs font-semibold ${polySubTab === 'admin' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Poly Admin</button>
+                <button onClick={() => setPolySubTab('schedule')} className={`flex-1 md:flex-none px-3 py-1.5 rounded text-xs font-semibold ${polySubTab === 'schedule' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Poly Schedule</button>
+                <button onClick={() => setPolySubTab('results')} className={`flex-1 md:flex-none px-3 py-1.5 rounded text-xs font-semibold ${polySubTab === 'results' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Poly Results</button>
+              </div>
               </div>
             </div>
 
-            {polySubTab !== 'admin' && (
-              <div className="flex flex-wrap items-end gap-3">
+            {polySubTab !== 'admin' && showPolyFilters && (
+              <div className="grid grid-cols-2 md:flex md:flex-wrap items-end gap-3">
                 <label className="text-xs text-slate-400">Polygrapher
-                  <select value={polyExaminerFilter} onChange={(e) => setPolyExaminerFilter(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
+                  <select value={polyExaminerFilter} onChange={(e) => setPolyExaminerFilter(e.target.value)} className="block mt-1 w-full md:w-auto h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
                     <option value="">All Polygraphers</option>
                     {polyExaminerChoices.map(p => <option key={p.email} value={p.email}>{p.name}</option>)}
                   </select>
                 </label>
                 <label className="text-xs text-slate-400">Location
-                  <select value={polyLocationFilter} onChange={(e) => setPolyLocationFilter(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
+                  <select value={polyLocationFilter} onChange={(e) => setPolyLocationFilter(e.target.value)} className="block mt-1 w-full md:w-auto h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
                     <option value="">All Locations</option>
                     {polyLocationChoices.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
                 </label>
                 <label className="text-xs text-slate-400">From
-                  <input type="date" value={polyDateFrom} max={polyDateTo || undefined} onChange={(e) => setPolyDateFrom(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200" />
+                  <input type="date" value={polyDateFrom} max={polyDateTo || undefined} onChange={(e) => setPolyDateFrom(e.target.value)} className="block mt-1 w-full md:w-auto h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200" />
                 </label>
                 <label className="text-xs text-slate-400">To
-                  <input type="date" value={polyDateTo} min={polyDateFrom || undefined} onChange={(e) => setPolyDateTo(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200" />
+                  <input type="date" value={polyDateTo} min={polyDateFrom || undefined} onChange={(e) => setPolyDateTo(e.target.value)} className="block mt-1 w-full md:w-auto h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200" />
                 </label>
                 {polySubTab === 'schedule' && (
                   <label className="text-xs text-slate-400">Status
-                    <select value={polyStatusFilter} onChange={(e) => setPolyStatusFilter(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
+                    <select value={polyStatusFilter} onChange={(e) => setPolyStatusFilter(e.target.value)} className="block mt-1 w-full md:w-auto h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
                       <option value="">All Statuses ({examinerSlots.length})</option>
                       {POLY_SLOT_STATUSES.map(st => <option key={st} value={st}>{st} ({polyStatusCounts[st]})</option>)}
                     </select>
                   </label>
                 )}
                 <label className="text-xs text-slate-400">Sort
-                  <select value={polyDateSort} onChange={(e) => setPolyDateSort(e.target.value as 'asc' | 'desc')} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
+                  <select value={polyDateSort} onChange={(e) => setPolyDateSort(e.target.value as 'asc' | 'desc')} className="block mt-1 w-full md:w-auto h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
                     <option value="asc">Date: Soonest First</option>
                     <option value="desc">Date: Latest First</option>
                   </select>

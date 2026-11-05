@@ -71,8 +71,8 @@ export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Prop
   const blockMinus = (e: React.KeyboardEvent) => { if (e.key === '-' || e.key === 'e' || e.key === 'E') e.preventDefault(); };
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4 lg:col-span-2">
-      <div className="flex justify-between items-center gap-3 border-b border-slate-800 pb-3">
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl space-y-4 lg:col-span-2">
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border-b border-slate-800 pb-3">
         <div>
           <h2 className="text-lg font-bold text-white">Assessment & Individual Prices</h2>
           <p className="text-xs text-slate-400 mt-0.5">The types and prices offered on the Assessments & Individuals tab.</p>

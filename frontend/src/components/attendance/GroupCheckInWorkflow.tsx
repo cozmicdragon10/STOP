@@ -52,7 +52,7 @@ function StepIndicator({ current }: { current: number }) {
             >
               {done ? <Check size={12} /> : step}
             </span>
-            <span className={`truncate ${active ? 'text-white' : done ? 'text-emerald-400' : 'text-slate-500'}`}>{label}</span>
+            <span className={`truncate ${active ? 'text-white' : `max-sm:hidden ${done ? 'text-emerald-400' : 'text-slate-500'}`}`}>{label}</span>
             {i < STEPS.length - 1 && <span className="w-6 h-px bg-slate-700 shrink-0" />}
           </li>
         );
@@ -239,7 +239,7 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
         const newDay = wf.sessionChoice.date === todayLocal() ? 'today' : `on ${formatSessionDay(wf.sessionChoice.date)}`;
         return (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div role="dialog" aria-modal="true" aria-labelledby="session-choice-title" className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md p-6 space-y-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="session-choice-title" className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md max-h-full overflow-y-auto p-6 space-y-4">
             <h3 id="session-choice-title" className="text-lg font-bold text-white">
               {group.groupname} was already held {closed.date === wf.sessionChoice.date ? (closedToday ? 'today' : 'that day') : wf.sessionChoice.date === todayLocal() ? 'this week' : 'that week'}
             </h3>

@@ -264,10 +264,10 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-      <div className="p-5 border-b border-slate-800 space-y-4">
-        <div className="flex justify-between items-center">
+      <div className="p-4 md:p-5 border-b border-slate-800 space-y-4">
+        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3">
           <h2 className="font-semibold text-white">Active Client Directory</h2>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 md:gap-3">
             <button type="button" onClick={() => setShowNewClientForm(s => !s)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap">+ New Client</button>
             {headerActions}
             <input
@@ -275,7 +275,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
               value={clientSearch}
               onChange={(e) => setClientSearch(e.target.value)}
               placeholder="Search name, DOC #, agent, group..."
-              className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs w-64 max-w-full"
+              className="max-md:order-first bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs w-full md:w-64 max-w-full"
             />
             <button
               type="button"
@@ -297,7 +297,8 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
             >
               {hideMode ? <><Eye size={13} /> Show All{hiddenIds.size > 0 && <span className="bg-amber-500 text-slate-950 rounded-full px-1.5 text-[0.625rem] leading-4">{hiddenIds.size} hidden</span>}</> : <><EyeOff size={13} /> Hide Clients</>}
             </button>
-            <ColumnPicker layout={columns} labels={ROSTER_COLUMN_LABELS} />
+            {/* Columns only exist on the table; phones show cards, sorted from the Filters panel instead of by column header */}
+            <div className="hidden md:block"><ColumnPicker layout={columns} labels={ROSTER_COLUMN_LABELS} /></div>
             <span className="text-xs bg-slate-800 px-3 py-1 rounded-full text-slate-300 whitespace-nowrap">
               {statusLoading ? 'Loading…' : filteredClients.length === statusClients.length ? `${statusClients.length} Clients` : `${filteredClients.length} of ${statusClients.length} Clients`}
             </span>
@@ -306,6 +307,24 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
 
         {showClientFilters && (
         <div className="flex gap-3 flex-wrap">
+        <div className="md:hidden flex items-center gap-2 w-full">
+          <select
+            aria-label="Sort clients by"
+            value={sort.key}
+            onChange={(e) => setSort({ key: e.target.value as SortKey, dir: 1 })}
+            className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+          >
+            {ROSTER_COLUMN_KEYS.map(key => <option key={key} value={key}>Sort: {ROSTER_COLUMN_LABELS[key]}</option>)}
+          </select>
+          <button
+            type="button"
+            onClick={() => toggleSort(sort.key)}
+            aria-label={sort.dir === 1 ? 'Sorted ascending; switch to descending' : 'Sorted descending; switch to ascending'}
+            className="bg-slate-800 border border-slate-700 text-slate-300 p-1.5 rounded-lg"
+          >
+            {sort.dir === 1 ? <ArrowUp size={16} /> : <ArrowDown size={16} />}
+          </button>
+        </div>
           {filterSelect('agent', 'Agent')}
           {filterSelect('programtype', 'Program Type')}
           {/* BIP clients store a week number as their phase */}
@@ -478,7 +497,57 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
           </div>
         </form>
       )}
-      <div className="overflow-x-auto">
+      {/* Phones: one card per client, always showing the fields that matter most at a glance */}
+      <ul className="md:hidden divide-y divide-slate-800">
+        {pager.pageItems.map((c) => {
+          const hidden = hideMode && hiddenIds.has(c.clientid);
+          const pretrial = pretrialValue(c);
+          return (
+            <li key={c.clientid} className="flex items-stretch">
+              {hideMode && (
+                <button
+                  type="button"
+                  onClick={() => toggleHidden(c.clientid)}
+                  aria-pressed={hidden}
+                  aria-label={hidden ? 'Show this client again' : `Hide ${c.firstname} ${c.lastname} from view`}
+                  className={`shrink-0 flex items-center justify-center px-3 border-r border-slate-800 ${hidden ? 'bg-amber-500/15 text-amber-300' : 'text-slate-400'}`}
+                >
+                  {hidden ? <Eye size={16} /> : <EyeOff size={16} />}
+                </button>
+              )}
+              {hidden ? (
+                <div className="flex-1 min-h-16 bg-slate-950/60" aria-label="Hidden client" />
+              ) : (
+                <button type="button" data-client-row onClick={() => onOpenClient(c)} className="flex-1 min-w-0 text-left p-4 space-y-1.5">
+                  <span className="flex items-baseline justify-between gap-3">
+                    <span className="font-medium text-white truncate">{c.lastname}, {c.firstname}</span>
+                    <span className={`shrink-0 text-sm font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</span>
+                  </span>
+                  <span className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className="bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2 py-0.5 rounded font-semibold">{c.programtype || 'State SO'}</span>
+                    {pretrial && <span className="bg-amber-500/10 border border-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-semibold">Pretrial</span>}
+                    <span className="bg-slate-800 px-2 py-0.5 rounded text-slate-300">{formatPhase(c.programtype, c.phase) || 'N/A'}</span>
+                    <span className={`whitespace-nowrap px-2 py-0.5 rounded-full font-medium ${c.programstatus === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>{c.programstatus === 'Discharged Supervision' ? 'Discharged' : c.programstatus}</span>
+                  </span>
+                  <span className="block text-xs text-slate-400 truncate">
+                    {[c.docnumber && `DOC ${c.docnumber}`, c.supervisingagent, c.groupname || UNASSIGNED_GROUP].filter(Boolean).join(' · ')}
+                  </span>
+                  <span className="block text-xs text-slate-400">
+                    Last attended: <span className={isAttendanceOverdue(c) ? 'text-red-400 font-semibold' : ''}>{c.lastattended ? new Date(c.lastattended).toLocaleDateString() : 'Never'}</span>
+                    {takesPolygraphs(c.programtype) && ` · Last poly: ${c.lastpoly ? new Date(c.lastpoly).toLocaleDateString() : 'None'}`}
+                  </span>
+                </button>
+              )}
+            </li>
+          );
+        })}
+        {filteredClients.length === 0 && (
+          <li className={`p-6 text-center text-sm ${statusError ? 'text-red-400' : 'text-slate-500'}`}>
+            {statusError || (statusLoading ? 'Loading discharged clients…' : 'No clients match your filters.')}
+          </li>
+        )}
+      </ul>
+      <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-left border-collapse text-xs">
           <thead>
             <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">

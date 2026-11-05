@@ -27,18 +27,19 @@ export default function Pagination({ page, pageCount, pageSize, total, onPageCha
   return (
     <nav aria-label="Pages" className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-t border-slate-800 text-xs">
       <span className="text-slate-400">Showing {first}–{last} of {total} {noun}</span>
-      <div className="flex items-center gap-1">
+      {/* Phones keep the arrows and the current page; the other page numbers don't fit at a tappable size */}
+      <div className="flex items-center justify-center gap-1 w-full sm:w-auto">
         <button type="button" onClick={() => onPageChange(1)} disabled={page === 1} title="First page" className={arrow}><ChevronsLeft size={14} /></button>
         <button type="button" onClick={() => onPageChange(page - 1)} disabled={page === 1} title="Previous page" className={arrow}><ChevronLeft size={14} /></button>
         {pageNumbers(page, pageCount).map((p, i) => p === null ? (
-          <span key={`gap-${i}`} className="px-1.5 text-slate-500">…</span>
+          <span key={`gap-${i}`} className="max-sm:hidden px-1.5 text-slate-500">…</span>
         ) : (
           <button
             key={p}
             type="button"
             onClick={() => onPageChange(p)}
             aria-current={p === page ? 'page' : undefined}
-            className={`min-w-[2rem] px-2 py-1 rounded border font-semibold ${p === page ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700'}`}
+            className={`min-w-[2rem] px-2 py-1 rounded border font-semibold ${p === page ? 'bg-blue-600 border-blue-600 text-white' : 'max-sm:hidden bg-slate-800 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700'}`}
           >
             {p}
           </button>

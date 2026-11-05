@@ -72,7 +72,7 @@ export default function ProgramStatusDialog({ action, client, employees, groupCo
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="status-dialog-title">
-      <div className={`bg-slate-900 border rounded-xl p-6 w-full max-w-md space-y-4 text-sm ${activating ? 'border-blue-500/40' : 'border-amber-500/40'}`}>
+      <div className={`bg-slate-900 border rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm ${activating ? 'border-blue-500/40' : 'border-amber-500/40'}`}>
         <div>
           <h3 id="status-dialog-title" className="font-semibold text-white">{activating ? 'Activate Client' : 'Discharge Client'}</h3>
           <p className="text-xs text-slate-400 mt-1">
@@ -83,7 +83,7 @@ export default function ProgramStatusDialog({ action, client, employees, groupCo
           <>
             <div>
               <p className="block text-xs text-slate-400 uppercase mb-2">{activating ? 'New Status' : 'Discharge Type'}</p>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {choices.map(s => (
                   <label key={s} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-xs ${choice === s ? (activating ? 'border-blue-500 bg-blue-500/10 text-white' : 'border-amber-500 bg-amber-500/10 text-white') : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}>
                     <input type="radio" name="status-dialog-choice" value={s} checked={choice === s} onChange={() => { setChoice(s); setSubcategory(''); }} className={activating ? 'accent-blue-500' : 'accent-amber-500'} />
@@ -95,7 +95,7 @@ export default function ProgramStatusDialog({ action, client, employees, groupCo
             {subcategories && (
               <div>
                 <p className="block text-xs text-slate-400 uppercase mb-2">{choice} Subcategory</p>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {subcategories.map(s => (
                     <label key={s} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-xs ${subcategory === s ? 'border-amber-500 bg-amber-500/10 text-white' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}>
                       <input type="radio" name="status-dialog-subcategory" value={s} checked={subcategory === s} onChange={() => setSubcategory(s)} className="accent-amber-500" />

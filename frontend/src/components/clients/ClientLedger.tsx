@@ -215,7 +215,7 @@ export default function ClientLedger({ client, role, userEmail, financials, book
               const balance = ledgerBalanceChange(fin);
               return (
                 <div key={fin.transactionid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm">
-                  <div className="flex justify-between items-center">
+                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
                     <div>
                       <p className="font-semibold text-white">
                         {fin.feetype || fin.type}
@@ -241,7 +241,7 @@ export default function ClientLedger({ client, role, userEmail, financials, book
                         </p>
                       )}
                     </div>
-                    <div className="text-right shrink-0 pl-4">
+                    <div className="sm:text-right sm:shrink-0 sm:pl-4">
                       <p className={`font-bold ${tone.text}`}>{minus ? '-' : '+'}${Number(fin.amount).toFixed(2)}</p>
                       {balance && (
                         <p className={`text-xs mt-1 ${balance.after < 0 ? 'text-red-400' : 'text-slate-400'}`}>
@@ -249,7 +249,7 @@ export default function ClientLedger({ client, role, userEmail, financials, book
                         </p>
                       )}
                       {!action && (
-                        <div className="mt-1 flex justify-end gap-3">
+                        <div className="mt-1 flex sm:justify-end gap-3">
                           {canAdjust && <button type="button" onClick={() => startAction('adjust', Number(fin.amount))} className={linkClass}><Pencil size={12} /> Adjust</button>}
                           {isAdmin && card && !disputeOpen && card.kept > 0 && (
                             <>

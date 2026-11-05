@@ -41,7 +41,7 @@ export default function PolyAssignDialogs({ assignment: a, slots, clients, userE
         ];
         return (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
+            <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
               <div>
                 <h3 className="font-semibold text-white">Confirm Polygraph Assignment</h3>
                 <p className="text-xs text-slate-400 mt-1">Review the details below. This will be added to the client's case notes.</p>
@@ -80,7 +80,7 @@ export default function PolyAssignDialogs({ assignment: a, slots, clients, userE
 
       {a.waitBypassPrompt && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="wait-bypass-title">
-          <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
             <div>
               <h3 id="wait-bypass-title" className="font-semibold text-white">Bypass Polygraph Waiting Period?</h3>
               <p className="text-xs text-slate-400 mt-1">

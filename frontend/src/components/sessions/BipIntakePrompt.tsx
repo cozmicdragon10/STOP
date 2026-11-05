@@ -41,7 +41,7 @@ export default function BipIntakePrompt({ client, employees, user, onDone }: Pro
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="bip-intake-title">
-      <div className="bg-slate-900 border border-blue-500/40 rounded-xl p-6 w-full max-w-md space-y-4 text-sm">
+      <div className="bg-slate-900 border border-blue-500/40 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
         <div>
           <h3 id="bip-intake-title" className="font-semibold text-white">Open a BIP Assessment?</h3>
           <p className="text-xs text-slate-400 mt-1">

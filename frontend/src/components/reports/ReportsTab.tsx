@@ -129,11 +129,11 @@ export default function ReportsTab({ user, clients, groups, onOpenClient, onOpen
       {currentReport === 'agent' && !reportsError && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
           <h3 className="font-semibold text-white mb-4">Weekly Supervising Agent Summary</h3>
-          <table className="w-full text-left border-collapse text-xs">
+          <table className="stack-table w-full text-left border-collapse text-xs">
             <thead><tr className="bg-slate-800/50 text-slate-400 uppercase"><th className="p-3">Client</th><th className="p-3">Agent</th><th className="p-3">Attended Sessions</th><th className="p-3">Last Poly</th><th className="p-3">Balance</th></tr></thead>
             <tbody className="divide-y divide-slate-800 text-sm">
               {agentReportData?.map(r => (
-                <tr key={r.clientid}><td className="p-3 font-medium text-white">{r.lastname}, {r.firstname}</td><td className="p-3 text-slate-300">{r.supervisingagent}</td><td className="p-3">{r.totalattended}</td><td className="p-3 text-slate-400">{r.lastpolydate ? new Date(r.lastpolydate).toLocaleDateString() : 'None'}</td><td className="p-3 font-semibold text-slate-200">{formatBalance(r.accountbalance)}</td></tr>
+                <tr key={r.clientid}><td className="p-3 font-medium text-white">{r.lastname}, {r.firstname}</td><td data-label="Agent" className="p-3 text-slate-300">{r.supervisingagent}</td><td data-label="Attended Sessions" className="p-3">{r.totalattended}</td><td data-label="Last Poly" className="p-3 text-slate-400">{r.lastpolydate ? new Date(r.lastpolydate).toLocaleDateString() : 'None'}</td><td data-label="Balance" className="p-3 font-semibold text-slate-200">{formatBalance(r.accountbalance)}</td></tr>
               ))}
               {(!agentReportData || agentReportData.length === 0) && (
                 <tr><td colSpan={5} className="p-6 text-center text-slate-500 text-sm">{agentReportData ? 'No clients to report.' : 'Loading…'}</td></tr>
@@ -144,13 +144,13 @@ export default function ReportsTab({ user, clients, groups, onOpenClient, onOpen
       )}
 
       {currentReport === 'deposit' && !depositReportData && !reportsError && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl text-center text-slate-500 text-sm">Loading…</div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl text-center text-slate-500 text-sm">Loading…</div>
       )}
 
       {currentReport === 'deposit' && depositReportData && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl space-y-4">
           <h3 className="font-semibold text-white">Monthly Deposit Summary</h3>
-          <div className="grid grid-cols-2 gap-4 text-center">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-center">
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800"><p className="text-xs text-slate-400">Total Revenue Collected</p><p className="text-2xl font-bold text-emerald-400">${depositReportData.totalRevenue.toFixed(2)}</p></div>
             <div className="bg-slate-950 p-4 rounded-xl border border-slate-800"><p className="text-xs text-slate-400">Total Charges Assessed</p><p className="text-2xl font-bold text-amber-400">${depositReportData.totalCharges.toFixed(2)}</p></div>
           </div>

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Mail, Pencil, Phone, PlusCircle, Search, Trash2, UserCheck } from 'lucide-react';
 import { deleteSupervisingAgent, getClients, getSupervisingAgents, saveSupervisingAgent } from '../../api';
 import type { SupervisingAgent } from '../../api';
 import { usePagination } from '../../hooks/usePagination';
 import Pagination from '../Pagination';
+import { scrollToStackedPanel } from '../../utils/layout';
 
 interface Props {
   // Current clients (not discharged); the selected agent's discharged clients are loaded on their own
@@ -37,6 +38,14 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // The selected agent's clients; on phones this sits below the whole agent list
+  const detailPanelRef = useRef<HTMLDivElement>(null);
+  const selectAgent = (key: string) => {
+    setSelectedKey(key);
+    setShowDischarged(false);
+    // After the frame, so the scroll is measured with the agent's clients in the panel
+    requestAnimationFrame(() => scrollToStackedPanel(detailPanelRef.current));
+  };
   const [showDischarged, setShowDischarged] = useState(false);
   // null: form closed; 0: adding; otherwise the id of the agent being edited
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -207,7 +216,39 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
 
         {loadError && <p className="p-5 text-xs text-red-400">{loadError}</p>}
 
-        <div className="overflow-x-auto">
+        {/* Phones: one compact card per agent. The table's columns don't fit, and a call or email is usually why they're here. */}
+        <ul className="md:hidden divide-y divide-slate-800">
+          {pager.pageItems.map(r => {
+            const current = r.clients.filter(c => !isDischarged(c)).length;
+            return (
+              <li
+                key={r.key}
+                onClick={() => selectAgent(r.key)}
+                className={`p-4 cursor-pointer ${selectedKey === r.key ? 'bg-blue-500/10' : ''}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-medium text-white">{r.name}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{current} client{current === 1 ? '' : 's'}</p>
+                    {!r.agent && <span className="mt-1 inline-block bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[0.625rem] font-semibold">Not in directory</span>}
+                  </div>
+                  {canEdit && (
+                    <div className="flex gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <button type="button" onClick={() => openForm(r)} title={r.agent ? 'Edit' : 'Add to Directory'} aria-label={r.agent ? `Edit ${r.name}` : `Add ${r.name} to directory`} className="bg-slate-800 text-slate-300 p-1.5 rounded">{r.agent ? <Pencil size={14} /> : <PlusCircle size={14} />}</button>
+                      {r.agent && canDelete && <button type="button" onClick={() => handleDelete(r.agent!)} title="Delete" aria-label={`Delete ${r.name}`} className="bg-slate-800 text-slate-300 p-1.5 rounded"><Trash2 size={14} /></button>}
+                    </div>
+                  )}
+                </div>
+                {r.agent?.phone && <a href={`tel:${r.agent.phone}`} onClick={(e) => e.stopPropagation()} className="mt-1 flex w-fit max-w-full items-center gap-2 min-h-10 text-sm text-blue-400"><Phone size={14} className="shrink-0" />{r.agent.phone}</a>}
+                {r.agent?.email && <a href={`mailto:${r.agent.email}`} onClick={(e) => e.stopPropagation()} className="flex w-fit max-w-full items-center gap-2 min-h-10 text-sm text-blue-400 break-all"><Mail size={14} className="shrink-0" />{r.agent.email}</a>}
+              </li>
+            );
+          })}
+          {visibleRows.length === 0 && (
+            <li className="p-6 text-center text-slate-500 text-sm">{rows.length === 0 ? 'No supervising agents yet.' : 'No agents match your search.'}</li>
+          )}
+        </ul>
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
@@ -224,7 +265,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
                 return (
                   <tr
                     key={r.key}
-                    onClick={() => { setSelectedKey(r.key); setShowDischarged(false); }}
+                    onClick={() => selectAgent(r.key)}
                     className={`cursor-pointer transition ${selectedKey === r.key ? 'bg-blue-500/10' : 'hover:bg-slate-800/50'}`}
                   >
                     <td className="p-3 font-medium text-white">
@@ -262,7 +303,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
         <Pagination page={pager.page} pageCount={pager.pageCount} pageSize={pager.pageSize} total={pager.total} onPageChange={pager.setPage} noun="agents" />
       </div>
 
-      <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4 self-start">
+      <div ref={detailPanelRef} className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl space-y-4 self-start scroll-mt-4">
         {!selected ? (
           <div className="text-center text-slate-500 text-sm py-10">
             <UserCheck size={28} className="mx-auto mb-3 text-slate-600" />
@@ -272,8 +313,8 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
           <>
             <div className="border-b border-slate-800 pb-3 space-y-1">
               <h2 className="text-lg font-bold text-white">{selected.name}</h2>
-              {selected.agent?.phone && <p className="text-xs text-slate-300 flex items-center gap-2"><Phone size={12} className="text-slate-500" /><a href={`tel:${selected.agent.phone}`} className="hover:text-blue-400">{selected.agent.phone}</a></p>}
-              {selected.agent?.email && <p className="text-xs text-slate-300 flex items-center gap-2"><Mail size={12} className="text-slate-500" /><a href={`mailto:${selected.agent.email}`} className="hover:text-blue-400 break-all">{selected.agent.email}</a></p>}
+              {selected.agent?.phone && <p className="text-xs text-slate-300 flex items-center gap-2"><Phone size={12} className="text-slate-500" /><a href={`tel:${selected.agent.phone}`} className="max-md:inline-block max-md:py-3 hover:text-blue-400">{selected.agent.phone}</a></p>}
+              {selected.agent?.email && <p className="text-xs text-slate-300 flex items-center gap-2"><Mail size={12} className="text-slate-500" /><a href={`mailto:${selected.agent.email}`} className="max-md:inline-block max-md:py-3 hover:text-blue-400 break-all">{selected.agent.email}</a></p>}
               <p className="text-xs text-slate-400">{selectedCurrent.length} assigned client(s){selectedDischarged.length > 0 ? `, ${selectedDischarged.length} discharged` : ''}</p>
             </div>
             {selectedDischarged.length > 0 && (

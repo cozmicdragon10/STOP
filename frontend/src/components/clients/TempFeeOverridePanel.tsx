@@ -87,7 +87,7 @@ export default function TempFeeOverridePanel({ client, role, userEmail, override
 
       {override ? (
         <div className="bg-slate-900 border border-emerald-500/30 rounded-lg p-4 mb-4">
-          <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div>
               <p className="text-xs text-slate-500 mb-1">Reduced Fee</p>
               <p className="text-white font-semibold text-lg">${Number(override.reducedfee).toFixed(2)}</p>

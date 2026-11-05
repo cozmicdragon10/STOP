@@ -78,7 +78,7 @@ export default function TestingTab({ clients, onSuccess }: Props) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl space-y-4">
         <h2 className="text-lg font-bold text-white border-b border-slate-800 pb-3">Test Entry</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -110,7 +110,7 @@ export default function TestingTab({ clients, onSuccess }: Props) {
         </form>
       </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-xl space-y-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl space-y-4">
         <h2 className="text-lg font-bold text-white border-b border-slate-800 pb-3">Test History</h2>
         {history.length === 0 ? (
           <p className="text-xs text-slate-500 italic">{testClient ? 'No test results for this client yet.' : 'Select a client to view test history.'}</p>

@@ -84,7 +84,7 @@ export default function PolyRescheduleDialog({ slot, role, userEmail, employees,
             </p>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-xs text-slate-400 uppercase mb-1">New Date *</label>
             <input type="date" required min={today} value={date} onChange={(e) => { setDate(e.target.value); clearWaitPrompt(); }} className={`${fieldClass} [color-scheme:dark]`} />
@@ -101,7 +101,7 @@ export default function PolyRescheduleDialog({ slot, role, userEmail, employees,
             {examiners.map(e => <option key={e.employeeemail} value={e.employeeemail}>{e.displayname} ({e.employeeemail})</option>)}
           </select>
         </div>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="block text-xs text-slate-400 uppercase mb-1">Office Location *</label>
             <input type="text" required value={location} onChange={(e) => setLocation(e.target.value)} className={fieldClass} />

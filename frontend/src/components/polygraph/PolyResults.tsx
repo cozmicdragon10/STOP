@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, RotateCcw } from 'lucide-react';
 import { deletePolygraphSlot, submitPolygraphResult } from '../../api';
 import { POLY_INCENTIVE_OVERRIDE_RESULTS } from '../../utils/polygraph';
 import { formatDisplayTime, getLocalDateString } from '../../utils/dates';
+import { scrollToStackedPanel } from '../../utils/layout';
 
 export interface AssignedPolySlot {
   slotid: number;
@@ -41,6 +42,11 @@ const RESULT_TYPES: [string, string][] = [
 export default function PolyResults({ slots, role, userEmail, examinerName, onCancelReservation, onRecorded, onSuccess, onError }: Props) {
   // Kept by id, so the form closes on its own once the slot is cancelled, deleted, or filtered out
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // The form opens under the whole appointment list, which on a phone is well off screen
+  const resultsFormRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (selectedId !== null) scrollToStackedPanel(resultsFormRef.current);
+  }, [selectedId]);
   const selected = slots.find(s => s.slotid === selectedId) ?? null;
   const [resResultType, setResResultType] = useState('No Deception Indicated');
   // Incentive program continuation on an Inconclusive or No Opinion result: unchecked and locked unless a Business Administrator overrides
@@ -100,7 +106,7 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
         </div>
       ) : (
         <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
+          <table className="stack-table w-full text-left border-collapse text-xs whitespace-nowrap">
             <thead>
               <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
                 <th className="p-3">Client</th>
@@ -117,10 +123,10 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
                   onClick={() => { setSelectedId(slot.slotid); setResIncentiveContinued(false); setResIncentiveOverride(false); }}
                   className={`transition cursor-pointer ${selectedId === slot.slotid ? 'bg-blue-500/10' : 'hover:bg-slate-800/50'}`}>
                   <td className="p-3 font-medium text-white">{slot.assignedClientName}</td>
-                  <td className="p-3"><span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-xs">{slot.type || 'Polygraph'}</span></td>
-                  <td className="p-3 text-slate-400">{slot.location}</td>
-                  <td className="p-3 text-slate-300">{new Date(slot.date).toLocaleDateString()} @ {formatDisplayTime(slot.time)}</td>
-                  <td className="p-3 text-slate-300">{examinerName(slot.polygrapher || '')}</td>
+                  <td data-label="Type" className="p-3"><span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-xs">{slot.type || 'Polygraph'}</span></td>
+                  <td data-label="Location" className="p-3 text-slate-400">{slot.location}</td>
+                  <td data-label="Scheduled" className="p-3 text-slate-300">{new Date(slot.date).toLocaleDateString()} @ {formatDisplayTime(slot.time)}</td>
+                  <td data-label="Examiner" className="p-3 text-slate-300">{examinerName(slot.polygrapher || '')}</td>
                 </tr>
               ))}
             </tbody>
@@ -129,8 +135,8 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
       )}
 
       {selected && (
-        <form onSubmit={handleSubmit} className="bg-slate-950 border border-blue-500/40 p-6 rounded-xl space-y-4 max-w-2xl mt-6">
-          <div className="border-b border-slate-800 pb-3 flex justify-between items-center">
+        <form ref={resultsFormRef} onSubmit={handleSubmit} className="bg-slate-950 border border-blue-500/40 p-4 md:p-6 rounded-xl space-y-4 max-w-2xl mt-6 scroll-mt-4">
+          <div className="border-b border-slate-800 pb-3 flex flex-wrap justify-between items-center gap-x-3">
             <h4 className="font-bold text-white">Record Results for {selected.assignedClientName}</h4>
             <span className="text-xs text-slate-400">{selected.type} Exam</span>
           </div>
