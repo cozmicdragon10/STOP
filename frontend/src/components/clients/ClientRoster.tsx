@@ -50,6 +50,8 @@ const getEmptyNewClient = () => ({
 });
 type NewClient = ReturnType<typeof getEmptyNewClient>;
 type FilterKey = 'agent' | 'programtype' | 'phase' | 'currentgroup' | 'status';
+// Shown, and offered in the Current Group filter, for clients with no group
+const UNASSIGNED_GROUP = 'Unassigned';
 
 // SO phases in phase order, then BIP weeks by number, then anything else
 const phaseRank = (p: string) => SO_PHASES.includes(p) ? SO_PHASES.indexOf(p) : isWholeNumber(p) ? 100 + Number(p) : Infinity;
@@ -107,7 +109,7 @@ const ROSTER_CELLS: Record<SortKey, (c: any) => ReactNode> = {
       : <span className="text-slate-400">No</span>}</td>;
   },
   phase: c => <td className="p-3 text-xs"><span className="bg-slate-800 px-2 py-0.5 rounded text-slate-300">{formatPhase(c.programtype, c.phase) || 'N/A'}</span></td>,
-  group: c => <td className="p-3 text-slate-300 text-xs">{c.groupname || 'Unassigned'}</td>,
+  group: c => <td className="p-3 text-slate-300 text-xs">{c.groupname || UNASSIGNED_GROUP}</td>,
   lastattended: c => (
     <td
       className={`p-3 text-xs ${isAttendanceOverdue(c) ? 'text-red-400 font-semibold' : 'text-slate-400'}`}
@@ -182,7 +184,8 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
         .sort((a, b) => phaseRank(a) - phaseRank(b) || a.localeCompare(b));
     }
     const field = key === 'agent' ? 'supervisingagent' : key === 'currentgroup' ? 'groupname' : 'programtype';
-    return Array.from(new Set(statusClients.map(c => String(c[field] ?? '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    const values = Array.from(new Set(statusClients.map(c => String(c[field] ?? '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    return key === 'currentgroup' ? [UNASSIGNED_GROUP, ...values] : values;
   };
   const filteredClients = statusClients
     .filter(c => {
@@ -196,13 +199,14 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
       if (!allowed(clientFilters.agent, c.supervisingagent)) return false;
       if (!allowed(clientFilters.programtype, c.programtype)) return false;
       if (!allowed(clientFilters.phase, c.phase)) return false;
-      if (!allowed(clientFilters.currentgroup, c.groupname)) return false;
+      if (!allowed(clientFilters.currentgroup, String(c.groupname ?? '').trim() || UNASSIGNED_GROUP)) return false;
       if (!allowed(clientFilters.status, c.programstatus)) return false;
       if (clientFilters.feeoverride === 'active' && (c.activefeeoverride === null || c.activefeeoverride === undefined)) return false;
       if (clientFilters.feeoverride === 'none' && c.activefeeoverride !== null && c.activefeeoverride !== undefined) return false;
       // Not pretrial: Federal SO and Fed Drug Test clients without the box ticked
       if (clientFilters.pretrial === 'yes' && pretrialValue(c) !== true) return false;
       if (clientFilters.pretrial === 'no' && pretrialValue(c) !== false) return false;
+      if (clientFilters.docnumber && (textOrNull(c.docnumber) === null) !== (clientFilters.docnumber === 'missing')) return false;
 
       return true;
     });
@@ -328,6 +332,16 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
             <option value="">Pretrial: All</option>
             <option value="yes">Pretrial</option>
             <option value="no">Not pretrial (Federal SO / Fed Drug Test)</option>
+          </select>
+
+          <select
+            value={clientFilters.docnumber}
+            onChange={(e) => setClientFilters({ ...clientFilters, docnumber: e.target.value as ClientFilters['docnumber'] })}
+            className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+          >
+            <option value="">DOC #: All</option>
+            <option value="missing">No DOC #</option>
+            <option value="has">Has DOC #</option>
           </select>
 
           {clientFilterActive && (

@@ -52,8 +52,9 @@ export interface ClientFilters {
   status: string[];
   feeoverride: '' | 'active' | 'none';
   pretrial: '' | 'yes' | 'no';
+  docnumber: '' | 'has' | 'missing';
 }
-export const DEFAULT_CLIENT_FILTERS: ClientFilters = { agent: [], programtype: [], phase: [], currentgroup: [], status: ['Active'], feeoverride: '', pretrial: '' };
+export const DEFAULT_CLIENT_FILTERS: ClientFilters = { agent: [], programtype: [], phase: [], currentgroup: [], status: ['Active'], feeoverride: '', pretrial: '', docnumber: '' };
 // Dropdown choices for client Information fields; must match the server's lists
 export const CLIENT_FIELD_OPTIONS: Record<string, string[]> = {
   race: ['American Indian or Alaska Native', 'Asian', 'Black or African American', 'Hispanic or Latino', 'Native Hawaiian or Other Pacific Islander', 'White', 'Two or More Races', 'Other'],
