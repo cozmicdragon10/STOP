@@ -71,6 +71,13 @@ const ACCOUNT_FIELDS: { label: string; field: string; prefix: string; step?: str
   { label: 'Poly Fee Voucher', field: 'polyfeevoucher', prefix: '', step: '1', min: 0 },
 ];
 const isDateField = (field: string) => field.includes('date') || field.includes('Date');
+// Compares a field the way it's shown: dates without their time, money and counts as numbers (150 and 150.00 match)
+const sameValue = (field: string, a: unknown, b: unknown) => {
+  const [x, y] = [String(a ?? ''), String(b ?? '')];
+  if (isDateField(field)) return x.split('T')[0] === y.split('T')[0];
+  if (ACCOUNT_FIELDS.some(f => f.field === field) && x !== '' && y !== '') return Number(x) === Number(y);
+  return x === y;
+};
 const inputClass = 'w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm';
 
 // The Information tab's details: Personal, Contact, and Program & Account sections, shown read-only until Edit Info.
@@ -88,13 +95,17 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
   const setField = (field: string, value: unknown) => update(() => ({ [field]: value }));
 
   // A field typed back to what it was doesn't count as a change
-  const dirty = Object.entries(edits ?? {}).some(([field, value]) => String(value ?? '') !== String(client[field] ?? ''));
+  const dirty = Object.entries(edits ?? {}).some(([field, value]) => !sameValue(field, value, client[field]));
   useEffect(() => {
     onDirtyChange(dirty);
     return () => onDirtyChange(false);
   }, [dirty, onDirtyChange]);
 
-  // Returns whether the save worked
+  // The prompt is waiting and the changes are gone, either saved or discarded: carry on leaving
+  useEffect(() => {
+    if (leaveRequested && !dirty) onLeaveResolved(true);
+  }, [leaveRequested, dirty, onLeaveResolved]);
+
   const handleSave = async () => {
     setSaving(true);
     setError('');
@@ -103,11 +114,9 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
       // Prefer the row the server returned (includes joined group name); fall back to the form values
       onSaved({ ...form, ...(res.client ?? {}) }, client.programtype ?? null);
       setEdits(null);
-      return true;
     } catch (err) {
       // Stay in edit mode so nothing typed is lost
       setError(err instanceof Error ? err.message : 'Failed to save client information.');
-      return false;
     } finally {
       setSaving(false);
     }
@@ -136,8 +145,8 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
             {error && <p role="alert" className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{error}</p>}
             <div className="flex flex-wrap justify-end gap-2">
               <button type="button" disabled={saving} onClick={() => { setError(''); onLeaveResolved(false); }} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Keep Editing</button>
-              <button type="button" disabled={saving} onClick={() => { setEdits(null); setError(''); onLeaveResolved(true); }} className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">Discard Changes</button>
-              <button type="button" disabled={saving} onClick={async () => { if (await handleSave()) onLeaveResolved(true); }} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1">
+              <button type="button" disabled={saving} onClick={() => { setEdits(null); setError(''); }} className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">Discard Changes</button>
+              <button type="button" disabled={saving} onClick={handleSave} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1">
                 <CheckCircle2 size={14} /> {saving ? 'Saving…' : 'Save Changes'}
               </button>
             </div>

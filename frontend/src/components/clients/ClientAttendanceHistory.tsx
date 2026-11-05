@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { SlidersHorizontal, Trash2 } from 'lucide-react';
 import { deleteAttendance, getClient, getClientAttendance, getClientFinancials } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
@@ -42,6 +43,8 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
   const [deleting, setDeleting] = useState<{ id: number; reason: string } | null>(null);
   const [deleteError, setDeleteError] = useState('');
   const [saving, setSaving] = useState(false);
+  // A reason typed for deleting an attendance
+  useUnsavedForm(!!deleting?.reason.trim());
 
   const handleDelete = async (e: React.FormEvent) => {
     e.preventDefault();

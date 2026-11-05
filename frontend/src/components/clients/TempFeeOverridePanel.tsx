@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { deleteClientFeeOverride, saveClientFeeOverride } from '../../api';
 import { getLocalDateString, parseLogDate } from '../../utils/dates';
 
@@ -24,6 +25,8 @@ export default function TempFeeOverridePanel({ client, role, userEmail, override
   const [expires, setExpires] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // A temporary fee partly filled in
+  useUnsavedForm(showForm && !!(feeInput || expires));
   const isAdmin = role === 'Business Administrator';
 
   const closeForm = () => {

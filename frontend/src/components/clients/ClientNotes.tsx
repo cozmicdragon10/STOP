@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import type { Dispatch, SetStateAction } from 'react';
 import { Pencil, PlusCircle, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { addClientNote, deleteClientNote, getClientNotes, reviewClientNote, updateClientNote } from '../../api';
@@ -50,6 +51,8 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
   const [editNoteText, setEditNoteText] = useState('');
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteError, setNoteError] = useState<{ noteId: number; message: string } | null>(null);
+  // A new note being typed, or an open note with changes
+  useUnsavedForm(!!newNoteText.trim() || (editingNoteId !== null && editNoteText !== (notes.find(n => n.noteid === editingNoteId)?.comments || '')));
 
   // Matches the server rule: the note's author or a Business Administrator
   const canChangeNote = (note: { User?: string }) =>

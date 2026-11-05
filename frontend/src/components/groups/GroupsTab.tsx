@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import { SlidersHorizontal, X } from 'lucide-react';
 import { assignClientToGroup, createGroup, deleteGroup, getGroupClients, updateGroup } from '../../api';
 import ScheduleSelect from '../ScheduleSelect';
@@ -187,16 +187,6 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
   const locationOptions = Array.from(new Set(groups.map(g => normalizeLocation(g.location)).filter(Boolean)));
   const programTypeOptions = Array.from(new Set(groups.map(g => g.programtype).filter(Boolean) as string[]));
 
-  // Auto-scroll to group details when a group is selected
-  useEffect(() => {
-    if (selectedGroupDetail && groupDetailRef.current) {
-      setTimeout(() => {
-        // The panel opens under the clicked row, so only scroll as far as needed to show it
-        groupDetailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }, 0);
-    }
-  }, [selectedGroupDetail]);
-
   const loadRoster = async (groupId: number) => {
     setGroupRoster(await getGroupClients(groupId));
   };
@@ -216,6 +206,8 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
     } catch (err) {
       onError(errorText(err, 'Could not load the group roster.'));
     }
+    // After the frame, so the page is measured with the roster showing. A low row has no room to scroll until then.
+    requestAnimationFrame(() => groupDetailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
 
   const handleUpdateGroup = async (e: React.FormEvent) => {
@@ -293,7 +285,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
 
   // Roster, Assign Clients, and Group Details for the open group. Shown under the group's row.
   const renderGroupDetailPanel = () => selectedGroupDetail && (
-    <div ref={groupDetailRef} className="p-4 md:p-6 space-y-4 text-left">
+    <div ref={groupDetailRef} className="p-4 md:p-6 space-y-4 text-left scroll-mt-4">
       <div className="flex flex-wrap justify-between items-center gap-3 border-b border-slate-800 pb-4">
         <h3 className="text-lg font-bold text-white">Managing: {selectedGroupDetail.groupname}</h3>
         <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">

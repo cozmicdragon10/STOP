@@ -1,4 +1,5 @@
 import { Fragment, useState } from 'react';
+import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { setClientNoPolyRequired } from '../../api';
 import { polySchedulingNeeds, slotStart, slotSummary } from '../../utils/polygraph';
 import { formatLogMonthDay, formatLogYear, localYmd, timeBetween } from '../../utils/dates';
@@ -49,6 +50,8 @@ function SchedulePolygraphForm({ openSlots, examinerName, onSchedule, scheduling
   const [slotId, setSlotId] = useState('');
   const [type, setType] = useState('Maintenance');
   const [comment, setComment] = useState('');
+  // A polygraph being scheduled
+  useUnsavedForm(!!(slotId || comment.trim()));
   return (
     <form
       onSubmit={(e) => {

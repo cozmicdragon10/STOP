@@ -57,6 +57,7 @@ import type { AttendanceDeleted } from './components/clients/ClientAttendanceHis
 import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividualsTab';
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
+import { UnsavedFormsContext } from './hooks/useUnsavedForm';
 import { DISCHARGE_STATUSES } from './utils/clients';
 import { scrollToStackedPanel } from './utils/layout';
 import { polygraphHistoryText, polygraphNotice, slotStart, slotSummary, takesPolygraphs } from './utils/polygraph';
@@ -98,13 +99,26 @@ export default function App() {
   const accountScrollRef = useRef<HTMLDivElement>(null);
   // The spot in the account header where the Information tab puts Edit Info
   const [accountActionsSlot, setAccountActionsSlot] = useState<HTMLDivElement | null>(null);
-  // Set while the Information tab has unsaved changes. Leaving it then waits in pendingAccountLeave for the save or discard prompt.
+  // Unsaved work in the open account: changes on the Information tab, and any other form with something in progress.
+  // Leaving then waits in leavePrompt. 'info' is the form's own prompt, which can save; 'other' can only discard, since
+  // each of those forms has its own save button and rules.
   const accountEditsDirty = useRef(false);
   const setAccountEditsDirty = useCallback((dirty: boolean) => { accountEditsDirty.current = dirty; }, []);
-  const [pendingAccountLeave, setPendingAccountLeave] = useState<(() => void) | null>(null);
-  const leaveAccountEdits = (leave: () => void) => {
-    if (accountEditsDirty.current) setPendingAccountLeave(() => leave);
+  const unsavedFormCount = useRef(0);
+  const reportUnsavedForm = useCallback((change: 1 | -1) => { unsavedFormCount.current += change; }, []);
+  const [leavePrompt, setLeavePrompt] = useState<{ leave: () => void; kind: 'info' | 'other' } | null>(null);
+  const leaveAccountEdits = useCallback((leave: () => void) => {
+    if (accountEditsDirty.current) setLeavePrompt({ leave, kind: 'info' });
+    else if (unsavedFormCount.current > 0) setLeavePrompt({ leave, kind: 'other' });
     else leave();
+  }, []);
+  const resolveLeavePrompt = (leave: boolean) => {
+    if (leave && leavePrompt && leavePrompt.kind === 'info' && unsavedFormCount.current > 0) {
+      setLeavePrompt({ leave: leavePrompt.leave, kind: 'other' });
+      return;
+    }
+    if (leave) leavePrompt?.leave();
+    setLeavePrompt(null);
   };
   const [clientAttendance, setClientAttendance] = useState<any[]>([]);
   const [clientFinancials, setClientFinancials] = useState<any[]>([]);
@@ -186,6 +200,7 @@ export default function App() {
     setSessionEndedHandler(() => {
       setUser(null);
       setError('Your session has ended. Please log in again.');
+      setLeavePrompt(null);
     });
     return () => setSessionEndedHandler(null);
   }, []);
@@ -466,6 +481,35 @@ export default function App() {
     document.documentElement.style.overflow = 'hidden';
     return () => { document.documentElement.style.overflow = ''; };
   }, [accountOpen]);
+
+  // Back (the phone's button or swipe) closes the account instead of leaving the app, and asks first if there's unsaved
+  // work. It does nothing while a dialog is over the account, so a payment being entered isn't dropped. Refreshing or
+  // closing the browser tab gets the browser's own warning.
+  const accountDialogOpen = useRef(false);
+  useEffect(() => {
+    accountDialogOpen.current = showClientPayment || statusDialog !== null;
+  }, [showClientPayment, statusDialog]);
+  useEffect(() => {
+    if (!accountOpen) return;
+    const unsavedWork = () => accountEditsDirty.current || unsavedFormCount.current > 0;
+    const entry = { stopAccount: true };
+    window.history.pushState(entry, '');
+    const onBack = () => {
+      if (accountDialogOpen.current || unsavedWork()) window.history.pushState(entry, '');
+      if (!accountDialogOpen.current) leaveAccountEdits(() => setSelectedClientDetail(null));
+    };
+    const onUnload = (e: BeforeUnloadEvent) => {
+      if (unsavedWork()) e.preventDefault();
+    };
+    window.addEventListener('popstate', onBack);
+    window.addEventListener('beforeunload', onUnload);
+    return () => {
+      window.removeEventListener('popstate', onBack);
+      window.removeEventListener('beforeunload', onUnload);
+      // Closed some other way: take back the history entry added above
+      if (window.history.state?.stopAccount) window.history.back();
+    };
+  }, [accountOpen, leaveAccountEdits]);
 
   // Scrolls to and briefly outlines a slot opened from a client's account. Kept above the sign-in return so the hook count never changes.
   useEffect(() => {
@@ -774,6 +818,7 @@ export default function App() {
             className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex justify-end client-left:justify-start z-50"
             onMouseDown={e => { if (e.target === e.currentTarget) leaveAccountEdits(() => setSelectedClientDetail(null)); }}
           >
+            <UnsavedFormsContext.Provider value={reportUnsavedForm}>
             <div className="bg-slate-900 w-full max-w-6xl client-full:max-w-none h-full border-l client-left:border-l-0 client-left:border-r client-full:border-0 border-slate-800 flex flex-col shadow-2xl">
               <div ref={accountScrollRef} className="flex-1 min-h-0 flex flex-col overflow-y-auto overscroll-contain">
               <div className="shrink-0 flex flex-col md:flex-row md:justify-between md:items-start gap-3 border-b client-tabs-top:border-b-0 border-slate-800 p-4 md:px-6">
@@ -853,10 +898,13 @@ export default function App() {
                 <BarTabs
                   items={clientTabItems}
                   activeTab={clientTab}
-                  onSelect={(tab) => leaveAccountEdits(() => {
-                    setClientTab(tab as typeof clientTab);
-                    accountScrollRef.current?.scrollTo({ top: 0 });
-                  })}
+                  onSelect={(tab) => {
+                    if (tab === clientTab) return;
+                    leaveAccountEdits(() => {
+                      setClientTab(tab as typeof clientTab);
+                      accountScrollRef.current?.scrollTo({ top: 0 });
+                    });
+                  }}
                   className="[scrollbar-width:thin] [scrollbar-color:#334155_transparent]"
                 />
               </nav>
@@ -920,11 +968,8 @@ export default function App() {
                     onDismissLoadError={() => setAccountLoadError('')}
                     actionsSlot={accountActionsSlot}
                     onDirtyChange={setAccountEditsDirty}
-                    leaveRequested={pendingAccountLeave !== null}
-                    onLeaveResolved={(leave) => {
-                      if (leave) pendingAccountLeave?.();
-                      setPendingAccountLeave(null);
-                    }}
+                    leaveRequested={leavePrompt?.kind === 'info'}
+                    onLeaveResolved={resolveLeavePrompt}
                     onSaved={handleClientInfoSaved}
                   />
 
@@ -995,7 +1040,7 @@ export default function App() {
                   financials={clientFinancials}
                   bookedSlot={assignedSlotFor(selectedClientDetail.clientid)}
                   canViewSlot={isAllowed('polygraph')}
-                  onViewSlot={openPolySlot}
+                  onViewSlot={(slotId) => leaveAccountEdits(() => openPolySlot(slotId))}
                   onPaymentChanged={handleLedgerPaymentChanged}
                   onSuccess={setSuccessMsg}
                 />
@@ -1016,7 +1061,7 @@ export default function App() {
                   bookedSlot={assignedSlotFor(selectedClientDetail.clientid)}
                   examinerName={getExaminerDisplayName}
                   canViewSlot={isAllowed('polygraph')}
-                  onViewSlot={openPolySlot}
+                  onViewSlot={(slotId) => leaveAccountEdits(() => openPolySlot(slotId))}
                   onSchedule={(slotId, type, comment) => polyAssign.scheduleFromAccount(slotId, String(selectedClientDetail.clientid), type, comment)}
                   scheduling={loading || polyAssign.saving}
                   error={error}
@@ -1041,6 +1086,22 @@ export default function App() {
               </div>
               </div>
             </div>
+            </UnsavedFormsContext.Provider>
+
+            {leavePrompt?.kind === 'other' && (
+              <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="unsaved-work-title">
+                <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
+                  <div>
+                    <h3 id="unsaved-work-title" className="font-semibold text-white">Discard your unsaved work?</h3>
+                    <p className="text-xs text-slate-400 mt-1">You have something in progress on this tab that hasn't been saved. Keep editing to finish and save it there.</p>
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button type="button" onClick={() => resolveLeavePrompt(false)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Keep Editing</button>
+                    <button type="button" onClick={() => resolveLeavePrompt(true)} className="bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">Discard</button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

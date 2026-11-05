@@ -33,9 +33,10 @@
     touch-action: manipulation;
   }
 
-  /* Icons are block level, so in a button widened by the rule above they would sit at the left */
+  /* Icons are block level, so in a button widened by the rule above they would sit at the left. Inline, the button centers them. */
   button > svg:only-child {
-    margin-inline: auto;
+    display: inline-block;
+    vertical-align: middle;
   }
 
   input[type="checkbox"], input[type="radio"] {

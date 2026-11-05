@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { PlusCircle, Trash2 } from 'lucide-react';
 import { deleteOutsideBipAssessment, getClientProgress, recordOutsideBipAssessment } from '../../api';
 import type { ClientProgress, CompletedAssessment } from '../../api';
@@ -29,6 +30,8 @@ export default function ProgressTab({ clientId, role, userEmail, onChanged, onSu
   const [error, setError] = useState('');
   const [form, setForm] = useState<typeof EMPTY_FORM | null>(null);
   const [saving, setSaving] = useState(false);
+  // An outside assessment form is open
+  useUnsavedForm(form !== null);
   const canRecord = ADMIN_ROLES.includes(role || '');
 
   const load = useCallback(() => {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { Download, Eye, Paperclip, Pencil, Printer, Trash2, Upload, X } from 'lucide-react';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import {
@@ -36,6 +37,8 @@ export default function ClientAttachments({ clientId, userEmail, canDelete, onSu
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
+  // An attachment is being renamed
+  useUnsavedForm(renamingId !== null);
 
   useEffect(() => {
     let cancelled = false;

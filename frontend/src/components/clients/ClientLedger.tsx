@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { AlertCircle, Pencil, SlidersHorizontal, X } from 'lucide-react';
 import { adjustCashPayment, fetchPolyFeeOverride, getClientAttendance, getClientFinancials, recordCardPaymentAction } from '../../api';
 import type { CardPaymentAction, PaymentChangeResult, PolyFeeOverride } from '../../api';
@@ -55,6 +56,8 @@ export default function ClientLedger({ client, role, userEmail, financials, book
   const [paymentAction, setPaymentAction] = useState<{ id: number; kind: PaymentActionKind; amount: string; reason: string } | null>(null);
   const [paymentActionError, setPaymentActionError] = useState('');
   const [saving, setSaving] = useState(false);
+  // An adjustment, refund, or dispute form is open
+  useUnsavedForm(paymentAction !== null);
   // Shown after a poly fee payment change when the client is already booked into a polygraph with vouchers
   const [scheduledPolyNotice, setScheduledPolyNotice] = useState<{ slotId: number; text: string } | null>(null);
 

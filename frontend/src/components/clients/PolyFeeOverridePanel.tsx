@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { deletePolyFeeOverride, savePolyFeeOverride } from '../../api';
 import type { PolyFeeOverride, PolyFeeOverrideResult } from '../../api';
 import { polyVoucherMax } from '../../utils/polygraph';
@@ -26,6 +27,8 @@ export default function PolyFeeOverridePanel({ client, role, userEmail, override
   const [fillsInput, setFillsInput] = useState('1');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // A poly fee override partly filled in
+  useUnsavedForm(showForm && !!(feeInput || fillsInput !== '1'));
   const isAdmin = role === 'Business Administrator';
 
   const toggleForm = () => {

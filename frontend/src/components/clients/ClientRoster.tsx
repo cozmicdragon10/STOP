@@ -82,7 +82,7 @@ const SORT_VALUES = {
   },
   group: (c: RosterRow) => textOrNull(c.groupname),
   lastattended: (c: RosterRow) => timeOrNull(c.lastattended),
-  lastpoly: (c: RosterRow) => (!takesPolygraphs(c.programtype) ? null : timeOrNull(c.lastpoly)),
+  lastpoly: (c: RosterRow) => (!takesPolygraphs(String(c.programtype ?? '')) ? null : timeOrNull(c.lastpoly)),
   status: (c: RosterRow) => textOrNull(c.programstatus),
   balance: (c: RosterRow) => toDisplayBalance(c.accountbalance),
 } satisfies Record<string, (c: RosterRow) => string | number | null>;
@@ -518,7 +518,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
               {hidden ? (
                 <div className="flex-1 min-h-16 bg-slate-950/60" aria-label="Hidden client" />
               ) : (
-                <button type="button" data-client-row onClick={() => onOpenClient(c)} className="flex-1 min-w-0 text-left p-4 space-y-1.5">
+                <button type="button" onClick={() => onOpenClient(c)} className="flex-1 min-w-0 text-left p-4 space-y-1.5">
                   <span className="flex items-baseline justify-between gap-3">
                     <span className="font-medium text-white truncate">{c.lastname}, {c.firstname}</span>
                     <span className={`shrink-0 text-sm font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</span>
