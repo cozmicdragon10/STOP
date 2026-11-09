@@ -414,7 +414,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                 setNewClient({
                   ...newClient,
                   programtype: programType,
-                  phase: SO_PROGRAM_TYPES.includes(programType) ? 'Phase 1 - Weekly' : programType === 'BIP' ? '0' : '',
+                  phase: SO_PROGRAM_TYPES.includes(programType) ? 'Phase 1 - Weekly' : programType === 'BIP' ? '0' : programType === 'Chaperon' ? 'Chaperon' : '',
                   treatmentfee: programType === 'BIP' ? 35 : (STATE_FEE_PROGRAM_TYPES.includes(programType) ? SO_TREATMENT_FEES['Phase 1 - Weekly'] : 0),
                   pretrial: PRETRIAL_PROGRAM_TYPES.includes(programType) && newClient.pretrial,
                 });
@@ -426,6 +426,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                 <option value="Voluntary SO">Voluntary SO</option>
                 <option value="Poly Only">Poly Only</option>
                 <option value="Fed Drug Test">Fed Drug Test</option>
+                <option value="Chaperon">Chaperon</option>
               </select>
               {PRETRIAL_PROGRAM_TYPES.includes(newClient.programtype) && (
                 <label className="mt-2 flex items-center gap-1.5 text-slate-200 text-sm cursor-pointer">

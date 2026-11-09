@@ -7,7 +7,7 @@ const { LAST_POLY_RESULT_SQL, POLY_INCENTIVE_OVERRIDE_RESULTS, POLY_NDI_WAIT, PO
 const router = express.Router();
 
 // Programs whose clients don't take polygraphs; mirrors NO_POLY_PROGRAM_TYPES in frontend/src/utils/polygraph.ts
-const NO_POLY_PROGRAM_TYPES = ['BIP', 'Fed Drug Test'];
+const NO_POLY_PROGRAM_TYPES = ['BIP', 'Fed Drug Test', 'Chaperon'];
 
 router.get('/api/polygraphs/slots', async (req, res) => {
     try {
@@ -161,7 +161,7 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
         if (!clientId) {
             return res.status(400).json({ error: 'Client ID is required.' });
         }
-        // Only active clients are booked, and BIP and Fed Drug Test clients don't take polygraphs
+        // Only active clients are booked, and BIP, Fed Drug Test and Chaperon clients don't take polygraphs
         const programRes = await db.query('SELECT ProgramType, ProgramStatus, FirstName, LastName FROM Clients WHERE ClientId = $1', [clientId]);
         const bookedClient = programRes.rows[0];
         if (NO_POLY_PROGRAM_TYPES.includes(bookedClient?.programtype)) {

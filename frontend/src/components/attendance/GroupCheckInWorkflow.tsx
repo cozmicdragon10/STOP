@@ -67,6 +67,7 @@ function filterSearchableClients(clients: ClientRecord[], groupType: string | nu
   const isSOGroup = ['SO', 'FED SO'].includes(normalizedGroupType);
   const isBIPGroup = normalizedGroupType === 'BIP';
   const isDrugTestGroup = normalizedGroupType === 'DRUG TEST';
+  const isChaperonGroup = ['CHAPERON', 'FED CHAPERON'].includes(normalizedGroupType);
 
   return clients.filter(c => {
     // Only show active clients
@@ -90,6 +91,11 @@ function filterSearchableClients(clients: ClientRecord[], groupType: string | nu
     // If it's a DRUG TEST group, only show Fed Drug Test clients
     if (isDrugTestGroup) {
       return (c.programtype || '').trim() === 'Fed Drug Test';
+    }
+
+    // If it's a CHAPERON or FED CHAPERON group, only show Chaperon clients
+    if (isChaperonGroup) {
+      return (c.programtype || '').trim() === 'Chaperon';
     }
     // For other group types, show all active clients
     return true;

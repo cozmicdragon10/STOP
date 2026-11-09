@@ -3,9 +3,9 @@ import { POLY_VOUCHER_MAX_BY_PHASE } from './soPhases';
 
 export const POLY_OVERDUE_MONTHS = 6;
 
-// BIP and Fed Drug Test clients don't take polygraphs, so they have no polygraph notices, poly fee or bookings.
+// BIP, Fed Drug Test and Chaperon clients don't take polygraphs, so they have no polygraph notices, poly fee or bookings.
 // Mirrors NO_POLY_PROGRAM_TYPES in backend/routes/polygraphs.js.
-export const NO_POLY_PROGRAM_TYPES = ['BIP', 'Fed Drug Test'];
+export const NO_POLY_PROGRAM_TYPES = ['BIP', 'Fed Drug Test', 'Chaperon'];
 export const takesPolygraphs = (programtype?: string | null) => !NO_POLY_PROGRAM_TYPES.includes(programtype ?? '');
 
 // When the client's most recent polygraph was taken: the actual polygraph date, falling back to the recorded date for older results without one

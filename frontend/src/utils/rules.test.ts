@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatPhase, isAttendanceOverdue } from './clients';
+import { allowsByAppointment, clientFitsGroup, formatPhase, isAttendanceOverdue } from './clients';
 import { caseNoteLabel, parseGroupCallInNote } from './notes';
 import { currentReportFor, reportTabsFor } from './reports';
 import { SCHEDULE_TIMES, formatSchedule, isByAppointment, parseSchedule } from './schedule';
@@ -7,6 +7,21 @@ import { groupByMonth, sortedUnique, toggleInSet } from './filters';
 import { isMonthlyFeeClient } from './soPhases';
 
 describe('client rules', () => {
+  it('puts Chaperon clients only in chaperon groups, state or federal', () => {
+    expect(clientFitsGroup('Chaperon', 'CHAPERON')).toBe(true);
+    expect(clientFitsGroup('Chaperon', 'FED CHAPERON')).toBe(true);
+    expect(clientFitsGroup('Chaperon', 'SO')).toBe(false);
+    expect(clientFitsGroup('State SO', 'CHAPERON')).toBe(false);
+    expect(clientFitsGroup('Federal SO', 'FED CHAPERON')).toBe(false);
+  });
+
+  it('lets drug-test and chaperon groups meet By Appointment', () => {
+    expect(allowsByAppointment('DRUG TEST')).toBe(true);
+    expect(allowsByAppointment('CHAPERON')).toBe(true);
+    expect(allowsByAppointment('FED CHAPERON')).toBe(true);
+    expect(allowsByAppointment('SO')).toBe(false);
+  });
+
   it('shows a BIP week number as a week', () => {
     expect(formatPhase('BIP', '3')).toBe('Week 3');
     expect(formatPhase('State SO', 'Phase 1 - Weekly')).toBe('Phase 1 - Weekly');

@@ -45,6 +45,15 @@ test('BIP check-in block messages match', async () => {
     }
 });
 
+test('the same programs skip polygraphs', () => {
+    const fs = require('fs');
+    const list = (file) => JSON.parse(/NO_POLY_PROGRAM_TYPES = (\[[^\]]*\])/.exec(fs.readFileSync(file, 'utf8'))[1].replace(/'/g, '"'));
+    assert.deepEqual(
+        list(path.join(__dirname, '..', 'routes', 'polygraphs.js')),
+        list(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'polygraph.ts')),
+    );
+});
+
 test('call-in reasons match', async () => {
     const { CALL_IN_REASONS: browser } = await frontend('notes.ts');
     const source = require('fs').readFileSync(path.join(__dirname, '..', 'routes', 'callins.js'), 'utf8');

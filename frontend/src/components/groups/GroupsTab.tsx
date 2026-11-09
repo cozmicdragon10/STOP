@@ -5,7 +5,7 @@ import ScheduleSelect from '../ScheduleSelect';
 import { BY_APPOINTMENT } from '../../utils/schedule';
 import { DEFAULT_GROUP_FILTERS } from '../../utils/filters';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
-import { OBSERVER_ROLES, clientFitsGroup, formatPhase, groupLeadLabel, isDrugTestGroup } from '../../utils/clients';
+import { OBSERVER_ROLES, allowsByAppointment, clientFitsGroup, formatPhase, groupLeadLabel, isChaperonGroup, isDrugTestGroup } from '../../utils/clients';
 import { toLocalDay } from '../../utils/dates';
 
 interface DirectoryGroup {
@@ -69,20 +69,23 @@ const denormalizeLocation = (loc: string) => (loc === 'OKC' ? 'Oklahoma City' : 
 
 const emptyNewGroup = { groupName: '', location: '', counselor: '', programType: '', schedule: '', address: '' };
 
-// The directory's sub-tabs. BIP and DRUG TEST groups have their own; SO, FED SO and anything else are under SO.
+// The directory's sub-tabs. BIP, DRUG TEST and chaperon (CHAPERON and FED CHAPERON) groups have their own; SO, FED SO and
+// anything else are under SO.
 const GROUP_SECTIONS = [
-  { key: 'SO', label: 'SO', newGroupType: 'SO' },
-  { key: 'BIP', label: 'BIP', newGroupType: 'BIP' },
-  { key: 'DRUG TEST', label: 'Drug Test', newGroupType: 'DRUG TEST' },
+  { key: 'SO', label: 'SO', newGroupType: 'SO', clientProgram: 'SO' },
+  { key: 'BIP', label: 'BIP', newGroupType: 'BIP', clientProgram: 'BIP' },
+  { key: 'DRUG TEST', label: 'Drug Test', newGroupType: 'DRUG TEST', clientProgram: 'Fed Drug Test' },
+  { key: 'CHAPERON', label: 'Chaperon', newGroupType: 'CHAPERON', clientProgram: 'Chaperon' },
 ] as const;
 type GroupSection = typeof GROUP_SECTIONS[number]['key'];
-// A new group starts with the open sub-tab's program type; a drug-test group starts By Appointment
+// A new group starts with the open sub-tab's program type; drug-test and chaperon groups start By Appointment
 const withNewGroupDefaults = (g: typeof emptyNewGroup, section: GroupSection) => {
   const programType = g.programType || GROUP_SECTIONS.find(s => s.key === section)!.newGroupType;
-  return { ...g, programType, schedule: g.schedule || (isDrugTestGroup(programType) ? BY_APPOINTMENT : '') };
+  return { ...g, programType, schedule: g.schedule || (allowsByAppointment(programType) ? BY_APPOINTMENT : '') };
 };
 const groupSection = (g: { programtype?: string | null }): GroupSection => {
   const type = (g.programtype || '').trim().toUpperCase();
+  if (isChaperonGroup(type)) return 'CHAPERON';
   return type === 'BIP' || type === 'DRUG TEST' ? type : 'SO';
 };
 
@@ -377,7 +380,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
                   ))
                 ) : (
                   <p className="text-xs text-slate-500 italic md:col-span-2">
-                    {searchTerm ? 'No clients match your search.' : `No other active${selectedGroupDetail.programtype ? ` ${groupSection(selectedGroupDetail) === 'DRUG TEST' ? 'Fed Drug Test' : groupSection(selectedGroupDetail)}` : ''} clients to assign.`}
+                    {searchTerm ? 'No clients match your search.' : `No other active${selectedGroupDetail.programtype ? ` ${GROUP_SECTIONS.find(s => s.key === groupSection(selectedGroupDetail))!.clientProgram}` : ''} clients to assign.`}
                   </p>
                 )}
               </div>
@@ -403,7 +406,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
             <div><label className="block text-xs text-slate-400 mb-1">Location *</label><input type="text" required list="edit-group-locations" value={editLocation} onChange={(e) => setEditLocation(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
             <div><label className="block text-xs text-slate-400 mb-1">{groupLeadLabel(editProgramType)} *</label><select required value={editCounselor} onChange={(e) => setEditCounselor(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm"><option value="">Select {isDrugTestGroup(editProgramType) ? 'an observer' : 'a counselor'}...</option>{counselorChoices(editCounselor, editProgramType).map(name => <option key={name} value={name}>{name}</option>)}</select></div>
             <div><label className="block text-xs text-slate-400 mb-1">Program Type *</label><input type="text" required list="edit-group-program-types" value={editProgramType} onChange={(e) => setEditProgramType(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
-            <div><label className="block text-xs text-slate-400 mb-1">Schedule *</label><ScheduleSelect value={editSchedule} onChange={setEditSchedule} allowByAppointment={isDrugTestGroup(editProgramType)} className="bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Schedule *</label><ScheduleSelect value={editSchedule} onChange={setEditSchedule} allowByAppointment={allowsByAppointment(editProgramType)} className="bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
             <div><label className="block text-xs text-slate-400 mb-1">Address</label><input type="text" value={editAddress} onChange={(e) => setEditAddress(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" /></div>
           </div>
           <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
@@ -494,10 +497,10 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
             <div><label className="block text-xs text-slate-400 mb-1">{groupLeadLabel(newGroup.programType)} *</label><select required value={newGroup.counselor} onChange={(e) => setNewGroup({ ...newGroup, counselor: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm"><option value="">Select {isDrugTestGroup(newGroup.programType) ? 'an observer' : 'a counselor'}...</option>{counselorChoices(newGroup.counselor, newGroup.programType).map(name => <option key={name} value={name}>{name}</option>)}</select></div>
             <div><label className="block text-xs text-slate-400 mb-1">Program Type *</label><input type="text" required list="group-program-types" value={newGroup.programType} onChange={(e) => setNewGroup({
               ...newGroup, programType: e.target.value,
-              // Typing DRUG TEST into a blank schedule starts it By Appointment
-              schedule: newGroup.schedule || (isDrugTestGroup(e.target.value) ? BY_APPOINTMENT : ''),
+              // Typing DRUG TEST, CHAPERON or FED CHAPERON into a blank schedule starts it By Appointment
+              schedule: newGroup.schedule || (allowsByAppointment(e.target.value) ? BY_APPOINTMENT : ''),
             })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
-            <div><label className="block text-xs text-slate-400 mb-1">Schedule *</label><ScheduleSelect value={newGroup.schedule} onChange={(v) => setNewGroup({ ...newGroup, schedule: v })} allowByAppointment={isDrugTestGroup(newGroup.programType)} className="bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
+            <div><label className="block text-xs text-slate-400 mb-1">Schedule *</label><ScheduleSelect value={newGroup.schedule} onChange={(v) => setNewGroup({ ...newGroup, schedule: v })} allowByAppointment={allowsByAppointment(newGroup.programType)} className="bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
             <div><label className="block text-xs text-slate-400 mb-1">Address</label><input type="text" value={newGroup.address} onChange={(e) => setNewGroup({ ...newGroup, address: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" /></div>
             <div className="md:col-span-2 flex justify-end gap-2">
               <button type="button" onClick={() => { setShowNewGroupForm(false); setNewGroup(emptyNewGroup); }} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Cancel</button>

@@ -64,9 +64,10 @@ describe('polyVoucherReturnRule', () => {
 describe('polygraphNotice', () => {
   const today = new Date(2026, 6, 15);
 
-  it('does not apply to BIP or Fed Drug Test clients or clients with No Poly Required', () => {
+  it('does not apply to BIP, Fed Drug Test or Chaperon clients or clients with No Poly Required', () => {
     expect(polygraphNotice({ programtype: 'BIP' }, [], today)).toBeNull();
     expect(polygraphNotice({ programtype: 'Fed Drug Test', lastdateattended: '2026-07-05' }, [], today)).toBeNull();
+    expect(polygraphNotice({ programtype: 'Chaperon', lastdateattended: '2026-07-05' }, [], today)).toBeNull();
     expect(polygraphNotice({ programtype: 'State SO', nopolyrequired: true }, [], today)).toBeNull();
   });
 

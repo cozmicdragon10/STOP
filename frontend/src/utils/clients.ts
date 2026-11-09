@@ -36,6 +36,8 @@ export const SO_PROGRAM_TYPES = ['State SO', 'Federal SO', 'Voluntary SO'];
 export const POLY_PROGRAM_TYPES = [...SO_PROGRAM_TYPES, 'Poly Only'];
 // Programs whose clients can be marked Pretrial. Mirrors PRETRIAL_PROGRAM_TYPES in backend/routes/clients.js.
 export const PRETRIAL_PROGRAM_TYPES = ['Federal SO', 'Fed Drug Test'];
+// Chaperon clients' phase says which kind of chaperon program they are in (the old system's two chaperon phases)
+export const CHAPERON_PHASES = ['Chaperon', 'Federal Chaperon'];
 // Programs that start at the State SO default treatment fee (Phase 1 - Weekly)
 export const STATE_FEE_PROGRAM_TYPES = ['State SO', 'Voluntary SO'];
 // BIP clients store a whole-number week (starting at 0) in the phase column instead of an SO phase
@@ -87,14 +89,20 @@ export const GROUP_TYPES_BY_PROGRAM: Record<string, string[]> = {
   'Voluntary SO': ['SO', 'FED SO'],
   'BIP': ['BIP'],
   'Fed Drug Test': ['DRUG TEST'],
+  'Chaperon': ['CHAPERON', 'FED CHAPERON'],
 };
 // Drug-test groups are run by an observer, who is an Office Admin or Business Administrator, instead of a counselor.
 // The observer is kept in the group's Counselor field.
 export const isDrugTestGroup = (groupProgram?: string | null) => (groupProgram || '').trim().toUpperCase() === 'DRUG TEST';
+// Chaperon classes: CHAPERON groups, and FED CHAPERON groups for federal (USPO-billed) chaperon clients
+export const CHAPERON_GROUP_TYPES = ['CHAPERON', 'FED CHAPERON'];
+export const isChaperonGroup = (groupProgram?: string | null) => CHAPERON_GROUP_TYPES.includes((groupProgram || '').trim().toUpperCase());
+// Drug-test groups and chaperon classes meet when booked, so their schedule can be By Appointment
+export const allowsByAppointment = (groupProgram?: string | null) => isDrugTestGroup(groupProgram) || isChaperonGroup(groupProgram);
 export const groupLeadLabel = (groupProgram?: string | null) => (isDrugTestGroup(groupProgram) ? 'Observer' : 'Counselor');
 export const OBSERVER_ROLES = ['Office Admin', 'Business Administrator'];
 // Whether a client of this program can be put in a group of this program type: BIP groups take BIP clients, SO groups
-// take SO clients, DRUG TEST groups take Fed Drug Test clients. A group without a program type takes anyone. Mirrors the server's check on assignment.
+// take SO clients, DRUG TEST groups take Fed Drug Test clients, CHAPERON and FED CHAPERON groups take Chaperon clients. A group without a program type takes anyone. Mirrors the server's check on assignment.
 export const clientFitsGroup = (clientProgram?: string | null, groupProgram?: string | null) => {
   const groupType = (groupProgram || '').trim().toUpperCase();
   return !groupType || (GROUP_TYPES_BY_PROGRAM[clientProgram || ''] ?? []).includes(groupType);

@@ -989,7 +989,7 @@ export default function App() {
                   />
 
                   {/* Section 5 – Temporary Poly Fee Override: a reduced poly fee for a number of fills, not a date.
-                      BIP and Fed Drug Test clients don't take polygraphs, so they have no poly fee. */}
+                      BIP, Fed Drug Test and Chaperon clients don't take polygraphs, so they have no poly fee. */}
                   {takesPolygraphs(selectedClientDetail.programtype) && <PolyFeeOverridePanel
                     key={`poly-${selectedClientDetail.clientid}`}
                     client={selectedClientDetail}

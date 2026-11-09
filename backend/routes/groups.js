@@ -13,6 +13,7 @@ const GROUP_TYPES_BY_PROGRAM = {
     'Voluntary SO': ['SO', 'FED SO'],
     'BIP': ['BIP'],
     'Fed Drug Test': ['DRUG TEST'],
+    'Chaperon': ['CHAPERON', 'FED CHAPERON'],
 };
 
 router.get('/api/groups', async (req, res) => {
@@ -121,8 +122,8 @@ router.post('/api/groups/:id/assign', async (req, res) => {
         const groupRes = await pool.query('SELECT ProgramType FROM Groups WHERE GroupId = $1', [id]);
         const c = beforeRes.rows[0];
         if (!c || groupRes.rows.length === 0) return res.status(404).json({ error: 'Client or group not found.' });
-        // Only active clients are assigned, and only to a group of their program: BIP to BIP groups, SO to SO groups, Fed Drug Test to DRUG TEST groups
-        // (a group without a program type takes anyone). Mirrors clientFitsGroup in frontend/src/utils/clients.ts.
+        // Only active clients are assigned, and only to a group of their program: BIP to BIP groups, SO to SO groups, Fed Drug Test to DRUG TEST groups,
+        // Chaperon to CHAPERON and FED CHAPERON groups (a group without a program type takes anyone). Mirrors clientFitsGroup in frontend/src/utils/clients.ts.
         const name = `${c.lastname}, ${c.firstname}`;
         if (c.programstatus !== 'Active') {
             return res.status(400).json({ error: `${name} is ${c.programstatus || 'not active'}. Only active clients can be assigned to a group.` });

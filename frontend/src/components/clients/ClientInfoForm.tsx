@@ -6,7 +6,7 @@ import type { SupervisingAgent } from '../../api';
 import AgentPicker from '../agents/AgentPicker';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import {
-  CLIENT_FIELD_OPTIONS, EDITABLE_PROGRAM_STATUSES, GROUP_TYPES_BY_PROGRAM, POLY_PROGRAM_TYPES, PRETRIAL_PROGRAM_TYPES, SO_ATTENDANCE_LIMIT_MONTHS, SO_PROGRAM_TYPES,
+  CHAPERON_PHASES, CLIENT_FIELD_OPTIONS, EDITABLE_PROGRAM_STATUSES, GROUP_TYPES_BY_PROGRAM, POLY_PROGRAM_TYPES, PRETRIAL_PROGRAM_TYPES, SO_ATTENDANCE_LIMIT_MONTHS, SO_PROGRAM_TYPES,
   STATE_FEE_PROGRAM_TYPES, formatPhase, isAttendanceOverdue, isWholeNumber,
 } from '../../utils/clients';
 import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
@@ -284,6 +284,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                     // Switching programs resets the phase/week to one that fits the new program
                     const phase = SO_PROGRAM_TYPES.includes(newType) && !SO_PHASES.includes(f.phase) ? 'Phase 1 - Weekly'
                       : newType === 'BIP' && !isWholeNumber(f.phase) ? '0'
+                      : newType === 'Chaperon' && !CHAPERON_PHASES.includes(f.phase) ? 'Chaperon'
                       : f.phase;
                     // BIP is $35; Federal SO has no treatment fee; State and Voluntary SO take the fee for the phase
                     const treatmentfee = newType === 'BIP' ? 35
@@ -302,6 +303,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                 <option value="Voluntary SO">Voluntary SO</option>
                 <option value="Poly Only">Poly Only</option>
                 <option value="Fed Drug Test">Fed Drug Test</option>
+                <option value="Chaperon">Chaperon</option>
               </select>
             ) : (
               <p className="text-white font-medium">{client.programtype || '—'}</p>
@@ -367,7 +369,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
               <p className="text-white font-medium">{groups.find(g => g.groupid === client.groupid)?.groupname || client.groupid || '—'}</p>
             )}
           </div>
-          {/* BIP and Fed Drug Test clients don't take polygraphs, so their poly fee and vouchers aren't shown */}
+          {/* BIP, Fed Drug Test and Chaperon clients don't take polygraphs, so their poly fee and vouchers aren't shown */}
           {ACCOUNT_FIELDS.filter(({ field }) => !(!takesPolygraphs(programType) && field === 'polyfeevoucher')).map(({ label, field, prefix, step = '0.01', min, max }) => (
             <div key={field}>
               <p className="text-xs text-slate-500 mb-0.5">{label}</p>

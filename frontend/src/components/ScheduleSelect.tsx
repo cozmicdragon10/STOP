@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { BY_APPOINTMENT, SCHEDULE_DAYS, SCHEDULE_TIMES, formatSchedule, isByAppointment, parseSchedule } from '../utils/schedule';
 
 // Day and time pickers for a group schedule, read from and written back as "Thursdays @ 7:00 PM". With
-// allowByAppointment (drug-test groups) the day list also offers By Appointment, which needs no time.
+// allowByAppointment (drug-test and chaperon groups) the day list also offers By Appointment, which needs no time.
 const ScheduleSelect = ({ value, onChange, className, allowByAppointment = false }: {
   value: string; onChange: (v: string) => void; className: string; allowByAppointment?: boolean;
 }) => {

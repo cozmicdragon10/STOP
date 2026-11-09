@@ -61,7 +61,7 @@ const PHASE_MAP = {
     16: ['State SO', 'Phase 1 - Weekly'],    // Pro-Bono Reduced
     17: [null, 'MRT'],
     18: [null, 'MRT Voucher'],
-    19: [null, 'Chaperon'],
+    19: ['Chaperon', 'Chaperon'],
     20: [null, 'Substance Abuse Evaluation'],
     22: [null, 'Mental Health Evaluation'],
     23: [null, 'Sexual Interest Evaluation'],
@@ -73,11 +73,11 @@ const PHASE_MAP = {
     33: ['Fed Drug Test', 'Phase 1 - Weekly'], // Federal Drug Testing
     34: ['Federal SO', 'Phase 1 - Weekly'],  // Federal Individual
     35: ['Poly Only', 'Polygraphs'],         // Federal Polygraphs
-    36: ['Federal SO', 'Phase 1 - Weekly'],  // Federal Chaperon
+    36: ['Chaperon', 'Federal Chaperon'],
 };
 
 // Group program types each client program may join (mirrors GROUP_TYPES_BY_PROGRAM in the frontend)
-const GROUP_TYPES_BY_PROGRAM = { 'State SO': ['SO', 'FED SO'], 'Federal SO': ['SO', 'FED SO'], 'BIP': ['BIP'], 'Fed Drug Test': ['DRUG TEST'] };
+const GROUP_TYPES_BY_PROGRAM = { 'State SO': ['SO', 'FED SO'], 'Federal SO': ['SO', 'FED SO'], 'BIP': ['BIP'], 'Fed Drug Test': ['DRUG TEST'], 'Chaperon': ['CHAPERON', 'FED CHAPERON'] };
 
 // Splits one record into fields; quoted fields may hold commas, doubled quotes and line breaks
 const parseFields = (record) => {
