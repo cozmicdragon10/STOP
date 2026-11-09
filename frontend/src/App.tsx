@@ -16,7 +16,7 @@ import {
   getEmployees, fetchClientFeeOverride, fetchPolyFeeOverride,
   getOpenGroups, deleteOpenGroup, getClosedGroups, getSupervisingAgents
 } from './api';
-import type { ClosedGroupSession, OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
+import type { ClientNote, ClosedGroupSession, OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
@@ -379,10 +379,10 @@ export default function App() {
   };
 
   // A bus pass was granted on the Information tab: new count on the account and roster, and its note on Case Notes
-  const handleBusPassGranted = (busPasses: number, note: any) => {
+  const handleBusPassGranted = (busPasses: number, note: ClientNote) => {
     if (!selectedClientDetail) return;
     const clientid = selectedClientDetail.clientid;
-    setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, buspasses: busPasses } : c));
+    setSelectedClientDetail((c: typeof selectedClientDetail) => (c && c.clientid === clientid ? { ...c, buspasses: busPasses } : c));
     setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, buspasses: busPasses } : c));
     setClientNotes(prev => [note, ...prev]);
     setSuccessMsg(`Bus pass granted to ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}. ${busPasses} left.`);
