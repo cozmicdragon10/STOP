@@ -16,8 +16,9 @@ const ACTION = 'Assessor Import';
 const IMPORTED_BY = 'Data Import';
 
 // Old assessment GroupId -> the counselor it belonged to (from the group's name; current employees' display names where
-// they still work here). Old group 47 "Assessments - HM" names no one clearly, so its visits keep their note.
+// they still work here). Old group 47 "Assessments - HM" was Holly Morrell (former employee; added 2026-11-09 after the first run).
 const ASSESSORS = {
+    47: 'Holly Morrell',
     30: 'Belinda Harris', 110: 'Alicia Martinez', 103: 'Kelly McCoy', 74: 'Monte Blake', 129: 'Melissa Snipes', 108: 'Marsha Porter',
     48: 'Donna Burns', 55: 'Melissa LaFave', 63: 'Megan Smith', 77: 'Sherry Smith', 97: 'John Thomas', 111: 'Misty Clower',
     115: 'Holly Chandler', 120: 'Eric Armstrong', 148: 'Keisha Lewis-Vick',
