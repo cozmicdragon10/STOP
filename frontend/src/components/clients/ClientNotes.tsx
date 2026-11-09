@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import type { Dispatch, SetStateAction } from 'react';
-import { Pencil, PlusCircle, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { CheckCircle2, Pencil, PlusCircle, SlidersHorizontal, Trash2, Undo2 } from 'lucide-react';
 import { addClientNote, deleteClientNote, getClientNotes, reviewClientNote, updateClientNote } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
@@ -18,6 +18,11 @@ interface Props {
   setNotes: Dispatch<SetStateAction<any[]>>;
   // A note went to, or came out of, the approval list; refreshes the count on the Client Directory
   onApprovalChanged?: () => void;
+  // Tells App whether there are unsaved note edits or deletions, so it asks before leaving the tab or the account
+  onDirtyChange: (dirty: boolean) => void;
+  // App wants to leave; shows the save or discard prompt. onLeaveResolved(true) goes ahead, false stays here.
+  leaveRequested: boolean;
+  onLeaveResolved: (leave: boolean) => void;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -31,8 +36,9 @@ const defaultNoteCategory = (role: string) => (role === 'Business Administrator'
 
 const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 
-// The Case Notes tab of a client's account: filters, the new-note form, and in-place edit and delete
-export default function ClientNotes({ clientId, user, notes, setNotes, onApprovalChanged }: Props) {
+// The Case Notes tab of a client's account: filters, the new-note form, and in-place edit and delete. Edits and deletions
+// are kept on screen until Save Changes; leaving the tab or the account with any of them asks to save or discard.
+export default function ClientNotes({ clientId, user, notes, setNotes, onApprovalChanged, onDirtyChange, leaveRequested, onLeaveResolved }: Props) {
   const isBusinessAdmin = user.role === 'Business Administrator';
   const employeeLabel = useEmployeeLabel();
   // Shown above the list after a Counselor's note is sent for approval
@@ -46,13 +52,72 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
   const [newNoteCategory, setNewNoteCategory] = useState(() => defaultNoteCategory(user.role));
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState('');
-  // Inline edit of one case note; noteError is shown under the note it belongs to
+  // The note whose text box is open; noteError is shown under the note it belongs to
   const [editingNoteId, setEditingNoteId] = useState<number | null>(null);
-  const [editNoteText, setEditNoteText] = useState('');
-  const [noteSaving, setNoteSaving] = useState(false);
   const [noteError, setNoteError] = useState<{ noteId: number; message: string } | null>(null);
-  // A new note being typed, or an open note with changes
-  useUnsavedForm(!!newNoteText.trim() || (editingNoteId !== null && editNoteText !== (notes.find(n => n.noteid === editingNoteId)?.comments || '')));
+  // Unsaved changes: new text for edited notes, and notes marked for deletion
+  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  const [deletions, setDeletions] = useState<number[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const savedText = (noteId: number) => notes.find(n => n.noteid === noteId)?.comments || '';
+  const changeCount = Object.keys(drafts).length + deletions.length;
+  const dirty = changeCount > 0;
+  // A new note being typed (it has its own Save Note button)
+  useUnsavedForm(!!newNoteText.trim());
+  useEffect(() => { onDirtyChange(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
+  // The prompt is waiting and the changes are gone, either saved or discarded: carry on leaving
+  useEffect(() => {
+    if (leaveRequested && !dirty) onLeaveResolved(true);
+  }, [leaveRequested, dirty, onLeaveResolved]);
+
+  const setDraft = (noteId: number, text: string) => setDrafts(d => {
+    const next = { ...d };
+    if (text === savedText(noteId)) delete next[noteId];
+    else next[noteId] = text;
+    return next;
+  });
+  const dropDraft = (noteId: number) => setDrafts(d => { const next = { ...d }; delete next[noteId]; return next; });
+  const discardChanges = () => { setDrafts({}); setDeletions([]); setEditingNoteId(null); setNoteError(null); setSaveError(''); };
+
+  // Saves every staged deletion and edit. Stops at the first failure, keeping what wasn't saved. Returns whether all saved.
+  const saveChanges = async () => {
+    const empty = Object.entries(drafts).find(([id, text]) => !deletions.includes(Number(id)) && !text.trim());
+    if (empty) {
+      setEditingNoteId(Number(empty[0]));
+      setNoteError({ noteId: Number(empty[0]), message: 'The note cannot be empty.' });
+      return false;
+    }
+    setSaving(true);
+    setSaveError('');
+    setNoteError(null);
+    let approvalChanged = false;
+    try {
+      for (const noteId of deletions) {
+        await deleteClientNote(noteId, user.employeeemail);
+        if (notes.find(n => n.noteid === noteId)?.approvalstatus === 'Pending') approvalChanged = true;
+        setNotes(list => list.filter(n => n.noteid !== noteId));
+        setDeletions(list => list.filter(id => id !== noteId));
+        dropDraft(noteId);
+      }
+      for (const [id, text] of Object.entries(drafts)) {
+        const noteId = Number(id);
+        if (deletions.includes(noteId)) continue;
+        const saved = await updateClientNote(noteId, { user: user.employeeemail, comments: text });
+        setNotes(list => list.map(n => (n.noteid === noteId ? saved : n)));
+        dropDraft(noteId);
+      }
+      setEditingNoteId(null);
+      return true;
+    } catch (err) {
+      setSaveError(errorText(err, 'Failed to save the case note changes.'));
+      return false;
+    } finally {
+      if (approvalChanged) onApprovalChanged?.();
+      setSaving(false);
+    }
+  };
 
   // Matches the server rule: the note's author or a Business Administrator
   const canChangeNote = (note: { User?: string }) =>
@@ -92,22 +157,14 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
     }
   };
 
-  const handleSaveNoteEdit = async (noteId: number) => {
-    if (!editNoteText.trim()) {
+  // Closes a note's text box, keeping its new text as an unsaved change
+  const finishNoteEdit = (noteId: number) => {
+    if (!(drafts[noteId] ?? savedText(noteId)).trim()) {
       setNoteError({ noteId, message: 'The note cannot be empty.' });
       return;
     }
-    setNoteSaving(true);
     setNoteError(null);
-    try {
-      const saved = await updateClientNote(noteId, { user: user.employeeemail, comments: editNoteText });
-      setNotes(list => list.map(n => (n.noteid === noteId ? saved : n)));
-      setEditingNoteId(null);
-    } catch (err) {
-      setNoteError({ noteId, message: errorText(err, 'Failed to save the note.') });
-    } finally {
-      setNoteSaving(false);
-    }
+    setEditingNoteId(null);
   };
 
   // Business Administrators approve or deny a pending note here or from the Client Directory's approval list.
@@ -127,22 +184,48 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
     }
   };
 
-  const handleDeleteNote = async (noteId: number) => {
-    if (!window.confirm('Delete this case note? This cannot be undone.')) return;
+  // Marks a note for deletion (or takes the mark off); it's deleted when the changes are saved
+  const toggleDeletion = (noteId: number) => {
     setNoteError(null);
-    try {
-      await deleteClientNote(noteId, user.employeeemail);
-      const removed = notes.find(n => n.noteid === noteId);
-      setNotes(list => list.filter(n => n.noteid !== noteId));
-      if (editingNoteId === noteId) setEditingNoteId(null);
-      if (removed?.approvalstatus === 'Pending') onApprovalChanged?.();
-    } catch (err) {
-      setNoteError({ noteId, message: errorText(err, 'Failed to delete the note.') });
-    }
+    if (editingNoteId === noteId) setEditingNoteId(null);
+    setDeletions(list => (list.includes(noteId) ? list.filter(id => id !== noteId) : [...list, noteId]));
   };
 
   return (
     <div className="space-y-4">
+      {leaveRequested && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="unsaved-notes-title">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
+            <div>
+              <h3 id="unsaved-notes-title" className="font-semibold text-white">Save your case note changes?</h3>
+              <p className="text-xs text-slate-400 mt-1">
+                {changeCount} unsaved change{changeCount === 1 ? '' : 's'}
+                {deletions.length > 0 && ` (${deletions.length} to delete)`}. Save them, or discard them to leave the notes as they were.
+              </p>
+            </div>
+            {saveError && <p role="alert" className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{saveError}</p>}
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" disabled={saving} onClick={() => { setSaveError(''); onLeaveResolved(false); }} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Keep Editing</button>
+              <button type="button" disabled={saving} onClick={discardChanges} className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">Discard Changes</button>
+              <button type="button" disabled={saving} onClick={async () => { if (!(await saveChanges())) onLeaveResolved(false); }} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1">
+                <CheckCircle2 size={14} /> {saving ? 'Saving…' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {dirty && (
+        <div className="sticky top-0 z-10 bg-amber-500/10 border border-amber-500/40 rounded-xl p-3 flex flex-wrap items-center gap-3 backdrop-blur">
+          <p className="text-xs text-amber-200 flex-1 min-w-[12rem]">
+            {changeCount} unsaved change{changeCount === 1 ? '' : 's'} to case notes{deletions.length > 0 && ` (${deletions.length} to delete)`}. Save to keep them.
+          </p>
+          {saveError && !leaveRequested && <p role="alert" className="text-xs text-red-400 w-full order-last">{saveError}</p>}
+          <button type="button" disabled={saving} onClick={discardChanges} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 disabled:opacity-50 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Discard</button>
+          <button type="button" disabled={saving} onClick={saveChanges} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1">
+            <CheckCircle2 size={14} /> {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -213,8 +296,11 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
       {shownNotes.length === 0 && notes.length > 0 && (
         <p className="text-center text-slate-500 text-sm py-4">No case notes match these filters.</p>
       )}
-      {shownNotes.map(n => (
-        <div key={n.noteid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm flex gap-5">
+      {shownNotes.map(n => {
+        const deleting = deletions.includes(n.noteid);
+        const edited = drafts[n.noteid] !== undefined;
+        return (
+        <div key={n.noteid} className={`bg-slate-950 border p-4 rounded-xl text-sm flex gap-5 ${deleting ? 'border-red-500/40 opacity-60' : edited ? 'border-amber-500/40' : 'border-slate-800'}`}>
           <div className="shrink-0 w-28 flex flex-col justify-center border-r border-slate-800 pr-5">
             <p className="text-2xl font-bold text-white leading-tight">{formatLogMonthDay(n.date)}</p>
             <p className="text-sm text-slate-400 mt-0.5">{formatLogYear(n.date)}</p>
@@ -227,7 +313,9 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
                 {n.approvalstatus === 'Pending' && (
                   <span className="text-[0.625rem] uppercase font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded">Awaiting approval</span>
                 )}
-                {n.approvalstatus === 'Pending' && isBusinessAdmin && editingNoteId !== n.noteid && (
+                {deleting && <span className="text-[0.625rem] uppercase font-semibold bg-red-500/10 border border-red-500/30 text-red-400 px-1.5 py-0.5 rounded">Will be deleted</span>}
+                {edited && !deleting && <span className="text-[0.625rem] uppercase font-semibold bg-amber-500/10 border border-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded">Unsaved edit</span>}
+                {n.approvalstatus === 'Pending' && isBusinessAdmin && editingNoteId !== n.noteid && !deleting && !edited && (
                   <span className="flex gap-1.5">
                     <button type="button" disabled={reviewingId === n.noteid} onClick={() => handleReview(n.noteid, 'approve')} className="text-[0.6875rem] font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-2 py-0.5 rounded">Approve</button>
                     <button type="button" disabled={reviewingId === n.noteid} onClick={() => handleReview(n.noteid, 'deny')} className="text-[0.6875rem] font-semibold bg-slate-800 hover:bg-red-600 border border-slate-700 disabled:opacity-50 text-slate-200 px-2 py-0.5 rounded">Deny</button>
@@ -236,21 +324,27 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
               </span>
               {canChangeNote(n) && editingNoteId !== n.noteid && (
                 <span className="flex gap-3 text-xs">
-                  <button type="button" onClick={() => { setEditingNoteId(n.noteid); setEditNoteText(n.comments || ''); setNoteError(null); }} className="inline-flex items-center gap-1 text-slate-400 hover:text-white"><Pencil size={12} /> Edit</button>
-                  <button type="button" onClick={() => handleDeleteNote(n.noteid)} className="inline-flex items-center gap-1 text-slate-400 hover:text-red-400"><Trash2 size={12} /> Delete</button>
+                  {deleting ? (
+                    <button type="button" disabled={saving} onClick={() => toggleDeletion(n.noteid)} className="inline-flex items-center gap-1 text-slate-300 hover:text-white"><Undo2 size={12} /> Undo Delete</button>
+                  ) : (
+                    <>
+                      <button type="button" disabled={saving} onClick={() => { setEditingNoteId(n.noteid); setNoteError(null); }} className="inline-flex items-center gap-1 text-slate-400 hover:text-white"><Pencil size={12} /> Edit</button>
+                      <button type="button" disabled={saving} onClick={() => toggleDeletion(n.noteid)} className="inline-flex items-center gap-1 text-slate-400 hover:text-red-400"><Trash2 size={12} /> Delete</button>
+                    </>
+                  )}
                 </span>
               )}
             </div>
             {editingNoteId === n.noteid ? (
               <div className="mt-2 space-y-2">
-                <textarea value={editNoteText} onChange={(e) => setEditNoteText(e.target.value)} rows={3} autoFocus className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm" />
+                <textarea value={drafts[n.noteid] ?? n.comments ?? ''} onChange={(e) => setDraft(n.noteid, e.target.value)} rows={3} autoFocus className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm" />
                 <div className="flex justify-end gap-2">
-                  <button type="button" onClick={() => { setEditingNoteId(null); setNoteError(null); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Cancel</button>
-                  <button type="button" onClick={() => handleSaveNoteEdit(n.noteid)} disabled={noteSaving} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">{noteSaving ? 'Saving…' : 'Save Changes'}</button>
+                  <button type="button" onClick={() => { dropDraft(n.noteid); setEditingNoteId(null); setNoteError(null); }} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Undo Changes</button>
+                  <button type="button" onClick={() => finishNoteEdit(n.noteid)} className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">Done</button>
                 </div>
               </div>
             ) : (
-              <p className="text-slate-200 mt-1 whitespace-pre-wrap">{n.comments}</p>
+              <p className={`text-slate-200 mt-1 whitespace-pre-wrap ${deleting ? 'line-through' : ''}`}>{drafts[n.noteid] ?? n.comments}</p>
             )}
             {noteError && noteError.noteId === n.noteid && <p className="text-xs text-red-400 mt-1">{noteError.message}</p>}
             <p className="text-xs text-slate-500 text-right mt-2">
@@ -260,7 +354,8 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
             </p>
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

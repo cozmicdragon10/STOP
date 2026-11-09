@@ -101,21 +101,33 @@ export default function App() {
   // The spot in the account header where the Information tab puts Edit Info
   const [accountActionsSlot, setAccountActionsSlot] = useState<HTMLDivElement | null>(null);
   // Unsaved work in the open account: changes on the Information tab, and any other form with something in progress.
-  // Leaving then waits in leavePrompt. 'info' is the form's own prompt, which can save; 'other' can only discard, since
-  // each of those forms has its own save button and rules.
+  // Leaving then waits in leavePrompt. 'info' (Information tab) and 'notes' (Case Notes edits and deletions) are those
+  // tabs' own prompts, which can save; 'other' can only discard, since each of those forms has its own save button and rules.
   const accountEditsDirty = useRef(false);
   const setAccountEditsDirty = useCallback((dirty: boolean) => { accountEditsDirty.current = dirty; }, []);
+  const notesEditsDirty = useRef(false);
+  const setNotesEditsDirty = useCallback((dirty: boolean) => { notesEditsDirty.current = dirty; }, []);
   const unsavedFormCount = useRef(0);
   const reportUnsavedForm = useCallback((change: 1 | -1) => { unsavedFormCount.current += change; }, []);
-  const [leavePrompt, setLeavePrompt] = useState<{ leave: () => void; kind: 'info' | 'other' } | null>(null);
+  type LeaveKind = 'info' | 'notes' | 'other';
+  const [leavePrompt, setLeavePrompt] = useState<{ leave: () => void; kind: LeaveKind } | null>(null);
+  // The first prompt still owed after `after` (in the order info, notes, other), or null when nothing is unsaved
+  const nextLeaveKind = (after: LeaveKind | null): LeaveKind | null => {
+    const order: LeaveKind[] = ['info', 'notes', 'other'];
+    const pending = { info: accountEditsDirty.current, notes: notesEditsDirty.current, other: unsavedFormCount.current > 0 };
+    return order.slice(after ? order.indexOf(after) + 1 : 0).find(k => pending[k]) ?? null;
+  };
   const leaveAccountEdits = useCallback((leave: () => void) => {
-    if (accountEditsDirty.current) setLeavePrompt({ leave, kind: 'info' });
-    else if (unsavedFormCount.current > 0) setLeavePrompt({ leave, kind: 'other' });
+    const kind = nextLeaveKind(null);
+    if (kind) setLeavePrompt({ leave, kind });
     else leave();
+  // nextLeaveKind only reads refs
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const resolveLeavePrompt = (leave: boolean) => {
-    if (leave && leavePrompt && leavePrompt.kind === 'info' && unsavedFormCount.current > 0) {
-      setLeavePrompt({ leave: leavePrompt.leave, kind: 'other' });
+    const next = leave && leavePrompt ? nextLeaveKind(leavePrompt.kind) : null;
+    if (next && leavePrompt) {
+      setLeavePrompt({ leave: leavePrompt.leave, kind: next });
       return;
     }
     if (leave) leavePrompt?.leave();
@@ -519,7 +531,7 @@ export default function App() {
   }, [showClientPayment, statusDialog]);
   useEffect(() => {
     if (!accountOpen) return;
-    const unsavedWork = () => accountEditsDirty.current || unsavedFormCount.current > 0;
+    const unsavedWork = () => accountEditsDirty.current || notesEditsDirty.current || unsavedFormCount.current > 0;
     const entry = { stopAccount: true };
     window.history.pushState(entry, '');
     const onBack = () => {
@@ -1079,7 +1091,8 @@ export default function App() {
               )}
 
               {clientTab === 'notes' && (
-                <ClientNotes key={selectedClientDetail.clientid} clientId={selectedClientDetail.clientid} user={user} notes={clientNotes} setNotes={setClientNotes} onApprovalChanged={refreshPendingNotes} />
+                <ClientNotes key={selectedClientDetail.clientid} clientId={selectedClientDetail.clientid} user={user} notes={clientNotes} setNotes={setClientNotes} onApprovalChanged={refreshPendingNotes}
+                  onDirtyChange={setNotesEditsDirty} leaveRequested={leavePrompt?.kind === 'notes'} onLeaveResolved={resolveLeavePrompt} />
               )}
 
               {clientTab === 'polygraphs' && takesPolygraphs(selectedClientDetail.programtype) && (
