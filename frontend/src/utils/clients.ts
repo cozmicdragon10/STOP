@@ -20,6 +20,7 @@ export const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
   { type: 'Program Type', label: 'Program Type' },
   { type: 'Supervising Agent', label: 'Supervising Agent' },
   { type: 'Group', label: 'Group' },
+  { type: 'Assessor', label: 'Assessor' },
   { type: 'Pretrial', label: 'Pretrial' },
   { type: 'No Poly Required', label: 'No Poly Required' },
   { type: 'Fee Override', label: 'Temporary Fee Override' },

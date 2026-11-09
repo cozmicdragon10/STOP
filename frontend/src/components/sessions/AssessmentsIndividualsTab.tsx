@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ClipboardList, Trash2 } from 'lucide-react';
+import { ClipboardList, Hourglass, Trash2 } from 'lucide-react';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import {
   closeIndividualSession, deleteOpenIndividualSession, getBipIntake, getClosedIndividualSessions, getOpenIndividualSessions,
@@ -20,6 +20,9 @@ interface TabClient {
   docnumber?: string | null;
   programtype?: string | null;
   accountbalance?: number | string | null;
+  programstatus?: string | null;
+  // The counselor the client is waiting to be assessed by
+  assessor?: string | null;
 }
 
 interface Employee {
@@ -95,6 +98,13 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const [closedSessions, setClosedSessions] = useState<ClosedIndividualSession[]>([]);
   const [listError, setListError] = useState('');
   const [expandedClosed, setExpandedClosed] = useState<number | null>(null);
+  // Waiting for Assessment list: one assessor's clients, or everyone's ('')
+  const [waitingFor, setWaitingFor] = useState(() => {
+    try { return localStorage.getItem('waitingForAssessor') || ''; } catch { return ''; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('waitingForAssessor', waitingFor); } catch { /* storage unavailable */ }
+  }, [waitingFor]);
   // Closing a BIP intake or reinstate: payment taken (first), then paperwork completed / contract signed; both are needed to close
   const [paymentChecked, setPaymentChecked] = useState(false);
   const [paperworkChecked, setPaperworkChecked] = useState(false);
@@ -321,6 +331,13 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const shownOpen = openSessions.filter(o => o.category === panelCategory);
   const shownClosed = closedSessions.filter(c => c.category === panelCategory);
   const panelNoun = panelCategory === 'Assessment' ? 'assessments' : 'individual sessions';
+
+  // Active clients waiting for an assessment, with how many each assessor has
+  const waiting = clients.filter(c => c.assessor && c.programstatus === 'Active')
+    .sort((a, b) => `${a.lastname}, ${a.firstname}`.localeCompare(`${b.lastname}, ${b.firstname}`));
+  const assessors = Object.entries(waiting.reduce<Record<string, number>>((n, c) => ({ ...n, [c.assessor!]: (n[c.assessor!] || 0) + 1 }), {}))
+    .sort(([a], [b]) => a.localeCompare(b));
+  const shownWaiting = waitingFor ? waiting.filter(c => c.assessor === waitingFor) : waiting;
 
   const label = 'block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5';
   const input = 'w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm';
@@ -665,6 +682,39 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
               </ul>
             )}
           </>
+        )}
+      </div>
+
+      {/* Clients waiting to be assessed, by the counselor they are waiting for (set on the client's Information tab;
+          closing an assessment for the client takes them off) */}
+      <div className="lg:col-start-3 bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h3 className="font-semibold text-white flex items-center gap-2"><Hourglass size={18} className="text-blue-400" /> Waiting for Assessment{shownWaiting.length ? ` (${shownWaiting.length})` : ''}</h3>
+        </div>
+        <label htmlFor="waiting-assessor" className="sr-only">Assessor</label>
+        <select id="waiting-assessor" value={waitingFor} onChange={e => setWaitingFor(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm mb-3">
+          <option value="">All assessors ({waiting.length})</option>
+          {assessors.map(([name, n]) => <option key={name} value={name}>{name} ({n})</option>)}
+        </select>
+        {shownWaiting.length === 0 ? (
+          <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">No clients are waiting for an assessment.</p>
+        ) : (
+          <ul className="space-y-2 max-h-[32rem] overflow-y-auto pr-1">
+            {shownWaiting.map(c => (
+              <li key={c.clientid} className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex justify-between items-center gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white truncate">{c.lastname}, {c.firstname}</p>
+                  <p className="text-xs text-slate-400 truncate">{c.programtype || 'No program'}{waitingFor ? '' : ` · ${c.assessor}`}</p>
+                </div>
+                <button
+                  type="button"
+                  disabled={reviewing}
+                  onClick={() => setForm(f => ({ ...blankForm('Assessment'), clientId: String(c.clientid), date: f.date, provider: c.assessor || f.provider }))}
+                  className="shrink-0 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold px-3 py-1.5 rounded-lg"
+                >Start</button>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
     </div>

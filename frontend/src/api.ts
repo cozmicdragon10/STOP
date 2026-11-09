@@ -82,6 +82,8 @@ export interface ClientColumns {
     dateofbirth: string | null;
     sex: string | null;
     polyvouchersbeforefill: number | null;
+    // The counselor the client is waiting to be assessed by; cleared when an assessment is closed
+    assessor: string | null;
 }
 
 // A client on the roster, with its group and the check-in facts the frontend needs

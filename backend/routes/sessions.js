@@ -419,6 +419,17 @@ router.post('/api/individual-sessions/close', async (req, res) => {
             comments: needsChecks ? `${(note || s.typeName).replace(/\.+$/, '')}. Payment received and ${secondCheck}.` : note || s.typeName,
         });
         await db.query('UPDATE Attendance SET SessionTypeId = $1, Provider = $2, OpenedBy = $3 WHERE AttendanceId = $4', [s.sessionTypeId, s.provider, openedBy, attendanceId]);
+        // A closed assessment takes the client off the waiting list for an assessment
+        if (s.category === 'Assessment') {
+            const waiting = (await db.query('SELECT Assessor FROM Clients WHERE ClientId = $1 AND Assessor IS NOT NULL', [s.client])).rows[0];
+            if (waiting) {
+                await db.query('UPDATE Clients SET Assessor = NULL WHERE ClientId = $1', [s.client]);
+                await logClientChange(db, {
+                    clientId: s.client, changedBy: viewer.employeeemail, changeType: 'Assessor', oldValue: waiting.assessor, newValue: 'None',
+                    details: `${s.typeName} closed on ${s.date} with ${s.provider}.`,
+                });
+            }
+        }
         await db.query('COMMIT');
         await logAction(user, `${s.category} Closed`, `${s.typeName} for ${s.clientName} (Client ID ${s.client}) on ${s.date} with ${s.provider}: fee $${s.fee.toFixed(2)}, paid $${s.payment.toFixed(2)}${s.paymentMethod ? ` ${s.paymentMethod}` : ''}`);
         res.status(201).json({ success: true, attendanceId, newBalance });

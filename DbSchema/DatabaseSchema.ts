@@ -101,6 +101,7 @@ export interface Clients {
   dateofbirth?: Date | string;
   sex?: string;
   polyvouchersbeforefill?: number;
+  assessor?: string;
 }
 
 export interface Employeeroles {

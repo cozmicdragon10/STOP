@@ -192,6 +192,9 @@ export default function App() {
 
   // Employee accounts: managed on the Admin tab, also used for examiner names and counselor pickers
   const [employees, setEmployees] = useState<any[]>([]);
+  // Active counselors, for a client's Assessor
+  const counselorNames: string[] = employees.filter(e => e.role === 'Counselor' && e.active !== false && e.displayname)
+    .map(e => e.displayname).sort((a, b) => a.localeCompare(b));
   // Supervising agent directory, suggested in the client forms' agent field
   const [directoryAgents, setDirectoryAgents] = useState<SupervisingAgent[]>([]);
 
@@ -962,6 +965,7 @@ export default function App() {
                     discharged={clientIsDischarged}
                     groups={groups}
                     directoryAgents={directoryAgents}
+                    counselors={counselorNames}
                     polyOverrideActive={!!clientPolyOverride}
                     userEmail={user.employeeemail}
                     loadError={accountLoadError}

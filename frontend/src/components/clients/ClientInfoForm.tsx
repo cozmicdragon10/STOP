@@ -21,6 +21,8 @@ interface Props {
   discharged: boolean;
   groups: any[];
   directoryAgents: SupervisingAgent[];
+  // Active counselors' display names, for the Assessor choice
+  counselors: string[];
   // The poly fee total belongs to an active poly fee override and is changed there
   polyOverrideActive: boolean;
   userEmail: string;
@@ -83,7 +85,7 @@ const inputClass = 'w-full bg-slate-900 border border-slate-700 rounded-lg px-2.
 // The Information tab's details: Personal, Contact, and Program & Account sections, shown read-only until Edit Info.
 // While editing, only the changed fields are kept, laid over the current client, so a status change made meanwhile
 // (Discharge / Activate) still shows and is saved.
-export default function ClientInfoForm({ client, discharged, groups, directoryAgents, polyOverrideActive, userEmail, loadError, onDismissLoadError, actionsSlot, onDirtyChange, leaveRequested, onLeaveResolved, onSaved }: Props) {
+export default function ClientInfoForm({ client, discharged, groups, directoryAgents, counselors, polyOverrideActive, userEmail, loadError, onDismissLoadError, actionsSlot, onDirtyChange, leaveRequested, onLeaveResolved, onSaved }: Props) {
   // null while not editing; otherwise the fields changed so far
   const [edits, setEdits] = useState<Record<string, any> | null>(null); // eslint-disable-line @typescript-eslint/no-explicit-any
   const [saving, setSaving] = useState(false);
@@ -367,6 +369,18 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
               </select>
             ) : (
               <p className="text-white font-medium">{groups.find(g => g.groupid === client.groupid)?.groupname || client.groupid || '—'}</p>
+            )}
+          </div>
+          {/* The counselor the client is waiting to be assessed by; closing an assessment clears it */}
+          <div>
+            <p className="text-xs text-slate-500 mb-0.5">Waiting for Assessment With</p>
+            {editing ? (
+              <select value={form.assessor || ''} onChange={e => setField('assessor', e.target.value)} className={inputClass}>
+                <option value="">-- Not waiting --</option>
+                {[...new Set([...(form.assessor ? [form.assessor] : []), ...counselors])].map(name => <option key={name} value={name}>{name}</option>)}
+              </select>
+            ) : (
+              <p className="text-white font-medium">{client.assessor || '—'}</p>
             )}
           </div>
           {/* BIP, Fed Drug Test and Chaperon clients don't take polygraphs, so their poly fee and vouchers aren't shown */}
