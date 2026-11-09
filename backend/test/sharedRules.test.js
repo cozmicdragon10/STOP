@@ -64,7 +64,7 @@ test('the same federal programs get bus passes, with the same limit', () => {
         };
     };
     assert.deepEqual(
-        read(path.join(__dirname, '..', 'routes', 'clients.js')),
+        read(path.join(__dirname, '..', 'lib', 'busPasses.js')),
         read(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'clients.ts')),
     );
 });

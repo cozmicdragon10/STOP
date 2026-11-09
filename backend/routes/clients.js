@@ -6,6 +6,7 @@ const { requireRole } = require('../lib/auth');
 const { groupNameFor, logClientChange } = require('../lib/changeLog');
 const { POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, countPolyFeeFill } = require('../lib/poly');
 const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED } = require('../lib/sql');
+const { BUS_PASS_MAX, FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
 
 const router = express.Router();
 
@@ -106,10 +107,6 @@ router.put('/api/clients/:id/no-poly-required', async (req, res) => {
     }
 });
 
-// Federal clients can be granted bus passes, up to BUS_PASS_MAX at a time. Mirrors FEDERAL_PROGRAM_TYPES and BUS_PASS_MAX
-// in frontend/src/utils/clients.ts.
-const FEDERAL_PROGRAM_TYPES = ['Federal SO', 'Fed Drug Test'];
-const BUS_PASS_MAX = 2;
 
 // Grants one of a federal client's bus passes: takes it off their count and adds a Bus Pass case note with its number
 router.post('/api/clients/:id/bus-pass', async (req, res) => {
@@ -567,11 +564,16 @@ router.put('/api/clients/:id', async (req, res) => {
             treatmentfee, accountbalance, vouchers, polyfeevoucher, polyfeepaid, polyfee,
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
-            comments, programtype, race, dateofbirth, sex, pretrial, assessor, buspasses, updatedBy
+            comments, programtype, race, dateofbirth, sex, pretrial, assessor, buspasses, buspassrefill, updatedBy
         } = req.body;
-        const busPasses = buspasses === undefined || buspasses === null || buspasses === '' ? null : Number(buspasses);
-        if (busPasses !== null && (!Number.isInteger(busPasses) || busPasses < 0 || busPasses > BUS_PASS_MAX)) {
-            return res.status(400).json({ error: `Bus passes must be a whole number from 0 to ${BUS_PASS_MAX}.` });
+        // Bus passes and the monthly refill: whole numbers from 0 to BUS_PASS_MAX, changed only when sent
+        const passCount = (value) => (value === undefined || value === null || value === '' ? null : Number(value));
+        const busPasses = passCount(buspasses);
+        const busPassRefill = passCount(buspassrefill);
+        for (const [label, value] of [['Bus passes', busPasses], ['The monthly bus pass refill', busPassRefill]]) {
+            if (value !== null && (!Number.isInteger(value) || value < 0 || value > BUS_PASS_MAX)) {
+                return res.status(400).json({ error: `${label} must be a whole number from 0 to ${BUS_PASS_MAX}.` });
+            }
         }
 
         if (race && !CLIENT_RACES.includes(race)) {
@@ -585,7 +587,7 @@ router.put('/api/clients/:id', async (req, res) => {
         }
 
         // Tracked fields before the edit, for the change log
-        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses FROM Clients WHERE ClientId = $1', [id]);
+        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
         const before = beforeRes.rows[0];
 
         // The full set of poly fee vouchers depends on the phase the client will be in after this edit. A count sent back
@@ -654,7 +656,8 @@ router.put('/api/clients/:id', async (req, res) => {
                 Pretrial = COALESCE($31, Pretrial) AND COALESCE($23, ProgramType) = ANY($32::text[]),
                 -- Changed only when the request sends it (an empty value clears it)
                 Assessor = CASE WHEN $33::boolean THEN $34 ELSE Assessor END,
-                BusPasses = COALESCE($35, BusPasses)
+                BusPasses = COALESCE($35, BusPasses),
+                BusPassRefill = COALESCE($36, BusPassRefill)
             WHERE ClientId = $24`,
             [
                 firstname || null, middlename || null, lastname || null, docnumber || null, supervisingagent || null,
@@ -671,7 +674,7 @@ router.put('/api/clients/:id', async (req, res) => {
                 race || null, dateofbirth || null, sex || null,
                 typeof pretrial === 'boolean' ? pretrial : null, PRETRIAL_PROGRAM_TYPES,
                 assessor !== undefined, String(assessor ?? '').trim() || null,
-                busPasses,
+                busPasses, busPassRefill,
             ]
         );
 
@@ -686,7 +689,7 @@ router.put('/api/clients/:id', async (req, res) => {
         );
 
         if (before && updated.rows[0]) {
-            const after = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, Pretrial, Assessor, BusPasses FROM Clients WHERE ClientId = $1', [id]);
+            const after = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
             const now = after.rows[0];
             // An edit that makes the poly fee paid in full filled the vouchers (see the CASE above); that counts toward an override
             const wasFull = Number(before.polyfee) > 0 && Number(before.polyfeepaid) >= Number(before.polyfee);
@@ -708,6 +711,7 @@ router.put('/api/clients/:id', async (req, res) => {
                 ['Supervising Agent', before.supervisingagent, now.supervisingagent],
                 ['Assessor', before.assessor, now.assessor],
                 ['Bus Passes', String(before.buspasses ?? 0), String(now.buspasses ?? 0)],
+                ['Bus Pass Refill', String(before.buspassrefill ?? 0), String(now.buspassrefill ?? 0)],
             ];
             for (const [changeType, oldValue, newValue] of tracked) {
                 if ((oldValue || '') !== (newValue || '')) {

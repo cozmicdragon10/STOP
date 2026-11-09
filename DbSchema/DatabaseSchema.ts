@@ -103,6 +103,7 @@ export interface Clients {
   polyvouchersbeforefill?: number;
   assessor?: string;
   buspasses: number;
+  buspassrefill: number;
 }
 
 export interface Employeeroles {

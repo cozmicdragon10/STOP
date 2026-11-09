@@ -4,6 +4,7 @@ const path = require('path');
 const { pool } = require('./db');
 const { runMigrations } = require('./migrate');
 const app = require('./app');
+const { startMonthlyRefills } = require('./lib/busPasses');
 
 const PORT = process.env.PORT || 5000;
 // HTTPS using the self-signed certificate in backend/certs (see SSL_PFX_PASSWORD in .env)
@@ -19,6 +20,8 @@ runMigrations(pool)
     https.createServer(tlsOptions, app).listen(PORT, '0.0.0.0', () => {
       console.log(`STOP Backend Server running on https://OKC-SERVER:${PORT}`);
     });
+    // Federal clients' monthly bus pass refill, at the start of each calendar month
+    startMonthlyRefills(pool);
   })
   .catch(err => {
     console.error('Could not start the server:', err.message);

@@ -86,6 +86,8 @@ export interface ClientColumns {
     assessor: string | null;
     // Bus passes a federal client may still be granted (0 to 2)
     buspasses: number;
+    // Bus passes set at the start of each calendar month, replacing what's left (0 = no refill)
+    buspassrefill: number;
 }
 
 // A client on the roster, with its group and the check-in facts the frontend needs

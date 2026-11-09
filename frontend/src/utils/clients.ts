@@ -22,6 +22,7 @@ export const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
   { type: 'Group', label: 'Group' },
   { type: 'Assessor', label: 'Assessor' },
   { type: 'Bus Passes', label: 'Bus Passes' },
+  { type: 'Bus Pass Refill', label: 'Bus Pass Refill' },
   { type: 'Pretrial', label: 'Pretrial' },
   { type: 'No Poly Required', label: 'No Poly Required' },
   { type: 'Fee Override', label: 'Temporary Fee Override' },
@@ -39,7 +40,7 @@ export const POLY_PROGRAM_TYPES = [...SO_PROGRAM_TYPES, 'Poly Only'];
 // Programs whose clients can be marked Pretrial. Mirrors PRETRIAL_PROGRAM_TYPES in backend/routes/clients.js.
 export const PRETRIAL_PROGRAM_TYPES = ['Federal SO', 'Fed Drug Test'];
 // Federal clients can be granted bus passes, up to BUS_PASS_MAX at a time. Mirrors FEDERAL_PROGRAM_TYPES and BUS_PASS_MAX
-// in backend/routes/clients.js.
+// in backend/lib/busPasses.js.
 export const FEDERAL_PROGRAM_TYPES = ['Federal SO', 'Fed Drug Test'];
 export const BUS_PASS_MAX = 2;
 // Chaperon clients' phase says which kind of chaperon program they are in (the old system's two chaperon phases)

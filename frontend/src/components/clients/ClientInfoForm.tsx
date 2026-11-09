@@ -402,14 +402,29 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
             <div>
               <p className="text-xs text-slate-500 mb-0.5">Bus Passes</p>
               {editing ? (
-                <input type="number" min={0} max={BUS_PASS_MAX} step={1} value={form.buspasses ?? 0} onChange={e => setField('buspasses', e.target.value)} className={inputClass} />
-              ) : (
-                <div className="flex items-center gap-3">
-                  <p className="text-white font-medium">{Number(client.buspasses ?? 0)}</p>
-                  {Number(client.buspasses ?? 0) > 0 && (
-                    <button type="button" onClick={() => setBusPassOpen(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded-lg text-xs font-semibold">Grant Bus Pass</button>
-                  )}
+                <div className="space-y-2">
+                  <input type="number" min={0} max={BUS_PASS_MAX} step={1} value={form.buspasses ?? 0} onChange={e => setField('buspasses', e.target.value)} className={inputClass} aria-label="Bus passes" />
+                  {/* At the start of each calendar month the count is set to this, replacing what's left */}
+                  <label className="flex items-center gap-2 text-xs text-slate-400">
+                    Monthly refill
+                    <select value={String(form.buspassrefill ?? 0)} onChange={e => setField('buspassrefill', e.target.value)} className={`${inputClass} w-auto`}>
+                      <option value="0">None</option>
+                      {Array.from({ length: BUS_PASS_MAX }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n} on the 1st of each month</option>)}
+                    </select>
+                  </label>
                 </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3">
+                    <p className="text-white font-medium">{Number(client.buspasses ?? 0)}</p>
+                    {Number(client.buspasses ?? 0) > 0 && (
+                      <button type="button" onClick={() => setBusPassOpen(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded-lg text-xs font-semibold">Grant Bus Pass</button>
+                    )}
+                  </div>
+                  {Number(client.buspassrefill ?? 0) > 0 && (
+                    <p className="text-xs text-slate-500 mt-0.5">Refills to {Number(client.buspassrefill)} on the 1st of each month</p>
+                  )}
+                </>
               )}
             </div>
           )}
