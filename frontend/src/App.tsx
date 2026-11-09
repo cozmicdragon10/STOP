@@ -12,6 +12,7 @@ import {
   getClientAttendance, getClientFinancials,
   getClientNotes, getClientPolygraphs,
   deleteClient,
+  getClientDeletable,
   getEmployees, fetchClientFeeOverride, fetchPolyFeeOverride,
   getOpenGroups, deleteOpenGroup, getClosedGroups, getSupervisingAgents
 } from './api';
@@ -374,6 +375,20 @@ export default function App() {
     setClientNotes(prev => [note, ...prev]);
     setSuccessMsg(`Bus pass granted to ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}. ${busPasses} left.`);
   };
+
+  // The open account's Delete button shows only for Business Administrators and only when the server says the client can
+  // be deleted (nothing kept on record points at them). Checked again when the account's notes change.
+  const [deletableClientId, setDeletableClientId] = useState<number | null>(null);
+  const openClientId: number | null = selectedClientDetail?.clientid ?? null;
+  const isBusinessAdmin = user?.role === 'Business Administrator';
+  useEffect(() => {
+    if (openClientId === null || !isBusinessAdmin) return;
+    let cancelled = false;
+    getClientDeletable(openClientId)
+      .then(ok => { if (!cancelled) setDeletableClientId(ok ? openClientId : null); })
+      .catch(() => { if (!cancelled) setDeletableClientId(null); });
+    return () => { cancelled = true; };
+  }, [openClientId, isBusinessAdmin, clientNotes.length]);
 
   // A discharged client's program status is locked; only the Activate button changes it
   const clientIsDischarged = DISCHARGE_STATUSES.includes(selectedClientDetail?.programstatus);
@@ -877,8 +892,10 @@ export default function App() {
                       <LogOut size={14} /> Discharge
                     </button>
                   )}
-                  {role === 'Business Administrator' && (
+                  {role === 'Business Administrator' && deletableClientId === selectedClientDetail.clientid && (
                     <button
+                      title="Delete client"
+                      aria-label={`Delete ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}`}
                       onClick={async () => {
                         if (!window.confirm(`Delete client ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}? This action cannot be undone.`)) return;
                         setLoading(true);

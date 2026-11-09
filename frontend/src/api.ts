@@ -430,6 +430,13 @@ export async function createClient(data: ClientFields & { createdBy: string }) {
     return body as { success: true; clientId: number; message: string };
 }
 
+// Whether the client could be deleted now (nothing kept on record still points at them). Business Administrators only.
+export async function getClientDeletable(clientId: number): Promise<boolean> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/deletable`);
+    const body = await jsonResponse<{ deletable: boolean }>(res, 'Failed to check whether the client can be deleted.');
+    return body.deletable;
+}
+
 // The server only lets Business Administrators delete clients, and reads who is asking from X-User-Email
 export async function deleteClient(clientId: number, userEmail: string) {
     const res = await apiFetch(`${API_BASE}/clients/${clientId}`, {

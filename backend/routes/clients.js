@@ -809,6 +809,24 @@ router.post('/api/clients', async (req, res) => {
     }
 });
 
+// Whether a client could be deleted right now: tries the delete in a transaction that is always rolled back, so the answer
+// follows the database's own rules (records that would be removed with the client don't block it; attendance, notes and
+// other kept records do). Used to show the Delete button only when it would work.
+router.get('/api/clients/:id/deletable', requireRole('Business Administrator'), async (req, res) => {
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        const result = await db.query('DELETE FROM Clients WHERE ClientId = $1 RETURNING ClientId', [req.params.id]);
+        res.json({ deletable: result.rows.length > 0 });
+    } catch (err) {
+        if (err.code === '23503') return res.json({ deletable: false, blockedBy: err.table || null });
+        res.status(500).json({ error: err.message });
+    } finally {
+        await db.query('ROLLBACK').catch(() => {});
+        db.release();
+    }
+});
+
 // Delete a client (Business Administrators only)
 router.delete('/api/clients/:id', async (req, res) => {
     try {
