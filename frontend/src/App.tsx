@@ -365,6 +365,16 @@ export default function App() {
     setClientNotes(await getClientNotes(clientid));
   };
 
+  // A bus pass was granted on the Information tab: new count on the account and roster, and its note on Case Notes
+  const handleBusPassGranted = (busPasses: number, note: any) => {
+    if (!selectedClientDetail) return;
+    const clientid = selectedClientDetail.clientid;
+    setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, buspasses: busPasses } : c));
+    setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, buspasses: busPasses } : c));
+    setClientNotes(prev => [note, ...prev]);
+    setSuccessMsg(`Bus pass granted to ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}. ${busPasses} left.`);
+  };
+
   // A discharged client's program status is locked; only the Activate button changes it
   const clientIsDischarged = DISCHARGE_STATUSES.includes(selectedClientDetail?.programstatus);
 
@@ -975,6 +985,7 @@ export default function App() {
                     leaveRequested={leavePrompt?.kind === 'info'}
                     onLeaveResolved={resolveLeavePrompt}
                     onSaved={handleClientInfoSaved}
+                    onBusPassGranted={handleBusPassGranted}
                   />
 
                   {/* Section 4 – Temporary Fee Override */}
@@ -1141,6 +1152,7 @@ export default function App() {
                   onResumeHandled={() => setResumeRequest(null)}
                   missedCheckInRequest={missedCheckInRequest}
                   onMissedCheckInHandled={() => setMissedCheckInRequest(null)}
+                  onOpenClient={openClientById}
                 />
               </div>
 

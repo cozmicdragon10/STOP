@@ -106,6 +106,47 @@ router.put('/api/clients/:id/no-poly-required', async (req, res) => {
     }
 });
 
+// Federal clients can be granted bus passes, up to BUS_PASS_MAX at a time. Mirrors FEDERAL_PROGRAM_TYPES and BUS_PASS_MAX
+// in frontend/src/utils/clients.ts.
+const FEDERAL_PROGRAM_TYPES = ['Federal SO', 'Fed Drug Test'];
+const BUS_PASS_MAX = 2;
+
+// Grants one of a federal client's bus passes: takes it off their count and adds a Bus Pass case note with its number
+router.post('/api/clients/:id/bus-pass', async (req, res) => {
+    const { id } = req.params;
+    const { busPassNumber, user } = req.body;
+    const number = String(busPassNumber ?? '').trim();
+    if (!number) return res.status(400).json({ error: 'Enter the bus pass number.' });
+    if (number.length > 50) return res.status(400).json({ error: 'The bus pass number is too long.' });
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        const c = (await db.query('SELECT FirstName, LastName, ProgramType, BusPasses FROM Clients WHERE ClientId = $1 FOR UPDATE', [id])).rows[0];
+        const refuse = async (status, error) => { await db.query('ROLLBACK'); return res.status(status).json({ error }); };
+        if (!c) return refuse(404, 'Client not found.');
+        const name = `${c.lastname}, ${c.firstname}`;
+        if (!FEDERAL_PROGRAM_TYPES.includes(c.programtype)) return refuse(400, `${name} is not a federal client. Only ${FEDERAL_PROGRAM_TYPES.join(' and ')} clients get bus passes.`);
+        if (Number(c.buspasses) <= 0) return refuse(400, `${name} has no bus passes left to grant.`);
+        const left = Number(c.buspasses) - 1;
+        await db.query('UPDATE Clients SET BusPasses = $1 WHERE ClientId = $2', [left, id]);
+        const note = (await db.query(
+            `INSERT INTO Notes (Client, Date, "User", Comments, Category) VALUES ($1, NOW(), $2, $3, 'Bus Pass') RETURNING *`,
+            [id, user, `Bus pass #${number} granted. ${left} bus pass${left === 1 ? '' : 'es'} left.`])).rows[0];
+        await logClientChange(db, {
+            clientId: id, changedBy: user, changeType: 'Bus Passes', oldValue: String(c.buspasses), newValue: String(left),
+            details: `Bus pass #${number} granted.`,
+        });
+        await db.query('COMMIT');
+        await logAction(user, 'Bus Pass Granted', `Bus pass #${number} for ${name} (Client ID ${id}); ${left} left.`);
+        res.status(201).json({ busPasses: left, note });
+    } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
+        res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
+    }
+});
+
 // Statuses that can be set when adding or editing a client; the discharge statuses below are only set through discharge
 const EDITABLE_PROGRAM_STATUSES = ['Active', 'Inactive'];
 // Programs whose clients can be marked Pretrial; other programs' clients never are.
@@ -526,8 +567,12 @@ router.put('/api/clients/:id', async (req, res) => {
             treatmentfee, accountbalance, vouchers, polyfeevoucher, polyfeepaid, polyfee,
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
-            comments, programtype, race, dateofbirth, sex, pretrial, assessor, updatedBy
+            comments, programtype, race, dateofbirth, sex, pretrial, assessor, buspasses, updatedBy
         } = req.body;
+        const busPasses = buspasses === undefined || buspasses === null || buspasses === '' ? null : Number(buspasses);
+        if (busPasses !== null && (!Number.isInteger(busPasses) || busPasses < 0 || busPasses > BUS_PASS_MAX)) {
+            return res.status(400).json({ error: `Bus passes must be a whole number from 0 to ${BUS_PASS_MAX}.` });
+        }
 
         if (race && !CLIENT_RACES.includes(race)) {
             return res.status(400).json({ error: `Race must be one of: ${CLIENT_RACES.join(', ')}.` });
@@ -540,7 +585,7 @@ router.put('/api/clients/:id', async (req, res) => {
         }
 
         // Tracked fields before the edit, for the change log
-        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor FROM Clients WHERE ClientId = $1', [id]);
+        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses FROM Clients WHERE ClientId = $1', [id]);
         const before = beforeRes.rows[0];
 
         // The full set of poly fee vouchers depends on the phase the client will be in after this edit. A count sent back
@@ -608,7 +653,8 @@ router.put('/api/clients/:id', async (req, res) => {
                 -- Kept only while the client's program (after this edit) is one that has pretrial clients
                 Pretrial = COALESCE($31, Pretrial) AND COALESCE($23, ProgramType) = ANY($32::text[]),
                 -- Changed only when the request sends it (an empty value clears it)
-                Assessor = CASE WHEN $33::boolean THEN $34 ELSE Assessor END
+                Assessor = CASE WHEN $33::boolean THEN $34 ELSE Assessor END,
+                BusPasses = COALESCE($35, BusPasses)
             WHERE ClientId = $24`,
             [
                 firstname || null, middlename || null, lastname || null, docnumber || null, supervisingagent || null,
@@ -625,6 +671,7 @@ router.put('/api/clients/:id', async (req, res) => {
                 race || null, dateofbirth || null, sex || null,
                 typeof pretrial === 'boolean' ? pretrial : null, PRETRIAL_PROGRAM_TYPES,
                 assessor !== undefined, String(assessor ?? '').trim() || null,
+                busPasses,
             ]
         );
 
@@ -639,7 +686,7 @@ router.put('/api/clients/:id', async (req, res) => {
         );
 
         if (before && updated.rows[0]) {
-            const after = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, Pretrial, Assessor FROM Clients WHERE ClientId = $1', [id]);
+            const after = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, Pretrial, Assessor, BusPasses FROM Clients WHERE ClientId = $1', [id]);
             const now = after.rows[0];
             // An edit that makes the poly fee paid in full filled the vouchers (see the CASE above); that counts toward an override
             const wasFull = Number(before.polyfee) > 0 && Number(before.polyfeepaid) >= Number(before.polyfee);
@@ -660,6 +707,7 @@ router.put('/api/clients/:id', async (req, res) => {
                 ['Program Type', before.programtype, now.programtype],
                 ['Supervising Agent', before.supervisingagent, now.supervisingagent],
                 ['Assessor', before.assessor, now.assessor],
+                ['Bus Passes', String(before.buspasses ?? 0), String(now.buspasses ?? 0)],
             ];
             for (const [changeType, oldValue, newValue] of tracked) {
                 if ((oldValue || '') !== (newValue || '')) {

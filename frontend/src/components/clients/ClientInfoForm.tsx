@@ -2,11 +2,12 @@ import { Fragment, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle2, Settings, X } from 'lucide-react';
 import { updateClient } from '../../api';
-import type { SupervisingAgent } from '../../api';
+import type { ClientNote, SupervisingAgent } from '../../api';
+import BusPassDialog from './BusPassDialog';
 import AgentPicker from '../agents/AgentPicker';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import {
-  CHAPERON_PHASES, CLIENT_FIELD_OPTIONS, EDITABLE_PROGRAM_STATUSES, GROUP_TYPES_BY_PROGRAM, POLY_PROGRAM_TYPES, PRETRIAL_PROGRAM_TYPES, SO_ATTENDANCE_LIMIT_MONTHS, SO_PROGRAM_TYPES,
+  BUS_PASS_MAX, CHAPERON_PHASES, CLIENT_FIELD_OPTIONS, EDITABLE_PROGRAM_STATUSES, FEDERAL_PROGRAM_TYPES, GROUP_TYPES_BY_PROGRAM, POLY_PROGRAM_TYPES, PRETRIAL_PROGRAM_TYPES, SO_ATTENDANCE_LIMIT_MONTHS, SO_PROGRAM_TYPES,
   STATE_FEE_PROGRAM_TYPES, formatPhase, isAttendanceOverdue, isWholeNumber,
 } from '../../utils/clients';
 import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
@@ -38,6 +39,8 @@ interface Props {
   onLeaveResolved: (leave: boolean) => void;
   // Saved; previousProgramType lets App ask about a BIP intake when the client was just moved to BIP
   onSaved: (saved: any, previousProgramType: string | null) => void;
+  // A bus pass was granted: the client's new count and the Bus Pass note it added
+  onBusPassGranted: (busPasses: number, note: ClientNote) => void;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -85,7 +88,8 @@ const inputClass = 'w-full bg-slate-900 border border-slate-700 rounded-lg px-2.
 // The Information tab's details: Personal, Contact, and Program & Account sections, shown read-only until Edit Info.
 // While editing, only the changed fields are kept, laid over the current client, so a status change made meanwhile
 // (Discharge / Activate) still shows and is saved.
-export default function ClientInfoForm({ client, discharged, groups, directoryAgents, counselors, polyOverrideActive, userEmail, loadError, onDismissLoadError, actionsSlot, onDirtyChange, leaveRequested, onLeaveResolved, onSaved }: Props) {
+export default function ClientInfoForm({ client, discharged, groups, directoryAgents, counselors, polyOverrideActive, userEmail, loadError, onDismissLoadError, actionsSlot, onDirtyChange, leaveRequested, onLeaveResolved, onSaved, onBusPassGranted }: Props) {
+  const [busPassOpen, setBusPassOpen] = useState(false);
   // null while not editing; otherwise the fields changed so far
   const [edits, setEdits] = useState<Record<string, any> | null>(null); // eslint-disable-line @typescript-eslint/no-explicit-any
   const [saving, setSaving] = useState(false);
@@ -129,6 +133,16 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
 
   return (
     <>
+      {busPassOpen && (
+        <BusPassDialog
+          clientId={client.clientid}
+          clientName={`${client.lastname}, ${client.firstname}`}
+          busPasses={Number(client.buspasses ?? 0)}
+          userEmail={userEmail}
+          onGranted={(busPasses, note) => { setBusPassOpen(false); onBusPassGranted(busPasses, note); }}
+          onClose={() => setBusPassOpen(false)}
+        />
+      )}
       {shownError && (
         <div className="bg-red-500/10 border border-red-500 text-red-400 p-3 rounded-lg text-sm flex justify-between items-center gap-3">
           <span>{shownError}</span>
@@ -383,6 +397,22 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
               <p className="text-white font-medium">{client.assessor || '—'}</p>
             )}
           </div>
+          {/* Federal clients only: how many bus passes they can still be granted (0 to 2); granting one adds a Bus Pass note */}
+          {FEDERAL_PROGRAM_TYPES.includes(programType || '') && (
+            <div>
+              <p className="text-xs text-slate-500 mb-0.5">Bus Passes</p>
+              {editing ? (
+                <input type="number" min={0} max={BUS_PASS_MAX} step={1} value={form.buspasses ?? 0} onChange={e => setField('buspasses', e.target.value)} className={inputClass} />
+              ) : (
+                <div className="flex items-center gap-3">
+                  <p className="text-white font-medium">{Number(client.buspasses ?? 0)}</p>
+                  {Number(client.buspasses ?? 0) > 0 && (
+                    <button type="button" onClick={() => setBusPassOpen(true)} className="bg-blue-600 hover:bg-blue-500 text-white px-2.5 py-1 rounded-lg text-xs font-semibold">Grant Bus Pass</button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {/* BIP, Fed Drug Test and Chaperon clients don't take polygraphs, so their poly fee and vouchers aren't shown */}
           {ACCOUNT_FIELDS.filter(({ field }) => !(!takesPolygraphs(programType) && field === 'polyfeevoucher')).map(({ label, field, prefix, step = '0.01', min, max }) => (
             <div key={field}>

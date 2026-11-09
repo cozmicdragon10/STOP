@@ -54,6 +54,21 @@ test('the same programs skip polygraphs', () => {
     );
 });
 
+test('the same federal programs get bus passes, with the same limit', () => {
+    const fs = require('fs');
+    const read = (file) => {
+        const source = fs.readFileSync(file, 'utf8');
+        return {
+            programs: JSON.parse(/FEDERAL_PROGRAM_TYPES = (\[[^\]]*\])/.exec(source)[1].replace(/'/g, '"')),
+            max: Number(/BUS_PASS_MAX = (\d+)/.exec(source)[1]),
+        };
+    };
+    assert.deepEqual(
+        read(path.join(__dirname, '..', 'routes', 'clients.js')),
+        read(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'clients.ts')),
+    );
+});
+
 test('call-in reasons match', async () => {
     const { CALL_IN_REASONS: browser } = await frontend('notes.ts');
     const source = require('fs').readFileSync(path.join(__dirname, '..', 'routes', 'callins.js'), 'utf8');

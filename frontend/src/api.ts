@@ -84,6 +84,8 @@ export interface ClientColumns {
     polyvouchersbeforefill: number | null;
     // The counselor the client is waiting to be assessed by; cleared when an assessment is closed
     assessor: string | null;
+    // Bus passes a federal client may still be granted (0 to 2)
+    buspasses: number;
 }
 
 // A client on the roster, with its group and the check-in facts the frontend needs
@@ -335,6 +337,16 @@ export async function setClientNoPolyRequired(clientId: number, noPolyRequired: 
         throw new Error(body.error || 'Failed to update No Poly Required.');
     }
     return body.noPolyRequired;
+}
+
+// Grants one of a federal client's bus passes; returns how many are left and the Bus Pass case note it added
+export async function grantBusPass(clientId: number, busPassNumber: string, user: string): Promise<{ busPasses: number; note: ClientNote }> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/bus-pass`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ busPassNumber, user }),
+    });
+    return jsonResponse(res, 'Failed to grant the bus pass.');
 }
 
 // 'discharge' is Business Administrators only (the server checks the role); 'activate' sets a discharged client

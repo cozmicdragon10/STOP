@@ -102,6 +102,7 @@ export interface Clients {
   sex?: string;
   polyvouchersbeforefill?: number;
   assessor?: string;
+  buspasses: number;
 }
 
 export interface Employeeroles {

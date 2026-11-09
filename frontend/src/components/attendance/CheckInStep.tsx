@@ -1,4 +1,4 @@
-import { Save, Search, Trash2 } from 'lucide-react';
+import { Save, Search, Trash2, UserRound } from 'lucide-react';
 import type { ClientRecord, GroupRecord, GroupCheckInState } from '../../hooks/useGroupCheckIn';
 import { formatBalance } from '../../utils/balance';
 import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
@@ -8,19 +8,21 @@ interface Props {
   group: GroupRecord;
   wf: GroupCheckInState;
   onOpenSearch: () => void;
+  onOpenClient: (clientId: number) => void;
 }
 
 const buttonBase = 'px-4 py-2 rounded-lg text-sm font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed';
 const primaryButton = `${buttonBase} bg-blue-600 hover:bg-blue-500 text-white`;
 const secondaryButton = `${buttonBase} bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700`;
 
-function RosterRow({ client, checked, attended, selected, onToggle }: {
+function RosterRow({ client, checked, attended, selected, onToggle, onOpenClient }: {
   client: ClientRecord;
   checked: boolean;
   // Already attended this group today, so cannot be checked in again
   attended: boolean;
   selected: boolean;
   onToggle: () => void;
+  onOpenClient: () => void;
 }) {
   // A BIP client still waiting on their intake or reinstate assessment can't be checked in
   const bipBlocked = !checked && !attended && !!client.bipcheckinblock;
@@ -52,6 +54,16 @@ function RosterRow({ client, checked, attended, selected, onToggle }: {
         )}
         <p className="text-xs text-slate-400 sm:ml-auto">DOC # {client.docnumber || '—'} · Bal {formatBalance(client.accountbalance)}</p>
       </div>
+      {/* Inside the row's label, so it must not also tick the checkbox */}
+      <button
+        type="button"
+        onClick={e => { e.preventDefault(); e.stopPropagation(); onOpenClient(); }}
+        className="shrink-0 cursor-pointer text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md p-1.5"
+        aria-label={`Open ${client.lastname}, ${client.firstname}'s account`}
+        title="Open account"
+      >
+        <UserRound size={14} />
+      </button>
     </label>
   );
 }
@@ -66,7 +78,7 @@ function RosterSkeleton() {
   );
 }
 
-export default function CheckInStep({ group, wf, onOpenSearch }: Props) {
+export default function CheckInStep({ group, wf, onOpenSearch, onOpenClient }: Props) {
   // SO groups show the phase fee schedule for State, Federal and Voluntary SO clients
   const showPhaseFees = ['SO', 'FED SO'].includes((group.programtype || '').trim().toUpperCase());
   const selectableSelected = wf.selectableRoster.filter(c => wf.selectedIds.has(c.clientid)).length;
@@ -137,6 +149,7 @@ export default function CheckInStep({ group, wf, onOpenSearch }: Props) {
                 attended={wf.attendedIds.has(c.clientid)}
                 selected={wf.selectedIds.has(c.clientid)}
                 onToggle={() => wf.toggleSelect(c.clientid)}
+                onOpenClient={() => onOpenClient(c.clientid)}
               />
             ))}
           </div>

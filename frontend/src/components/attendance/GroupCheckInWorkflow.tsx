@@ -26,6 +26,8 @@ interface Props {
   // Closed session picked from the Closed Groups panel for missed check-ins (Business Administrators); cleared once loaded
   missedCheckInRequest: ClosedGroupSession | null;
   onMissedCheckInHandled: () => void;
+  // Opens a client's account from the group's roster (the check-in in progress is kept)
+  onOpenClient: (clientId: number) => void;
 }
 
 const STEPS = ['Select Group', 'Check In Clients', 'Review & Save'];
@@ -102,7 +104,7 @@ function filterSearchableClients(clients: ClientRecord[], groupType: string | nu
   });
 }
 
-export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPickCover, onSuccess, onError, onSaved, openGroups, onOpenGroupsChanged, resumeRequest, onResumeHandled, missedCheckInRequest, onMissedCheckInHandled }: Props) {
+export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPickCover, onSuccess, onError, onSaved, openGroups, onOpenGroupsChanged, resumeRequest, onResumeHandled, missedCheckInRequest, onMissedCheckInHandled, onOpenClient }: Props) {
   const wf = useGroupCheckIn(createdBy, { onSuccess, onError, onSaved, onOpenGroupsChanged });
   const [searchOpen, setSearchOpen] = useState(false);
 
@@ -275,7 +277,7 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
 
       {/* Steps 2 and 3 stay hidden until a group is chosen */}
       {group && wf.view === 'checkin' && (
-        <CheckInStep group={group} wf={wf} onOpenSearch={() => setSearchOpen(true)} />
+        <CheckInStep group={group} wf={wf} onOpenSearch={() => setSearchOpen(true)} onOpenClient={onOpenClient} />
       )}
       {group && wf.view === 'review' && (
         <ReviewStep group={group} wf={wf} createdBy={createdBy} canPickCover={canPickCover} onSuccess={onSuccess} onError={onError} onSaved={onSaved} />
