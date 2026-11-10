@@ -52,6 +52,11 @@ const balanceText = (stored: number) => {
   const tag = cents > 0 ? '<span class="tag">(Owed)</span> ' : cents < 0 ? '<span class="tag">(Credit)</span> ' : '';
   return `${tag}${escapeHtml(formatBalance(stored))}`;
 };
+// YYYY-MM-DD as MM/DD/YY
+const shortDate = (ymd: string) => {
+  const [y, m, d] = ymd.split('-');
+  return y && m && d ? `${m.padStart(2, '0')}/${d.padStart(2, '0')}/${y.slice(-2)}` : ymd;
+};
 const longDate = (ymd: string) => {
   const [y, m, d] = ymd.split('-').map(Number);
   return y && m && d ? new Date(y, m - 1, d).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }) : ymd;
@@ -122,7 +127,7 @@ const polygraphSection = async (clientId: number) => {
     const p = await getPolySummary(clientId);
     if (!p.takesPolygraphs) return '';
     const next = p.next
-      ? `<p><span class="small">Next polygraph</span><br><b>${escapeHtml(longDate(p.next.date))}${p.next.time ? ` at ${escapeHtml(formatDisplayTime(p.next.time))}` : ''}</b>${
+      ? `<p><span class="small">Next polygraph</span><br><b>${escapeHtml(shortDate(p.next.date))}${p.next.time ? ` at ${escapeHtml(formatDisplayTime(p.next.time))}` : ''}</b>${
         p.next.location ? `<br>${escapeHtml(p.next.location)}` : ''}</p>`
       : '<table><tr><td>Next polygraph</td><td class="r">Not scheduled</td></tr></table>';
     const last = p.lastTaken && p.lastTaken <= ymdToday() ? escapeHtml(longDate(p.lastTaken)) : 'None yet';
