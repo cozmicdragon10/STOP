@@ -1090,6 +1090,10 @@ export default function App() {
                   canDelete={role === 'Business Administrator'}
                   onDeleted={handleAttendanceDeleted}
                   onSuccess={setSuccessMsg}
+                  clientName={`${selectedClientDetail.lastname}, ${selectedClientDetail.firstname}`}
+                  docNumber={selectedClientDetail.docnumber || ''}
+                  printedBy={user?.displayname || user?.employeeemail || ''}
+                  onError={setError}
                 />
               )}
 

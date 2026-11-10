@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { ArrowLeft, Save, Trash2 } from 'lucide-react';
-import { validateSession } from '../../hooks/useGroupCheckIn';
+import { ArrowLeft, Printer, Save, Trash2 } from 'lucide-react';
+import { printAttendanceReceipt } from '../../utils/receipt';
+import { todayLocal, validateSession } from '../../hooks/useGroupCheckIn';
 import type { ClientRecord, GroupCheckInState, GroupRecord, SessionEntry } from '../../hooks/useGroupCheckIn';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import ClientPaymentDialog from '../payments/ClientPaymentDialog';
@@ -19,12 +20,13 @@ interface Props {
 
 const inputClass = 'bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm w-full';
 
-function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment }: {
+function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint }: {
   entry: SessionEntry;
   balance: number;
   onChange: (patch: Partial<Omit<SessionEntry, 'client'>>) => void;
   onRemove: () => void;
   onMakePayment: () => void;
+  onPrint: (afterClose: number) => void;
 }) {
   const { client } = entry;
   // What the account will read once the group closes: fee charged, cash payment from check-in recorded.
@@ -39,6 +41,13 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment }: {
           <p className="text-xs text-slate-400">DOC # {client.docnumber || '—'}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => onPrint(afterClose)}
+            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5"
+          >
+            <Printer size={12} /> Print Receipt
+          </button>
           <button
             type="button"
             onClick={onMakePayment}
@@ -126,6 +135,23 @@ export default function ReviewStep({ group, wf, createdBy, canPickCover, onSucce
             onChange={patch => wf.updateEntry(entry.client.clientid, patch)}
             onRemove={() => wf.removeEntry(entry.client.clientid)}
             onMakePayment={() => setPaymentClient(entry.client)}
+            onPrint={afterClose => printAttendanceReceipt({
+              clientName: `${entry.client.lastname}, ${entry.client.firstname}`,
+              docNumber: entry.client.docnumber || '',
+              sessionKind: 'Group',
+              sessionName: group.groupname,
+              sessionDate: wf.sessionDate ?? todayLocal(),
+              provider: wf.coveredBy || group.counselor || null,
+              fee: entry.fee,
+              payments: [
+                { label: 'Paid at check-in', amount: entry.payment, method: entry.paymentMethod },
+                { label: 'Card paid at check-in', amount: entry.cardPaid, alreadyApplied: true },
+              ],
+              balanceBefore: updatedBalances[entry.client.clientid] ?? entry.balance,
+              balanceAfter: afterClose,
+              pending: true,
+              printedBy: createdBy,
+            }, onError)}
           />
         ))}
       </div>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useUnsavedForm } from '../../hooks/useUnsavedForm';
-import { SlidersHorizontal, Trash2 } from 'lucide-react';
+import { Printer, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { printAttendanceReceipt } from '../../utils/receipt';
 import { deleteAttendance, getClient, getClientAttendance, getClientFinancials } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
 import MonthHeader from './MonthHeader';
@@ -29,12 +30,35 @@ interface Props {
   canDelete: boolean;
   onDeleted: (refresh: AttendanceDeleted) => void;
   onSuccess: (message: string) => void;
+  // For printed attendance receipts
+  clientName: string;
+  docNumber: string;
+  printedBy: string;
+  onError: (message: string) => void;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 // The Attendance tab of a client's account: sessions by month with fee, payment, and the balance before and after.
 // Business Administrators can delete a session, which takes back its fee and payment.
-export default function ClientAttendanceHistory({ clientId, balance, attendance, canDelete, onDeleted, onSuccess }: Props) {
+export default function ClientAttendanceHistory({ clientId, balance, attendance, canDelete, onDeleted, onSuccess, clientName, docNumber, printedBy, onError }: Props) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- attendance rows are untyped throughout App
+  const printAttendance = (att: any) => {
+    const c = attendanceBalanceChange(att);
+    const kind = att.type === 'Assessment' || att.type === 'Individual' ? att.type : 'Group';
+    const paidOnOpen = Number(att.paidonopen || 0);
+    printAttendanceReceipt({
+      clientName, docNumber, sessionKind: kind,
+      // Assessments and individuals come back as e.g. "Individual - Individual Session"
+      sessionName: kind === 'Group' ? (att.groupname || 'Group Session') : String(att.groupname || kind).replace(new RegExp(`^${kind} - `), ''),
+      sessionDate: localYmd(att.date), provider: att.provider || null, fee: c.fee,
+      payments: [
+        { label: 'Paid when the session was opened', amount: paidOnOpen, alreadyApplied: true },
+        { label: paidOnOpen > 0 ? 'Paid when the session was closed' : 'Payment', amount: c.paid, method: att.paymentmethod },
+      ],
+      // attendanceBalanceChange gives the shown sign; the receipt takes the stored one
+      balanceBefore: -c.before, balanceAfter: -c.after, printedBy,
+    }, onError);
+  };
   const [filters, setFilters] = useState(EMPTY_ATTENDANCE_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
   // Months (YYYY-MM) the user has collapsed
@@ -192,6 +216,15 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
                       </p>
                     </div>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => printAttendance(att)}
+                    title="Print a receipt for this attendance"
+                    aria-label="Print a receipt for this attendance"
+                    className="shrink-0 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white p-1.5 rounded"
+                  >
+                    <Printer size={13} />
+                  </button>
                   {canDelete && (
                     <button
                       type="button"

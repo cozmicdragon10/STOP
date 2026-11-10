@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ClipboardList, Hourglass, Trash2 } from 'lucide-react';
+import { ClipboardList, Hourglass, Printer, Trash2 } from 'lucide-react';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import {
   closeIndividualSession, deleteOpenIndividualSession, getBipIntake, getClosedIndividualSessions, getOpenIndividualSessions,
@@ -11,7 +11,7 @@ import CardPaymentFields from '../payments/CardPaymentFields';
 import { emptyCardBilling, type CardBilling } from '../payments/cardBilling';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
-import { printReceipt, type Receipt } from '../../utils/receipt';
+import { printAttendanceReceipt, printReceipt, type Receipt } from '../../utils/receipt';
 
 interface TabClient {
   clientid: number;
@@ -304,6 +304,36 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
     loadLists();
     if (paidNow) onSaved?.();
   });
+
+  // A receipt for the session being reviewed: what closing will record, and anything already paid
+  const printPendingReceipt = () => {
+    if (!client) return;
+    printAttendanceReceipt({
+      clientName: `${client.lastname}, ${client.firstname}`, docNumber: client.docnumber || '',
+      sessionKind: form.category, sessionName: sessionType?.name ?? form.category, sessionDate: form.date, provider: form.provider || null,
+      fee: Number.isFinite(fee) ? fee : 0,
+      payments: [
+        { label: 'Paid when the session was opened', amount: form.paidOnOpen, alreadyApplied: true },
+        { label: 'Payment processed', amount: form.receipt?.amount ?? 0, method: form.receipt?.method, alreadyApplied: true },
+        { label: 'Payment', amount: Number.isFinite(payment) ? payment : 0, method: paymentMethod },
+      ],
+      balanceBefore, balanceAfter, pending: true, printedBy: user.displayname || user.employeeemail,
+    }, onError);
+  };
+
+  const printClosedReceipt = (c: ClosedIndividualSession) => {
+    const paidOnOpen = Number(c.paidonopen || 0);
+    printAttendanceReceipt({
+      clientName: `${c.lastname}, ${c.firstname}`, docNumber: clients.find(x => x.clientid === c.clientid)?.docnumber || '',
+      sessionKind: c.category, sessionName: c.sessiontypename || c.category, sessionDate: c.sessiondate, provider: c.provider,
+      fee: Number(c.fee || 0),
+      payments: [
+        { label: 'Paid when the session was opened', amount: paidOnOpen, alreadyApplied: true },
+        { label: paidOnOpen > 0 ? 'Paid when the session was closed' : 'Payment', amount: Number(c.payment || 0), method: c.paymentmethod },
+      ],
+      printedBy: user.displayname || user.employeeemail,
+    }, onError);
+  };
 
   const handleClose = () => run(async () => {
     const res = await closeIndividualSession(payload());
@@ -668,6 +698,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
             {formError && <p role="alert" className="text-xs text-red-400 bg-red-500/10 border border-red-500 rounded-lg p-3">{formError}</p>}
 
             <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
+              <button type="button" onClick={printPendingReceipt} title="Print a receipt with the fee and payment" className="mr-auto bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold px-4 py-2.5 rounded-lg text-sm flex items-center gap-1.5"><Printer size={14} /> Print Receipt</button>
               <button type="button" disabled={saving} onClick={() => { setReviewing(false); setFormError(''); }} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-semibold px-5 py-2.5 rounded-lg text-sm">Back / Edit</button>
               {needsChecks && form.openSessionId && (
                 <button type="button" disabled={saving} onClick={handleSaveOpen} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 disabled:opacity-50 text-slate-200 font-semibold px-5 py-2.5 rounded-lg text-sm">Keep Open</button>
@@ -754,6 +785,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                           <div className="flex justify-between"><span className="text-slate-400">{Number(c.paidonopen) > 0 ? 'Paid when closed' : 'Paid'}</span><span className="text-slate-200">{Number(c.payment) > 0 ? `${money(Number(c.payment))} ${c.paymentmethod || ''}`.trim() : 'No payment'}</span></div>
                           {c.paymentcomments && <p className="text-slate-400 pt-1"><span className="text-slate-500">Payment:</span> {c.paymentcomments}</p>}
                           {c.comments && <p className="text-slate-400 pt-1"><span className="text-slate-500">{c.category === 'Assessment' ? 'Assessment' : 'Session'}:</span> {c.comments}</p>}
+                          <button type="button" onClick={() => printClosedReceipt(c)} className="mt-1 w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold py-1.5 rounded-lg flex items-center justify-center gap-1.5"><Printer size={12} /> Print Receipt</button>
                           <p className="text-[0.6875rem] text-slate-500 pt-1">
                             Closed{c.closedon ? ` ${new Date(c.closedon).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}` : ''}{c.closedby ? ` by ${c.closedby}` : ''}
                             {c.openedby && c.openedby !== c.closedby ? ` · Opened by ${c.openedby}` : ''}
