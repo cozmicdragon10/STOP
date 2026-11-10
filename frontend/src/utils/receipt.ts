@@ -1,5 +1,7 @@
 import type { PaymentMethod } from '../hooks/useGroupCheckIn';
 import { formatBalance } from './balance';
+import { formatDisplayTime } from './dates';
+import { getPolySummary } from '../api';
 
 // A saved payment, as shown on a printed receipt. newBalance uses the stored sign (positive = owes).
 export interface Receipt {
@@ -34,13 +36,13 @@ export interface AttendanceReceipt {
   sessionDate: string;
   provider?: string | null;
   fee: number;
-  // Payments for this session. alreadyApplied: paid before the attendance was recorded (e.g. when an individual
-  // session was opened, or a card at check-in), so it is part of the balance before rather than taken off it here.
+  // Payments for this session. alreadyApplied: already in balanceBefore (e.g. paid when an individual session was
+  // opened, or a card at check-in); the receipt adds it back so balance before + fee - payments = balance after.
   payments: { label: string; amount: number; method?: string | null; alreadyApplied?: boolean }[];
   balanceBefore?: number;
   balanceAfter?: number;
-  // Not recorded yet: the group or session is still open, so the fee and payment are what closing will record
-  pending?: boolean;
+  // The client, for the polygraph dates printed at the bottom
+  clientId: number;
 }
 
 const money = (n: number) => `$${n.toFixed(2)}`;
@@ -74,31 +76,65 @@ const receiptHeader = (title: string) => `<div class="center"><div class="biz">C
     <div class="small">${escapeHtml(new Date().toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }))}</div></div><hr>`;
 const RECEIPT_FOOTER = '<hr><p class="center">Thank you.</p>';
 
-// Writes the receipt into a small window sized like the paper and opens the print dialog.
+// Writes the receipt into a small window sized like the paper and opens the print dialog. The window is opened right
+// away (while still handling the click, so pop-up blockers allow it); a body still loading is filled in when ready.
 // Pop-ups must be allowed for this site.
-const printReceiptPage = (title: string, body: string, onError: (message: string) => void) => {
+const printReceiptPage = (title: string, body: string | Promise<string>, onError: (message: string) => void) => {
   const win = window.open('', '_blank', 'width=360,height=640');
   if (!win) {
     onError('Allow pop-ups for this site to print receipts.');
     return;
   }
-  win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>${RECEIPT_STYLE}</head><body>${receiptHeader(title)}${body}${RECEIPT_FOOTER}</body></html>`);
-  win.document.close();
-  win.focus();
-  win.print();
+  const write = (html: string) => {
+    win.document.open();
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>${RECEIPT_STYLE}</head><body>${receiptHeader(title)}${html}${RECEIPT_FOOTER}</body></html>`);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+  if (typeof body === 'string') {
+    write(body);
+    return;
+  }
+  win.document.write('<p style="font-family:Arial,sans-serif">Preparing receipt…</p>');
+  body.then(write);
 };
 
-// Prints a receipt for one attendance: what it was, its fee, its payment(s), and the balance before and after
+const ymdToday = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// The polygraph lines at the bottom of an attendance receipt; empty for clients who don't take polygraphs, or if the
+// dates can't be loaded (the receipt still prints)
+const polygraphSection = async (clientId: number) => {
+  try {
+    const p = await getPolySummary(clientId);
+    if (!p.takesPolygraphs) return '';
+    const next = p.next
+      ? `<p><span class="small">Next polygraph</span><br><b>${escapeHtml(longDate(p.next.date))}${p.next.time ? ` at ${escapeHtml(formatDisplayTime(p.next.time))}` : ''}</b>${
+        p.next.location ? `<br>${escapeHtml(p.next.location)}` : ''}</p>`
+      : '<table><tr><td>Next polygraph</td><td class="r">Not scheduled</td></tr></table>';
+    const last = p.lastTaken && p.lastTaken <= ymdToday() ? escapeHtml(longDate(p.lastTaken)) : 'None yet';
+    return `<hr><table><tr><td>Last polygraph</td><td class="r">${last}</td></tr></table>${next}`;
+  } catch {
+    return '';
+  }
+};
+
+// Prints a receipt for one attendance: what it was, its fee, its payment(s), the balance before and after, and the
+// client's last and next polygraph
 export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: string) => void) => {
   const row = (label: string, value: string, cls = '') => `<tr class="${cls}"><td>${escapeHtml(label)}</td><td class="r">${value}</td></tr>`;
-  const paymentRows = r.payments.filter(p => p.amount > 0).map(p => row(
-    `${p.label}${p.method ? ` (${p.method})` : ''}${p.alreadyApplied ? ' *' : ''}`, money(p.amount),
-  )).join('');
-  const anyApplied = r.payments.some(p => p.amount > 0 && p.alreadyApplied);
-  const totalPaid = r.payments.reduce((t, p) => t + (p.amount > 0 ? p.amount : 0), 0);
+  const paid = r.payments.filter(p => p.amount > 0);
+  const paymentRows = paid.map(p => row(`${p.label}${p.method ? ` (${p.method})` : ''}`, money(p.amount))).join('');
+  const totalPaid = paid.reduce((t, p) => t + p.amount, 0);
+  // Payments already in the balance are added back (stored sign: positive = owes), so the lines add up
+  const applied = paid.filter(p => p.alreadyApplied).reduce((t, p) => t + p.amount, 0);
+  const balanceBefore = r.balanceBefore === undefined ? undefined : r.balanceBefore + applied;
   // Long names and group names get their own line so the amounts column stays readable on narrow paper
   const block = (label: string, value: string) => `<p><span class="small">${escapeHtml(label)}</span><br><b>${value}</b></p>`;
-  printReceiptPage('Attendance Receipt', `
+  printReceiptPage('Attendance Receipt', polygraphSection(r.clientId).then(poly => `
     ${block('Client', escapeHtml(r.clientName))}
     ${r.docNumber ? `<table>${row('DOC #', escapeHtml(r.docNumber))}</table>` : ''}
     ${block(r.sessionKind === 'Group' ? 'Group' : r.sessionKind, escapeHtml(r.sessionName))}
@@ -108,15 +144,14 @@ export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: 
     </table>
     <hr>
     <table>
-      ${r.balanceBefore !== undefined ? row('Balance before', escapeHtml(formatBalance(r.balanceBefore))) : ''}
+      ${balanceBefore !== undefined ? row('Balance before', escapeHtml(formatBalance(balanceBefore))) : ''}
       ${row(`${r.sessionKind} fee`, money(r.fee))}
       ${paymentRows || row('Payment', 'None')}
-      ${r.payments.filter(p => p.amount > 0).length > 1 ? row('Total paid', money(totalPaid)) : ''}
+      ${paid.length > 1 ? row('Total paid', money(totalPaid)) : ''}
       ${r.balanceAfter !== undefined ? row('Balance after', escapeHtml(formatBalance(r.balanceAfter)), 'total') : ''}
     </table>
-    ${anyApplied ? '<p class="small">* Paid earlier; already included in the balance before.</p>' : ''}
-    ${r.pending ? `<p class="small">Session not closed yet. The fee and ${anyApplied ? 'any payment not marked *' : 'the payment'} are recorded when it closes.</p>` : ''}
-  `, onError);
+    ${poly}
+  `), onError);
 };
 
 // A payment receipt (account payments, card payments, payments at check-in)

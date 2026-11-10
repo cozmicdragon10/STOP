@@ -9,6 +9,35 @@ const router = express.Router();
 // Programs whose clients don't take polygraphs; mirrors NO_POLY_PROGRAM_TYPES in frontend/src/utils/polygraph.ts
 const NO_POLY_PROGRAM_TYPES = ['BIP', 'Fed Drug Test', 'Chaperon'];
 
+// For printed receipts: when the client last took a polygraph and their next scheduled one (read only).
+// takesPolygraphs is false for programs without polygraphs and clients marked as not needing one.
+router.get('/api/clients/:id/poly-summary', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const clientRes = await pool.query('SELECT ProgramType, NoPolyRequired FROM Clients WHERE ClientId = $1', [id]);
+        const c = clientRes.rows[0];
+        if (!c) return res.status(404).json({ error: 'Client not found.' });
+        const lastRes = await pool.query(
+            `SELECT to_char(MAX(COALESCE(PolygraphDateTime::date, Date)), 'YYYY-MM-DD') AS LastTaken FROM PolygraphResults WHERE Client = $1`,
+            [id]
+        );
+        const nextRes = await pool.query(
+            `SELECT to_char(s.Date, 'YYYY-MM-DD') AS Date, to_char(s.Time, 'HH24:MI') AS Time, s.Location
+             FROM PolygraphAppointments a JOIN PolygraphSlots s ON s.SlotId = a.SlotId
+             WHERE a.Client = $1 AND a.Status = 'Scheduled' AND s.Date + COALESCE(s.Time, '23:59') >= NOW()
+             ORDER BY s.Date, s.Time LIMIT 1`,
+            [id]
+        );
+        res.json({
+            takesPolygraphs: !NO_POLY_PROGRAM_TYPES.includes(c.programtype) && !c.nopolyrequired,
+            lastTaken: lastRes.rows[0].lasttaken,
+            next: nextRes.rows[0] || null,
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 router.get('/api/polygraphs/slots', async (req, res) => {
     try {
         await deletePastOpenSlots();

@@ -55,7 +55,7 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
         { label: paidOnOpen > 0 ? 'Paid when the session was closed' : 'Payment', amount: c.paid, method: att.paymentmethod },
       ],
       // attendanceBalanceChange gives the shown sign; the receipt takes the stored one
-      balanceBefore: -c.before, balanceAfter: -c.after,
+      balanceBefore: -c.before, balanceAfter: -c.after, clientId,
     }, onError);
   };
   const [filters, setFilters] = useState(EMPTY_ATTENDANCE_FILTERS);

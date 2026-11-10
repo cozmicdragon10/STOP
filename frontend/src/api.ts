@@ -956,6 +956,17 @@ export async function submitGroupCallIn(data: { group: number; date: Date | stri
     return jsonResponse(res, 'Could not log the group call-in.');
 }
 
+// When the client last took a polygraph (YYYY-MM-DD) and their next scheduled one, for printed receipts
+export interface PolySummary {
+    takesPolygraphs: boolean;
+    lastTaken: string | null;
+    next: { date: string; time: string | null; location: string | null } | null;
+}
+export async function getPolySummary(clientId: number): Promise<PolySummary> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/poly-summary`);
+    return jsonResponse(res, 'Failed to load the polygraph dates.');
+}
+
 export async function getPolygraphSlots(): Promise<PolygraphSlot[]> {
     const res = await apiFetch(`${API_BASE}/polygraphs/slots`);
     return jsonResponse(res, 'Failed to load polygraph slots.');

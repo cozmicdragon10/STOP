@@ -317,7 +317,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
         { label: 'Payment processed', amount: form.receipt?.amount ?? 0, method: form.receipt?.method, alreadyApplied: true },
         { label: 'Payment', amount: Number.isFinite(payment) ? payment : 0, method: paymentMethod },
       ],
-      balanceBefore, balanceAfter, pending: true,
+      balanceBefore, balanceAfter, clientId: client.clientid,
     }, onError);
   };
 
@@ -331,6 +331,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
         { label: 'Paid when the session was opened', amount: paidOnOpen, alreadyApplied: true },
         { label: paidOnOpen > 0 ? 'Paid when the session was closed' : 'Payment', amount: Number(c.payment || 0), method: c.paymentmethod },
       ],
+      clientId: c.clientid,
     }, onError);
   };
 
