@@ -52,14 +52,10 @@ const balanceText = (stored: number) => {
   const tag = cents > 0 ? '<span class="tag">(Owed)</span> ' : cents < 0 ? '<span class="tag">(Credit)</span> ' : '';
   return `${tag}${escapeHtml(formatBalance(stored))}`;
 };
-// YYYY-MM-DD as MM/DD/YY
+// Receipt dates are YYYY-MM-DD shown as MM/DD/YY
 const shortDate = (ymd: string) => {
   const [y, m, d] = ymd.split('-');
   return y && m && d ? `${m.padStart(2, '0')}/${d.padStart(2, '0')}/${y.slice(-2)}` : ymd;
-};
-const longDate = (ymd: string) => {
-  const [y, m, d] = ymd.split('-').map(Number);
-  return y && m && d ? new Date(y, m - 1, d).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }) : ymd;
 };
 
 // Receipts are laid out for an 80 mm thermal receipt printer (Star TSP100III): 72 mm printable width, solid black
@@ -130,7 +126,7 @@ const polygraphSection = async (clientId: number) => {
       ? `<p><span class="small">Next polygraph</span><br><b>${escapeHtml(shortDate(p.next.date))}${p.next.time ? ` at ${escapeHtml(formatDisplayTime(p.next.time))}` : ''}</b>${
         p.next.location ? `<br>${escapeHtml(p.next.location)}` : ''}</p>`
       : '<table><tr><td>Next polygraph</td><td class="r">Not scheduled</td></tr></table>';
-    const last = p.lastTaken && p.lastTaken <= ymdToday() ? escapeHtml(longDate(p.lastTaken)) : 'None yet';
+    const last = p.lastTaken && p.lastTaken <= ymdToday() ? escapeHtml(shortDate(p.lastTaken)) : 'None yet';
     return `<hr><table><tr><td>Last polygraph</td><td class="r">${last}</td></tr></table>${next}`;
   } catch {
     return '';
@@ -168,7 +164,7 @@ export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: 
     ${clientLine(r.clientName, r.docNumber)}
     <p><b>${escapeHtml(r.sessionKind)}:</b> ${escapeHtml(r.sessionName)}</p>
     ${counselorName ? `<p><b>Counselor:</b> ${escapeHtml(counselorName)}</p>` : ''}
-    <p><b>Date attended:</b> ${escapeHtml(longDate(r.sessionDate))}</p>
+    <p><b>Date attended:</b> ${escapeHtml(shortDate(r.sessionDate))}</p>
     <hr>
     <table>
       ${balanceBefore !== undefined ? row('Balance before', balanceText(balanceBefore)) : ''}
