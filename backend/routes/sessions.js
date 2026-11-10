@@ -220,7 +220,7 @@ const canSeeIndividualSession = (viewer, row) => {
 
 const OPEN_INDIVIDUAL_COLUMNS = `o.OpenSessionId, o.ClientId, c.FirstName, c.LastName, c.DOCNumber, c.ProgramType, o.Category, o.SessionTypeId,
     st.Name AS SessionTypeName, to_char(o.SessionDate, 'YYYY-MM-DD') AS SessionDate, o.Fee, o.Payment, o.PaymentMethod,
-    o.Provider, o.Comments, o.PaymentComments, o.CreatedBy, o.UpdatedOn`;
+    o.Provider, o.Comments, o.PaymentComments, o.PaidOnOpen, o.CreatedBy, o.UpdatedOn`;
 const OPEN_INDIVIDUAL_FROM = `OpenIndividualSessions o JOIN Clients c ON c.ClientId = o.ClientId JOIN SessionTypes st ON st.SessionTypeId = o.SessionTypeId`;
 
 router.get('/api/individual-sessions/open', async (req, res) => {
@@ -240,7 +240,7 @@ router.get('/api/individual-sessions/closed', async (req, res) => {
         if (!viewer) return res.json([]);
         const result = await pool.query(
             `SELECT a.AttendanceId, a.Client AS ClientId, c.FirstName, c.LastName, a.Type AS Category, st.Name AS SessionTypeName,
-                    to_char(a.Date, 'YYYY-MM-DD') AS SessionDate, a.GroupFee AS Fee, a.AccountPaid AS Payment, a.PaymentMethod,
+                    to_char(a.Date, 'YYYY-MM-DD') AS SessionDate, a.GroupFee AS Fee, a.AccountPaid AS Payment, a.PaymentMethod, a.PaidOnOpen,
                     a.Provider, a.Comments, COALESCE(a.OpenedBy, a.CreatedBy) AS OpenedBy, a.CreatedBy AS ClosedBy, a.CreatedOn AS ClosedOn,
                     -- What was typed as payment comments: the payment's ledger text without its standard opening sentence
                     (SELECT NULLIF(regexp_replace(f.Comments, '^Payment applied during .* session on \\d{4}-\\d{2}-\\d{2}\\.\\s*', ''), '')
@@ -314,37 +314,65 @@ const checkIndividualSession = async (db, body, viewer) => {
 };
 
 // Saves a session as open (new, or an update of openSessionId). The fee is not charged until it is closed.
+// An individual session's cash payment is applied to the account now (added to PaidOnOpen), so it isn't kept as pending;
+// an assessment's payment is taken when it is closed.
 router.put('/api/individual-sessions/open', async (req, res) => {
+    const { openSessionId, comments, paymentComments, user } = req.body;
+    const db = await pool.connect();
     try {
-        const { openSessionId, comments, paymentComments, user } = req.body;
         const viewer = await openGroupViewer(user);
         if (!viewer) return res.status(403).json({ error: 'Only active employees can save sessions.' });
-        const checked = await checkIndividualSession(pool, req.body, viewer);
-        if (checked.error) return res.status(400).json({ error: checked.error });
+        await db.query('BEGIN');
+        const checked = await checkIndividualSession(db, req.body, viewer);
+        const refuse = async (status, error) => { await db.query('ROLLBACK'); return res.status(status).json({ error }); };
+        if (checked.error) return refuse(400, checked.error);
         const s = checked.session;
         let id = openSessionId;
         if (id) {
-            const existing = await pool.query('SELECT CreatedBy, Provider FROM OpenIndividualSessions WHERE OpenSessionId = $1', [id]);
-            if (!existing.rows[0]) return res.status(404).json({ error: 'This open session was already closed or discarded.' });
-            if (!canSeeIndividualSession(viewer, existing.rows[0])) return res.status(403).json({ error: 'Only the employee who opened this session, its counselor or therapist, or an administrator can change it.' });
-            await pool.query(
+            const existing = await db.query('SELECT CreatedBy, Provider FROM OpenIndividualSessions WHERE OpenSessionId = $1 FOR UPDATE', [id]);
+            if (!existing.rows[0]) return refuse(404, 'This open session was already closed or discarded.');
+            if (!canSeeIndividualSession(viewer, existing.rows[0])) return refuse(403, 'Only the employee who opened this session, its counselor or therapist, or an administrator can change it.');
+        }
+        const payNow = s.category === 'Individual' && s.payment > 0;
+        let newBalance = null;
+        if (payNow) {
+            const balRes = await db.query('SELECT AccountBalance FROM Clients WHERE ClientId = $1 FOR UPDATE', [s.client]);
+            newBalance = Math.round((Number(balRes.rows[0].accountbalance || 0) - s.payment) * 100) / 100;
+            const note = String(paymentComments || '').trim();
+            await db.query(
+                `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, EnteredBy)
+                 VALUES ($1, NOW(), 'Payment', $2, 'Individual Fee', $3, $4, $5, $6)`,
+                [s.client, s.payment, newBalance, `Payment applied when opening ${s.typeName} session on ${s.date}.${note ? ` ${note}` : ''}`, s.paymentMethod, viewer.employeeemail]
+            );
+            await db.query('UPDATE Clients SET AccountBalance = $1 WHERE ClientId = $2', [newBalance, s.client]);
+        }
+        // A payment applied now is not stored as pending on the open session
+        const pending = payNow ? 0 : s.payment;
+        const pendingMethod = payNow ? null : s.paymentMethod;
+        const paidNow = payNow ? s.payment : 0;
+        if (id) {
+            await db.query(
                 `UPDATE OpenIndividualSessions SET ClientId = $1, Category = $2, SessionTypeId = $3, SessionDate = $4, Fee = $5, Payment = $6,
-                     PaymentMethod = $7, Provider = $8, Comments = $9, PaymentComments = $10, UpdatedOn = NOW() WHERE OpenSessionId = $11`,
-                [s.client, s.category, s.sessionTypeId, s.date, s.fee, s.payment, s.paymentMethod, s.provider, comments || null, paymentComments || null, id]
+                     PaymentMethod = $7, Provider = $8, Comments = $9, PaymentComments = $10, PaidOnOpen = PaidOnOpen + $12, UpdatedOn = NOW() WHERE OpenSessionId = $11`,
+                [s.client, s.category, s.sessionTypeId, s.date, s.fee, pending, pendingMethod, s.provider, comments || null, payNow ? null : (paymentComments || null), id, paidNow]
             );
         } else {
-            const inserted = await pool.query(
-                `INSERT INTO OpenIndividualSessions (ClientId, Category, SessionTypeId, SessionDate, Fee, Payment, PaymentMethod, Provider, Comments, PaymentComments, CreatedBy)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING OpenSessionId`,
-                [s.client, s.category, s.sessionTypeId, s.date, s.fee, s.payment, s.paymentMethod, s.provider, comments || null, paymentComments || null, viewer.employeeemail]
+            const inserted = await db.query(
+                `INSERT INTO OpenIndividualSessions (ClientId, Category, SessionTypeId, SessionDate, Fee, Payment, PaymentMethod, Provider, Comments, PaymentComments, CreatedBy, PaidOnOpen)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING OpenSessionId`,
+                [s.client, s.category, s.sessionTypeId, s.date, s.fee, pending, pendingMethod, s.provider, comments || null, payNow ? null : (paymentComments || null), viewer.employeeemail, paidNow]
             );
             id = inserted.rows[0].opensessionid;
         }
-        await logAction(user, `${s.category} Saved`, `Saved open ${s.typeName} for ${s.clientName} (Client ID ${s.client}) on ${s.date}`);
+        await db.query('COMMIT');
+        await logAction(user, `${s.category} Saved`, `Saved open ${s.typeName} for ${s.clientName} (Client ID ${s.client}) on ${s.date}${payNow ? `; payment $${s.payment.toFixed(2)} ${s.paymentMethod} applied to the account` : ''}`);
         const result = await pool.query(`SELECT ${OPEN_INDIVIDUAL_COLUMNS} FROM ${OPEN_INDIVIDUAL_FROM} WHERE o.OpenSessionId = $1`, [id]);
-        res.json(result.rows[0]);
+        res.json({ ...result.rows[0], newBalance });
     } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
         res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
     }
 });
 
@@ -378,8 +406,9 @@ router.post('/api/individual-sessions/close', async (req, res) => {
         if (!viewer) return res.status(403).json({ error: 'Only active employees can close sessions.' });
         await db.query('BEGIN');
         let openedBy = viewer.employeeemail;
+        let paidOnOpen = 0;
         if (openSessionId) {
-            const openRes = await db.query('SELECT CreatedBy, Provider FROM OpenIndividualSessions WHERE OpenSessionId = $1 FOR UPDATE', [openSessionId]);
+            const openRes = await db.query('SELECT CreatedBy, Provider, PaidOnOpen FROM OpenIndividualSessions WHERE OpenSessionId = $1 FOR UPDATE', [openSessionId]);
             const open = openRes.rows[0];
             if (!open) {
                 await db.query('ROLLBACK');
@@ -390,6 +419,7 @@ router.post('/api/individual-sessions/close', async (req, res) => {
                 return res.status(403).json({ error: 'Only the employee who opened this session, its counselor or therapist, or an administrator can close it.' });
             }
             openedBy = open.createdby || openedBy;
+            paidOnOpen = Number(open.paidonopen || 0);
             await db.query('DELETE FROM OpenIndividualSessions WHERE OpenSessionId = $1', [openSessionId]);
         }
         const checked = await checkIndividualSession(db, req.body, viewer);
@@ -418,7 +448,7 @@ router.post('/api/individual-sessions/close', async (req, res) => {
             paymentComments: String(paymentComments || '').trim(),
             comments: needsChecks ? `${(note || s.typeName).replace(/\.+$/, '')}. Payment received and ${secondCheck}.` : note || s.typeName,
         });
-        await db.query('UPDATE Attendance SET SessionTypeId = $1, Provider = $2, OpenedBy = $3 WHERE AttendanceId = $4', [s.sessionTypeId, s.provider, openedBy, attendanceId]);
+        await db.query('UPDATE Attendance SET SessionTypeId = $1, Provider = $2, OpenedBy = $3, PaidOnOpen = $5 WHERE AttendanceId = $4', [s.sessionTypeId, s.provider, openedBy, attendanceId, paidOnOpen]);
         // A closed assessment takes the client off the waiting list for an assessment
         if (s.category === 'Assessment') {
             const waiting = (await db.query('SELECT Assessor FROM Clients WHERE ClientId = $1 AND Assessor IS NOT NULL', [s.client])).rows[0];
@@ -431,7 +461,7 @@ router.post('/api/individual-sessions/close', async (req, res) => {
             }
         }
         await db.query('COMMIT');
-        await logAction(user, `${s.category} Closed`, `${s.typeName} for ${s.clientName} (Client ID ${s.client}) on ${s.date} with ${s.provider}: fee $${s.fee.toFixed(2)}, paid $${s.payment.toFixed(2)}${s.paymentMethod ? ` ${s.paymentMethod}` : ''}`);
+        await logAction(user, `${s.category} Closed`, `${s.typeName} for ${s.clientName} (Client ID ${s.client}) on ${s.date} with ${s.provider}: fee $${s.fee.toFixed(2)}, paid $${s.payment.toFixed(2)}${s.paymentMethod ? ` ${s.paymentMethod}` : ''}${paidOnOpen > 0 ? ` (plus $${paidOnOpen.toFixed(2)} paid when opened)` : ''}`);
         res.status(201).json({ success: true, attendanceId, newBalance });
     } catch (err) {
         await db.query('ROLLBACK').catch(() => {});

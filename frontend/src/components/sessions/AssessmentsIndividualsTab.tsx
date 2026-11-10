@@ -64,6 +64,8 @@ interface FormState {
   card: CardBilling;
   // Set once a card is processed: the amount is on the account, so the session itself records no payment
   cardReceipt: Receipt | null;
+  // Cash already applied to the account when this individual session was saved as open (already in the balance)
+  paidOnOpen: number;
 }
 
 const CATEGORIES: IndividualCategory[] = ['Assessment', 'Individual'];
@@ -77,14 +79,16 @@ const cents = (n: number) => Math.round(n * 100) / 100;
 const formatDay = (ymd: string) => (ymd === todayLocal() ? 'Today' : new Date(`${ymd}T00:00:00`).toLocaleDateString());
 
 // Assessments and individual sessions: one client per session, saved as open and then closed like a group check-in.
-// Closing records the attendance, the fee from the price list, and any cash payment. Card payments go on the account
-// when processed, so they stay there even if the session is discarded.
+// Closing records the attendance, the fee from the price list, and any cash payment. An individual session can also be
+// paid when it is saved as open: cash is applied to the account then, and card payments go on the account when processed,
+// so either stays there even if the session is discarded.
 export default function AssessmentsIndividualsTab({ active, clients, employees, user, onSuccess, onError, onSaved }: Props) {
   const employeeLabel = useEmployeeLabel();
   const isAdmin = user.role === 'Business Administrator';
   const blankForm = useCallback((category: IndividualCategory = 'Assessment'): FormState => ({
     openSessionId: null, category, clientId: '', sessionTypeId: '', date: todayLocal(), fee: '', payment: '',
     paymentMethod: 'Cash', provider: user.displayname || '', comments: '', paymentComments: '', card: emptyCardBilling, cardReceipt: null,
+    paidOnOpen: 0,
   }), [user.displayname]);
 
   const [form, setForm] = useState<FormState>(() => blankForm());
@@ -93,7 +97,6 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const [formError, setFormError] = useState('');
   const [sessionTypes, setSessionTypes] = useState<SessionType[]>([]);
   const [panelTab, setPanelTab] = useState<'open' | 'closed'>('open');
-  const [panelCategory, setPanelCategory] = useState<IndividualCategory>('Assessment');
   const [openSessions, setOpenSessions] = useState<OpenIndividualSession[]>([]);
   const [closedSessions, setClosedSessions] = useState<ClosedIndividualSession[]>([]);
   const [listError, setListError] = useState('');
@@ -285,12 +288,17 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   };
 
   const handleSaveOpen = () => run(async () => {
-    await saveOpenIndividualSession(payload());
-    onSuccess(`${form.category} for ${client!.lastname}, ${client!.firstname} saved to Open. ${form.cardReceipt ? 'The card payment is on the account; the fee has not been charged yet.' : 'Nothing has been charged yet.'}`);
+    const res = await saveOpenIndividualSession(payload());
+    // An individual session's cash payment is applied to the account when it is saved
+    const paidNow = res.newBalance !== null && res.newBalance !== undefined;
+    onSuccess(`${form.category} for ${client!.lastname}, ${client!.firstname} saved to Open. ${
+      paidNow ? `The ${money(payment)} payment was applied to the account (new balance ${formatBalance(res.newBalance!)}); the fee has not been charged yet.`
+      : form.cardReceipt ? 'The card payment is on the account; the fee has not been charged yet.' : 'Nothing has been charged yet.'}`);
     setForm(blankForm(form.category));
     setReviewing(false);
     setPanelTab('open');
     loadLists();
+    if (paidNow) onSaved?.();
   });
 
   const handleClose = () => run(async () => {
@@ -308,7 +316,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
       openSessionId: o.opensessionid, category: o.category, clientId: String(o.clientid), sessionTypeId: String(o.sessiontypeid),
       date: o.sessiondate, fee: Number(o.fee).toFixed(2), payment: Number(o.payment) > 0 ? Number(o.payment).toFixed(2) : '',
       paymentMethod: o.paymentmethod || 'Cash', provider: o.provider || '', comments: o.comments || '', paymentComments: o.paymentcomments || '',
-      card: emptyCardBilling, cardReceipt: null,
+      card: emptyCardBilling, cardReceipt: null, paidOnOpen: Number(o.paidonopen || 0),
     });
     setFormError('');
     resetChecks();
@@ -316,7 +324,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   };
 
   const discard = async (o: OpenIndividualSession) => {
-    if (!window.confirm(`Discard the open ${o.category.toLowerCase()} for ${o.lastname}, ${o.firstname}? The fee was not charged, so nothing is undone. Any card payment already processed stays on the account.`)) return;
+    if (!window.confirm(`Discard the open ${o.category.toLowerCase()} for ${o.lastname}, ${o.firstname}? The fee was not charged, so nothing is undone. Any payment already taken stays on the account.`)) return;
     try {
       await deleteOpenIndividualSession(o.opensessionid, user.employeeemail);
       if (form.openSessionId === o.opensessionid) { setForm(blankForm(form.category)); setReviewing(false); }
@@ -327,7 +335,11 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
     }
   };
 
-  // The side panel shows one category at a time
+  // The form and the side panel always show the same category; switching keeps the client, date, and provider
+  const panelCategory = form.category;
+  const switchCategory = (c: IndividualCategory) => {
+    if (c !== form.category) setForm(f => ({ ...blankForm(c), clientId: f.clientId, date: f.date, provider: f.provider }));
+  };
   const shownOpen = openSessions.filter(o => o.category === panelCategory);
   const shownClosed = closedSessions.filter(c => c.category === panelCategory);
   const panelNoun = panelCategory === 'Assessment' ? 'assessments' : 'individual sessions';
@@ -356,6 +368,40 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
       <textarea id="payment-comments" value={form.paymentComments} onChange={e => set({ paymentComments: e.target.value })} rows={2} className={input} placeholder="e.g. receipt #, who paid…" />
     </div>
   );
+  // An individual session's payment: taken when it is saved as open (cash is applied to the account right away) or when it is closed
+  const paymentAmountField = (
+    <div>
+      <label htmlFor="individual-payment" className={label}>Payment <span className="normal-case font-normal text-slate-500">(optional)</span></label>
+      <div className="relative">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
+        <input id="individual-payment" type="number" step="0.01" min="0" value={form.payment} disabled={!!form.cardReceipt} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} placeholder="0.00" className={`${input} pl-7 disabled:opacity-50`} />
+      </div>
+    </div>
+  );
+  const paymentMethodField = !cashOnly && enteredPayment > 0 && (
+    <div>
+      <label className={label}>Payment Method</label>
+      <div className="grid grid-cols-2 gap-3">
+        {(['Cash', 'Credit Card'] as const).map(m => (
+          <button key={m} type="button" disabled={!!form.cardReceipt} onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50 ${form.paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}>{m}</button>
+        ))}
+      </div>
+      {form.paymentMethod === 'Cash' && !reviewing && (
+        <p className="text-xs text-slate-500 mt-2">Saving as open applies the cash payment to the account right away; the fee is charged when the session is closed.</p>
+      )}
+      {form.paymentMethod === 'Credit Card' && (
+        <div className="mt-3 space-y-3">
+          <p className="text-xs text-slate-500">Card payments are applied to the account as soon as they are processed, even if this session isn't closed.</p>
+          <CardPaymentFields value={form.card} onChange={card => set({ card })} />
+          <div className="flex flex-wrap justify-end items-center gap-2">
+            {form.cardReceipt && <span className="text-xs text-emerald-400 mr-auto">Payment processed and applied to account</span>}
+            <button type="button" onClick={() => printReceipt(form.cardReceipt as Receipt, onError)} disabled={!form.cardReceipt} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Print Receipt</button>
+            <button type="button" onClick={processCardPayment} disabled={!cardPending || !client || bipIndividual || saving} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">{saving ? 'Processing...' : 'Process Payment'}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -371,7 +417,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                 key={c}
                 type="button"
                 disabled={reviewing}
-                onClick={() => setForm(f => ({ ...blankForm(c), clientId: f.clientId, date: f.date, provider: f.provider }))}
+                onClick={() => switchCategory(c)}
                 className={`px-3 py-1.5 rounded text-xs font-semibold disabled:cursor-not-allowed ${form.category === c ? 'bg-blue-600 text-white' : 'text-slate-400 disabled:opacity-40'}`}
               >
                 {c === 'Assessment' ? 'Assessment' : 'Individual'}
@@ -451,38 +497,11 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                 <p className="text-[0.6875rem] text-slate-500 mt-1">{isAdmin ? 'From the price list; you can change it for this session.' : 'From the price list.'}</p>
               </div>
               {/* An assessment's payment is taken when it is reviewed and closed */}
-              {!cashOnly && (
-                <div>
-                  <label className={label}>Payment <span className="normal-case font-normal text-slate-500">(optional)</span></label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
-                    <input type="number" step="0.01" min="0" value={form.payment} disabled={!!form.cardReceipt} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} placeholder="0.00" className={`${input} pl-7 disabled:opacity-50`} />
-                  </div>
-                </div>
-              )}
+              {!cashOnly && paymentAmountField}
             </div>
 
-            {!cashOnly && enteredPayment > 0 && (
-              <div>
-                <label className={label}>Payment Method</label>
-                <div className="grid grid-cols-2 gap-3">
-                  {(['Cash', 'Credit Card'] as const).map(m => (
-                    <button key={m} type="button" disabled={!!form.cardReceipt} onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50 ${form.paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}>{m}</button>
-                  ))}
-                </div>
-                {form.paymentMethod === 'Credit Card' && (
-                  <div className="mt-3 space-y-3">
-                    <p className="text-xs text-slate-500">Card payments are applied to the account as soon as they are processed, even if this session isn't closed.</p>
-                    <CardPaymentFields value={form.card} onChange={card => set({ card })} />
-                    <div className="flex flex-wrap justify-end items-center gap-2">
-                      {form.cardReceipt && <span className="text-xs text-emerald-400 mr-auto">Payment processed and applied to account</span>}
-                      <button type="button" onClick={() => printReceipt(form.cardReceipt as Receipt, onError)} disabled={!form.cardReceipt} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Print Receipt</button>
-                      <button type="button" onClick={processCardPayment} disabled={!cardPending || !client || bipIndividual || saving} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">{saving ? 'Processing...' : 'Process Payment'}</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+            {paymentMethodField}
+            {form.paidOnOpen > 0 && <p className="text-xs text-emerald-400">{money(form.paidOnOpen)} was already paid when this session was opened.</p>}
 
             {!cashOnly && !form.cardReceipt && paymentCommentsField}
             {commentsField}
@@ -510,7 +529,6 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                 ['Counselor / Therapist', form.provider],
                 // An intake's comments are edited below instead
                 ...(!needsChecks && form.comments.trim() ? [[commentsLabel, form.comments.trim()]] : []),
-                ...(!cashOnly && form.paymentComments.trim() ? [['Payment Comments', form.paymentComments.trim()]] : []),
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-4"><span className="text-slate-400">{k}</span><span className="text-white text-right">{v}</span></div>
               ))}
@@ -520,7 +538,17 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
               <div className="flex justify-between"><span className="text-slate-400">Payment{payment > 0 ? ` (${paymentMethod})` : ''}</span><span className="text-emerald-400">+{money(payment)}</span></div>
               <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="font-semibold text-slate-300">Balance after</span><span className={`font-bold ${toDisplayBalance(balanceAfter) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(balanceAfter)}</span></div>
               {form.cardReceipt && <p className="text-xs text-slate-500 pt-1">Current balance includes the {money(form.cardReceipt.amount)} card payment already applied to the account.</p>}
+              {form.paidOnOpen > 0 && <p className="text-xs text-slate-500 pt-1">Current balance includes the {money(form.paidOnOpen)} paid when this session was opened.</p>}
             </div>
+
+            {/* An individual session can also be paid (or paid more) when it is closed */}
+            {!cashOnly && (
+              <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4 text-sm">
+                {paymentAmountField}
+                {paymentMethodField}
+                {!form.cardReceipt && paymentCommentsField}
+              </div>
+            )}
 
             {needsChecks && (
               <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4 text-sm">
@@ -611,7 +639,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
           {CATEGORIES.map(c => {
             const count = openSessions.filter(o => o.category === c).length;
             return (
-              <button key={c} type="button" onClick={() => setPanelCategory(c)} className={`px-3 py-1 rounded text-xs font-semibold transition ${panelCategory === c ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+              <button key={c} type="button" disabled={reviewing} onClick={() => switchCategory(c)} title={reviewing ? 'Finish or go back from the review to switch' : undefined} className={`px-3 py-1 rounded text-xs font-semibold transition disabled:cursor-not-allowed ${panelCategory === c ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200 disabled:opacity-40'}`}>
                 {c === 'Assessment' ? 'Assessments' : 'Individuals'}{count ? ` (${count} open)` : ''}
               </button>
             );
@@ -635,6 +663,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-white truncate">{o.lastname}, {o.firstname}</p>
                         <p className="text-xs text-slate-300 truncate">{o.category} · {o.sessiontypename}</p>
+                        {Number(o.paidonopen) > 0 && <p className="text-xs text-emerald-400">Paid {money(Number(o.paidonopen))}</p>}
                         <p className={`text-xs ${o.sessiondate === todayLocal() ? 'text-slate-400' : 'text-amber-400'}`}>{formatDay(o.sessiondate)}{o.provider ? ` · ${o.provider}` : ''}</p>
                         <p className="text-[0.6875rem] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${employeeLabel(o.createdby)}` : ''}</p>
                       </div>
@@ -667,7 +696,8 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                       {expanded && (
                         <div className="border-t border-slate-800 px-3 py-2 text-xs space-y-1">
                           <div className="flex justify-between"><span className="text-slate-400">Fee</span><span className="text-slate-200">{money(Number(c.fee || 0))}</span></div>
-                          <div className="flex justify-between"><span className="text-slate-400">Paid</span><span className="text-slate-200">{Number(c.payment) > 0 ? `${money(Number(c.payment))} ${c.paymentmethod || ''}`.trim() : 'No payment'}</span></div>
+                          {Number(c.paidonopen) > 0 && <div className="flex justify-between"><span className="text-slate-400">Paid when opened</span><span className="text-slate-200">{money(Number(c.paidonopen))}</span></div>}
+                          <div className="flex justify-between"><span className="text-slate-400">{Number(c.paidonopen) > 0 ? 'Paid when closed' : 'Paid'}</span><span className="text-slate-200">{Number(c.payment) > 0 ? `${money(Number(c.payment))} ${c.paymentmethod || ''}`.trim() : 'No payment'}</span></div>
                           {c.paymentcomments && <p className="text-slate-400 pt-1"><span className="text-slate-500">Payment:</span> {c.paymentcomments}</p>}
                           {c.comments && <p className="text-slate-400 pt-1"><span className="text-slate-500">{c.category === 'Assessment' ? 'Assessment' : 'Session'}:</span> {c.comments}</p>}
                           <p className="text-[0.6875rem] text-slate-500 pt-1">

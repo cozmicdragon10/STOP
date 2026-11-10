@@ -758,6 +758,8 @@ export interface OpenIndividualSession {
     provider: string | null;
     comments: string | null;
     paymentcomments: string | null;
+    // Cash already applied to the account when the session was saved as open (individual sessions)
+    paidonopen: string | number;
     createdby: string | null;
     updatedon: string;
 }
@@ -773,6 +775,7 @@ export interface ClosedIndividualSession {
     fee: string | number;
     payment: string | number;
     paymentmethod: string | null;
+    paidonopen: string | number;
     provider: string | null;
     comments: string | null;
     paymentcomments: string | null;
@@ -812,7 +815,8 @@ export async function getClosedIndividualSessions(user: string): Promise<ClosedI
     return jsonResponse(res, 'Failed to load closed sessions.');
 }
 
-export async function saveOpenIndividualSession(data: IndividualSessionPayload): Promise<OpenIndividualSession> {
+// newBalance is set when an individual session's payment was applied to the account while saving
+export async function saveOpenIndividualSession(data: IndividualSessionPayload): Promise<OpenIndividualSession & { newBalance: string | number | null }> {
     const res = await apiFetch(`${API_BASE}/individual-sessions/open`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
