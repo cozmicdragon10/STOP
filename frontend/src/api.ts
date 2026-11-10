@@ -4,22 +4,24 @@ import type { BipCheckInBlock } from './utils/bip';
 const API_BASE = 'https://192.168.1.133:5000/api';
 
 // The login session token. Held in memory only, so reloading the page logs out (as before sessions existed).
-let sessionToken: string | null = null;
-let onSessionEnded: (() => void) | null = null;
+// It is kept on the page's global object rather than in this module, so a copy of this module loaded by a live code
+// update (while someone stays logged in) still sends the same token.
+interface SessionHolder { token: string | null; onEnded: (() => void) | null }
+const session: SessionHolder = ((globalThis as { __stopSession?: SessionHolder }).__stopSession ??= { token: null, onEnded: null });
 
 // Called when the server refuses the token (expired, logged out elsewhere, or account deactivated)
 export function setSessionEndedHandler(handler: (() => void) | null) {
-    onSessionEnded = handler;
+    session.onEnded = handler;
 }
 
 // fetch with the session token attached. Every API call except login goes through this.
 async function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
-    if (sessionToken) headers.set('Authorization', `Bearer ${sessionToken}`);
+    if (session.token) headers.set('Authorization', `Bearer ${session.token}`);
     const res = await fetch(url, { ...init, headers });
-    if (res.status === 401 && sessionToken) {
-        sessionToken = null;
-        onSessionEnded?.();
+    if (res.status === 401 && session.token) {
+        session.token = null;
+        session.onEnded?.();
     }
     return res;
 }
@@ -272,14 +274,14 @@ export async function loginUser(email: string, password: string): Promise<LoginR
         body: JSON.stringify({ email, password }),
     });
     const data = await res.json() as LoginReply;
-    if (data.success && data.token) sessionToken = data.token;
+    if (data.success && data.token) session.token = data.token;
     return data;
 }
 
 export async function logoutUser() {
-    if (!sessionToken) return;
+    if (!session.token) return;
     await apiFetch(`${API_BASE}/auth/logout`, { method: 'POST' }).catch(() => {});
-    sessionToken = null;
+    session.token = null;
 }
 
 // Without options, current clients only (not discharged). status: 'all', 'discharged' (any discharge status), or one

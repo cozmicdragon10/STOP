@@ -152,7 +152,8 @@ const counselorWithCredentials = async (nameOrEmail: string) => {
 export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: string) => void) => {
   const row = (label: string, value: string, cls = '') => `<tr class="${cls}"><td>${escapeHtml(label)}</td><td class="r">${value}</td></tr>`;
   const paid = r.payments.filter(p => p.amount > 0);
-  const paymentRows = paid.map(p => row(`${p.label}${p.method ? ` (${p.method})` : ''}`, `+${money(p.amount)}`)).join('');
+  // Each payment prints as "Paid (Cash)" or "Paid (CC)"
+  const paymentRows = paid.map(p => row(`Paid${p.method ? ` (${p.method === 'Credit Card' ? 'CC' : p.method})` : ''}`, `+${money(p.amount)}`)).join('');
   const totalPaid = paid.reduce((t, p) => t + p.amount, 0);
   // Payments already in the balance are added back (stored sign: positive = owes), so the lines add up
   const applied = paid.filter(p => p.alreadyApplied).reduce((t, p) => t + p.amount, 0);
@@ -161,10 +162,8 @@ export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: 
   printReceiptPage('Attendance Receipt', Promise.all([polygraphSection(r.clientId), counselor]).then(([poly, counselorName]) => `
     ${clientLine(r.clientName, r.docNumber)}
     <p><b>${escapeHtml(r.sessionKind)}:</b> ${escapeHtml(r.sessionName)}</p>
-    <table>
-      ${row('Date attended', escapeHtml(longDate(r.sessionDate)))}
-    </table>
     ${counselorName ? `<p><b>Counselor:</b> ${escapeHtml(counselorName)}</p>` : ''}
+    <p><b>Date attended:</b> ${escapeHtml(longDate(r.sessionDate))}</p>
     <hr>
     <table>
       ${balanceBefore !== undefined ? row('Balance before', balanceText(balanceBefore)) : ''}

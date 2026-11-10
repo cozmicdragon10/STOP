@@ -145,7 +145,7 @@ export default function ReviewStep({ group, wf, createdBy, canPickCover, onSucce
               fee: entry.fee,
               payments: [
                 { label: 'Paid at check-in', amount: entry.payment, method: entry.paymentMethod },
-                { label: 'Card paid at check-in', amount: entry.cardPaid, alreadyApplied: true },
+                { label: 'Card paid at check-in', amount: entry.cardPaid, method: 'Credit Card', alreadyApplied: true },
               ],
               balanceBefore: updatedBalances[entry.client.clientid] ?? entry.balance,
               balanceAfter: afterClose,

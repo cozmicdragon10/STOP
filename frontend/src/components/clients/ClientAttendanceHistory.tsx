@@ -54,7 +54,7 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
       provider: att.provider || att.coveredby || att.groupcounselor || null,
       fee: c.fee,
       payments: [
-        { label: 'Paid when the session was opened', amount: paidOnOpen, alreadyApplied: true },
+        { label: 'Paid when the session was opened', amount: paidOnOpen, method: 'Cash', alreadyApplied: true },
         { label: paidOnOpen > 0 ? 'Paid when the session was closed' : 'Payment', amount: c.paid, method: att.paymentmethod },
       ],
       // attendanceBalanceChange gives the shown sign; the receipt takes the stored one
