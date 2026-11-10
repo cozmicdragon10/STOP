@@ -77,6 +77,7 @@ const RECEIPT_STYLE = `<style>
     td{padding:.6mm 0;vertical-align:top}
     td.r{text-align:right;padding-left:2mm;white-space:nowrap}
     td.wrap{white-space:normal}
+    table.poly td:first-child{white-space:nowrap}
     tr.total td{border-top:2px solid #000;padding-top:1.2mm;font-weight:bold;font-size:12pt}
     p{margin:1.5mm 0}
   </style>`;
@@ -131,10 +132,10 @@ const polygraphSection = async (clientId: number) => {
     const where = street && city && !street.toLowerCase().includes(city.toLowerCase()) ? `${street}, ${city}` : street || city;
     const next = p.next
       ? `<tr><td>Next polygraph</td><td class="r">${escapeHtml(shortDate(p.next.date))}${p.next.time ? ` ${escapeHtml(formatDisplayTime(p.next.time))}` : ''}</td></tr>${
-        where ? `<tr><td style="white-space:nowrap">Poly address</td><td class="r wrap">${escapeHtml(where)}</td></tr>` : ''}`
+        where ? `<tr><td>Poly address</td><td class="r wrap">${escapeHtml(where)}</td></tr>` : ''}`
       : '<tr><td>Next polygraph</td><td class="r">Not scheduled</td></tr>';
     const last = p.lastTaken && p.lastTaken <= ymdToday() ? escapeHtml(shortDate(p.lastTaken)) : 'None yet';
-    return `<hr><table><tr><td>Last polygraph</td><td class="r">${last}</td></tr>${next}</table>`;
+    return `<hr><table class="poly"><tr><td>Last polygraph</td><td class="r">${last}</td></tr>${next}</table>`;
   } catch {
     return '';
   }
