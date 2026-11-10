@@ -122,12 +122,13 @@ const polygraphSection = async (clientId: number) => {
   try {
     const p = await getPolySummary(clientId);
     if (!p.takesPolygraphs) return '';
+    // Same size and layout as the Last polygraph line: "Next polygraph    12/03/26 10:00 AM", then the location
     const next = p.next
-      ? `<p><span class="small">Next polygraph</span><br><b>${escapeHtml(shortDate(p.next.date))}${p.next.time ? ` at ${escapeHtml(formatDisplayTime(p.next.time))}` : ''}</b>${
-        p.next.location ? `<br>${escapeHtml(p.next.location)}` : ''}</p>`
-      : '<table><tr><td>Next polygraph</td><td class="r">Not scheduled</td></tr></table>';
+      ? `<tr><td>Next polygraph</td><td class="r">${escapeHtml(shortDate(p.next.date))}${p.next.time ? ` ${escapeHtml(formatDisplayTime(p.next.time))}` : ''}</td></tr>${
+        p.next.location ? `<tr><td>Location</td><td class="r">${escapeHtml(p.next.location)}</td></tr>` : ''}`
+      : '<tr><td>Next polygraph</td><td class="r">Not scheduled</td></tr>';
     const last = p.lastTaken && p.lastTaken <= ymdToday() ? escapeHtml(shortDate(p.lastTaken)) : 'None yet';
-    return `<hr><table><tr><td>Last polygraph</td><td class="r">${last}</td></tr></table>${next}`;
+    return `<hr><table><tr><td>Last polygraph</td><td class="r">${last}</td></tr>${next}</table>`;
   } catch {
     return '';
   }
