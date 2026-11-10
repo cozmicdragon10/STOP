@@ -4,6 +4,7 @@ import CardPaymentFields from './CardPaymentFields';
 import { emptyCardBilling } from './cardBilling';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { formatMoney } from '../../utils/ledger';
+import { printReceipt, type Receipt } from '../../utils/receipt';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client rows are untyped throughout App */
 interface Props {
@@ -16,7 +17,6 @@ interface Props {
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-interface Receipt { clientName: string; docNumber: string; amount: number; method: string; notes: string; newBalance: number; processedBy: string; date: string }
 
 // Attendance tab's Account-Only Payment: a payment toward a client's balance without a check-in, with a printable receipt
 export default function AccountPaymentForm({ clients, userEmail, onRecorded, onSuccess, onError }: Props) {
@@ -124,40 +124,11 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
         </div>
 
         <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
-          <button type="button" onClick={() => window.print()} disabled={!lastPayment} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">Print Receipt</button>
+          <button type="button" onClick={() => lastPayment && printReceipt(lastPayment, onError)} disabled={!lastPayment} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">Print Receipt</button>
           <button type="submit" disabled={saving} className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">Process Payment</button>
         </div>
       </form>
 
-      {lastPayment && (
-        <>
-          <style>{`
-            @media print {
-              body * { visibility: hidden !important; }
-              #payment-receipt, #payment-receipt * { visibility: visible !important; }
-              #payment-receipt { display: block !important; position: absolute; left: 0; top: 0; width: 100%; }
-            }
-          `}</style>
-          <div id="payment-receipt" className="hidden bg-white text-black p-6 text-sm">
-            <h2 className="text-lg font-bold">Payment Receipt</h2>
-            <p className="text-xs text-gray-600 mb-3">{lastPayment.date}</p>
-            <hr className="mb-3 border-gray-300" />
-            <table className="w-full text-sm">
-              <tbody>
-                <tr><td className="py-1 text-gray-600">Client</td><td className="py-1 text-right font-medium">{lastPayment.clientName}</td></tr>
-                {lastPayment.docNumber && <tr><td className="py-1 text-gray-600">DOC #</td><td className="py-1 text-right">{lastPayment.docNumber}</td></tr>}
-                <tr><td className="py-1 text-gray-600">Payment method</td><td className="py-1 text-right">{lastPayment.method}</td></tr>
-                <tr><td className="py-1 text-gray-600">Amount paid</td><td className="py-1 text-right font-bold">${lastPayment.amount.toFixed(2)}</td></tr>
-                <tr><td className="py-1 text-gray-600">Balance after payment</td><td className="py-1 text-right">{formatMoney(toDisplayBalance(lastPayment.newBalance))}</td></tr>
-              </tbody>
-            </table>
-            {lastPayment.notes && <p className="mt-3 text-xs"><span className="text-gray-600">Notes:</span> {lastPayment.notes}</p>}
-            <hr className="my-3 border-gray-300" />
-            <p className="text-xs text-gray-600">Processed by {lastPayment.processedBy}</p>
-            <p className="text-xs text-gray-600 mt-3 text-center">Thank you.</p>
-          </div>
-        </>
-      )}
     </>
   );
 }

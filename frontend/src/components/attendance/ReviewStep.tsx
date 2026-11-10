@@ -150,7 +150,6 @@ export default function ReviewStep({ group, wf, createdBy, canPickCover, onSucce
               balanceBefore: updatedBalances[entry.client.clientid] ?? entry.balance,
               balanceAfter: afterClose,
               pending: true,
-              printedBy: createdBy,
             }, onError)}
           />
         ))}

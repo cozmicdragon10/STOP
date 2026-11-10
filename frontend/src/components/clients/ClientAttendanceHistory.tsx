@@ -33,14 +33,13 @@ interface Props {
   // For printed attendance receipts
   clientName: string;
   docNumber: string;
-  printedBy: string;
   onError: (message: string) => void;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 // The Attendance tab of a client's account: sessions by month with fee, payment, and the balance before and after.
 // Business Administrators can delete a session, which takes back its fee and payment.
-export default function ClientAttendanceHistory({ clientId, balance, attendance, canDelete, onDeleted, onSuccess, clientName, docNumber, printedBy, onError }: Props) {
+export default function ClientAttendanceHistory({ clientId, balance, attendance, canDelete, onDeleted, onSuccess, clientName, docNumber, onError }: Props) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- attendance rows are untyped throughout App
   const printAttendance = (att: any) => {
     const c = attendanceBalanceChange(att);
@@ -56,7 +55,7 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
         { label: paidOnOpen > 0 ? 'Paid when the session was closed' : 'Payment', amount: c.paid, method: att.paymentmethod },
       ],
       // attendanceBalanceChange gives the shown sign; the receipt takes the stored one
-      balanceBefore: -c.before, balanceAfter: -c.after, printedBy,
+      balanceBefore: -c.before, balanceAfter: -c.after,
     }, onError);
   };
   const [filters, setFilters] = useState(EMPTY_ATTENDANCE_FILTERS);
