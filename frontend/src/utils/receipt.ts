@@ -46,11 +46,11 @@ export interface AttendanceReceipt {
 }
 
 const money = (n: number) => `$${n.toFixed(2)}`;
-// A balance with whether it is owed or a credit, e.g. "-$150.00 (Owed)" or "$20.00 (Credit)"; stored sign: positive = owes
+// A balance with whether it is owed or a credit, e.g. "(Owed) -$150.00" or "(Credit) $20.00"; stored sign: positive = owes
 const balanceText = (stored: number) => {
   const cents = Math.round(stored * 100);
-  const tag = cents > 0 ? ' <span class="tag">(Owed)</span>' : cents < 0 ? ' <span class="tag">(Credit)</span>' : '';
-  return `${escapeHtml(formatBalance(stored))}${tag}`;
+  const tag = cents > 0 ? '<span class="tag">(Owed)</span> ' : cents < 0 ? '<span class="tag">(Credit)</span> ' : '';
+  return `${tag}${escapeHtml(formatBalance(stored))}`;
 };
 const longDate = (ymd: string) => {
   const [y, m, d] = ymd.split('-').map(Number);
