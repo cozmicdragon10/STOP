@@ -58,11 +58,11 @@ const RECEIPT_STYLE = `<style>
     @page{margin:0}
     *{box-sizing:border-box}
     html,body{margin:0;padding:0;background:#fff}
-    body{width:72mm;padding:2mm 3mm 6mm;font-family:Arial,Helvetica,sans-serif;color:#000;font-size:11pt;line-height:1.25;
+    body{width:72mm;padding:0 3mm 4mm;font-family:Arial,Helvetica,sans-serif;color:#000;font-size:11pt;line-height:1.25;
       -webkit-print-color-adjust:exact;print-color-adjust:exact}
     .center{text-align:center}
-    .biz{font-size:13pt;font-weight:bold}
-    h2{font-size:12pt;margin:1mm 0 0;text-transform:uppercase;letter-spacing:.5px}
+    .biz{font-size:13pt;font-weight:bold;line-height:1.1}
+    h2{font-size:12pt;margin:0;text-transform:uppercase;letter-spacing:.5px}
     .small{font-size:9pt}
     hr{border:0;border-top:1px dashed #000;margin:2mm 0}
     table{width:100%;border-collapse:collapse}
@@ -74,7 +74,10 @@ const RECEIPT_STYLE = `<style>
 
 const receiptHeader = (title: string) => `<div class="center"><div class="biz">Chandler &amp; Associates</div><h2>${title}</h2>
     <div class="small">${escapeHtml(new Date().toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }))}</div></div><hr>`;
-const RECEIPT_FOOTER = '<hr><p class="center">Thank you.</p>';
+// The client's name with their DOC number to the right, e.g. "Sanchez, Jason      #581422"
+const clientLine = (name: string, docNumber: string) =>
+  `<table><tr><td><b>${escapeHtml(name)}</b></td><td class="r"><b>${docNumber ? `#${escapeHtml(docNumber)}` : ''}</b></td></tr></table>`;
+const RECEIPT_FOOTER ='<hr><p class="center">Thank you.</p>';
 
 // Writes the receipt into a small window sized like the paper and opens the print dialog. The window is opened right
 // away (while still handling the click, so pop-up blockers allow it); a body still loading is filled in when ready.
@@ -132,12 +135,9 @@ export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: 
   // Payments already in the balance are added back (stored sign: positive = owes), so the lines add up
   const applied = paid.filter(p => p.alreadyApplied).reduce((t, p) => t + p.amount, 0);
   const balanceBefore = r.balanceBefore === undefined ? undefined : r.balanceBefore + applied;
-  // Long names and group names get their own line so the amounts column stays readable on narrow paper
-  const block = (label: string, value: string) => `<p><span class="small">${escapeHtml(label)}</span><br><b>${value}</b></p>`;
   printReceiptPage('Attendance Receipt', polygraphSection(r.clientId).then(poly => `
-    ${block('Client', escapeHtml(r.clientName))}
-    ${r.docNumber ? `<table>${row('DOC #', escapeHtml(r.docNumber))}</table>` : ''}
-    ${block(r.sessionKind === 'Group' ? 'Group' : r.sessionKind, escapeHtml(r.sessionName))}
+    ${clientLine(r.clientName, r.docNumber)}
+    <p><b>${escapeHtml(r.sessionKind)}:</b> ${escapeHtml(r.sessionName)}</p>
     <table>
       ${row('Date attended', escapeHtml(longDate(r.sessionDate)))}
       ${r.provider ? row('Counselor', escapeHtml(r.provider)) : ''}
@@ -158,9 +158,8 @@ export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: 
 export const printReceipt = (r: Receipt, onError: (message: string) => void) => {
   const row = (label: string, value: string, cls = '') => `<tr class="${cls}"><td>${escapeHtml(label)}</td><td class="r">${value}</td></tr>`;
   printReceiptPage('Payment Receipt', `
-    <p><span class="small">Client</span><br><b>${escapeHtml(r.clientName)}</b></p>
+    ${clientLine(r.clientName, r.docNumber)}
     <table>
-      ${r.docNumber ? row('DOC #', escapeHtml(r.docNumber)) : ''}
       ${row('Paid on', escapeHtml(r.date))}
     </table>
     <hr>
