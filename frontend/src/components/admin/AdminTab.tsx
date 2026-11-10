@@ -11,6 +11,7 @@ interface Employee {
   displayname: string | null;
   role: string;
   active?: boolean | null;
+  credentials?: string | null;
 }
 
 interface Props {
@@ -51,6 +52,8 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
   const [editingEmail, setEditingEmail] = useState<string | null>(null);
   const [empActive, setEmpActive] = useState(true);
   const [empPassword, setEmpPassword] = useState('');
+  // Counselors only, e.g. "LPC" or "LPC, LADC-MH"; printed after their name on receipts
+  const [empCredentials, setEmpCredentials] = useState('');
   const [saving, setSaving] = useState(false);
 
   const [accountFilter, setAccountFilter] = useState<'active' | 'inactive' | 'all'>('active');
@@ -76,6 +79,7 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
     setEmpRole('Counselor');
     setEmpActive(true);
     setEmpPassword('');
+    setEmpCredentials('');
   };
 
   const startEditEmployee = (emp: Employee) => {
@@ -86,6 +90,7 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
     setEmpRole(emp.role || 'Counselor');
     setEmpActive(emp.active !== false);
     setEmpPassword('');
+    setEmpCredentials(emp.credentials || '');
   };
 
   const handleSaveEmployee = async (e: React.FormEvent) => {
@@ -93,7 +98,7 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
     setSaving(true);
     try {
       if (editingEmail) {
-        await updateEmployee(editingEmail, { displayName: empName, role: empRole, active: empActive, updatedBy: user.employeeemail, password: empPassword });
+        await updateEmployee(editingEmail, { displayName: empName, role: empRole, active: empActive, updatedBy: user.employeeemail, password: empPassword, credentials: empCredentials });
         onSuccess(empPassword ? 'Account updated and password changed!' : 'Account updated successfully!');
       } else {
         await addEmployee({
@@ -102,7 +107,8 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
           role: empRole,
           location: NEW_ACCOUNT_LOCATION,
           active: true,
-          password: empPassword
+          password: empPassword,
+          credentials: empCredentials,
         });
         onSuccess('Employee account created successfully!');
       }
@@ -158,6 +164,12 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
           <select value={empRole} onChange={(e) => setEmpRole(e.target.value)} disabled={editingEmail === user.employeeemail} className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm disabled:opacity-50">
             {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
+          {empRole === 'Counselor' && (
+            <label className="block">
+              <span className="text-xs text-slate-400">Credentials <span className="text-slate-500">(printed after the name on receipts, e.g. LPC or LPC, LADC-MH)</span></span>
+              <input type="text" value={empCredentials} onChange={(e) => setEmpCredentials(e.target.value)} maxLength={100} placeholder="Credentials" className="mt-1 w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm" />
+            </label>
+          )}
           {editingEmail && (
             <label className="flex items-center gap-2 text-xs text-slate-300">
               <input type="checkbox" checked={empActive} onChange={(e) => setEmpActive(e.target.checked)} disabled={editingEmail === user.employeeemail} className="rounded accent-blue-500 disabled:opacity-50" />
@@ -213,7 +225,7 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
           {visibleEmployees.map(e => (
             <div key={e.employeeemail} className={`bg-slate-950 border p-3 rounded flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 sm:gap-3 text-xs ${editingEmail === e.employeeemail ? 'border-blue-500' : 'border-slate-800'}`}>
               <div className="min-w-0">
-                <p className="font-semibold text-white truncate">{e.displayname}</p>
+                <p className="font-semibold text-white truncate">{e.displayname}{e.credentials ? <span className="font-normal text-slate-400">, {e.credentials}</span> : null}</p>
                 <p className="text-slate-400 truncate">{e.employeeemail}</p>
               </div>
               <div className="flex items-center gap-2 shrink-0 max-sm:justify-between">

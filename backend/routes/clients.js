@@ -258,7 +258,8 @@ router.get('/api/clients/:id/attendance', async (req, res) => {
             // Same-day attendances: the most recently recorded first
             // Assessments and individual sessions have no group; they show as e.g. "Assessment - Psychosexual Assessment"
             `SELECT a.*, COALESCE(g.GroupName, CASE WHEN a.Type IN ('Assessment', 'Individual') THEN a.Type || COALESCE(' - ' || st.Name, '') END) AS GroupName,
-                    COALESCE(g.Schedule, CASE WHEN a.Provider IS NOT NULL THEN 'with ' || a.Provider END) AS GroupSchedule
+                    COALESCE(g.Schedule, CASE WHEN a.Provider IS NOT NULL THEN 'with ' || a.Provider END) AS GroupSchedule,
+                    g.Counselor AS GroupCounselor
              FROM Attendance a LEFT JOIN Groups g ON a."Group" = g.GroupId LEFT JOIN SessionTypes st ON st.SessionTypeId = a.SessionTypeId
              WHERE a.Client = $1 ORDER BY a.Date DESC, a.AttendanceId DESC`,
             [id]

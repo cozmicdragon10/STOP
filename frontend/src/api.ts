@@ -136,6 +136,8 @@ export interface Employee {
     role: string;
     location: string;
     active: boolean | null;
+    // A counselor's license credentials, e.g. "LPC, LADC-MH" (printed after their name on receipts)
+    credentials?: string | null;
 }
 
 export interface PolygraphSlot {
@@ -1219,7 +1221,7 @@ export async function getEmployees(): Promise<Employee[]> {
     return jsonResponse(res, 'Failed to load employees.');
 }
 
-export async function updateEmployee(email: string, data: { displayName: string; role: string; active: boolean; updatedBy: string; password?: string }) {
+export async function updateEmployee(email: string, data: { displayName: string; role: string; active: boolean; updatedBy: string; password?: string; credentials?: string }) {
     const res = await apiFetch(`${API_BASE}/admin/employees/${encodeURIComponent(email)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1232,7 +1234,7 @@ export async function updateEmployee(email: string, data: { displayName: string;
     return body as { success: true };
 }
 
-export async function addEmployee(data: { employeeEmail: string; displayName: string; role: string; location: string; active: boolean; password: string }) {
+export async function addEmployee(data: { employeeEmail: string; displayName: string; role: string; location: string; active: boolean; password: string; credentials?: string }) {
     const res = await apiFetch(`${API_BASE}/admin/employees`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

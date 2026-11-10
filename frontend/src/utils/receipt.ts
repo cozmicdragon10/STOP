@@ -1,7 +1,7 @@
 import type { PaymentMethod } from '../hooks/useGroupCheckIn';
 import { formatBalance } from './balance';
 import { formatDisplayTime } from './dates';
-import { getPolySummary } from '../api';
+import { getEmployees, getPolySummary } from '../api';
 
 // A saved payment, as shown on a printed receipt. newBalance uses the stored sign (positive = owes).
 export interface Receipt {
@@ -125,6 +125,21 @@ const polygraphSection = async (clientId: number) => {
   }
 };
 
+// The counselor's name followed by their credentials, e.g. "Belinda Harris, LPC, LADC-MH". Takes a display name or an
+// account email (a covering counselor is saved by email) and always prints the name, never an email.
+const counselorWithCredentials = async (nameOrEmail: string) => {
+  const key = nameOrEmail.trim().toLowerCase();
+  const fallback = key.includes('@') ? '' : nameOrEmail.trim();
+  try {
+    const match = (await getEmployees()).find(e => (e.displayname || '').trim().toLowerCase() === key || e.employeeemail.toLowerCase() === key);
+    if (!match) return fallback;
+    const name = match.displayname?.trim() || fallback;
+    return name && match.credentials?.trim() ? `${name}, ${match.credentials.trim()}` : name;
+  } catch {
+    return fallback;
+  }
+};
+
 // Prints a receipt for one attendance: what it was, its fee, its payment(s), the balance before and after, and the
 // client's last and next polygraph
 export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: string) => void) => {
@@ -135,13 +150,14 @@ export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: 
   // Payments already in the balance are added back (stored sign: positive = owes), so the lines add up
   const applied = paid.filter(p => p.alreadyApplied).reduce((t, p) => t + p.amount, 0);
   const balanceBefore = r.balanceBefore === undefined ? undefined : r.balanceBefore + applied;
-  printReceiptPage('Attendance Receipt', polygraphSection(r.clientId).then(poly => `
+  const counselor = r.provider?.trim() ? counselorWithCredentials(r.provider.trim()) : Promise.resolve('');
+  printReceiptPage('Attendance Receipt', Promise.all([polygraphSection(r.clientId), counselor]).then(([poly, counselorName]) => `
     ${clientLine(r.clientName, r.docNumber)}
     <p><b>${escapeHtml(r.sessionKind)}:</b> ${escapeHtml(r.sessionName)}</p>
     <table>
       ${row('Date attended', escapeHtml(longDate(r.sessionDate)))}
-      ${r.provider ? row('Counselor', escapeHtml(r.provider)) : ''}
     </table>
+    ${counselorName ? `<p><b>Counselor:</b> ${escapeHtml(counselorName)}</p>` : ''}
     <hr>
     <table>
       ${balanceBefore !== undefined ? row('Balance before', escapeHtml(formatBalance(balanceBefore))) : ''}

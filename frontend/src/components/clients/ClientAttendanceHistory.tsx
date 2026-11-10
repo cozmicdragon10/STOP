@@ -49,7 +49,10 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
       clientName, docNumber, sessionKind: kind,
       // Assessments and individuals come back as e.g. "Individual - Individual Session"
       sessionName: kind === 'Group' ? (att.groupname || 'Group Session') : String(att.groupname || kind).replace(new RegExp(`^${kind} - `), ''),
-      sessionDate: localYmd(att.date), provider: att.provider || null, fee: c.fee,
+      sessionDate: localYmd(att.date),
+      // A group's covering counselor (saved by email), or the group's usual counselor
+      provider: att.provider || att.coveredby || att.groupcounselor || null,
+      fee: c.fee,
       payments: [
         { label: 'Paid when the session was opened', amount: paidOnOpen, alreadyApplied: true },
         { label: paidOnOpen > 0 ? 'Paid when the session was closed' : 'Payment', amount: c.paid, method: att.paymentmethod },
