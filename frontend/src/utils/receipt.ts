@@ -131,8 +131,8 @@ const polygraphSection = async (clientId: number) => {
     const city = p.next?.location?.trim() || '';
     const where = street && city && !street.toLowerCase().includes(city.toLowerCase()) ? `${street}, ${city}` : street || city;
     const next = p.next
-      ? `<tr><td>Next polygraph</td><td class="r">${escapeHtml(shortDate(p.next.date))}${p.next.time ? ` ${escapeHtml(formatDisplayTime(p.next.time))}` : ''}</td></tr>${
-        where ? `<tr><td>Poly address</td><td class="r wrap">${escapeHtml(where)}</td></tr>` : ''}`
+      ? `<tr><td>Next polygraph</td><td class="r"><b>${escapeHtml(shortDate(p.next.date))}${p.next.time ? ` ${escapeHtml(formatDisplayTime(p.next.time))}` : ''}</b></td></tr>${
+        where ? `<tr><td>Poly address</td><td class="r wrap"><b>${escapeHtml(where)}</b></td></tr>` : ''}`
       : '<tr><td>Next polygraph</td><td class="r">Not scheduled</td></tr>';
     const last = p.lastTaken && p.lastTaken <= ymdToday() ? escapeHtml(shortDate(p.lastTaken)) : 'None yet';
     return `<hr><table class="poly"><tr><td>Last polygraph</td><td class="r">${last}</td></tr>${next}</table>`;
