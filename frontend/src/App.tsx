@@ -74,8 +74,15 @@ export default function App() {
       return null;
     }
   });
-  const [emailInput, setEmailInput] = useState(rememberedEmail ?? 'justin.chandlerandassociates@hotmail.com');
+  const [emailInput, setEmailInput] = useState(rememberedEmail ?? '');
   const [rememberMe, setRememberMe] = useState(rememberedEmail !== null);
+  // A remembered email is shown masked (ju••••@hotmail.com) until the user picks a different account
+  const [showRememberedEmail, setShowRememberedEmail] = useState(rememberedEmail !== null);
+  const maskEmail = (email: string) => {
+    const at = email.indexOf('@');
+    if (at < 1) return '••••••';
+    return `${email.slice(0, Math.min(2, at))}••••••${email.slice(at)}`;
+  };
   const [passwordInput, setPasswordInput] = useState('');
   const [activeTab, setActiveTab] = useState('home');
   const [clients, setClients] = useState<any[]>([]);
@@ -240,6 +247,10 @@ export default function App() {
         } catch {
           // Storage can be blocked (private window, site data cleared); login still works without it
         }
+        // What the login screen shows after logging out: the masked email if remembered, otherwise nothing
+        setShowRememberedEmail(rememberMe);
+        if (!rememberMe) setEmailInput('');
+        setPasswordInput('');
         setUser(res.user);
         setError('');
         loadDashboardData();
@@ -571,7 +582,14 @@ export default function App() {
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase mb-1">Employee Email</label>
-              <input type="email" value={emailInput} onChange={(e) => setEmailInput(e.target.value)} className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 text-sm" required />
+              {showRememberedEmail ? (
+                <div className="flex items-center justify-between gap-2 w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm">
+                  <span className="text-white truncate" aria-label="Remembered email (hidden)">{maskEmail(emailInput)}</span>
+                  <button type="button" onClick={() => { setShowRememberedEmail(false); setEmailInput(''); }} className="text-xs text-blue-400 hover:text-blue-300 shrink-0">Use a different account</button>
+                </div>
+              ) : (
+                <input type="email" value={emailInput} onChange={(e) => setEmailInput(e.target.value)} autoComplete="username" className="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 text-sm" required />
+              )}
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wide">Password</label>
