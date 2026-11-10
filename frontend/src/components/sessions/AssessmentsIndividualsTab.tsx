@@ -532,22 +532,65 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
               ].map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-4"><span className="text-slate-400">{k}</span><span className="text-white text-right">{v}</span></div>
               ))}
-              <div className="border-t border-slate-800 my-2" />
-              <div className="flex justify-between"><span className="text-slate-400">Current balance</span><span className={toDisplayBalance(balanceBefore) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatBalance(balanceBefore)}</span></div>
-              <div className="flex justify-between"><span className="text-slate-400">Fee</span><span className="text-red-400">-{money(fee)}</span></div>
-              <div className="flex justify-between"><span className="text-slate-400">Payment{payment > 0 ? ` (${paymentMethod})` : ''}</span><span className="text-emerald-400">+{money(payment)}</span></div>
-              <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="font-semibold text-slate-300">Balance after</span><span className={`font-bold ${toDisplayBalance(balanceAfter) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(balanceAfter)}</span></div>
-              {form.cardReceipt && <p className="text-xs text-slate-500 pt-1">Current balance includes the {money(form.cardReceipt.amount)} card payment already applied to the account.</p>}
-              {form.paidOnOpen > 0 && <p className="text-xs text-slate-500 pt-1">Current balance includes the {money(form.paidOnOpen)} paid when this session was opened.</p>}
+              {/* An individual session's balances are in its payment card below */}
+              {cashOnly && (
+                <>
+                  <div className="border-t border-slate-800 my-2" />
+                  <div className="flex justify-between"><span className="text-slate-400">Current balance</span><span className={toDisplayBalance(balanceBefore) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatBalance(balanceBefore)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Fee</span><span className="text-red-400">-{money(fee)}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Payment{payment > 0 ? ` (${paymentMethod})` : ''}</span><span className="text-emerald-400">+{money(payment)}</span></div>
+                  <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="font-semibold text-slate-300">Balance after</span><span className={`font-bold ${toDisplayBalance(balanceAfter) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(balanceAfter)}</span></div>
+                </>
+              )}
             </div>
 
-            {/* An individual session can also be paid (or paid more) when it is closed */}
-            {!cashOnly && (
-              <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4 text-sm">
-                {paymentAmountField}
-                {paymentMethodField}
-                {!form.cardReceipt && paymentCommentsField}
-              </div>
+            {/* An individual session can also be paid (or paid more) when it is closed. Laid out like a group's Check-In Details. */}
+            {!cashOnly && client && (
+              <article className="bg-slate-950 border border-slate-800 rounded-lg p-4">
+                <div className="flex justify-between items-baseline gap-3 mb-3">
+                  <p className="font-semibold text-white truncate">{client.lastname}, {client.firstname}</p>
+                  <p className="text-xs text-slate-400 whitespace-nowrap">DOC # {client.docnumber || '—'} · Balance {formatBalance(balanceBefore)}</p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-300 items-end">
+                  <label className="flex flex-col gap-1">
+                    <span>Payment ($)</span>
+                    <input id="individual-payment" type="number" step="0.01" min="0" autoFocus placeholder="0.00" disabled={!!form.cardReceipt} value={form.payment} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm disabled:opacity-50" />
+                  </label>
+                  <div className="flex flex-col gap-1">
+                    Payment Method
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {(['Cash', 'Credit Card'] as const).map(m => (
+                        <button key={m} type="button" disabled={!!form.cardReceipt} onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-xs font-semibold transition disabled:opacity-50 ${form.paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'}`}>{m}</button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-3 bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs space-y-1.5">
+                  <div className="flex justify-between"><span className="text-slate-400">Current balance</span><span className="text-white">{formatBalance(balanceBefore)}</span></div>
+                  {form.paidOnOpen > 0 && <p className="text-slate-500">Includes the {money(form.paidOnOpen)} paid when this session was opened.</p>}
+                  <div className="flex justify-between"><span className="text-slate-400">{sessionType?.name ?? 'Session'} fee</span><span className="text-red-400">{formatBalance(fee)}</span></div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">{form.cardReceipt ? 'Payment (processed)' : 'This payment'}</span>
+                    <span className="text-emerald-400">{formatBalance(-(form.cardReceipt ? form.cardReceipt.amount : (Number.isFinite(enteredPayment) ? enteredPayment : 0)))}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="font-semibold text-slate-300">Balance after close</span><span className="font-bold text-white">{formatBalance(balanceAfter)}</span></div>
+                </div>
+
+                {form.paymentMethod === 'Credit Card' && (
+                  <div className="mt-3 space-y-3">
+                    <p className="text-xs text-slate-500">Card payments are applied to the account as soon as they are processed, even if this session isn't closed.</p>
+                    <CardPaymentFields value={form.card} onChange={card => set({ card })} />
+                    <div className="flex flex-wrap justify-end items-center gap-2">
+                      {form.cardReceipt && <span className="text-xs text-emerald-400 mr-auto">Payment processed and applied to account</span>}
+                      <button type="button" onClick={() => printReceipt(form.cardReceipt as Receipt, onError)} disabled={!form.cardReceipt} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Print Receipt</button>
+                      <button type="button" onClick={processCardPayment} disabled={!cardPending || saving} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">{saving ? 'Processing...' : 'Process Payment'}</button>
+                    </div>
+                  </div>
+                )}
+                {!form.cardReceipt && <div className="mt-3">{paymentCommentsField}</div>}
+                {cardPending && <p className="mt-3 text-xs text-red-400">Press Process Payment to apply the card payment, or clear the amount.</p>}
+              </article>
             )}
 
             {needsChecks && (
