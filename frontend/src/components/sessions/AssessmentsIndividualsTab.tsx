@@ -62,8 +62,8 @@ interface FormState {
   // About the payment (added to the payment's ledger row)
   paymentComments: string;
   card: CardBilling;
-  // Set once a card is processed: the amount is on the account, so the session itself records no payment
-  cardReceipt: Receipt | null;
+  // Set once a payment (cash or card) is processed: the amount is on the account, so the session itself records no payment
+  receipt: Receipt | null;
   // Cash already applied to the account when this individual session was saved as open (already in the balance)
   paidOnOpen: number;
 }
@@ -87,7 +87,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const isAdmin = user.role === 'Business Administrator';
   const blankForm = useCallback((category: IndividualCategory = 'Assessment'): FormState => ({
     openSessionId: null, category, clientId: '', sessionTypeId: '', date: todayLocal(), fee: '', payment: '',
-    paymentMethod: 'Cash', provider: user.displayname || '', comments: '', paymentComments: '', card: emptyCardBilling, cardReceipt: null,
+    paymentMethod: 'Cash', provider: user.displayname || '', comments: '', paymentComments: '', card: emptyCardBilling, receipt: null,
     paidOnOpen: 0,
   }), [user.displayname]);
 
@@ -184,15 +184,17 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const fee = isAdmin ? Number(form.fee) : (listFee ?? 0);
   const enteredPayment = Number(form.payment || 0);
   // What this session still has to record; a processed card is already in the balance
-  const payment = form.cardReceipt ? 0 : enteredPayment;
-  const balanceBefore = form.cardReceipt ? form.cardReceipt.newBalance : Number(client?.accountbalance || 0);
+  const payment = form.receipt ? 0 : enteredPayment;
+  const balanceBefore = form.receipt ? form.receipt.newBalance : Number(client?.accountbalance || 0);
   const balanceAfter = cents(balanceBefore + (Number.isFinite(fee) ? fee : 0) - (Number.isFinite(payment) ? payment : 0));
   const bipIndividual = form.category === 'Individual' && client?.programtype === 'BIP';
   // Assessments are paid in cash only (the server checks too)
   const cashOnly = form.category === 'Assessment';
   const paymentMethod: PaymentMethod = cashOnly ? 'Cash' : form.paymentMethod;
   // A card amount only counts once it is processed, so it must be processed or cleared before saving or closing
-  const cardPending = paymentMethod === 'Credit Card' && !form.cardReceipt && enteredPayment > 0;
+  const cardPending = paymentMethod === 'Credit Card' && !form.receipt && enteredPayment > 0;
+  // Process Payment applies an individual session's payment (cash or card) to the account right away
+  const canProcess = !cashOnly && !form.receipt && !!client && !bipIndividual && Number.isFinite(enteredPayment) && enteredPayment > 0 && !saving;
   const commentsLabel = form.category === 'Assessment' ? 'Assessment Comments' : 'Session Comments';
 
   // A BIP intake or BIP reinstate must be paid in full along with any past due balance (the account can't owe anything
@@ -255,30 +257,32 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   };
 
   // Saved right away, separately from the session, so the payment stands whether or not the session is ever closed
-  const processCardPayment = async () => {
-    if (!client || !cardPending || !Number.isFinite(enteredPayment)) return;
+  // Cash or card: applied to the account now, with a receipt that can be printed
+  const processPayment = async () => {
+    if (!client || !canProcess) return;
     const amount = cents(enteredPayment);
+    const method = paymentMethod;
     setSaving(true);
     setFormError('');
     try {
       const res = await submitAccountPayment({
         client: client.clientid,
         amount,
-        comments: form.paymentComments.trim() || 'Card payment processed for individual session.',
+        comments: form.paymentComments.trim() || `${method} payment processed for ${sessionType?.name ?? 'individual'} session.`,
         createdBy: user.employeeemail,
-        paymentMethod: 'Credit Card',
+        paymentMethod: method,
       });
-      const cardReceipt: Receipt = {
+      const receipt: Receipt = {
         clientName: `${client.lastname}, ${client.firstname}`,
         docNumber: client.docnumber || '',
         amount,
-        method: 'Credit Card',
+        method,
         newBalance: Number(res.newBalance),
         processedBy: user.employeeemail,
         date: new Date().toLocaleString(),
       };
-      setForm(f => (f.clientId === String(client.clientid) ? { ...f, cardReceipt } : f));
-      onSuccess(`Card payment processed for ${client.firstname} ${client.lastname}.`);
+      setForm(f => (f.clientId === String(client.clientid) ? { ...f, receipt } : f));
+      onSuccess(`${method} payment processed for ${client.firstname} ${client.lastname}.`);
       onSaved?.();
     } catch (err: any) {
       setFormError(err.message || 'Payment could not be processed.');
@@ -293,7 +297,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
     const paidNow = res.newBalance !== null && res.newBalance !== undefined;
     onSuccess(`${form.category} for ${client!.lastname}, ${client!.firstname} saved to Open. ${
       paidNow ? `The ${money(payment)} payment was applied to the account (new balance ${formatBalance(res.newBalance!)}); the fee has not been charged yet.`
-      : form.cardReceipt ? 'The card payment is on the account; the fee has not been charged yet.' : 'Nothing has been charged yet.'}`);
+      : form.receipt ? `The ${form.receipt.method.toLowerCase()} payment is on the account; the fee has not been charged yet.` : 'Nothing has been charged yet.'}`);
     setForm(blankForm(form.category));
     setReviewing(false);
     setPanelTab('open');
@@ -316,7 +320,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
       openSessionId: o.opensessionid, category: o.category, clientId: String(o.clientid), sessionTypeId: String(o.sessiontypeid),
       date: o.sessiondate, fee: Number(o.fee).toFixed(2), payment: Number(o.payment) > 0 ? Number(o.payment).toFixed(2) : '',
       paymentMethod: o.paymentmethod || 'Cash', provider: o.provider || '', comments: o.comments || '', paymentComments: o.paymentcomments || '',
-      card: emptyCardBilling, cardReceipt: null, paidOnOpen: Number(o.paidonopen || 0),
+      card: emptyCardBilling, receipt: null, paidOnOpen: Number(o.paidonopen || 0),
     });
     setFormError('');
     resetChecks();
@@ -374,7 +378,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
       <label htmlFor="individual-payment" className={label}>Payment <span className="normal-case font-normal text-slate-500">(optional)</span></label>
       <div className="relative">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
-        <input id="individual-payment" type="number" step="0.01" min="0" value={form.payment} disabled={!!form.cardReceipt} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} placeholder="0.00" className={`${input} pl-7 disabled:opacity-50`} />
+        <input id="individual-payment" type="number" step="0.01" min="0" value={form.payment} disabled={!!form.receipt} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} placeholder="0.00" className={`${input} pl-7 disabled:opacity-50`} />
       </div>
     </div>
   );
@@ -383,7 +387,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
       <label className={label}>Payment Method</label>
       <div className="grid grid-cols-2 gap-3">
         {(['Cash', 'Credit Card'] as const).map(m => (
-          <button key={m} type="button" disabled={!!form.cardReceipt} onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50 ${form.paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}>{m}</button>
+          <button key={m} type="button" disabled={!!form.receipt} onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50 ${form.paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}>{m}</button>
         ))}
       </div>
       {form.paymentMethod === 'Cash' && !reviewing && (
@@ -394,9 +398,9 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
           <p className="text-xs text-slate-500">Card payments are applied to the account as soon as they are processed, even if this session isn't closed.</p>
           <CardPaymentFields value={form.card} onChange={card => set({ card })} />
           <div className="flex flex-wrap justify-end items-center gap-2">
-            {form.cardReceipt && <span className="text-xs text-emerald-400 mr-auto">Payment processed and applied to account</span>}
-            <button type="button" onClick={() => printReceipt(form.cardReceipt as Receipt, onError)} disabled={!form.cardReceipt} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Print Receipt</button>
-            <button type="button" onClick={processCardPayment} disabled={!cardPending || !client || bipIndividual || saving} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">{saving ? 'Processing...' : 'Process Payment'}</button>
+            {form.receipt && <span className="text-xs text-emerald-400 mr-auto">Payment processed and applied to account</span>}
+            <button type="button" onClick={() => printReceipt(form.receipt as Receipt, onError)} disabled={!form.receipt} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Print Receipt</button>
+            <button type="button" onClick={processPayment} disabled={!cardPending || !canProcess} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">{saving ? 'Processing...' : 'Process Payment'}</button>
           </div>
         </div>
       )}
@@ -433,7 +437,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
             )}
             <div>
               <label className={label}>Client</label>
-              <ClientPicker clients={clients} value={form.clientId} onChange={id => set({ clientId: id, ...(form.cardReceipt ? { payment: '', cardReceipt: null } : {}) })} className={input} required />
+              <ClientPicker clients={clients} value={form.clientId} onChange={id => set({ clientId: id, ...(form.receipt ? { payment: '', receipt: null } : {}) })} className={input} required />
               {client && (
                 <p className="text-xs text-slate-500 mt-1.5">
                   {client.programtype || 'No program'} · Balance <span className={toDisplayBalance(client.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatBalance(client.accountbalance)}</span>
@@ -503,7 +507,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
             {paymentMethodField}
             {form.paidOnOpen > 0 && <p className="text-xs text-emerald-400">{money(form.paidOnOpen)} was already paid when this session was opened.</p>}
 
-            {!cashOnly && !form.cardReceipt && paymentCommentsField}
+            {!cashOnly && !form.receipt && paymentCommentsField}
             {commentsField}
 
             {formError && <p role="alert" className="text-xs text-red-400 bg-red-500/10 border border-red-500 rounded-lg p-3">{formError}</p>}
@@ -519,7 +523,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
         ) : (
           <div className="space-y-5 max-w-xl">
             <p className="text-xs text-blue-300 bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
-              Closing records this {form.category.toLowerCase()} as attendance{form.cardReceipt ? ' and charges the fee' : ', charges the fee, and records the payment'}. Check the details before confirming.
+              Closing records this {form.category.toLowerCase()} as attendance{form.receipt ? ' and charges the fee' : ', charges the fee, and records the payment'}. Check the details before confirming.
             </p>
             <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 text-sm space-y-1.5">
               {[
@@ -554,13 +558,13 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-300 items-end">
                   <label className="flex flex-col gap-1">
                     <span>Payment ($)</span>
-                    <input id="individual-payment" type="number" step="0.01" min="0" autoFocus placeholder="0.00" disabled={!!form.cardReceipt} value={form.payment} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm disabled:opacity-50" />
+                    <input id="individual-payment" type="number" step="0.01" min="0" autoFocus placeholder="0.00" disabled={!!form.receipt} value={form.payment} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm disabled:opacity-50" />
                   </label>
                   <div className="flex flex-col gap-1">
                     Payment Method
                     <div className="grid grid-cols-2 gap-1.5">
                       {(['Cash', 'Credit Card'] as const).map(m => (
-                        <button key={m} type="button" disabled={!!form.cardReceipt} onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-xs font-semibold transition disabled:opacity-50 ${form.paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'}`}>{m}</button>
+                        <button key={m} type="button" disabled={!!form.receipt} onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-xs font-semibold transition disabled:opacity-50 ${form.paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'}`}>{m}</button>
                       ))}
                     </div>
                   </div>
@@ -571,25 +575,32 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                   {form.paidOnOpen > 0 && <p className="text-slate-500">Includes the {money(form.paidOnOpen)} paid when this session was opened.</p>}
                   <div className="flex justify-between"><span className="text-slate-400">{sessionType?.name ?? 'Session'} fee</span><span className="text-red-400">{formatBalance(fee)}</span></div>
                   <div className="flex justify-between">
-                    <span className="text-slate-400">{form.cardReceipt ? 'Payment (processed)' : 'This payment'}</span>
-                    <span className="text-emerald-400">{formatBalance(-(form.cardReceipt ? form.cardReceipt.amount : (Number.isFinite(enteredPayment) ? enteredPayment : 0)))}</span>
+                    <span className="text-slate-400">{form.receipt ? 'Payment (processed)' : 'This payment'}</span>
+                    <span className="text-emerald-400">{formatBalance(-(form.receipt ? form.receipt.amount : (Number.isFinite(enteredPayment) ? enteredPayment : 0)))}</span>
                   </div>
                   <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="font-semibold text-slate-300">Balance after close</span><span className="font-bold text-white">{formatBalance(balanceAfter)}</span></div>
                 </div>
 
-                {form.paymentMethod === 'Credit Card' && (
-                  <div className="mt-3 space-y-3">
-                    <p className="text-xs text-slate-500">Card payments are applied to the account as soon as they are processed, even if this session isn't closed.</p>
+                {form.paymentMethod === 'Credit Card' && !form.receipt && (
+                  <div className="mt-3">
                     <CardPaymentFields value={form.card} onChange={card => set({ card })} />
-                    <div className="flex flex-wrap justify-end items-center gap-2">
-                      {form.cardReceipt && <span className="text-xs text-emerald-400 mr-auto">Payment processed and applied to account</span>}
-                      <button type="button" onClick={() => printReceipt(form.cardReceipt as Receipt, onError)} disabled={!form.cardReceipt} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Print Receipt</button>
-                      <button type="button" onClick={processCardPayment} disabled={!cardPending || saving} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">{saving ? 'Processing...' : 'Process Payment'}</button>
-                    </div>
                   </div>
                 )}
-                {!form.cardReceipt && <div className="mt-3">{paymentCommentsField}</div>}
-                {cardPending && <p className="mt-3 text-xs text-red-400">Press Process Payment to apply the card payment, or clear the amount.</p>}
+                {!form.receipt && <div className="mt-3">{paymentCommentsField}</div>}
+
+                <p className="mt-3 text-xs text-slate-500">
+                  {form.receipt
+                    ? `${form.receipt.method} payment processed and applied to the account. Closing charges the fee.`
+                    : form.paymentMethod === 'Credit Card'
+                      ? 'Card payments must be processed before closing. They are applied to the account right away, even if this session isn\'t closed.'
+                      : 'Process Payment applies the cash to the account now and gives a receipt. A cash amount left unprocessed is recorded when the session closes.'}
+                </p>
+                <div className="mt-3 flex flex-wrap justify-end items-center gap-2">
+                  {form.receipt && <span className="text-xs text-emerald-400 mr-auto">Payment processed</span>}
+                  <button type="button" onClick={() => printReceipt(form.receipt as Receipt, onError)} disabled={!form.receipt} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Print Receipt</button>
+                  <button type="button" onClick={processPayment} disabled={!canProcess} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">{saving ? 'Processing...' : 'Process Payment'}</button>
+                </div>
+                {cardPending && <p className="mt-2 text-xs text-red-400 text-right">Press Process Payment to apply the card payment, or clear the amount.</p>}
               </article>
             )}
 
