@@ -46,6 +46,12 @@ export interface AttendanceReceipt {
 }
 
 const money = (n: number) => `$${n.toFixed(2)}`;
+// A balance with whether it is owed or a credit, e.g. "-$150.00 (Owed)" or "$20.00 (Credit)"; stored sign: positive = owes
+const balanceText = (stored: number) => {
+  const cents = Math.round(stored * 100);
+  const tag = cents > 0 ? ' <span class="tag">(Owed)</span>' : cents < 0 ? ' <span class="tag">(Credit)</span>' : '';
+  return `${escapeHtml(formatBalance(stored))}${tag}`;
+};
 const longDate = (ymd: string) => {
   const [y, m, d] = ymd.split('-').map(Number);
   return y && m && d ? new Date(y, m - 1, d).toLocaleDateString([], { year: 'numeric', month: 'long', day: 'numeric' }) : ymd;
@@ -64,6 +70,7 @@ const RECEIPT_STYLE = `<style>
     .biz{font-size:13pt;font-weight:bold;line-height:1.1}
     h2{font-size:12pt;margin:0;text-transform:uppercase;letter-spacing:.5px}
     .small{font-size:9pt}
+    .tag{font-size:9pt;font-weight:normal}
     hr{border:0;border-top:1px dashed #000;margin:2mm 0}
     table{width:100%;border-collapse:collapse}
     td{padding:.6mm 0;vertical-align:top}
@@ -145,7 +152,7 @@ const counselorWithCredentials = async (nameOrEmail: string) => {
 export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: string) => void) => {
   const row = (label: string, value: string, cls = '') => `<tr class="${cls}"><td>${escapeHtml(label)}</td><td class="r">${value}</td></tr>`;
   const paid = r.payments.filter(p => p.amount > 0);
-  const paymentRows = paid.map(p => row(`${p.label}${p.method ? ` (${p.method})` : ''}`, money(p.amount))).join('');
+  const paymentRows = paid.map(p => row(`${p.label}${p.method ? ` (${p.method})` : ''}`, `+${money(p.amount)}`)).join('');
   const totalPaid = paid.reduce((t, p) => t + p.amount, 0);
   // Payments already in the balance are added back (stored sign: positive = owes), so the lines add up
   const applied = paid.filter(p => p.alreadyApplied).reduce((t, p) => t + p.amount, 0);
@@ -160,11 +167,11 @@ export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: 
     ${counselorName ? `<p><b>Counselor:</b> ${escapeHtml(counselorName)}</p>` : ''}
     <hr>
     <table>
-      ${balanceBefore !== undefined ? row('Balance before', escapeHtml(formatBalance(balanceBefore))) : ''}
-      ${row(`${r.sessionKind} fee`, money(r.fee))}
+      ${balanceBefore !== undefined ? row('Balance before', balanceText(balanceBefore)) : ''}
+      ${row(`${r.sessionKind} fee`, r.fee > 0 ? `-${money(r.fee)}` : money(r.fee))}
       ${paymentRows || row('Payment', 'None')}
-      ${paid.length > 1 ? row('Total paid', money(totalPaid)) : ''}
-      ${r.balanceAfter !== undefined ? row('Balance after', escapeHtml(formatBalance(r.balanceAfter)), 'total') : ''}
+      ${paid.length > 1 ? row('Total paid', `+${money(totalPaid)}`) : ''}
+      ${r.balanceAfter !== undefined ? row('Balance after', balanceText(r.balanceAfter), 'total') : ''}
     </table>
     ${poly}
   `), onError);
@@ -181,10 +188,10 @@ export const printReceipt = (r: Receipt, onError: (message: string) => void) => 
     <hr>
     <table>
       ${row('Payment method', escapeHtml(r.method))}
-      ${row('Amount paid', money(r.amount))}
+      ${row('Amount paid', `+${money(r.amount)}`)}
       ${r.polyApplied ? `${row('To poly fee', money(r.polyApplied))}${row('To account', money(r.amount - r.polyApplied))}
         ${row('Poly fee paid', `${money(r.polyFeePaid ?? 0)} / ${money(r.polyFee ?? 0)}`)}` : ''}
-      ${row('Balance after', escapeHtml(formatBalance(r.newBalance)), 'total')}
+      ${row('Balance after', balanceText(r.newBalance), 'total')}
     </table>
     ${r.notes?.trim() ? `<p class="small">Notes: ${escapeHtml(r.notes.trim())}</p>` : ''}
   `, onError);
