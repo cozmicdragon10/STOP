@@ -22,7 +22,7 @@ router.get('/api/clients/:id/poly-summary', async (req, res) => {
             [id]
         );
         const nextRes = await pool.query(
-            `SELECT to_char(s.Date, 'YYYY-MM-DD') AS Date, to_char(s.Time, 'HH24:MI') AS Time, s.Location
+            `SELECT to_char(s.Date, 'YYYY-MM-DD') AS Date, to_char(s.Time, 'HH24:MI') AS Time, s.Location, s.Address
              FROM PolygraphAppointments a JOIN PolygraphSlots s ON s.SlotId = a.SlotId
              WHERE a.Client = $1 AND a.Status = 'Scheduled' AND s.Date + COALESCE(s.Time, '23:59') >= NOW()
              ORDER BY s.Date, s.Time LIMIT 1`,

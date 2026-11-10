@@ -76,6 +76,7 @@ const RECEIPT_STYLE = `<style>
     table{width:100%;border-collapse:collapse}
     td{padding:.6mm 0;vertical-align:top}
     td.r{text-align:right;padding-left:2mm;white-space:nowrap}
+    td.wrap{white-space:normal}
     tr.total td{border-top:2px solid #000;padding-top:1.2mm;font-weight:bold;font-size:12pt}
     p{margin:1.5mm 0}
   </style>`;
@@ -122,10 +123,15 @@ const polygraphSection = async (clientId: number) => {
   try {
     const p = await getPolySummary(clientId);
     if (!p.takesPolygraphs) return '';
-    // Same size and layout as the Last polygraph line: "Next polygraph    12/03/26 10:00 AM", then the location
+    // Same size and layout as the Last polygraph line: "Next polygraph    12/03/26 10:00 AM", then where it is: the
+    // slot's street address followed by its location (the city), e.g. "800 E 6th Ste C, Stillwater", wrapping onto
+    // more lines if long. The location isn't repeated when the address already includes it.
+    const street = (p.next?.address || '').replace(/\s*[\r\n]+\s*/g, ', ').trim();
+    const city = p.next?.location?.trim() || '';
+    const where = street && city && !street.toLowerCase().includes(city.toLowerCase()) ? `${street}, ${city}` : street || city;
     const next = p.next
       ? `<tr><td>Next polygraph</td><td class="r">${escapeHtml(shortDate(p.next.date))}${p.next.time ? ` ${escapeHtml(formatDisplayTime(p.next.time))}` : ''}</td></tr>${
-        p.next.location ? `<tr><td>Location</td><td class="r">${escapeHtml(p.next.location)}</td></tr>` : ''}`
+        where ? `<tr><td style="white-space:nowrap">Poly address</td><td class="r wrap">${escapeHtml(where)}</td></tr>` : ''}`
       : '<tr><td>Next polygraph</td><td class="r">Not scheduled</td></tr>';
     const last = p.lastTaken && p.lastTaken <= ymdToday() ? escapeHtml(shortDate(p.lastTaken)) : 'None yet';
     return `<hr><table><tr><td>Last polygraph</td><td class="r">${last}</td></tr>${next}</table>`;

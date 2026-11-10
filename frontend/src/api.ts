@@ -964,7 +964,7 @@ export async function submitGroupCallIn(data: { group: number; date: Date | stri
 export interface PolySummary {
     takesPolygraphs: boolean;
     lastTaken: string | null;
-    next: { date: string; time: string | null; location: string | null } | null;
+    next: { date: string; time: string | null; location: string | null; address: string | null } | null;
 }
 export async function getPolySummary(clientId: number): Promise<PolySummary> {
     const res = await apiFetch(`${API_BASE}/clients/${clientId}/poly-summary`);
