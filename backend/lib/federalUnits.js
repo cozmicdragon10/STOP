@@ -36,6 +36,67 @@ const saveClientFederalUnits = async (db, { clientId, programType, units, change
     }
 };
 
+// A client's monthly refills as { code: refill } (ClientFederalUnitRefills; migration 061)
+const FEDERAL_UNIT_REFILLS_SQL = (client) => `(SELECT json_object_agg(r.Code, r.Refill) FROM ClientFederalUnitRefills r WHERE r.ClientId = ${client})`;
+
+// Saves the monthly refills sent ({ code: number | '' | null }; blank or 0 = no refill) for the client's program's
+// refillable codes (6022, 6012); others are ignored. Each change goes on the change log. Throws { status: 400 } on a bad value.
+const saveClientUnitRefills = async (db, { clientId, programType, refills, changedBy }) => {
+    if (!refills || typeof refills !== 'object') return;
+    const codes = (await db.query('SELECT Code, Label FROM FederalUnitCodes WHERE Refillable AND $1 = ANY(Programs)', [programType])).rows;
+    const before = new Map((await db.query('SELECT Code, Refill FROM ClientFederalUnitRefills WHERE ClientId = $1', [clientId])).rows
+        .map(r => [r.code, Number(r.refill)]));
+    for (const { code, label } of codes) {
+        if (!(code in refills)) continue;
+        const problem = unitsProblem(code, refills[code]);
+        if (problem) throw Object.assign(new Error(problem.replace('units', 'monthly refill')), { status: 400 });
+        const raw = refills[code] === '' || refills[code] === null ? 0 : Math.round(Number(refills[code]) * 100) / 100;
+        const value = raw > 0 ? raw : null;
+        const old = before.has(code) ? before.get(code) : null;
+        if (old === value) continue;
+        if (value === null) await db.query('DELETE FROM ClientFederalUnitRefills WHERE ClientId = $1 AND Code = $2', [clientId, code]);
+        else await db.query(
+            `INSERT INTO ClientFederalUnitRefills (ClientId, Code, Refill) VALUES ($1, $2, $3)
+             ON CONFLICT (ClientId, Code) DO UPDATE SET Refill = EXCLUDED.Refill`, [clientId, code, value]);
+        await logClientChange(db, {
+            clientId, changedBy, changeType: `${code} ${label} Refill`,
+            oldValue: old === null ? 'None' : String(old), newValue: value === null ? 'None' : String(value),
+        });
+    }
+};
+
+// The monthly refill, inside the caller's transaction: each active client of a code's program with a refill gets their
+// units for that code set to it, replacing what was left. Runs once per month (month: 'YYYY-MM-01'); returns null when
+// this month was already done.
+const refillFederalUnits = async (db, month) => {
+    const claimed = await db.query('INSERT INTO FederalUnitRefillRuns (Month) VALUES ($1) ON CONFLICT DO NOTHING RETURNING Month', [month]);
+    if (claimed.rows.length === 0) return null;
+    const due = (await db.query(
+        `SELECT r.ClientId, r.Code, r.Refill, u.Units AS before, fc.Label
+         FROM ClientFederalUnitRefills r
+         JOIN Clients c ON c.ClientId = r.ClientId
+         JOIN FederalUnitCodes fc ON fc.Code = r.Code AND fc.Refillable AND c.ProgramType = ANY(fc.Programs)
+         LEFT JOIN ClientFederalUnits u ON u.ClientId = r.ClientId AND u.Code = r.Code
+         WHERE c.ProgramStatus = 'Active'
+         FOR UPDATE OF r`)).rows;
+    const monthName = new Date(`${month}T12:00:00`).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const clients = new Set();
+    for (const r of due) {
+        await db.query(
+            `INSERT INTO ClientFederalUnits (ClientId, Code, Units) VALUES ($1, $2, $3)
+             ON CONFLICT (ClientId, Code) DO UPDATE SET Units = EXCLUDED.Units`, [r.clientid, r.code, r.refill]);
+        clients.add(r.clientid);
+        if (r.before !== null && Number(r.before) === Number(r.refill)) continue;
+        await logClientChange(db, {
+            clientId: r.clientid, changedBy: 'System', changeType: `${r.code} ${r.label}`,
+            oldValue: r.before === null ? 'Blank' : String(Number(r.before)), newValue: String(Number(r.refill)),
+            details: `Monthly refill for ${monthName}.`,
+        });
+    }
+    await db.query('UPDATE FederalUnitRefillRuns SET Clients = $1 WHERE Month = $2', [clients.size, month]);
+    return { month, monthName, clients: clients.size };
+};
+
 // Session units (Form 45 tokens). A Federal SO client's group session uses 6022 Group Units and an individual group
 // session 6012 Individual Units. When closing, the counselor picks how long they attended, which sets the units used.
 // A client with no units left (blank counts as none) can't be checked in, and only lengths they have units for are
@@ -107,5 +168,6 @@ const returnSessionUnits = async (db, { att, changedBy }) => {
 
 module.exports = {
     FEDERAL_UNITS_SQL, saveClientFederalUnits, unitsProblem,
+    FEDERAL_UNIT_REFILLS_SQL, saveClientUnitRefills, refillFederalUnits,
     UNIT_PROGRAMS, DURATION_BANDS, unitCodeForGroup, useSessionUnits, returnSessionUnits, clientsWithoutUnits,
 };

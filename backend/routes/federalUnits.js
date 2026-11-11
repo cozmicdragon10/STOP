@@ -8,7 +8,7 @@ const router = express.Router();
 // track the code's units on their account.
 router.get('/api/federal-units', async (req, res) => {
     try {
-        const result = await pool.query('SELECT Code, Label, Programs, Price, UpdatedBy, UpdatedOn FROM FederalUnitCodes ORDER BY SortOrder, Code');
+        const result = await pool.query('SELECT Code, Label, Programs, Refillable, Price, UpdatedBy, UpdatedOn FROM FederalUnitCodes ORDER BY SortOrder, Code');
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -31,7 +31,7 @@ router.put('/api/federal-units/:code', async (req, res) => {
         if (!before) return res.status(404).json({ error: 'Billing code not found.' });
         const result = await pool.query(
             `UPDATE FederalUnitCodes SET Price = $1, UpdatedBy = $2, UpdatedOn = NOW() WHERE Code = $3
-             RETURNING Code, Label, Programs, Price, UpdatedBy, UpdatedOn`,
+             RETURNING Code, Label, Programs, Refillable, Price, UpdatedBy, UpdatedOn`,
             [value, user || null, req.params.code]
         );
         const show = (p) => (p === null || p === undefined ? 'blank' : `$${Number(p).toFixed(2)}`);

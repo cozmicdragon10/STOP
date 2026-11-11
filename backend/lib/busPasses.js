@@ -52,11 +52,36 @@ const runMonthlyRefill = async (pool, now = new Date()) => {
     }
 };
 
-// Checks at startup and then every hour, so the refill happens on the 1st (or as soon as the server is back up)
+// This month's federal unit refill (6022 / 6012, lib/federalUnits.js) in its own transaction if it hasn't run yet
+const runMonthlyUnitRefill = async (pool, now = new Date()) => {
+    const { refillFederalUnits } = require('./federalUnits');
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        const done = await refillFederalUnits(db, monthStart(now));
+        await db.query('COMMIT');
+        if (done) {
+            await logAction('System', 'Federal Unit Refill', `Monthly 6022/6012 unit refill for ${done.monthName}: ${done.clients} client(s) refilled.`);
+            console.log(`Federal unit refill for ${done.monthName}: ${done.clients} client(s).`);
+        }
+        return done;
+    } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        db.release();
+    }
+};
+
+// Checks at startup and then every hour, so the refills happen on the 1st (or as soon as the server is back up).
+// Bus passes and federal session units (6022 / 6012) refill on the same schedule.
 const startMonthlyRefills = (pool) => {
-    const run = () => runMonthlyRefill(pool).catch(err => console.error('Bus pass refill failed:', err.message));
+    const run = () => {
+        runMonthlyRefill(pool).catch(err => console.error('Bus pass refill failed:', err.message));
+        runMonthlyUnitRefill(pool).catch(err => console.error('Federal unit refill failed:', err.message));
+    };
     run();
     setInterval(run, 60 * 60 * 1000).unref();
 };
 
-module.exports = { FEDERAL_PROGRAM_TYPES, BUS_PASS_MAX, monthStart, refillBusPasses, runMonthlyRefill, startMonthlyRefills };
+module.exports = { FEDERAL_PROGRAM_TYPES, BUS_PASS_MAX, monthStart, refillBusPasses, runMonthlyRefill, runMonthlyUnitRefill, startMonthlyRefills };

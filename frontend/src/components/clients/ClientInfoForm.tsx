@@ -81,7 +81,7 @@ const isDateField = (field: string) => field.includes('date') || field.includes(
 const normalizedUnits = (units: unknown) => JSON.stringify(Object.entries((units ?? {}) as Record<string, unknown>)
   .filter(([, v]) => v !== '' && v !== null && v !== undefined).map(([k, v]) => [k, Number(v)]).sort(([a], [b]) => String(a).localeCompare(String(b))));
 const sameValue = (field: string, a: unknown, b: unknown) => {
-  if (field === 'federalunits') return normalizedUnits(a) === normalizedUnits(b);
+  if (field === 'federalunits' || field === 'federalunitrefills') return normalizedUnits(a) === normalizedUnits(b);
   const [x, y] = [String(a ?? ''), String(b ?? '')];
   if (isDateField(field)) return x.split('T')[0] === y.split('T')[0];
   if (ACCOUNT_FIELDS.some(f => f.field === field) && x !== '' && y !== '') return Number(x) === Number(y);
@@ -145,6 +145,12 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
     return v === null || v === undefined || v === '' ? '' : String(Number(v));
   };
   const setUnits = (code: string, value: string) => setField('federalunits', { ...(form.federalunits ?? {}), [code]: value });
+  // Monthly refill (6022 / 6012): on the 1st the units are set to this, replacing what's left; blank = no refill
+  const refillOf = (source: { federalunitrefills?: Record<string, unknown> | null }, code: string) => {
+    const v = source.federalunitrefills?.[code];
+    return v === null || v === undefined || v === '' ? '' : String(Number(v));
+  };
+  const setRefill = (code: string, value: string) => setField('federalunitrefills', { ...(form.federalunitrefills ?? {}), [code]: value });
 
   return (
     <>
@@ -471,6 +477,14 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                     ) : (
                       <p className="text-white font-medium">{unitsOf(client, c.code) || '—'}</p>
                     )}
+                    {c.refillable && (editing ? (
+                      <label className="flex items-center gap-1.5 text-[0.6875rem] text-slate-400 mt-1">
+                        Monthly refill
+                        <input type="number" min={0} step="any" value={refillOf(form, c.code)} onChange={e => setRefill(c.code, e.target.value)} placeholder="None" className={`${inputClass} py-0.5`} aria-label={`${c.code} ${c.label} monthly refill`} />
+                      </label>
+                    ) : refillOf(client, c.code) && (
+                      <p className="text-[0.6875rem] text-slate-500">Refills to {refillOf(client, c.code)} on the 1st</p>
+                    ))}
                   </div>
                 ))}
               </div>

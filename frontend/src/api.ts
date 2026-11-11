@@ -107,6 +107,8 @@ export interface Client extends Omit<ClientColumns, 'programtype'> {
     individualgroupname?: string | null;
     // Federal billing units by code ({ '6022': 4 }); a code with no entry is blank
     federalunits?: Record<string, number | string> | null;
+    // Monthly refills by code ({ '6022': 8 }): on the 1st the code's units are set to this
+    federalunitrefills?: Record<string, number | string> | null;
     // The client's own program type, else the group's, else State SO
     programtype: string;
     lastattended: string | null;
@@ -802,6 +804,8 @@ export interface FederalUnitCode {
     code: string;
     label: string;
     programs: string[];
+    // Clients can have a monthly refill for it (6022, 6012)
+    refillable: boolean;
     // Blank (null) until a Business Administrator sets it
     price: Money | null;
     updatedby: string | null;

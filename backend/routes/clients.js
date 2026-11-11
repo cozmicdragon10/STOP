@@ -7,7 +7,7 @@ const { groupNameFor, logClientChange } = require('../lib/changeLog');
 const { POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, countPolyFeeFill } = require('../lib/poly');
 const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED } = require('../lib/sql');
 const { BUS_PASS_MAX, FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
-const { FEDERAL_UNITS_SQL, saveClientFederalUnits, unitsProblem } = require('../lib/federalUnits');
+const { FEDERAL_UNITS_SQL, FEDERAL_UNIT_REFILLS_SQL, saveClientFederalUnits, saveClientUnitRefills, unitsProblem } = require('../lib/federalUnits');
 
 const router = express.Router();
 
@@ -32,7 +32,7 @@ const clientRowsSql = (where) => `
         c.*,
         g.GroupName,
         ig.GroupName AS IndividualGroupName,
-        ${FEDERAL_UNITS_SQL('c.ClientId')} AS FederalUnits,
+        ${FEDERAL_UNITS_SQL('c.ClientId')} AS FederalUnits, ${FEDERAL_UNIT_REFILLS_SQL('c.ClientId')} AS FederalUnitRefills,
         COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
         (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
         (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly,
@@ -632,7 +632,7 @@ router.put('/api/clients/:id', async (req, res) => {
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
             comments, programtype, race, dateofbirth, sex, pretrial, assessor, buspasses, buspassrefill, updatedBy,
-            individualgroupid, federalunits
+            individualgroupid, federalunits, federalunitrefills
         } = req.body;
         // Bus passes and the monthly refill: whole numbers from 0 to BUS_PASS_MAX, changed only when sent
         const passCount = (value) => (value === undefined || value === null || value === '' ? null : Number(value));
@@ -655,8 +655,9 @@ router.put('/api/clients/:id', async (req, res) => {
         }
 
         // Federal billing units: { code: units }, a blank clears one; checked before anything is saved
-        if (federalunits && typeof federalunits === 'object') {
-            const unitProblem = Object.entries(federalunits).map(([code, value]) => unitsProblem(code, value)).find(Boolean);
+        for (const sent of [federalunits, federalunitrefills]) {
+            if (!sent || typeof sent !== 'object') continue;
+            const unitProblem = Object.entries(sent).map(([code, value]) => unitsProblem(code, value)).find(Boolean);
             if (unitProblem) return res.status(400).json({ error: unitProblem });
         }
 
@@ -763,9 +764,10 @@ router.put('/api/clients/:id', async (req, res) => {
         // Units are kept for the codes of the client's program after this edit
         const programNow = (await pool.query('SELECT ProgramType FROM Clients WHERE ClientId = $1', [id])).rows[0]?.programtype;
         await saveClientFederalUnits(pool, { clientId: id, programType: programNow, units: federalunits, changedBy: updatedBy });
+        await saveClientUnitRefills(pool, { clientId: id, programType: programNow, refills: federalunitrefills, changedBy: updatedBy });
 
         const updated = await pool.query(
-            `SELECT c.*, g.GroupName, ig.GroupName AS IndividualGroupName, ${FEDERAL_UNITS_SQL('c.ClientId')} AS FederalUnits, COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
+            `SELECT c.*, g.GroupName, ig.GroupName AS IndividualGroupName, ${FEDERAL_UNITS_SQL('c.ClientId')} AS FederalUnits, ${FEDERAL_UNIT_REFILLS_SQL('c.ClientId')} AS FederalUnitRefills, COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
                     (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
                     (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly
              FROM Clients c
