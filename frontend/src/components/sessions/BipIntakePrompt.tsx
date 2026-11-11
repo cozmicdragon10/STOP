@@ -18,7 +18,7 @@ interface Props {
 }
 
 // Asked when a client is created as BIP or switched to BIP: open a BIP intake assessment (BIP Intake, DV Assessment,
-// or any other price list entry of kind BIP intake) on the Assessments & Individuals tab, or None. Nothing is charged
+// or any other price list entry of kind BIP intake) on the Assessments tab, or None. Nothing is charged
 // until the assessment is completed there.
 export default function BipIntakePrompt({ client, employees, user, onDone }: Props) {
   const [value, setValue] = useState<BipAssessmentChoice>(() => ({ choice: '', provider: counselorChoices(employees, client.groupCounselor).defaultCounselor }));
@@ -32,7 +32,7 @@ export default function BipIntakePrompt({ client, employees, user, onDone }: Pro
     setError('');
     try {
       const name = await openBipAssessment(client.clientid, value, user.employeeemail);
-      onDone(name ? `${name} for ${client.name} opened. Complete it on the Assessments & Individuals tab.` : null);
+      onDone(name ? `${name} for ${client.name} opened. Complete it on the Assessments tab.` : null);
     } catch (err: any) {
       setError(err.message || 'Failed to open the assessment.');
       setSaving(false);
@@ -45,7 +45,7 @@ export default function BipIntakePrompt({ client, employees, user, onDone }: Pro
         <div>
           <h3 id="bip-intake-title" className="font-semibold text-white">Open a BIP Assessment?</h3>
           <p className="text-xs text-slate-400 mt-1">
-            <span className="text-emerald-400 font-semibold">{client.name}</span> is now a BIP client. Choose the intake assessment to open. It is completed on the Assessments & Individuals tab once it is paid and the intake paperwork is done.
+            <span className="text-emerald-400 font-semibold">{client.name}</span> is now a BIP client. Choose the intake assessment to open. It is completed on the Assessments tab once it is paid and the intake paperwork is done.
           </p>
         </div>
 

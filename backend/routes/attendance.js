@@ -1,6 +1,6 @@
 const express = require('express');
 const { logAction, pool } = require('../db');
-const { chargedWithinMonths, feePeriodMonths, isMonthlyFeeClient, recordAttendance } = require('../lib/attendance');
+const { chargedWithinMonths, feePeriodMonths, individualPrice, isMonthlyFeeClient, recordAttendance } = require('../lib/attendance');
 const { requireRole } = require('../lib/auth');
 const { coveringCounselorFor } = require('../lib/cashResponsibility');
 const { logClientChange } = require('../lib/changeLog');
@@ -94,12 +94,30 @@ router.post('/api/attendance/batch', async (req, res) => {
         if (closedEarlierRes.rows.length > 0 && req.user?.role !== 'Business Administrator') {
             throw Object.assign(new Error('This group session was closed before this week. Only a Business Administrator can add missed check-ins to it.'), { status: 403 });
         }
-        const groupRes = await clientDb.query('SELECT ProgramType FROM Groups WHERE GroupId = $1', [group]);
-        const isSoGroup = SO_GROUP_TYPES.includes(String(groupRes.rows[0]?.programtype || '').trim().toUpperCase());
+        const groupRes = await clientDb.query('SELECT ProgramType, Counselor FROM Groups WHERE GroupId = $1', [group]);
+        const groupType = String(groupRes.rows[0]?.programtype || '').trim().toUpperCase();
+        const isSoGroup = SO_GROUP_TYPES.includes(groupType);
+        // A counselor's INDIVIDUAL group records Individual sessions: charged the Admin Individual price (not the treatment
+        // fee or its monthly rules), with the group's counselor as the provider. BIP clients don't have individual sessions.
+        const individual = groupType === 'INDIVIDUAL' ? await individualPrice(clientDb) : null;
+        if (groupType === 'INDIVIDUAL' && !individual) {
+            throw Object.assign(new Error('There is no active Individual price in Admin. Add one to the price list before checking in an individual group.'), { status: 400 });
+        }
+        if (individual) {
+            const bip = await clientDb.query(
+                `SELECT LastName || ', ' || FirstName AS name FROM Clients WHERE ClientId = ANY($1::int[]) AND ProgramType = 'BIP'`, [clientIds]);
+            if (bip.rows.length) {
+                throw Object.assign(new Error(`${bip.rows.map(r => r.name).join('; ')}: BIP clients do not have individual sessions.`), { status: 400 });
+            }
+        }
         const results = [];
         for (const entry of entries) {
             const { attendanceId, newBalance, polyVoucherAwarded, feeCharged, feeReason } = await recordAttendance(clientDb, {
-                ...entry, group, date, sessionNumber: sessionNum, type: type || 'Group', createdBy, paid: true, awardNdiVoucher: isSoGroup
+                ...entry, group, date, sessionNumber: sessionNum, type: individual ? 'Individual' : (type || 'Group'), createdBy, paid: true, awardNdiVoucher: isSoGroup,
+                ...(individual ? {
+                    groupFee: individual.fee, feeType: 'Individual Fee', sessionTypeId: individual.sessionTypeId,
+                    provider: groupRes.rows[0].counselor || null,
+                } : {}),
             });
             // The fee is worked out from the account when saving; a sheet shown with a different fee is reported back
             const feeSent = Math.round(Number(entry.groupFee || 0) * 100) / 100;

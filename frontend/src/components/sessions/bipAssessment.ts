@@ -30,7 +30,7 @@ export const bipChoiceProblem = (value: BipAssessmentChoice): string | null => {
   return null;
 };
 
-// Opens the picked assessment on the Assessments & Individuals tab (nothing is charged until it is completed there).
+// Opens the picked assessment on the Assessments tab (nothing is charged until it is completed there).
 // Returns the assessment's name, or null for None.
 export const openBipAssessment = async (clientId: number, value: BipAssessmentChoice, userEmail: string): Promise<string | null> => {
   if (value.choice === 'none') return null;

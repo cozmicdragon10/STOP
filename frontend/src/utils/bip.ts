@@ -5,10 +5,10 @@
 export type BipCheckInBlock = 'intake' | 'our-intake' | 'reinstate' | null | undefined;
 
 export const bipCheckInBlockMessage = (block: BipCheckInBlock, name: string): string => (block === 'intake'
-  ? `${name} is a BIP client with no BIP Intake or DV Assessment on record. Complete one on the Assessments & Individuals tab (or record one done at another provider on the client's Information tab) before group check-in.`
+  ? `${name} is a BIP client with no BIP Intake or DV Assessment on record. Complete one on the Assessments tab (or record one done at another provider on the client's Information tab) before group check-in.`
   : block === 'our-intake'
-    ? `${name} was discharged after an intake done at another provider. Complete our BIP Intake or DV Assessment on the Assessments & Individuals tab before group check-in.`
-    : `${name} was discharged and reactivated. Complete the BIP Reinstate assessment on the Assessments & Individuals tab before group check-in.`);
+    ? `${name} was discharged after an intake done at another provider. Complete our BIP Intake or DV Assessment on the Assessments tab before group check-in.`
+    : `${name} was discharged and reactivated. Complete the BIP Reinstate assessment on the Assessments tab before group check-in.`);
 
 export const bipCheckInBlockLabel = (block: BipCheckInBlock): string =>
   (block === 'intake' ? 'Needs BIP intake' : block === 'our-intake' ? 'Needs our BIP intake' : 'Needs BIP reinstate');

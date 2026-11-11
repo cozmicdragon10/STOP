@@ -57,9 +57,9 @@ export default function ProgramStatusDialog({ action, client, employees, groupCo
         // The client is already activated; a failure here only means the assessment wasn't opened
         try {
           const assessment = await openBipAssessment(client.clientid, reinstateChoice, userEmail);
-          onSuccess(`${name} set to ${programstatus}. ${assessment} opened on the Assessments & Individuals tab.`);
+          onSuccess(`${name} set to ${programstatus}. ${assessment} opened on the Assessments tab.`);
         } catch (err) {
-          onError(`Client activated, but the assessment could not be opened: ${err instanceof Error && err.message ? err.message : 'unknown error'}. Open it on the Assessments & Individuals tab.`);
+          onError(`Client activated, but the assessment could not be opened: ${err instanceof Error && err.message ? err.message : 'unknown error'}. Open it on the Assessments tab.`);
         }
       }
       onClose();

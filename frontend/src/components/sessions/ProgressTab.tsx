@@ -95,10 +95,10 @@ export default function ProgressTab({ clientId, role, userEmail, onChanged, onSu
           {progress.block ? (
             <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg p-3">
               {progress.block === 'intake'
-                ? 'Not cleared for group: no BIP Intake or DV Assessment on record. Complete one on the Assessments & Individuals tab, or record one done at another provider.'
+                ? 'Not cleared for group: no BIP Intake or DV Assessment on record. Complete one on the Assessments tab, or record one done at another provider.'
                 : progress.block === 'our-intake'
-                ? `Not cleared for group: discharged${progress.lastDischarge ? ` on ${formatDay(progress.lastDischarge)}` : ''} after an intake done at another provider. Complete our BIP Intake or DV Assessment on the Assessments & Individuals tab (a reinstate or another outside assessment won't clear them).`
-                : `Not cleared for group: discharged${progress.lastDischarge ? ` on ${formatDay(progress.lastDischarge)}` : ''} and reactivated. Complete the BIP Reinstate assessment (or a new BIP Intake or DV Assessment) on the Assessments & Individuals tab.`}
+                ? `Not cleared for group: discharged${progress.lastDischarge ? ` on ${formatDay(progress.lastDischarge)}` : ''} after an intake done at another provider. Complete our BIP Intake or DV Assessment on the Assessments tab (a reinstate or another outside assessment won't clear them).`
+                : `Not cleared for group: discharged${progress.lastDischarge ? ` on ${formatDay(progress.lastDischarge)}` : ''} and reactivated. Complete the BIP Reinstate assessment (or a new BIP Intake or DV Assessment) on the Assessments tab.`}
             </p>
           ) : (
             <p className="text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">Cleared for group check-in.</p>
@@ -154,7 +154,7 @@ export default function ProgressTab({ clientId, role, userEmail, onChanged, onSu
               </li>
             ))}
           </ul>
-          <p className="text-xs text-slate-500">Completed on the Assessments & Individuals tab.</p>
+          <p className="text-xs text-slate-500">Completed on the Assessments tab.</p>
         </div>
       )}
 

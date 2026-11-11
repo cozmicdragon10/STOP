@@ -8,9 +8,9 @@ import AgentPicker from '../agents/AgentPicker';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import {
   BUS_PASS_MAX, CHAPERON_PHASES, CLIENT_FIELD_OPTIONS, EDITABLE_PROGRAM_STATUSES, FEDERAL_PROGRAM_TYPES, GROUP_TYPES_BY_PROGRAM, POLY_PROGRAM_TYPES, PRETRIAL_PROGRAM_TYPES, SO_ATTENDANCE_LIMIT_MONTHS, SO_PROGRAM_TYPES,
-  STATE_FEE_PROGRAM_TYPES, formatPhase, isAttendanceOverdue, isWholeNumber,
+  STATE_FEE_PROGRAM_TYPES, formatPhase, isAttendanceOverdue, isIndividualGroup, isWholeNumber,
 } from '../../utils/clients';
-import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
+import { SO_PHASES, SO_TREATMENT_FEES, bipTreatmentFee } from '../../utils/soPhases';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { ageFromBirthDate, toLocalDay } from '../../utils/dates';
 import { polyVoucherMax, takesPolygraphs } from '../../utils/polygraph';
@@ -302,8 +302,8 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                       : newType === 'BIP' && !isWholeNumber(f.phase) ? '0'
                       : newType === 'Chaperon' && !CHAPERON_PHASES.includes(f.phase) ? 'Chaperon'
                       : f.phase;
-                    // BIP is $35; Federal SO has no treatment fee; State and Voluntary SO take the fee for the phase
-                    const treatmentfee = newType === 'BIP' ? 35
+                    // BIP takes the Admin BIP price; Federal SO has no treatment fee; State and Voluntary SO take the Admin price for the phase
+                    const treatmentfee = newType === 'BIP' ? bipTreatmentFee()
                       : newType === 'Federal SO' ? 0
                       : STATE_FEE_PROGRAM_TYPES.includes(newType) && SO_TREATMENT_FEES[phase] !== undefined ? SO_TREATMENT_FEES[phase]
                       : f.treatmentfee;
@@ -385,6 +385,21 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
               <p className="text-white font-medium">{groups.find(g => g.groupid === client.groupid)?.groupname || client.groupid || '—'}</p>
             )}
           </div>
+          {/* SO clients can also be in a counselor's individual group, alongside (or instead of) their regular group */}
+          {SO_PROGRAM_TYPES.includes((editing ? form.programtype : client.programtype) || '') && (
+            <div>
+              <p className="text-xs text-slate-500 mb-0.5">Individual Group</p>
+              {editing ? (
+                <select value={form.individualgroupid || ''} onChange={e => setField('individualgroupid', e.target.value ? Number(e.target.value) : null)} className={inputClass}>
+                  <option value="">-- None --</option>
+                  {groups.filter(g => isIndividualGroup(g.programtype) && (g.active !== false || g.groupid === form.individualgroupid))
+                    .map(g => <option key={g.groupid} value={g.groupid}>{g.groupname}{g.active === false ? ' (inactive)' : ''}</option>)}
+                </select>
+              ) : (
+                <p className="text-white font-medium">{groups.find(g => g.groupid === client.individualgroupid)?.groupname || '—'}</p>
+              )}
+            </div>
+          )}
           {/* The counselor the client is waiting to be assessed by; closing an assessment clears it */}
           <div>
             <p className="text-xs text-slate-500 mb-0.5">Waiting for Assessment With</p>

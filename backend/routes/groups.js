@@ -7,20 +7,23 @@ const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY
 const router = express.Router();
 
 // Group program types each client program can be assigned to; mirrors GROUP_TYPES_BY_PROGRAM in frontend/src/utils/clients.ts
+// An INDIVIDUAL group (a counselor's individual sessions) takes clients of any program; SO clients keep it in
+// Clients.IndividualGroupId, apart from their regular group.
+const SO_PROGRAM_TYPES = ['State SO', 'Federal SO', 'Voluntary SO'];
 const GROUP_TYPES_BY_PROGRAM = {
     'State SO': ['SO', 'FED SO'],
     'Federal SO': ['SO', 'FED SO'],
     'Voluntary SO': ['SO', 'FED SO'],
-    'BIP': ['BIP'],
-    'Fed Drug Test': ['DRUG TEST'],
-    'Chaperon': ['CHAPERON', 'FED CHAPERON'],
+    'BIP': ['BIP', 'INDIVIDUAL'],
+    'Fed Drug Test': ['DRUG TEST', 'INDIVIDUAL'],
+    'Chaperon': ['CHAPERON', 'FED CHAPERON', 'INDIVIDUAL'],
 };
 
 router.get('/api/groups', async (req, res) => {
     try {
         const query = `
             SELECT g.*, 
-            (SELECT COUNT(*) FROM Clients WHERE GroupId = g.GroupId AND ProgramStatus = 'Active') AS ClientCount
+            (SELECT COUNT(*) FROM Clients WHERE (GroupId = g.GroupId OR IndividualGroupId = g.GroupId) AND ProgramStatus = 'Active') AS ClientCount
             FROM Groups g ORDER BY g.GroupName ASC;
         `;
         const result = await pool.query(query);
@@ -38,7 +41,7 @@ router.get('/api/groups/:id/clients', async (req, res) => {
                     (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
                     (SELECT Date FROM Attendance WHERE Client = c.ClientId AND ${GROUP_ATTENDANCE} ORDER BY Date DESC LIMIT 1) AS LastGroupAttended,
                     ${BIP_CHECKIN_BLOCK} AS BipCheckInBlock
-             FROM Clients c WHERE c.GroupId = $1`,
+             FROM Clients c WHERE c.GroupId = $1 OR c.IndividualGroupId = $1`,
             [id]
         );
         res.json(result.rows);
@@ -95,7 +98,7 @@ router.post('/api/groups', async (req, res) => {
 router.delete('/api/groups/:id', requireRole('Business Administrator'), async (req, res) => {
     try {
         const { id } = req.params;
-        const assigned = await pool.query('SELECT COUNT(*) AS count FROM Clients WHERE GroupId = $1', [id]);
+        const assigned = await pool.query('SELECT COUNT(*) AS count FROM Clients WHERE GroupId = $1 OR IndividualGroupId = $1', [id]);
         if (Number(assigned.rows[0].count) > 0) {
             return res.status(409).json({ error: 'This group still has assigned clients. Reassign them to another group before deleting it.' });
         }
@@ -118,7 +121,7 @@ router.post('/api/groups/:id/assign', async (req, res) => {
     try {
         const { id } = req.params;
         const { clientId, assignedBy } = req.body;
-        const beforeRes = await pool.query('SELECT GroupId, ProgramType, ProgramStatus, FirstName, LastName FROM Clients WHERE ClientId = $1', [clientId]);
+        const beforeRes = await pool.query('SELECT GroupId, IndividualGroupId, ProgramType, ProgramStatus, FirstName, LastName FROM Clients WHERE ClientId = $1', [clientId]);
         const groupRes = await pool.query('SELECT ProgramType FROM Groups WHERE GroupId = $1', [id]);
         const c = beforeRes.rows[0];
         if (!c || groupRes.rows.length === 0) return res.status(404).json({ error: 'Client or group not found.' });
@@ -129,15 +132,18 @@ router.post('/api/groups/:id/assign', async (req, res) => {
             return res.status(400).json({ error: `${name} is ${c.programstatus || 'not active'}. Only active clients can be assigned to a group.` });
         }
         const groupType = String(groupRes.rows[0].programtype || '').trim().toUpperCase();
-        const fits = !groupType || (GROUP_TYPES_BY_PROGRAM[c.programtype] || []).includes(groupType);
+        const fits = !groupType || groupType === 'INDIVIDUAL' || (GROUP_TYPES_BY_PROGRAM[c.programtype] || []).includes(groupType);
         if (!fits) {
             return res.status(400).json({ error: `${name} is a ${c.programtype || 'client with no program'} client and can't be assigned to a ${groupType} group.` });
         }
-        await pool.query('UPDATE Clients SET GroupId = $1 WHERE ClientId = $2', [id, clientId]);
-        const oldGroupId = beforeRes.rows[0]?.groupid || null;
-        if (beforeRes.rows.length > 0 && oldGroupId !== Number(id)) {
+        // An SO client's individual group goes in its own field, leaving their regular group alone
+        const individual = groupType === 'INDIVIDUAL' && SO_PROGRAM_TYPES.includes(c.programtype);
+        const column = individual ? 'IndividualGroupId' : 'GroupId';
+        await pool.query(`UPDATE Clients SET ${column} = $1 WHERE ClientId = $2`, [id, clientId]);
+        const oldGroupId = (individual ? c.individualgroupid : c.groupid) || null;
+        if (oldGroupId !== Number(id)) {
             await logClientChange(pool, {
-                clientId, changedBy: assignedBy, changeType: 'Group',
+                clientId, changedBy: assignedBy, changeType: individual ? 'Individual Group' : 'Group',
                 oldValue: await groupNameFor(oldGroupId), newValue: await groupNameFor(Number(id)),
                 details: 'Reassigned from Manage Group.',
             });

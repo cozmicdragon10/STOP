@@ -16,6 +16,9 @@ interface Props {
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   onProcessed: () => void;
+  // Set for a counselor's individual group: everyone is charged this Admin Individual price, and the first-check-in-of-the-month
+  // balance rule doesn't apply (individual sessions aren't group attendance)
+  individualFee?: number | null;
 }
 
 // Inputs are kept as text so a field can be cleared while typing.
@@ -69,7 +72,8 @@ const cardNotProcessed = (row: Row): boolean =>
 
 // Steps through the clients one at a time. Each client must be valid before moving on, and nothing
 // is checked in until the last client is confirmed.
-export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, onCancel, onSuccess, onError, onProcessed }: Props) {
+export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, onCancel, onSuccess, onError, onProcessed, individualFee = null }: Props) {
+  const individual = individualFee !== null;
   const [rows, setRows] = useState<Record<number, Row>>(() =>
     Object.fromEntries(clients.map(c => [c.clientid, {
       payment: '', paymentMethod: 'Cash' as PaymentMethod, voucher: false, card: emptyCardBilling, processing: false, receipt: null,
@@ -123,7 +127,7 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
     return (!row.receipt && parsePayment(row) === null) || cardNotProcessed(row);
   });
   // Clients whose balance is too far behind for their first check-in of the month
-  const blocked = clients.filter(c => amountStillOwedToCheckIn(c, rows[c.clientid]) > 0);
+  const blocked = individual ? [] : clients.filter(c => amountStillOwedToCheckIn(c, rows[c.clientid]) > 0);
 
   const confirm = () => {
     if (invalid || blocked.length > 0) return;
@@ -153,10 +157,10 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
   const baseBalance = locked ? row.receipt!.newBalance : Number(c.accountbalance || 0);
   const paymentNow = locked ? row.receipt!.amount : (parsePayment(row) ?? 0);
   // Each client's fee comes from their own account
-  const fee = clientFee(c);
+  const fee = individual ? individualFee : clientFee(c);
   const afterCheckIn = baseBalance + fee - (locked ? 0 : paymentNow);
-  const stillOwed = amountStillOwedToCheckIn(c, row);
-  const minimumPayment = minimumCheckInPayment(c);
+  const stillOwed = individual ? 0 : amountStillOwedToCheckIn(c, row);
+  const minimumPayment = individual ? 0 : minimumCheckInPayment(c);
   const cardPending = cardNotProcessed(row);
   const canContinue = rowValid && stillOwed === 0 && !cardPending && !row.processing;
 
@@ -231,7 +235,7 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
                 <span className="text-white">{formatBalance(baseBalance)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">{feeLabel(c, fee)}</span>
+                <span className="text-slate-400">{individual ? 'Individual session (price from Admin)' : feeLabel(c, fee)}</span>
                 <span className="text-red-400">{formatBalance(fee)}</span>
               </div>
               <div className="flex justify-between">

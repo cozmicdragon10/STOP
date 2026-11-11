@@ -7,7 +7,7 @@ export const REPORT_TABS: { id: string; label: string; access: ReportAccess }[] 
   { id: 'groupIncome', label: 'Group Income Report', access: 'business' },
   { id: 'cashDeposits', label: 'Cash Deposits', access: 'all' },
   { id: 'poMonthly', label: 'Monthly PO Reports', access: 'admins' },
-  { id: 'federalSo', label: 'Federal SO by Group', access: 'admins' },
+  { id: 'federalSo', label: 'Federal Clients by Group', access: 'admins' },
   { id: 'counselorClients', label: 'Counselor Client Report', access: 'admins' },
   { id: 'userActivity', label: 'User Activity', access: 'admins' },
 ];

@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { Check } from 'lucide-react';
 import { todayLocal, useGroupCheckIn } from '../../hooks/useGroupCheckIn';
 import type { ClientRecord, GroupRecord } from '../../hooks/useGroupCheckIn';
-import type { ClosedGroupSession, OpenGroupSession } from '../../api';
+import { getSessionTypes } from '../../api';
+import type { ClosedGroupSession, OpenGroupSession, SessionType } from '../../api';
+import { individualPriceFrom, isIndividualGroup } from '../../utils/clients';
 import CheckInStep from './CheckInStep';
 import ReviewStep from './ReviewStep';
 import ClientSearchModal from './ClientSearchModal';
@@ -99,6 +101,11 @@ function filterSearchableClients(clients: ClientRecord[], groupType: string | nu
     if (isChaperonGroup) {
       return (c.programtype || '').trim() === 'Chaperon';
     }
+
+    // A counselor's individual group takes any client except BIP clients, who don't have individual sessions
+    if (normalizedGroupType === 'INDIVIDUAL') {
+      return (c.programtype || '').trim() !== 'BIP';
+    }
     // For other group types, show all active clients
     return true;
   });
@@ -109,6 +116,17 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
   const [searchOpen, setSearchOpen] = useState(false);
 
   const group = groups.find(g => g.groupid === wf.groupId) ?? null;
+
+  // The Admin price list, for the Individual price a counselor's individual group charges
+  const [sessionTypes, setSessionTypes] = useState<SessionType[] | null>(null);
+  useEffect(() => {
+    getSessionTypes().then(setSessionTypes).catch(() => setSessionTypes([]));
+  }, []);
+  const individualGroup = isIndividualGroup(group?.programtype);
+  const { setIndividualFee } = wf;
+  useEffect(() => {
+    setIndividualFee(individualGroup && sessionTypes ? individualPriceFrom(sessionTypes) : null);
+  }, [individualGroup, sessionTypes, setIndividualFee]);
   const currentStep = wf.groupId === null ? 1 : wf.view === 'review' ? 3 : 2;
   const searchableClients = group ? filterSearchableClients(clients, group.programtype, group.groupname) : [];
 
@@ -303,6 +321,7 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
           onError={onError}
           // The payment is already on the account, so the roster must show it even if this check-in is canceled
           onProcessed={() => { onSaved(); wf.reloadRoster(); }}
+          individualFee={wf.individualFee}
         />
       )}
     </div>

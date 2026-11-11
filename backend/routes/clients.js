@@ -13,11 +13,24 @@ const router = express.Router();
 // Discharge types a Business Administrator can pick; each becomes the client's program status
 const DISCHARGE_STATUSES = ['Completed', 'Deceased', 'Discharged Supervision', 'Program Failed', 'Revoked', 'Transferred', 'Terminated'];
 
+// SO clients can have a counselor's individual group as well as their regular group (Clients.IndividualGroupId)
+const SO_PROGRAM_TYPES = ['State SO', 'Federal SO', 'Voluntary SO'];
+// The individual group id from a request: { id } (null for none/blank), or { error } when it isn't an INDIVIDUAL group
+const individualGroupFrom = async (value) => {
+    if (value === undefined || value === null || value === '') return { id: null };
+    const r = await pool.query('SELECT GroupId, ProgramType FROM Groups WHERE GroupId = $1', [Number(value)]);
+    if (!r.rows.length || String(r.rows[0].programtype || '').trim().toUpperCase() !== 'INDIVIDUAL') {
+        return { error: 'The individual group must be an Individual group.' };
+    }
+    return { id: r.rows[0].groupid };
+};
+
 // A client row as the roster and every client picker use it
 const clientRowsSql = (where) => `
     SELECT
         c.*,
         g.GroupName,
+        ig.GroupName AS IndividualGroupName,
         COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
         (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
         (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly,
@@ -27,6 +40,7 @@ const clientRowsSql = (where) => `
         ${BIP_CHECKIN_BLOCK} AS BipCheckInBlock
     FROM Clients c
     LEFT JOIN Groups g ON c.GroupId = g.GroupId
+    LEFT JOIN Groups ig ON c.IndividualGroupId = ig.GroupId
     ${where}
     ORDER BY c.LastName ASC`;
 
@@ -172,7 +186,7 @@ router.post('/api/clients/:id/bus-pass', async (req, res) => {
         const refuse = async (status, error) => { await db.query('ROLLBACK'); return res.status(status).json({ error }); };
         if (!c) return refuse(404, 'Client not found.');
         const name = `${c.lastname}, ${c.firstname}`;
-        if (!FEDERAL_PROGRAM_TYPES.includes(c.programtype)) return refuse(400, `${name} is not a federal client. Only ${FEDERAL_PROGRAM_TYPES.join(' and ')} clients get bus passes.`);
+        if (!FEDERAL_PROGRAM_TYPES.includes(c.programtype)) return refuse(400, `${name} is not a federal client. Only ${FEDERAL_PROGRAM_TYPES.slice(0, -1).join(', ')} and ${FEDERAL_PROGRAM_TYPES.at(-1)} clients get bus passes.`);
         if (Number(c.buspasses) <= 0) return refuse(400, `${name} has no bus passes left to grant.`);
         const left = Number(c.buspasses) - 1;
         await db.query('UPDATE Clients SET BusPasses = $1 WHERE ClientId = $2', [left, id]);
@@ -615,7 +629,8 @@ router.put('/api/clients/:id', async (req, res) => {
             treatmentfee, accountbalance, vouchers, polyfeevoucher, polyfeepaid, polyfee,
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
-            comments, programtype, race, dateofbirth, sex, pretrial, assessor, buspasses, buspassrefill, updatedBy
+            comments, programtype, race, dateofbirth, sex, pretrial, assessor, buspasses, buspassrefill, updatedBy,
+            individualgroupid
         } = req.body;
         // Bus passes and the monthly refill: whole numbers from 0 to BUS_PASS_MAX, changed only when sent
         const passCount = (value) => (value === undefined || value === null || value === '' ? null : Number(value));
@@ -637,8 +652,12 @@ router.put('/api/clients/:id', async (req, res) => {
             return res.status(400).json({ error: 'Date of birth cannot be in the future.' });
         }
 
+        // The individual group must be an INDIVIDUAL group; changed only when sent (an empty value clears it)
+        const individualGroup = await individualGroupFrom(individualgroupid);
+        if (individualGroup.error) return res.status(400).json({ error: individualGroup.error });
+
         // Tracked fields before the edit, for the change log
-        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
+        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
         const before = beforeRes.rows[0];
 
         // The full set of poly fee vouchers depends on the phase the client will be in after this edit. A count sent back
@@ -708,7 +727,10 @@ router.put('/api/clients/:id', async (req, res) => {
                 -- Changed only when the request sends it (an empty value clears it)
                 Assessor = CASE WHEN $33::boolean THEN $34 ELSE Assessor END,
                 BusPasses = COALESCE($35, BusPasses),
-                BusPassRefill = COALESCE($36, BusPassRefill)
+                BusPassRefill = COALESCE($36, BusPassRefill),
+                -- Only SO clients (after this edit) have an individual group
+                IndividualGroupId = CASE WHEN COALESCE($23, ProgramType) = ANY($39::text[])
+                    THEN (CASE WHEN $37::boolean THEN $38::int ELSE IndividualGroupId END) ELSE NULL END
             WHERE ClientId = $24`,
             [
                 firstname || null, middlename || null, lastname || null, docnumber || null, supervisingagent || null,
@@ -726,21 +748,23 @@ router.put('/api/clients/:id', async (req, res) => {
                 typeof pretrial === 'boolean' ? pretrial : null, PRETRIAL_PROGRAM_TYPES,
                 assessor !== undefined, String(assessor ?? '').trim() || null,
                 busPasses, busPassRefill,
+                individualgroupid !== undefined, individualGroup.id, SO_PROGRAM_TYPES,
             ]
         );
 
         const updated = await pool.query(
-            `SELECT c.*, g.GroupName, COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
+            `SELECT c.*, g.GroupName, ig.GroupName AS IndividualGroupName, COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
                     (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
                     (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly
              FROM Clients c
              LEFT JOIN Groups g ON c.GroupId = g.GroupId
+             LEFT JOIN Groups ig ON c.IndividualGroupId = ig.GroupId
              WHERE c.ClientId = $1`,
             [id]
         );
 
         if (before && updated.rows[0]) {
-            const after = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
+            const after = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
             const now = after.rows[0];
             // An edit that makes the poly fee paid in full filled the vouchers (see the CASE above); that counts toward an override
             const wasFull = Number(before.polyfee) > 0 && Number(before.polyfeepaid) >= Number(before.polyfee);
@@ -782,6 +806,12 @@ router.put('/api/clients/:id', async (req, res) => {
                     oldValue: await groupNameFor(before.groupid), newValue: await groupNameFor(now.groupid),
                 });
             }
+            if ((before.individualgroupid || null) !== (now.individualgroupid || null)) {
+                await logClientChange(pool, {
+                    clientId: id, changedBy: updatedBy, changeType: 'Individual Group',
+                    oldValue: await groupNameFor(before.individualgroupid), newValue: await groupNameFor(now.individualgroupid),
+                });
+            }
         }
 
         res.json({ success: true, client: updated.rows[0] });
@@ -799,8 +829,11 @@ router.post('/api/clients', async (req, res) => {
             programstartdate, programstatus, phase, groupid,
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
-            comments, programtype, treatmentfee, vouchers, pretrial, createdBy
+            comments, programtype, treatmentfee, vouchers, pretrial, createdBy, individualgroupid
         } = req.body;
+        const individualGroup = await individualGroupFrom(individualgroupid);
+        if (individualGroup.error) return res.status(400).json({ error: individualGroup.error });
+        const individualGroupId = SO_PROGRAM_TYPES.includes(programtype) ? individualGroup.id : null;
 
         // BIP clients have no phase; they store a whole-number week in the same column. New BIP clients always start at week 0.
         const clientPhase = programtype === 'BIP' ? '0' : phase;
@@ -825,13 +858,13 @@ router.post('/api/clients', async (req, res) => {
                 ProgramStartDate, ProgramStatus, Phase, GroupId,
                 Address, City, County, State, Zip,
                 MainPhone, AltPhone, EmergencyContact, EmergencyContactPhone,
-                Comments, ProgramType, TreatmentFee, Vouchers, Pretrial
+                Comments, ProgramType, TreatmentFee, Vouchers, Pretrial, IndividualGroupId
             ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8, $9,
                 $10, $11, $12, $13, $14,
                 $15, $16, $17, $18,
-                $19, COALESCE($20, 'State SO'), COALESCE($21, 0), COALESCE($22, 0), $23
+                $19, COALESCE($20, 'State SO'), COALESCE($21, 0), COALESCE($22, 0), $23, $24
             ) RETURNING ClientId`,
             [
                 firstname.trim(), middlename?.trim() || null, lastname.trim(), docnumber?.trim() || null, supervisingagent?.trim() || null,
@@ -841,12 +874,13 @@ router.post('/api/clients', async (req, res) => {
                 comments || null, programtype || null,
                 treatmentfee !== undefined && treatmentfee !== null && treatmentfee !== '' ? Number(treatmentfee) : null,
                 vouchers !== undefined && vouchers !== null && vouchers !== '' ? Number(vouchers) : null,
-                isPretrial
+                isPretrial, individualGroupId
             ]
         );
         await logClientChange(pool, {
             clientId: result.rows[0].clientid, changedBy: createdBy, changeType: 'Client Created',
             details: `Created as ${programtype}${isPretrial ? ' (Pretrial)' : ''}, ${programstatus}, group: ${await groupNameFor(groupid ? Number(groupid) : null)}`
+                + `${individualGroupId ? `, individual group: ${await groupNameFor(individualGroupId)}` : ''}`
                 + `${supervisingagent?.trim() ? `, agent: ${supervisingagent.trim()}` : ''}.`,
         });
         res.status(201).json({ success: true, clientId: result.rows[0].clientid, message: 'Client added successfully.' });

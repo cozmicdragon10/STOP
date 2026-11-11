@@ -32,7 +32,7 @@ const KINDS: { kind: SessionTypeKind; label: string }[] = [
 const NEW_PRICE: EditState = { category: 'Assessment', name: '', fee: '', active: true, kind: 'Standard', bipOnly: false, soOnly: false, lateFee: '' };
 const validPrice = (v: string) => v !== '' && Number(v) >= 0;
 
-// The assessment and individual session types and their prices, used by the Assessments & Individuals tab.
+// The assessment and individual session types and their prices, used by the Assessments tab.
 // Entries are deactivated rather than deleted so closed sessions keep their name.
 export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Props) {
   const [types, setTypes] = useState<SessionType[]>([]);
@@ -75,7 +75,7 @@ export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Prop
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border-b border-slate-800 pb-3">
         <div>
           <h2 className="text-lg font-bold text-white">Assessment & Individual Prices</h2>
-          <p className="text-xs text-slate-400 mt-0.5">The types and prices offered on the Assessments & Individuals tab.</p>
+          <p className="text-xs text-slate-400 mt-0.5">Assessment prices are offered on the Assessments tab. The Individual price is charged when a client is checked in to a counselor's individual group on the Attendance tab.</p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
           <label className="flex items-center gap-1.5 text-xs text-slate-400">

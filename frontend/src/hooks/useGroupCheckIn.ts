@@ -180,6 +180,9 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   // Counselor covering the session (employee email), picked by the office; null means the group's usual counselor.
   // The server ignores it unless an Office Admin or Business Administrator sends it.
   const [coveredBy, setCoveredBy] = useState<string | null>(null);
+  // Set while the picked group is a counselor's individual group: every client is charged this Admin Individual price
+  // instead of their treatment fee, and BIP clients (who don't have individual sessions) can't be checked in
+  const [individualFee, setIndividualFee] = useState<number | null>(null);
 
   // Guards against a slow response for a previous group overwriting the current roster.
   const rosterRequestId = useRef(0);
@@ -189,8 +192,9 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   // Roster members who can still be checked in (not already on the sheet, not already attended today, and not a BIP
   // client still waiting on their intake or reinstate assessment).
   const selectableRoster = useMemo(
-    () => roster.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid) && !c.bipcheckinblock),
-    [roster, checkedInIds, attendedIds]
+    () => roster.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid) && !c.bipcheckinblock
+      && !(individualFee !== null && c.programtype === 'BIP')),
+    [roster, checkedInIds, attendedIds, individualFee]
   );
 
   const allSelected = selectableRoster.length > 0 && selectableRoster.every(c => selectedIds.has(c.clientid));
@@ -402,7 +406,12 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     if (blocked.length > 0) {
       notify.onError(blocked.map(c => bipCheckInBlockMessage(c.bipcheckinblock, `${c.lastname}, ${c.firstname}`)).join(' '));
     }
-    const fresh = clients.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid) && !c.bipcheckinblock);
+    const bipIndividual = individualFee !== null ? clients.filter(c => c.programtype === 'BIP' && !checkedInIds.has(c.clientid)) : [];
+    if (bipIndividual.length > 0) {
+      notify.onError(`${bipIndividual.map(c => `${c.lastname}, ${c.firstname}`).join('; ')}: BIP clients do not have individual sessions.`);
+    }
+    const fresh = clients.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid) && !c.bipcheckinblock
+      && !bipIndividual.includes(c));
     if (fresh.length === 0) return;
     const { approved, makeupIds } = confirmMakeups(fresh);
     if (approved.length === 0) return;
@@ -415,7 +424,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     const { clients, fromSelection, makeupIds } = pendingCheckIn;
     addToSession(clients.map(client => ({
       client,
-      terms: { ...terms[client.clientid], fee: clientFee(client) },
+      terms: { ...terms[client.clientid], fee: individualFee ?? clientFee(client) },
       // Approved make-ups are noted on the attendance record
       comments: makeupIds.has(client.clientid) ? MAKEUP_COMMENT : undefined,
     })));
@@ -546,6 +555,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     finishCheckIn,
     coveredBy,
     setCoveredBy,
+    individualFee,
+    setIndividualFee,
   };
 }
 

@@ -69,16 +69,17 @@ const denormalizeLocation = (loc: string) => (loc === 'OKC' ? 'Oklahoma City' : 
 
 const emptyNewGroup = { groupName: '', location: '', counselor: '', programType: '', schedule: '', address: '' };
 
-// The directory's sub-tabs. BIP, DRUG TEST and chaperon (CHAPERON and FED CHAPERON) groups have their own; SO, FED SO and
-// anything else are under SO.
+// The directory's sub-tabs. BIP, DRUG TEST, chaperon (CHAPERON and FED CHAPERON) and INDIVIDUAL groups have their own; SO,
+// FED SO and anything else are under SO. Individual groups take clients of any program (clientProgram '').
 const GROUP_SECTIONS = [
   { key: 'SO', label: 'SO', newGroupType: 'SO', clientProgram: 'SO' },
   { key: 'BIP', label: 'BIP', newGroupType: 'BIP', clientProgram: 'BIP' },
   { key: 'DRUG TEST', label: 'Drug Test', newGroupType: 'DRUG TEST', clientProgram: 'Fed Drug Test' },
   { key: 'CHAPERON', label: 'Chaperon', newGroupType: 'CHAPERON', clientProgram: 'Chaperon' },
+  { key: 'INDIVIDUAL', label: 'Individual', newGroupType: 'INDIVIDUAL', clientProgram: '' },
 ] as const;
 type GroupSection = typeof GROUP_SECTIONS[number]['key'];
-// A new group starts with the open sub-tab's program type; drug-test and chaperon groups start By Appointment
+// A new group starts with the open sub-tab's program type; drug-test, chaperon and individual groups start By Appointment
 const withNewGroupDefaults = (g: typeof emptyNewGroup, section: GroupSection) => {
   const programType = g.programType || GROUP_SECTIONS.find(s => s.key === section)!.newGroupType;
   return { ...g, programType, schedule: g.schedule || (allowsByAppointment(programType) ? BY_APPOINTMENT : '') };
@@ -86,7 +87,7 @@ const withNewGroupDefaults = (g: typeof emptyNewGroup, section: GroupSection) =>
 const groupSection = (g: { programtype?: string | null }): GroupSection => {
   const type = (g.programtype || '').trim().toUpperCase();
   if (isChaperonGroup(type)) return 'CHAPERON';
-  return type === 'BIP' || type === 'DRUG TEST' ? type : 'SO';
+  return type === 'BIP' || type === 'DRUG TEST' || type === 'INDIVIDUAL' ? type : 'SO';
 };
 
 const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
@@ -380,7 +381,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
                   ))
                 ) : (
                   <p className="text-xs text-slate-500 italic md:col-span-2">
-                    {searchTerm ? 'No clients match your search.' : `No other active${selectedGroupDetail.programtype ? ` ${GROUP_SECTIONS.find(s => s.key === groupSection(selectedGroupDetail))!.clientProgram}` : ''} clients to assign.`}
+                    {searchTerm ? 'No clients match your search.' : `No other active${selectedGroupDetail.programtype && GROUP_SECTIONS.find(s => s.key === groupSection(selectedGroupDetail))!.clientProgram ? ` ${GROUP_SECTIONS.find(s => s.key === groupSection(selectedGroupDetail))!.clientProgram}` : ''} clients to assign.`}
                   </p>
                 )}
               </div>

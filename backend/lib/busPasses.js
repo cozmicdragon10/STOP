@@ -3,7 +3,7 @@ const { logClientChange } = require('./changeLog');
 
 // Federal clients can be granted bus passes, up to BUS_PASS_MAX at a time. Mirrors FEDERAL_PROGRAM_TYPES and BUS_PASS_MAX
 // in frontend/src/utils/clients.ts.
-const FEDERAL_PROGRAM_TYPES = ['Federal SO', 'Fed Drug Test'];
+const FEDERAL_PROGRAM_TYPES = ['Federal SO', 'Fed Drug Test', 'Poly Only'];
 const BUS_PASS_MAX = 2;
 
 // First day of the calendar month (local time) as YYYY-MM-DD

@@ -34,10 +34,10 @@ const BIP_CHECKIN_BLOCK = `CASE WHEN c.ProgramType IS DISTINCT FROM 'BIP' THEN N
         WHERE ${AFTER_DISCHARGE}) THEN 'reinstate'
     END`;
 const bipCheckInBlockMessage = (block, name) => (block === 'intake'
-    ? `${name} is a BIP client with no BIP Intake or DV Assessment on record. Complete one on the Assessments & Individuals tab (or record one done at another provider on the client's Information tab) before group check-in.`
+    ? `${name} is a BIP client with no BIP Intake or DV Assessment on record. Complete one on the Assessments tab (or record one done at another provider on the client's Information tab) before group check-in.`
     : block === 'our-intake'
-        ? `${name} was discharged after an intake done at another provider. Complete our BIP Intake or DV Assessment on the Assessments & Individuals tab before group check-in.`
-        : `${name} was discharged and reactivated. Complete the BIP Reinstate assessment on the Assessments & Individuals tab before group check-in.`);
+        ? `${name} was discharged after an intake done at another provider. Complete our BIP Intake or DV Assessment on the Assessments tab before group check-in.`
+        : `${name} was discharged and reactivated. Complete the BIP Reinstate assessment on the Assessments tab before group check-in.`);
 
 // True when the client already has an attendance row in the current calendar month.
 // Used for the State SO Phase 1 rule: the treatment fee is charged once per month.

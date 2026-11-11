@@ -41,7 +41,7 @@ export const POLY_PROGRAM_TYPES = [...SO_PROGRAM_TYPES, 'Poly Only'];
 export const PRETRIAL_PROGRAM_TYPES = ['Federal SO', 'Fed Drug Test'];
 // Federal clients can be granted bus passes, up to BUS_PASS_MAX at a time. Mirrors FEDERAL_PROGRAM_TYPES and BUS_PASS_MAX
 // in backend/lib/busPasses.js.
-export const FEDERAL_PROGRAM_TYPES = ['Federal SO', 'Fed Drug Test'];
+export const FEDERAL_PROGRAM_TYPES = ['Federal SO', 'Fed Drug Test', 'Poly Only'];
 export const BUS_PASS_MAX = 2;
 // Chaperon clients' phase says which kind of chaperon program they are in (the old system's two chaperon phases)
 export const CHAPERON_PHASES = ['Chaperon', 'Federal Chaperon'];
@@ -89,14 +89,25 @@ export const isAttendanceOverdue = (client: any, today = new Date()) => {
   return startOfToday > new Date(last.getFullYear(), last.getMonth() + limit, last.getDate());
 };
 
-// Group program types offered for each client program type. Programs not listed see every group.
+// A counselor's individual-session group; it takes clients of any program
+export const INDIVIDUAL_GROUP_TYPE = 'INDIVIDUAL';
+export const isIndividualGroup = (groupProgram?: string | null) => (groupProgram || '').trim().toUpperCase() === INDIVIDUAL_GROUP_TYPE;
+// The Admin price list's Individual price that an individual group check-in charges: the active Individual entry named
+// "Individual", else the first active one; null when there is none. Mirrors individualPrice in backend/lib/attendance.js.
+export const individualPriceFrom = (types: { sessiontypeid: number; category: string; name: string; fee: number | string; active: boolean }[]): number | null => {
+  const active = types.filter(t => t.category === 'Individual' && t.active)
+    .sort((a, b) => Number(b.name === 'Individual') - Number(a.name === 'Individual') || a.sessiontypeid - b.sessiontypeid);
+  return active.length ? Number(active[0].fee) : null;
+};
+// Group program types offered for each client program type's Group field. Programs not listed see every group. SO
+// clients pick their individual group in a separate Individual Group field (individualgroupid) instead.
 export const GROUP_TYPES_BY_PROGRAM: Record<string, string[]> = {
   'State SO': ['SO', 'FED SO'],
   'Federal SO': ['SO', 'FED SO'],
   'Voluntary SO': ['SO', 'FED SO'],
-  'BIP': ['BIP'],
-  'Fed Drug Test': ['DRUG TEST'],
-  'Chaperon': ['CHAPERON', 'FED CHAPERON'],
+  'BIP': ['BIP', INDIVIDUAL_GROUP_TYPE],
+  'Fed Drug Test': ['DRUG TEST', INDIVIDUAL_GROUP_TYPE],
+  'Chaperon': ['CHAPERON', 'FED CHAPERON', INDIVIDUAL_GROUP_TYPE],
 };
 // Drug-test groups are run by an observer, who is an Office Admin or Business Administrator, instead of a counselor.
 // The observer is kept in the group's Counselor field.
@@ -104,13 +115,15 @@ export const isDrugTestGroup = (groupProgram?: string | null) => (groupProgram |
 // Chaperon classes: CHAPERON groups, and FED CHAPERON groups for federal (USPO-billed) chaperon clients
 export const CHAPERON_GROUP_TYPES = ['CHAPERON', 'FED CHAPERON'];
 export const isChaperonGroup = (groupProgram?: string | null) => CHAPERON_GROUP_TYPES.includes((groupProgram || '').trim().toUpperCase());
-// Drug-test groups and chaperon classes meet when booked, so their schedule can be By Appointment
-export const allowsByAppointment = (groupProgram?: string | null) => isDrugTestGroup(groupProgram) || isChaperonGroup(groupProgram);
+// Drug-test groups, chaperon classes and individual groups meet when booked, so their schedule can be By Appointment
+export const allowsByAppointment = (groupProgram?: string | null) =>
+  isDrugTestGroup(groupProgram) || isChaperonGroup(groupProgram) || isIndividualGroup(groupProgram);
 export const groupLeadLabel = (groupProgram?: string | null) => (isDrugTestGroup(groupProgram) ? 'Observer' : 'Counselor');
 export const OBSERVER_ROLES = ['Office Admin', 'Business Administrator'];
 // Whether a client of this program can be put in a group of this program type: BIP groups take BIP clients, SO groups
-// take SO clients, DRUG TEST groups take Fed Drug Test clients, CHAPERON and FED CHAPERON groups take Chaperon clients. A group without a program type takes anyone. Mirrors the server's check on assignment.
+// take SO clients, DRUG TEST groups take Fed Drug Test clients, CHAPERON and FED CHAPERON groups take Chaperon clients. A group without a program type,
+// or an INDIVIDUAL group, takes anyone. Mirrors the server's check on assignment.
 export const clientFitsGroup = (clientProgram?: string | null, groupProgram?: string | null) => {
   const groupType = (groupProgram || '').trim().toUpperCase();
-  return !groupType || (GROUP_TYPES_BY_PROGRAM[clientProgram || ''] ?? []).includes(groupType);
+  return !groupType || groupType === INDIVIDUAL_GROUP_TYPE || (GROUP_TYPES_BY_PROGRAM[clientProgram || ''] ?? []).includes(groupType);
 };

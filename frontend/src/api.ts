@@ -60,6 +60,8 @@ export interface ClientColumns {
     // BIP clients keep a whole-number week here instead of a phase
     phase: string;
     groupid: number | null;
+    // SO clients only: a counselor's INDIVIDUAL group, held apart from the regular group
+    individualgroupid?: number | null;
     treatmentfee: Money | null;
     // Stored sign: positive = owes
     accountbalance: Money | null;
@@ -102,6 +104,7 @@ export type CardBlock = Pick<ClientColumns, 'cardpaymentsblocked' | 'cardblockre
 // A client on the roster, with its group and the check-in facts the frontend needs
 export interface Client extends Omit<ClientColumns, 'programtype'> {
     groupname: string | null;
+    individualgroupname?: string | null;
     // The client's own program type, else the group's, else State SO
     programtype: string;
     lastattended: string | null;
@@ -764,6 +767,30 @@ export async function saveSessionType(data: {
         body: JSON.stringify(data),
     });
     return jsonResponse(res, 'Failed to save the price list entry.');
+}
+
+// Standard treatment fees kept in Admin: feekey is an SO phase (State SO / Voluntary SO price) or 'BIP'
+export interface ProgramFee {
+    feekey: string;
+    label: string;
+    fee: Money;
+    updatedby: string | null;
+    updatedon: string;
+}
+
+export async function getProgramFees(): Promise<ProgramFee[]> {
+    const res = await apiFetch(`${API_BASE}/program-fees`);
+    return jsonResponse(res, 'Failed to load the treatment fees.');
+}
+
+// applyToClients: also move current clients still on the old price to the new one
+export async function saveProgramFee(data: { feekey: string; fee: number; applyToClients: boolean; user: string }): Promise<{ fee: ProgramFee; clientsUpdated: number }> {
+    const res = await apiFetch(`${API_BASE}/program-fees/${encodeURIComponent(data.feekey)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return jsonResponse(res, 'Failed to save the price.');
 }
 
 export interface OpenIndividualSession {

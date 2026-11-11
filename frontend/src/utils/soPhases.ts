@@ -1,11 +1,26 @@
 // Phase schedule for State SO, Federal SO and Voluntary SO clients, with the treatment fee for each phase
 export const SO_PHASES = ['Phase 1 - Weekly', 'Phase 2 - Monthly', 'Phase 3 - Quarterly', 'Phase 4 - Semi Anual'];
 
+// State SO / Voluntary SO price for each phase and the BIP price. Business Administrators set them in Admin (ProgramFees);
+// App loads them at sign-in with applyProgramFees, which updates these objects in place. Until then the old fixed
+// prices below are used.
 export const SO_TREATMENT_FEES: Record<string, number> = {
   'Phase 1 - Weekly': 180,
   'Phase 2 - Monthly': 100,
   'Phase 3 - Quarterly': 180,
   'Phase 4 - Semi Anual': 300,
+};
+export const BIP_FEE_KEY = 'BIP';
+const otherProgramFees: Record<string, number> = { [BIP_FEE_KEY]: 35 };
+// The current BIP treatment fee for new BIP clients
+export const bipTreatmentFee = () => otherProgramFees[BIP_FEE_KEY];
+export const applyProgramFees = (fees: { feekey: string; fee: number | string }[]) => {
+  for (const { feekey, fee } of fees) {
+    const value = Number(fee);
+    if (!Number.isFinite(value)) continue;
+    if (feekey in SO_TREATMENT_FEES) SO_TREATMENT_FEES[feekey] = value;
+    else otherProgramFees[feekey] = value;
+  }
 };
 
 // State SO and Voluntary SO Phase 1 (weekly) and Phase 2 (monthly) clients pay the treatment fee once per calendar month, on their first attendance.

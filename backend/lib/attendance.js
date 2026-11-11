@@ -33,7 +33,8 @@ const FIRST_CHECKIN_MAX_OWED = 180;
 // sessionNumber: which session of the group that day (1 for the first); a group can meet again after its earlier session was closed
 // An Assessment or Individual type is charged its full fee and leaves the monthly fee rules and BIP weeks alone.
 // paymentComments: added after the standard text on the payment's ledger row
-const recordAttendance = async (db, { client, group, date, sessionNumber, paid, groupFee, accountPaid, paymentMethod, voucherUsed, type, comments, createdBy, awardNdiVoucher, feeType = 'Group Fee', paymentComments = '' }) => {
+// sessionTypeId and provider: the price list entry and the counselor of an individual session (Attendance.SessionTypeId, Provider)
+const recordAttendance = async (db, { client, group, date, sessionNumber, paid, groupFee, accountPaid, paymentMethod, voucherUsed, type, comments, createdBy, awardNdiVoucher, feeType = 'Group Fee', paymentComments = '', sessionTypeId = null, provider = null }) => {
     const isIndividualSession = INDIVIDUAL_SESSION_TYPES.includes(type);
     const clientRes = await db.query('SELECT AccountBalance, ProgramType, Phase, FirstName, LastName, TreatmentFee FROM Clients WHERE ClientId = $1 FOR UPDATE', [client]);
     if (clientRes.rows.length === 0) {
@@ -130,9 +131,9 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
     if (paidNum > 0 && paymentMethod === 'Credit Card') await assertCardAllowed(db, client);
 
     const attRes = await db.query(
-        `INSERT INTO Attendance (Client, "Group", Date, Paid, GroupFee, AccountPaid, AccountTotal, VoucherUsed, Type, Comments, CreatedBy, PaymentMethod, SessionNumber)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING AttendanceId;`,
-        [client, group || null, sessionDate, paid, feeNum, paidNum, newBalance, voucherUsed, type, comments || null, createdBy, paidNum > 0 ? paymentMethod : null, sessionNum]
+        `INSERT INTO Attendance (Client, "Group", Date, Paid, GroupFee, AccountPaid, AccountTotal, VoucherUsed, Type, Comments, CreatedBy, PaymentMethod, SessionNumber, SessionTypeId, Provider)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING AttendanceId;`,
+        [client, group || null, sessionDate, paid, feeNum, paidNum, newBalance, voucherUsed, type, comments || null, createdBy, paidNum > 0 ? paymentMethod : null, sessionNum, sessionTypeId, provider]
     );
 
     const attendanceId = attRes.rows[0].attendanceid;
@@ -182,4 +183,15 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
     return { attendanceId, newBalance, polyVoucherAwarded, feeCharged: feeNum, feeReason };
 };
 
-module.exports = { isMonthlyFeeClient, feePeriodMonths, chargedWithinMonths, FIRST_CHECKIN_MAX_OWED, recordAttendance };
+// The Individual price on the Admin price list that an INDIVIDUAL group check-in charges: the active Individual entry
+// named "Individual", else the first active Individual entry. null when there is none. Mirrors individualPriceFrom in
+// frontend/src/utils/clients.ts.
+const individualPrice = async (db) => {
+    const r = await db.query(
+        `SELECT SessionTypeId, Fee FROM SessionTypes WHERE Category = 'Individual' AND Active
+         ORDER BY (Name = 'Individual') DESC, SessionTypeId LIMIT 1`
+    );
+    return r.rows[0] ? { sessionTypeId: r.rows[0].sessiontypeid, fee: Number(r.rows[0].fee) } : null;
+};
+
+module.exports = { isMonthlyFeeClient, feePeriodMonths, chargedWithinMonths, FIRST_CHECKIN_MAX_OWED, recordAttendance, individualPrice };

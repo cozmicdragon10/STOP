@@ -15,10 +15,17 @@ describe('client rules', () => {
     expect(clientFitsGroup('Federal SO', 'FED CHAPERON')).toBe(false);
   });
 
-  it('lets drug-test and chaperon groups meet By Appointment', () => {
+  it('puts clients of any program in an individual group', () => {
+    for (const program of ['State SO', 'Federal SO', 'BIP', 'Fed Drug Test', 'Chaperon', null]) {
+      expect(clientFitsGroup(program, 'INDIVIDUAL')).toBe(true);
+    }
+  });
+
+  it('lets drug-test, chaperon and individual groups meet By Appointment', () => {
     expect(allowsByAppointment('DRUG TEST')).toBe(true);
     expect(allowsByAppointment('CHAPERON')).toBe(true);
     expect(allowsByAppointment('FED CHAPERON')).toBe(true);
+    expect(allowsByAppointment('INDIVIDUAL')).toBe(true);
     expect(allowsByAppointment('SO')).toBe(false);
   });
 

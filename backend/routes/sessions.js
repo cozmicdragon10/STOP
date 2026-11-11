@@ -64,7 +64,7 @@ const lastBipIntake = async (db, clientId, onDate) => {
 
 // The client's Progress tab: for BIP clients, why they can't be checked into group yet (block: 'intake', 'our-intake',
 // 'reinstate', or null) and their last discharge; every completed assessment (done here, or a BIP intake recorded from
-// another provider), newest first; and the assessments still open on the Assessments & Individuals tab.
+// another provider), newest first; and the assessments still open on the Assessments tab.
 router.get('/api/clients/:id/progress', async (req, res) => {
     try {
         const { id } = req.params;
@@ -262,6 +262,8 @@ router.get('/api/individual-sessions/closed', async (req, res) => {
     }
 });
 
+const INDIVIDUAL_MOVED = 'Individual sessions are now checked in on the Attendance tab: pick the counselor\'s individual group.';
+
 // Checks a session from the body against the price list and the client; returns { error } or the cleaned-up session.
 // Only a Business Administrator can set a fee other than the price list's.
 const checkIndividualSession = async (db, body, viewer) => {
@@ -327,6 +329,9 @@ router.put('/api/individual-sessions/open', async (req, res) => {
         const refuse = async (status, error) => { await db.query('ROLLBACK'); return res.status(status).json({ error }); };
         if (checked.error) return refuse(400, checked.error);
         const s = checked.session;
+        // Individual sessions are now checked in through the counselor's individual group on the Attendance tab; ones
+        // already open here can still be saved and closed
+        if (!openSessionId && s.category === 'Individual') return refuse(400, INDIVIDUAL_MOVED);
         let id = openSessionId;
         if (id) {
             const existing = await db.query('SELECT CreatedBy, Provider FROM OpenIndividualSessions WHERE OpenSessionId = $1 FOR UPDATE', [id]);
@@ -428,6 +433,10 @@ router.post('/api/individual-sessions/close', async (req, res) => {
             return res.status(400).json({ error: checked.error });
         }
         const s = checked.session;
+        if (!openSessionId && s.category === 'Individual') {
+            await db.query('ROLLBACK');
+            return res.status(400).json({ error: INDIVIDUAL_MOVED });
+        }
         const needsChecks = s.kind === 'BIP Intake' || s.kind === 'BIP Reinstate';
         const secondCheck = s.kind === 'BIP Reinstate' ? 'BIP Reinstatement Contract signed' : 'intake paperwork completed';
         if (needsChecks) {

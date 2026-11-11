@@ -73,6 +73,9 @@ interface FormState {
 }
 
 const CATEGORIES: IndividualCategory[] = ['Assessment', 'Individual'];
+// Individual sessions moved to the Attendance tab (a counselor's individual group). The Individual choice stays here only
+// while individual sessions opened before the move are still open, so they can be finished.
+const INDIVIDUAL_MOVED = 'New individual sessions are checked in on the Attendance tab: pick the counselor’s individual group. Only individual sessions already open can be finished here.';
 // Roles that see every open session; everyone else sees the ones they opened or are the counselor/therapist on
 const ADMIN_ROLES = ['Business Administrator', 'Office Admin'];
 // Client program types that can have "SO clients only" price list entries (the server checks too)
@@ -192,6 +195,8 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const balanceBefore = form.receipt ? form.receipt.newBalance : Number(client?.accountbalance || 0);
   const balanceAfter = cents(balanceBefore + (Number.isFinite(fee) ? fee : 0) - (Number.isFinite(payment) ? payment : 0));
   const bipIndividual = form.category === 'Individual' && client?.programtype === 'BIP';
+  // Only individual sessions already open here can be finished; new ones are checked in on the Attendance tab
+  const newIndividual = form.category === 'Individual' && !form.openSessionId;
   // Assessments are paid in cash only (the server checks too)
   const cashOnly = form.category === 'Assessment';
   // A client blocked from card payments pays cash, even if Credit Card was picked before they were chosen
@@ -216,6 +221,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const resetChecks = () => { setPaymentChecked(false); setPaperworkChecked(false); };
 
   const problem = (): string | null => {
+    if (newIndividual) return INDIVIDUAL_MOVED;
     if (!client) return 'Choose a client.';
     if (bipIndividual) return 'BIP clients do not have individual sessions.';
     if (!sessionType) return `Choose a${form.category === 'Assessment' ? 'n assessment' : 'n individual session'} type.`;
@@ -381,6 +387,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
     if (c !== form.category) setForm(f => ({ ...blankForm(c), clientId: f.clientId, date: f.date, provider: f.provider }));
   };
   const shownOpen = openSessions.filter(o => o.category === panelCategory);
+  const shownCategories = openSessions.some(o => o.category === 'Individual') || form.category === 'Individual' ? CATEGORIES : CATEGORIES.slice(0, 1);
   const shownClosed = closedSessions.filter(c => c.category === panelCategory);
   const panelNoun = panelCategory === 'Assessment' ? 'assessments' : 'individual sessions';
 
@@ -449,11 +456,11 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
       <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl">
         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 md:gap-4 mb-4 md:mb-6 border-b border-slate-800 pb-4">
           <div>
-            <h2 className="text-lg font-bold text-white">Assessments & Individuals</h2>
+            <h2 className="text-lg font-bold text-white">Assessments</h2>
             <p className="text-xs text-slate-400 mt-0.5">One client per session. Save it as open, then review and close it to record the attendance, fee, and payment.</p>
           </div>
           <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
-            {CATEGORIES.map(c => (
+            {shownCategories.map(c => (
               <button
                 key={c}
                 type="button"
@@ -481,6 +488,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                 </p>
               )}
               {bipIndividual && <p className="text-xs text-amber-400 mt-1.5">BIP clients do not have individual sessions.</p>}
+              {newIndividual && <p className="text-xs text-amber-400 mt-1.5">{INDIVIDUAL_MOVED}</p>}
             </div>
 
             <div>
@@ -728,8 +736,8 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
             ))}
           </div>
         </div>
-        <div className="grid grid-cols-2 bg-slate-950 border border-slate-800 rounded-lg p-0.5 my-3">
-          {CATEGORIES.map(c => {
+        <div className={`grid ${shownCategories.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} bg-slate-950 border border-slate-800 rounded-lg p-0.5 my-3`}>
+          {shownCategories.map(c => {
             const count = openSessions.filter(o => o.category === c).length;
             return (
               <button key={c} type="button" disabled={reviewing} onClick={() => switchCategory(c)} title={reviewing ? 'Finish or go back from the review to switch' : undefined} className={`px-3 py-1 rounded text-xs font-semibold transition disabled:cursor-not-allowed ${panelCategory === c ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200 disabled:opacity-40'}`}>

@@ -3,6 +3,7 @@ import { Activity, Moon, PlusCircle, Sun } from 'lucide-react';
 import { addEmployee, getEmployees, getSystemLogs, updateEmployee } from '../../api';
 import type { SystemLog } from '../../api';
 import SessionPriceList from '../sessions/SessionPriceList';
+import ProgramFeeList from './ProgramFeeList';
 import { sortedUnique } from '../../utils/filters';
 import { CLIENT_SIDE_OPTIONS, COLOR_VISION_OPTIONS, DEFAULT_CUSTOM_COLORS, FONT_SIZE_OPTIONS, FONT_TYPE_OPTIONS, TABS_POSITION_OPTIONS, useTheme, type ClientSide, type ColorVision, type FontSize, type FontType, type StatusColor, type TabsPosition } from '../../hooks/useTheme';
 
@@ -259,6 +260,8 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
         </div>
         )}
       </div>
+
+      <ProgramFeeList userEmail={user.employeeemail} canEdit={isBusinessAdmin} onSuccess={onSuccess} />
 
       <SessionPriceList userEmail={user.employeeemail} canEdit={isBusinessAdmin} onSuccess={onSuccess} />
 

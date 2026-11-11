@@ -12,10 +12,10 @@ import ColumnPicker from '../ColumnPicker';
 import { useColumnLayout } from '../../hooks/useColumnLayout';
 import {
   PROGRAM_STATUSES, EDITABLE_PROGRAM_STATUSES, PRETRIAL_PROGRAM_TYPES, SO_PROGRAM_TYPES, STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase,
-  DEFAULT_CLIENT_FILTERS, SO_ATTENDANCE_LIMIT_MONTHS, isAttendanceOverdue, GROUP_TYPES_BY_PROGRAM,
+  DEFAULT_CLIENT_FILTERS, SO_ATTENDANCE_LIMIT_MONTHS, isAttendanceOverdue, isIndividualGroup, GROUP_TYPES_BY_PROGRAM,
 } from '../../utils/clients';
 import type { ClientFilters } from '../../utils/clients';
-import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
+import { SO_PHASES, SO_TREATMENT_FEES, bipTreatmentFee } from '../../utils/soPhases';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { takesPolygraphs } from '../../utils/polygraph';
 
@@ -43,7 +43,7 @@ const getEmptyNewClient = () => ({
   firstname: '', middlename: '', lastname: '', docnumber: '', supervisingagent: '',
   programstartdate: new Date().toLocaleDateString('en-CA'),
   // Program type starts blank and must be chosen; phase and treatment fee are filled in from it
-  programstatus: 'Active', phase: '', programtype: '', groupid: '',
+  programstatus: 'Active', phase: '', programtype: '', groupid: '', individualgroupid: '',
   address: '', city: '', county: '', state: '', zip: '',
   mainphone: '', altphone: '', emergencycontact: '', emergencycontactphone: '', comments: '',
   treatmentfee: 0, vouchers: '', pretrial: false
@@ -157,7 +157,11 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
     e.preventDefault();
     setSaving(true);
     try {
-      const res = await createClient({ ...newClient, groupid: newClient.groupid || null, createdBy: userEmail });
+      const res = await createClient({
+        ...newClient, groupid: newClient.groupid || null,
+        individualgroupid: SO_PROGRAM_TYPES.includes(newClient.programtype) ? newClient.individualgroupid || null : null,
+        createdBy: userEmail,
+      });
       onSuccess(res.message || 'Client added successfully!');
       onCreated({
         clientId: res.clientId,
@@ -415,7 +419,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                   ...newClient,
                   programtype: programType,
                   phase: SO_PROGRAM_TYPES.includes(programType) ? 'Phase 1 - Weekly' : programType === 'BIP' ? '0' : programType === 'Chaperon' ? 'Chaperon' : '',
-                  treatmentfee: programType === 'BIP' ? 35 : (STATE_FEE_PROGRAM_TYPES.includes(programType) ? SO_TREATMENT_FEES['Phase 1 - Weekly'] : 0),
+                  treatmentfee: programType === 'BIP' ? bipTreatmentFee() : (STATE_FEE_PROGRAM_TYPES.includes(programType) ? SO_TREATMENT_FEES['Phase 1 - Weekly'] : 0),
                   pretrial: PRETRIAL_PROGRAM_TYPES.includes(programType) && newClient.pretrial,
                 });
               }} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm">
@@ -462,6 +466,16 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                 ).map(g => <option key={g.groupid} value={g.groupid}>{g.groupname}</option>)}
               </select>
             </div>
+
+            {SO_PROGRAM_TYPES.includes(newClient.programtype) && (
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Individual Group</label>
+                <select value={newClient.individualgroupid} onChange={(e) => setNewClient({ ...newClient, individualgroupid: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm">
+                  <option value="">-- None --</option>
+                  {activeGroups.filter(g => isIndividualGroup(g.programtype)).map(g => <option key={g.groupid} value={g.groupid}>{g.groupname}</option>)}
+                </select>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs text-slate-400 mb-1">Treatment Fee</label>

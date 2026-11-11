@@ -6,7 +6,7 @@ import {
   Paperclip, UserCheck, ClipboardList, SlidersHorizontal, Lock
 } from 'lucide-react';
 import {
-  loginUser, logoutUser, setSessionEndedHandler, getClient, getClients, getGroups,
+  loginUser, logoutUser, setSessionEndedHandler, getClient, getClients, getGroups, getProgramFees,
   getPolygraphSlots,
   deletePolygraphSlot,
   getClientAttendance, getClientFinancials,
@@ -20,6 +20,7 @@ import type { CardBlock, ClientNote, ClosedGroupSession, OpenGroupSession, PolyF
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
+import { applyProgramFees } from './utils/soPhases';
 import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
 import AccountPaymentForm from './components/payments/AccountPaymentForm';
 import CustomChargeForm from './components/payments/CustomChargeForm';
@@ -273,6 +274,12 @@ export default function App() {
       setEmployees(empData);
     } catch (err) {
       console.error('Failed to load data', err);
+    }
+    // The Admin treatment fees (State SO phases, BIP) that new clients and phase changes take
+    try {
+      applyProgramFees(await getProgramFees());
+    } catch (err) {
+      console.error('Failed to load treatment fees', err);
     }
     // Loaded on its own so an agent directory problem never blocks the rest of the dashboard
     try {
@@ -630,7 +637,7 @@ export default function App() {
     { tab: 'home', icon: Home, label: 'Home' },
     { tab: 'clients', icon: Users, label: 'Client Roster', shortLabel: 'Clients' },
     { tab: 'attendance', icon: ClipboardCheck, label: 'Attendance & Sign-In', shortLabel: 'Attendance' },
-    { tab: 'sessions', icon: ClipboardList, label: 'Assessments & Individuals', shortLabel: 'Assessments' },
+    { tab: 'sessions', icon: ClipboardList, label: 'Assessments', shortLabel: 'Assessments' },
     { tab: 'callin', icon: PhoneCall, label: 'Call-In Log', shortLabel: 'Call-In' },
     { tab: 'groups', icon: Layers, label: 'Groups' },
     { tab: 'testing', icon: CheckSquare, label: 'Testing' },
@@ -786,7 +793,7 @@ export default function App() {
                 {[
                   { tab: 'clients', icon: Users, label: 'Client Roster', description: 'Search and manage client records, balances, and notes.' },
                   { tab: 'attendance', icon: ClipboardCheck, label: 'Attendance & Sign-In', description: 'Record group sessions and account payments.' },
-                  { tab: 'sessions', icon: ClipboardList, label: 'Assessments & Individuals', description: 'Record one-client assessments and individual sessions with payments.' },
+                  { tab: 'sessions', icon: ClipboardList, label: 'Assessments', description: 'Record one-client assessments with payments. Individual sessions are checked in on the Attendance tab.' },
                   { tab: 'callin', icon: PhoneCall, label: 'Call-In Log', description: 'Log client and group call-ins.' },
                   { tab: 'groups', icon: Layers, label: 'Groups', description: 'Manage group schedules, counselors, and rosters.' },
                   { tab: 'testing', icon: CheckSquare, label: 'Testing', description: 'Record and review test results.' },
