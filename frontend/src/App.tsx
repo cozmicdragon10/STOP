@@ -3,7 +3,7 @@ import {
   Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
   DollarSign, Calendar, Activity, PhoneCall, ShieldAlert, 
   Layers, CheckSquare, BarChart3, Settings, Trash2, RotateCcw, Home, History,
-  Paperclip, UserCheck, ClipboardList, SlidersHorizontal
+  Paperclip, UserCheck, ClipboardList, SlidersHorizontal, Lock
 } from 'lucide-react';
 import {
   loginUser, logoutUser, setSessionEndedHandler, getClient, getClients, getGroups,
@@ -1313,6 +1313,16 @@ export default function App() {
                             </p>
                             <p className="text-[0.6875rem] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${o.createdby}` : ''}</p>
                           </div>
+                          {o.entries.some(e => e.receiptPrinted) ? (
+                            // A printed attendance receipt locks the session: it can only be closed, not discarded
+                            <span
+                              className="text-slate-500 p-1 shrink-0"
+                              title="An attendance receipt was printed for a client in this session, so it can't be discarded. Close the group to save the attendance."
+                              aria-label={`Open check-in for ${o.groupname} has a printed receipt and can't be discarded`}
+                            >
+                              <Lock size={14} />
+                            </span>
+                          ) : (
                           <button
                             type="button"
                             onClick={async () => {
@@ -1330,6 +1340,7 @@ export default function App() {
                           >
                             <Trash2 size={14} />
                           </button>
+                          )}
                         </div>
                         <button
                           type="button"

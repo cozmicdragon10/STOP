@@ -60,6 +60,9 @@ export interface SessionEntry {
   balance: number;
   voucher: boolean;
   comments: string;
+  // An attendance receipt was printed for this client. The client can't be removed from the session, and the open group
+  // can't be discarded, so the attendance saved when the group closes matches the receipt (the server enforces this too).
+  receiptPrinted?: boolean;
 }
 
 export interface CheckInTerms {
@@ -425,8 +428,29 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     setSession(prev => prev.map(e => (e.client.clientid === clientId ? { ...e, ...patch } : e)));
   };
 
+  // A client with a printed attendance receipt stays on the sheet
   const removeEntry = (clientId: number) => {
-    setSession(prev => prev.filter(e => e.client.clientid !== clientId));
+    const entry = session.find(e => e.client.clientid === clientId);
+    if (entry?.receiptPrinted) {
+      notify.onError(`An attendance receipt was printed for ${entry.client.lastname}, ${entry.client.firstname}, so they can't be removed from this session.`);
+      return;
+    }
+    setSession(prev => prev.filter(e => e.client.clientid !== clientId || e.receiptPrinted));
+  };
+
+  // Called when an attendance receipt is printed: marks the client and saves the sheet as an open group right away, so the
+  // lock holds even if this screen is left before the group is saved or closed. The sheet stays on screen.
+  const markReceiptPrinted = async (clientId: number) => {
+    if (groupId === null) return;
+    const next = session.map(e => (e.client.clientid === clientId ? { ...e, receiptPrinted: true } : e));
+    setSession(next);
+    try {
+      await saveOpenGroup({ group: groupId, date: sessionDate ?? todayLocal(), sessionNumber, entries: next, createdBy, coveredBy });
+      notify.onOpenGroupsChanged?.();
+    } catch (err: unknown) {
+      const reason = err instanceof Error && err.message ? ` (${err.message})` : '';
+      notify.onError(`The receipt was printed, but this check-in could not be saved${reason}. Press Save for Later or close the group so the attendance matches the receipt.`);
+    }
   };
 
   const goToReview = () => {
@@ -506,6 +530,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     session,
     updateEntry,
     removeEntry,
+    markReceiptPrinted,
     submitSession,
     submitting,
     sessionDate,

@@ -4,6 +4,7 @@ const { chargedWithinMonths, feePeriodMonths, isMonthlyFeeClient, recordAttendan
 const { requireRole } = require('../lib/auth');
 const { coveringCounselorFor } = require('../lib/cashResponsibility');
 const { logClientChange } = require('../lib/changeLog');
+const { printedReceiptProblem } = require('../lib/printedReceipts');
 const { INDIVIDUAL_SESSION_TYPES } = require('../lib/sql');
 
 const router = express.Router();
@@ -110,9 +111,12 @@ router.post('/api/attendance/batch', async (req, res) => {
         // The covering counselor (lib/cashResponsibility.js) is kept too: the closer's pick if they are an
         // administrator, otherwise whatever was saved with the open sheet.
         const openedRes = await clientDb.query(
-            'DELETE FROM OpenGroupSessions WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3 RETURNING CreatedBy, CoveredBy',
+            'DELETE FROM OpenGroupSessions WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3 RETURNING CreatedBy, CoveredBy, Entries',
             [group, date, sessionNum]
         );
+        // Everyone handed a printed attendance receipt must be saved with the fee and payment on that receipt
+        const printedProblem = printedReceiptProblem(openedRes.rows[0]?.entries, entries, { closing: true });
+        if (printedProblem) throw Object.assign(new Error(printedProblem), { status: 409 });
         const openedBy = openedRes.rows[0]?.createdby || createdBy;
         const covering = await coveringCounselorFor(createdBy, coveredBy, openedRes.rows[0]?.coveredby ?? null);
         await clientDb.query(

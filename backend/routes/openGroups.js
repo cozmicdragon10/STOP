@@ -2,6 +2,7 @@ const express = require('express');
 const { logAction, pool } = require('../db');
 const { OPEN_GROUP_ADMIN_ROLES, openGroupViewer } = require('../lib/access');
 const { coveringCounselorFor } = require('../lib/cashResponsibility');
+const { keepPrintedMarks, printedEntries, printedReceiptProblem } = require('../lib/printedReceipts');
 
 const router = express.Router();
 
@@ -78,7 +79,7 @@ router.put('/api/open-groups', async (req, res) => {
         }
         const sessionNum = Number(sessionNumber) > 0 ? Math.floor(Number(sessionNumber)) : 1;
         const existing = await pool.query(
-            `SELECT o.CreatedBy, o.CoveredBy, g.Counselor FROM OpenGroupSessions o JOIN Groups g ON g.GroupId = o.GroupId
+            `SELECT o.CreatedBy, o.CoveredBy, o.Entries, g.Counselor FROM OpenGroupSessions o JOIN Groups g ON g.GroupId = o.GroupId
              WHERE o.GroupId = $1 AND o.SessionDate = $2 AND o.SessionNumber = $3`,
             [group, date, sessionNum]
         );
@@ -86,14 +87,24 @@ router.put('/api/open-groups', async (req, res) => {
             return res.status(403).json({ error: 'This group already has an open check-in for this session, started by another counselor. Only that counselor, the group\'s counselor, or an administrator can change it.' });
         }
         const covering = await coveringCounselorFor(createdBy, coveredBy, existing.rows[0]?.coveredby ?? null);
+        // Clients given a printed attendance receipt stay on the sheet with the fee and payment that were printed. The
+        // check runs in the upsert itself (WHERE on the update) so a save from another screen in between can't slip past it.
+        const savedEntries = existing.rows[0]?.entries ?? [];
+        const problem = printedReceiptProblem(savedEntries, entries);
+        if (problem) return res.status(409).json({ error: problem });
+        const toSave = keepPrintedMarks(savedEntries, entries);
         const saved = await pool.query(
             `INSERT INTO OpenGroupSessions (GroupId, SessionDate, SessionNumber, Entries, CreatedBy, CoveredBy, UpdatedOn)
              VALUES ($1, $2, $3, $4, $5, $6, NOW())
              ON CONFLICT (GroupId, SessionDate, SessionNumber)
              DO UPDATE SET Entries = EXCLUDED.Entries, CoveredBy = EXCLUDED.CoveredBy, UpdatedOn = NOW()
+             WHERE OpenGroupSessions.Entries IS NOT DISTINCT FROM $7::jsonb
              RETURNING OpenSessionId`,
-            [group, date, sessionNum, JSON.stringify(entries), createdBy, covering]
+            [group, date, sessionNum, JSON.stringify(toSave), createdBy, covering, existing.rows[0] ? JSON.stringify(savedEntries) : null]
         );
+        if (saved.rows.length === 0) {
+            return res.status(409).json({ error: 'This check-in was just changed on another screen. Reopen it from Open Groups and try again.' });
+        }
         const result = await pool.query(
             `SELECT ${OPEN_GROUP_COLUMNS} FROM OpenGroupSessions o
              JOIN Groups g ON g.GroupId = o.GroupId WHERE o.OpenSessionId = $1`,
@@ -111,13 +122,27 @@ router.delete('/api/open-groups/:id', async (req, res) => {
         const { id } = req.params;
         const { removedBy } = req.body || {};
         const existing = await pool.query(
-            'SELECT o.CreatedBy, g.Counselor FROM OpenGroupSessions o JOIN Groups g ON g.GroupId = o.GroupId WHERE o.OpenSessionId = $1',
+            'SELECT o.CreatedBy, o.Entries, g.Counselor FROM OpenGroupSessions o JOIN Groups g ON g.GroupId = o.GroupId WHERE o.OpenSessionId = $1',
             [id]
         );
         if (existing.rows[0] && !canSeeOpenGroup(await openGroupViewer(removedBy), existing.rows[0])) {
             return res.status(403).json({ error: 'Only the counselor who opened this check-in, the group\'s counselor, or an administrator can discard it.' });
         }
-        await pool.query('DELETE FROM OpenGroupSessions WHERE OpenSessionId = $1', [id]);
+        // A session with a printed attendance receipt can only be closed. The check is repeated in the DELETE so a receipt
+        // printed on another screen just now still blocks it.
+        const printedReceiptError = 'An attendance receipt was printed for a client in this session, so it can\'t be discarded. Close the group to save the attendance.';
+        if (existing.rows[0] && printedEntries(existing.rows[0].entries).length > 0) {
+            return res.status(409).json({ error: printedReceiptError });
+        }
+        const deleted = await pool.query(
+            `DELETE FROM OpenGroupSessions WHERE OpenSessionId = $1
+               AND NOT jsonb_path_exists(Entries, '$[*] ? (@.receiptPrinted == true)')
+             RETURNING OpenSessionId`,
+            [id]
+        );
+        if (existing.rows[0] && deleted.rows.length === 0) {
+            return res.status(409).json({ error: printedReceiptError });
+        }
         if (removedBy) {
             await logAction(removedBy, 'Group Check-In Discarded', `Discarded open check-in ID ${id}`);
         }

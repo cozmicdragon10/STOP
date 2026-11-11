@@ -1,4 +1,4 @@
-import { Save, Search, Trash2, UserRound } from 'lucide-react';
+import { Lock, Save, Search, Trash2, UserRound } from 'lucide-react';
 import type { ClientRecord, GroupRecord, GroupCheckInState } from '../../hooks/useGroupCheckIn';
 import { formatBalance } from '../../utils/balance';
 import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
@@ -166,14 +166,24 @@ export default function CheckInStep({ group, wf, onOpenSearch, onOpenClient }: P
             {wf.session.map(e => (
               <li key={e.client.clientid} className="flex justify-between items-center gap-3 px-3 py-2 bg-slate-950 text-sm">
                 <span className="text-white truncate">{e.client.lastname}, {e.client.firstname}</span>
-                <button
-                  type="button"
-                  onClick={() => wf.removeEntry(e.client.clientid)}
-                  className="text-slate-400 hover:text-red-400 p-1 rounded"
-                  aria-label={`Remove ${e.client.firstname} ${e.client.lastname} from sheet`}
-                >
-                  <Trash2 size={14} />
-                </button>
+                {e.receiptPrinted ? (
+                  <span
+                    className="text-slate-400 p-1"
+                    title="An attendance receipt was printed, so this client can't be removed from the session."
+                    aria-label="Receipt printed; can't be removed from the session"
+                  >
+                    <Lock size={14} />
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => wf.removeEntry(e.client.clientid)}
+                    className="text-slate-400 hover:text-red-400 p-1 rounded"
+                    aria-label={`Remove ${e.client.firstname} ${e.client.lastname} from sheet`}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </li>
             ))}
           </ul>

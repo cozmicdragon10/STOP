@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ArrowLeft, Printer, Save, Trash2 } from 'lucide-react';
+import { ArrowLeft, Lock, Printer, Save, Trash2 } from 'lucide-react';
 import { printAttendanceReceipt } from '../../utils/receipt';
 import { todayLocal, validateSession } from '../../hooks/useGroupCheckIn';
 import type { ClientRecord, GroupCheckInState, GroupRecord, SessionEntry } from '../../hooks/useGroupCheckIn';
@@ -55,14 +55,24 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint 
           >
             Make Payment
           </button>
-          <button
-            type="button"
-            onClick={onRemove}
-            className="text-slate-400 hover:text-red-400 p-1 rounded"
-            aria-label={`Remove ${client.firstname} ${client.lastname} from session`}
-          >
-            <Trash2 size={14} />
-          </button>
+          {entry.receiptPrinted ? (
+            <span
+              className="text-slate-400 p-1"
+              title="An attendance receipt was printed, so this client can't be removed from the session."
+              aria-label="Receipt printed; can't be removed from the session"
+            >
+              <Lock size={14} />
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="text-slate-400 hover:text-red-400 p-1 rounded"
+              aria-label={`Remove ${client.firstname} ${client.lastname} from session`}
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -135,7 +145,8 @@ export default function ReviewStep({ group, wf, createdBy, canPickCover, onSucce
             onChange={patch => wf.updateEntry(entry.client.clientid, patch)}
             onRemove={() => wf.removeEntry(entry.client.clientid)}
             onMakePayment={() => setPaymentClient(entry.client)}
-            onPrint={afterClose => printAttendanceReceipt({
+            onPrint={afterClose => {
+              printAttendanceReceipt({
               clientName: `${entry.client.lastname}, ${entry.client.firstname}`,
               docNumber: entry.client.docnumber || '',
               sessionKind: 'Group',
@@ -150,7 +161,10 @@ export default function ReviewStep({ group, wf, createdBy, canPickCover, onSucce
               balanceBefore: updatedBalances[entry.client.clientid] ?? entry.balance,
               balanceAfter: afterClose,
               clientId: entry.client.clientid,
-            }, onError)}
+              }, onError);
+              // The receipt is out: keep this client on the session as printed
+              wf.markReceiptPrinted(entry.client.clientid);
+            }}
           />
         ))}
       </div>
