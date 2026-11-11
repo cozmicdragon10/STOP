@@ -4,6 +4,7 @@ import { submitAccountPayment } from '../../api';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { printReceipt, type Receipt } from '../../utils/receipt';
 import { takesPolygraphs } from '../../utils/polygraph';
+import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import CardPaymentFields from './CardPaymentFields';
 import { emptyCardBilling, type CardBilling } from './cardBilling';
 
@@ -121,14 +122,15 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
                 <button
                   key={m}
                   type="button"
-                  disabled={receipt !== null}
+                  disabled={receipt !== null || (m === 'Credit Card' && cardBlocked(client))}
                   onClick={() => setMethod(m)}
-                  className={`border rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50 ${method === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}
+                  className={`border rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${method === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}
                 >
                   {m}
                 </button>
               ))}
             </div>
+            {cardBlocked(client) && <p className="text-xs text-amber-400 mt-1.5">{cardBlockedText(client)}</p>}
           </div>
 
           <div>

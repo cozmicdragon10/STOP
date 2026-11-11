@@ -4,6 +4,7 @@ import { submitAccountPayment } from '../../api';
 import { FIRST_CHECKIN_MAX_OWED, formatBalance } from '../../utils/balance';
 import { feePeriodMonths } from '../../utils/soPhases';
 import { printReceipt, type Receipt } from '../../utils/receipt';
+import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import CardPaymentFields from '../payments/CardPaymentFields';
 import { emptyCardBilling, type CardBilling } from '../payments/cardBilling';
 
@@ -186,6 +187,9 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
               <p className="font-semibold text-white truncate">{c.lastname}, {c.firstname}</p>
               <p className="text-xs text-slate-400 whitespace-nowrap">DOC # {c.docnumber || '—'} · Balance {formatBalance(c.accountbalance)}</p>
             </div>
+            {cardBlocked(c) && (
+              <p className="mb-3 text-xs text-amber-400">{cardBlockedText(c)}</p>
+            )}
             {stillOwed > 0 && (
               <div className="mb-3 bg-red-500/10 border border-red-500/40 rounded-lg p-3 text-xs text-red-300">
                 This is {c.firstname}'s first group check-in this month. The client must pay their existing balance down to{' '}
@@ -205,9 +209,10 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
                     <button
                       key={method}
                       type="button"
-                      disabled={locked}
+                      disabled={locked || (method === 'Credit Card' && cardBlocked(c))}
                       onClick={() => updateRow(c.clientid, { paymentMethod: method })}
-                      className={`border rounded-lg py-2 text-xs font-semibold transition disabled:opacity-50 ${row.paymentMethod === method ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'}`}
+                      title={method === 'Credit Card' && cardBlocked(c) ? cardBlockedText(c) : undefined}
+                      className={`border rounded-lg py-2 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${row.paymentMethod === method ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'}`}
                     >
                       {method}
                     </button>

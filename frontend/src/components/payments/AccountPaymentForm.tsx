@@ -4,6 +4,7 @@ import ClientPicker from '../ClientPicker';
 import CardPaymentFields from './CardPaymentFields';
 import { emptyCardBilling } from './cardBilling';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
+import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import { formatMoney } from '../../utils/ledger';
 import { printReceipt, type Receipt } from '../../utils/receipt';
 
@@ -32,6 +33,8 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
 
   const amount = Number(amountInput) || 0;
   const client = clients.find(c => c.clientid === Number(clientId));
+  // A client blocked from card payments pays cash, whatever was picked for the client before
+  const payWith = cardBlocked(client) ? 'Cash' : paymentMethod;
   const currentBalance = Number(client?.accountbalance || 0);
   const balanceAfter = currentBalance - amount;
 
@@ -41,13 +44,13 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
     setSaving(true);
     setLastPayment(null);
     try {
-      const res = await submitAccountPayment({ client: Number(clientId), amount, comments, createdBy: userEmail, paymentMethod });
-      onSuccess(`${paymentMethod} payment recorded! Updated Balance: ${formatBalance(res.newBalance)}`);
+      const res = await submitAccountPayment({ client: Number(clientId), amount, comments, createdBy: userEmail, paymentMethod: payWith });
+      onSuccess(`${payWith} payment recorded! Updated Balance: ${formatBalance(res.newBalance)}`);
       setLastPayment({
         clientName: client ? `${client.lastname}, ${client.firstname}` : `Client #${clientId}`,
         docNumber: client?.docnumber || '',
         amount,
-        method: paymentMethod,
+        method: payWith,
         notes: comments,
         newBalance: Number(res.newBalance),
         processedBy: userEmail,
@@ -78,15 +81,17 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
                 key={method}
                 type="button"
                 onClick={() => setPaymentMethod(method)}
-                className={`border rounded-lg py-2.5 text-sm font-semibold transition ${paymentMethod === method ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}
+                disabled={method === 'Credit Card' && cardBlocked(client)}
+                className={`border rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-40 disabled:cursor-not-allowed ${payWith === method ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}
               >
                 {method}
               </button>
             ))}
           </div>
+          {cardBlocked(client) && <p className="text-xs text-amber-400 mt-1.5">{cardBlockedText(client)}</p>}
         </div>
 
-        {paymentMethod === 'Credit Card' && (
+        {payWith === 'Credit Card' && (
           <CardPaymentFields value={cardBilling} onChange={setCardBilling} />
         )}
 

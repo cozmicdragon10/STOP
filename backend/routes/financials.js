@@ -1,6 +1,7 @@
 const express = require('express');
 const { logAction, pool } = require('../db');
 const { activeRoleFor } = require('../lib/access');
+const { assertCardAllowed } = require('../lib/cardBlock');
 const { logClientChange } = require('../lib/changeLog');
 const { polyVoucherMax, changePolyFeePaid, countPolyFeeFill, splitPolyPaidChange, voucherChangeText } = require('../lib/poly');
 
@@ -22,6 +23,8 @@ router.post('/api/financials/payment', async (req, res) => {
         }
 
         const clientRes = await clientDb.query('SELECT AccountBalance, PolyFeePaid, PolyFee, PolyFeeVoucher, Phase FROM Clients WHERE ClientId = $1 FOR UPDATE', [client]);
+        // Read after the row lock, so a block set a moment ago is seen
+        if (paymentMethod === 'Credit Card') await assertCardAllowed(clientDb, client);
         const oldBalance = Number(clientRes.rows[0].accountbalance || 0);
         const payAmount = Number(amount || 0);
         const comment = comments || `Direct account payment processed by ${createdBy}`;
@@ -67,7 +70,7 @@ router.post('/api/financials/payment', async (req, res) => {
         res.status(201).json({ success: true, newBalance, polyFeePaid: newPolyPaid, polyFeeVoucher: newPolyVoucher, polyApplied: polyAmount, accountApplied: accountAmount });
     } catch (error) {
         await clientDb.query('ROLLBACK');
-        res.status(500).json({ error: error.message });
+        res.status(error.status || 500).json({ error: error.message });
     } finally {
         clientDb.release();
     }

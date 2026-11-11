@@ -16,7 +16,7 @@ import {
   getEmployees, fetchClientFeeOverride, fetchPolyFeeOverride,
   getOpenGroups, deleteOpenGroup, getClosedGroups, getSupervisingAgents
 } from './api';
-import type { ClientNote, ClosedGroupSession, OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
+import type { CardBlock, ClientNote, ClosedGroupSession, OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { formatBalance, toDisplayBalance } from './utils/balance';
@@ -386,6 +386,14 @@ export default function App() {
     setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, nopolyrequired: saved } : c));
     setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, nopolyrequired: saved } : c));
     setSuccessMsg(`No Poly Required ${saved ? 'checked' : 'unchecked'} for ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}.`);
+    setClientNotes(await getClientNotes(clientid));
+  };
+
+  // Card payments were blocked or allowed on the Ledger tab: the account and roster take the new fields (so every payment
+  // screen sees them), and Case Notes reloads for the note the server added
+  const handleCardBlockChanged = async (clientid: number, changes: CardBlock) => {
+    setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, ...changes } : c));
+    setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, ...changes } : c));
     setClientNotes(await getClientNotes(clientid));
   };
 
@@ -892,6 +900,15 @@ export default function App() {
                     </span>
                     {/* Ticked on the Information tab; only Federal SO and Fed Drug Test clients can be pretrial */}
                     {selectedClientDetail.pretrial && <span className="-ml-1 text-sm font-semibold text-amber-300">(Pretrial)</span>}
+                    {/* Set on the Ledger tab by a Business Administrator */}
+                    {selectedClientDetail.cardpaymentsblocked && (
+                      <span
+                        className="text-xs font-semibold px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 text-amber-300"
+                        title={`Credit card payments blocked${selectedClientDetail.cardblockreason ? `: ${selectedClientDetail.cardblockreason}` : ''}`}
+                      >
+                        Cash Only
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-slate-400 mt-1">DOC #: <span className="text-slate-200 font-mono">{selectedClientDetail.docnumber}</span> | Program: <span className="text-blue-400 font-semibold">{selectedClientDetail.programtype || 'State SO'}</span> | Agent: {selectedClientDetail.supervisingagent}</p>
                 </div>
@@ -1109,6 +1126,7 @@ export default function App() {
                   onPaymentChanged={handleLedgerPaymentChanged}
                   onSuccess={setSuccessMsg}
                   onError={setError}
+                  onCardBlockChanged={handleCardBlockChanged}
                 />
               )}
 

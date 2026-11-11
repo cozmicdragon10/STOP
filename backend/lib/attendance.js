@@ -1,3 +1,4 @@
+const { assertCardAllowed } = require('./cardBlock');
 const { LAST_POLY_RESULT_SQL, POLY_VOUCHER_EARNING_RESULTS, polyVoucherMax } = require('./poly');
 const {
     BIP_CHECKIN_BLOCK, FEE_ONCE_PER_PERIOD_PROGRAMS, FEE_PERIOD_MONTHS, GROUP_ATTENDANCE, INDIVIDUAL_SESSION_TYPES, MONTHLY_FEE_PHASES,
@@ -126,6 +127,7 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
     if (paidNum > 0 && !['Cash', 'Credit Card'].includes(paymentMethod)) {
         throw new Error(`Choose a payment method for the payment on client ${client}: Cash or Credit Card.`);
     }
+    if (paidNum > 0 && paymentMethod === 'Credit Card') await assertCardAllowed(db, client);
 
     const attRes = await db.query(
         `INSERT INTO Attendance (Client, "Group", Date, Paid, GroupFee, AccountPaid, AccountTotal, VoucherUsed, Type, Comments, CreatedBy, PaymentMethod, SessionNumber)

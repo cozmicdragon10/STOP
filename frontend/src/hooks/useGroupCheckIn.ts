@@ -33,6 +33,9 @@ export interface ClientRecord {
   polyfee?: number | string | null;
   polyfeepaid?: number | string | null;
   polyfeevoucher?: number | string | null;
+  // Card payments blocked by a Business Administrator: cash only (utils/cardBlock.ts)
+  cardpaymentsblocked?: boolean | null;
+  cardblockreason?: string | null;
 }
 
 export interface GroupRecord {

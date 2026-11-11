@@ -11,6 +11,7 @@ import CardPaymentFields from '../payments/CardPaymentFields';
 import { emptyCardBilling, type CardBilling } from '../payments/cardBilling';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
+import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import { printAttendanceReceipt, printReceipt, type Receipt } from '../../utils/receipt';
 
 interface TabClient {
@@ -23,6 +24,9 @@ interface TabClient {
   programstatus?: string | null;
   // The counselor the client is waiting to be assessed by
   assessor?: string | null;
+  // Card payments blocked by a Business Administrator: cash only
+  cardpaymentsblocked?: boolean | null;
+  cardblockreason?: string | null;
 }
 
 interface Employee {
@@ -190,7 +194,9 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const bipIndividual = form.category === 'Individual' && client?.programtype === 'BIP';
   // Assessments are paid in cash only (the server checks too)
   const cashOnly = form.category === 'Assessment';
-  const paymentMethod: PaymentMethod = cashOnly ? 'Cash' : form.paymentMethod;
+  // A client blocked from card payments pays cash, even if Credit Card was picked before they were chosen
+  const cardBlockedClient = cardBlocked(client);
+  const paymentMethod: PaymentMethod = cashOnly || cardBlockedClient ? 'Cash' : form.paymentMethod;
   // A card amount only counts once it is processed, so it must be processed or cleared before saving or closing
   const cardPending = paymentMethod === 'Credit Card' && !form.receipt && enteredPayment > 0;
   // Process Payment applies an individual session's payment (cash or card) to the account right away
@@ -417,13 +423,14 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
       <label className={label}>Payment Method</label>
       <div className="grid grid-cols-2 gap-3">
         {(['Cash', 'Credit Card'] as const).map(m => (
-          <button key={m} type="button" disabled={!!form.receipt} onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50 ${form.paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}>{m}</button>
+          <button key={m} type="button" disabled={!!form.receipt || (m === 'Credit Card' && cardBlockedClient)} title={m === 'Credit Card' && cardBlockedClient ? cardBlockedText(client) : undefined} onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50 ${paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}>{m}</button>
         ))}
       </div>
-      {form.paymentMethod === 'Cash' && !reviewing && (
+      {cardBlockedClient && <p className="text-xs text-amber-400 mt-1.5">{cardBlockedText(client)}</p>}
+      {paymentMethod === 'Cash' && !reviewing && (
         <p className="text-xs text-slate-500 mt-2">Saving as open applies the cash payment to the account right away; the fee is charged when the session is closed.</p>
       )}
-      {form.paymentMethod === 'Credit Card' && (
+      {paymentMethod === 'Credit Card' && (
         <div className="mt-3 space-y-3">
           <p className="text-xs text-slate-500">Card payments are applied to the account as soon as they are processed, even if this session isn't closed.</p>
           <CardPaymentFields value={form.card} onChange={card => set({ card })} />
@@ -594,11 +601,12 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                     Payment Method
                     <div className="grid grid-cols-2 gap-1.5">
                       {(['Cash', 'Credit Card'] as const).map(m => (
-                        <button key={m} type="button" disabled={!!form.receipt} onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-xs font-semibold transition disabled:opacity-50 ${form.paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'}`}>{m}</button>
+                        <button key={m} type="button" disabled={!!form.receipt || (m === 'Credit Card' && cardBlockedClient)} title={m === 'Credit Card' && cardBlockedClient ? cardBlockedText(client) : undefined} onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-xs font-semibold transition disabled:opacity-50 ${paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'}`}>{m}</button>
                       ))}
                     </div>
                   </div>
                 </div>
+                {cardBlockedClient && <p className="mt-2 text-xs text-amber-400">{cardBlockedText(client)}</p>}
 
                 <div className="mt-3 bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs space-y-1.5">
                   <div className="flex justify-between"><span className="text-slate-400">Current balance</span><span className="text-white">{formatBalance(balanceBefore)}</span></div>
@@ -611,7 +619,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                   <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="font-semibold text-slate-300">Balance after close</span><span className="font-bold text-white">{formatBalance(balanceAfter)}</span></div>
                 </div>
 
-                {form.paymentMethod === 'Credit Card' && !form.receipt && (
+                {paymentMethod === 'Credit Card' && !form.receipt && (
                   <div className="mt-3">
                     <CardPaymentFields value={form.card} onChange={card => set({ card })} />
                   </div>
@@ -621,7 +629,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                 <p className="mt-3 text-xs text-slate-500">
                   {form.receipt
                     ? `${form.receipt.method} payment processed and applied to the account. Closing charges the fee.`
-                    : form.paymentMethod === 'Credit Card'
+                    : paymentMethod === 'Credit Card'
                       ? 'Card payments must be processed before closing. They are applied to the account right away, even if this session isn\'t closed.'
                       : 'Process Payment applies the cash to the account now and gives a receipt. A cash amount left unprocessed is recorded when the session closes.'}
                 </p>

@@ -90,7 +90,14 @@ export interface ClientColumns {
     buspasses: number;
     // Bus passes set at the start of each calendar month, replacing what's left (0 = no refill)
     buspassrefill: number;
+    // Card payments blocked by a Business Administrator (e.g. after a dispute): cash only. See utils/cardBlock.ts.
+    cardpaymentsblocked: boolean;
+    cardblockreason: string | null;
+    cardblockedby: string | null;
+    cardblockedon: string | null;
 }
+
+export type CardBlock = Pick<ClientColumns, 'cardpaymentsblocked' | 'cardblockreason' | 'cardblockedby' | 'cardblockedon'>;
 
 // A client on the roster, with its group and the check-in facts the frontend needs
 export interface Client extends Omit<ClientColumns, 'programtype'> {
@@ -343,6 +350,20 @@ export async function setClientNoPolyRequired(clientId: number, noPolyRequired: 
         throw new Error(body.error || 'Failed to update No Poly Required.');
     }
     return body.noPolyRequired;
+}
+
+// Business Administrators only (the server checks the role): block or allow card payments for a client. Blocking needs a reason.
+export async function setClientCardPayments(clientId: number, blocked: boolean, reason: string): Promise<CardBlock> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/card-payments`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocked, reason }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+        throw new Error(body.error || 'Failed to change card payments for this client.');
+    }
+    return body;
 }
 
 // Grants one of a federal client's bus passes; returns how many are left and the Bus Pass case note it added

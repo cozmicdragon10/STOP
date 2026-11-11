@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useUnsavedForm } from '../../hooks/useUnsavedForm';
-import { AlertCircle, Pencil, Printer, SlidersHorizontal, X } from 'lucide-react';
+import { AlertCircle, Ban, Pencil, Printer, SlidersHorizontal, X } from 'lucide-react';
 import { printReceipt } from '../../utils/receipt';
-import { adjustCashPayment, fetchPolyFeeOverride, getClientAttendance, getClientFinancials, recordCardPaymentAction } from '../../api';
-import type { CardPaymentAction, PaymentChangeResult, PolyFeeOverride } from '../../api';
+import { adjustCashPayment, fetchPolyFeeOverride, getClientAttendance, getClientFinancials, recordCardPaymentAction, setClientCardPayments } from '../../api';
+import type { CardBlock, CardPaymentAction, PaymentChangeResult, PolyFeeOverride } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
 import MonthHeader from './MonthHeader';
 import { EMPTY_LEDGER_FILTERS, groupByMonth, sortedUnique, toggleInSet } from '../../utils/filters';
@@ -39,6 +39,8 @@ interface Props {
   onSuccess: (message: string) => void;
   // For reprinted payment receipts (pop-ups blocked)
   onError: (message: string) => void;
+  // Card payments were blocked or allowed again (Business Administrators); the client record takes these fields
+  onCardBlockChanged: (clientId: number, changes: CardBlock) => void;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -49,8 +51,33 @@ const ACTION_SUBMIT_LABELS: Record<PaymentActionKind, string> = { adjust: 'Save 
 
 // The Financial Ledger tab of a client's account: entries by month, and (Business Administrators) corrections to a
 // payment: adjust a cash payment, or refund, dispute, and settle a dispute on a card payment
-export default function ClientLedger({ client, role, userEmail, financials, bookedSlot, canViewSlot, onViewSlot, onPaymentChanged, onSuccess, onError }: Props) {
+export default function ClientLedger({ client, role, userEmail, financials, bookedSlot, canViewSlot, onViewSlot, onPaymentChanged, onSuccess, onError, onCardBlockChanged }: Props) {
   const employeeLabel = useEmployeeLabel();
+  // Blocking card payments: the reason being typed; null when the form is closed
+  const [blockReason, setBlockReason] = useState<string | null>(null);
+  const [blockSaving, setBlockSaving] = useState(false);
+  // Recording a dispute also blocks card payments unless unchecked
+  const [blockWithDispute, setBlockWithDispute] = useState(true);
+  useUnsavedForm(!!blockReason?.trim());
+
+  const changeCardBlock = async (blocked: boolean, reason: string) => {
+    const clientid = client.clientid;
+    setBlockSaving(true);
+    try {
+      const saved = await setClientCardPayments(clientid, blocked, reason);
+      onCardBlockChanged(clientid, saved);
+      setBlockReason(null);
+      onSuccess(blocked
+        ? `Credit card payments blocked for ${client.firstname} ${client.lastname}. Only cash will be taken.`
+        : `Credit card payments allowed again for ${client.firstname} ${client.lastname}.`);
+      return true;
+    } catch (err) {
+      onError(err instanceof Error && err.message ? err.message : 'Could not change card payments for this client.');
+      return false;
+    } finally {
+      setBlockSaving(false);
+    }
+  };
 
   // Reprints the receipt for a past payment, marked as a copy: the amount as it stands now (after any adjustment), what
   // it went to, and the balance saved with it. Refunds and disputes on a card payment are noted under it.
@@ -142,6 +169,11 @@ export default function ClientLedger({ client, role, userEmail, financials, book
         + (res.vouchersAdded ? ' Poly fee paid in full; vouchers filled.' : '')
         + (res.owedOnAccount ? ` ${formatMoney(res.owedOnAccount)} more than was paid on the poly fee is owed on the account.` : '')
         + (res.attendanceUpdated ? ' The check-in it was taken at and the Group Income Report were updated too.' : ''));
+      // A disputed card payment usually means no more card payments from this client
+      if (kind === 'dispute' && blockWithDispute && !client.cardpaymentsblocked) {
+        const disputed = financials.find(f => f.transactionid === id);
+        await changeCardBlock(true, `Card payment of ${formatMoney(Number(disputed?.amount ?? amount))}${disputed ? ` on ${new Date(disputed.date).toLocaleDateString()}` : ''} disputed. ${reason}`);
+      }
       if (res.scheduledPolygraph) {
         const p = res.scheduledPolygraph;
         setScheduledPolyNotice({
@@ -160,6 +192,62 @@ export default function ClientLedger({ client, role, userEmail, financials, book
 
   return (
     <div className="space-y-3">
+      {/* Card payments: everyone sees a block; Business Administrators can set or lift it */}
+      {client.cardpaymentsblocked ? (
+        <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-3 text-sm text-amber-300 flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="font-semibold"><Ban size={14} className="inline mr-1.5 -mt-0.5" />Credit card payments blocked: cash only</p>
+            {client.cardblockreason && <p className="text-xs text-amber-200/80 mt-0.5">{client.cardblockreason}</p>}
+            <p className="text-xs text-amber-200/60 mt-0.5">
+              {client.cardblockedby ? `Blocked by ${employeeLabel(client.cardblockedby)}` : 'Blocked'}
+              {client.cardblockedon ? ` on ${new Date(client.cardblockedon).toLocaleDateString()}` : ''}
+            </p>
+          </div>
+          {isAdmin && (
+            <button
+              type="button"
+              disabled={blockSaving}
+              onClick={() => {
+                if (window.confirm(`Allow ${client.firstname} ${client.lastname} to pay by credit card again?`)) changeCardBlock(false, '');
+              }}
+              className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border border-amber-500/40 hover:bg-amber-500/10 disabled:opacity-50"
+            >
+              Allow Card Payments
+            </button>
+          )}
+        </div>
+      ) : isAdmin && (
+        blockReason === null ? (
+          <div className="flex justify-end">
+            <button type="button" onClick={() => setBlockReason('')} className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-amber-400">
+              <Ban size={12} /> Block Card Payments
+            </button>
+          </div>
+        ) : (
+          <form
+            onSubmit={e => { e.preventDefault(); if (blockReason.trim()) changeCardBlock(true, blockReason.trim()); }}
+            className="bg-slate-950 border border-amber-500/40 rounded-xl p-3 space-y-2"
+          >
+            <p className="text-xs font-semibold text-amber-300">Block credit card payments</p>
+            <p className="text-xs text-slate-400">The client will only be able to pay cash, on every payment screen, until a Business Administrator allows cards again. This is noted on the change log and case notes.</p>
+            <input
+              type="text"
+              value={blockReason}
+              onChange={e => setBlockReason(e.target.value)}
+              placeholder="Reason, e.g. card payment of $180.00 on 11/4/2026 disputed"
+              autoFocus
+              required
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-sm"
+            />
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setBlockReason(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Cancel</button>
+              <button type="submit" disabled={blockSaving || !blockReason.trim()} className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">
+                Block Card Payments
+              </button>
+            </div>
+          </form>
+        )
+      )}
       {scheduledPolyNotice && (
         <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-3 text-sm text-amber-300 flex items-start justify-between gap-3">
           <p><AlertCircle size={15} className="inline mr-1.5 -mt-0.5" />{scheduledPolyNotice.text}</p>
@@ -243,6 +331,7 @@ export default function ClientLedger({ client, role, userEmail, financials, book
               const startAction = (kind: PaymentActionKind, amount: number) => {
                 setPaymentAction({ id: fin.transactionid, kind, amount: amount > 0 ? amount.toFixed(2) : '', reason: '' });
                 setPaymentActionError('');
+                setBlockWithDispute(true);
               };
               const linkClass = 'inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white';
               const balance = ledgerBalanceChange(fin);
@@ -388,6 +477,12 @@ export default function ClientLedger({ client, role, userEmail, financials, book
                               <button type="button" onClick={() => onViewSlot(bookedSlot.slotid)} className="shrink-0 underline hover:text-white">View Slot</button>
                             )}
                           </div>
+                        )}
+                        {action.kind === 'dispute' && !client.cardpaymentsblocked && (
+                          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                            <input type="checkbox" checked={blockWithDispute} onChange={e => setBlockWithDispute(e.target.checked)} className="accent-amber-500" />
+                            Also block credit card payments for this client (cash only from now on)
+                          </label>
                         )}
                         {paymentActionError && <p className="text-xs text-red-400">{paymentActionError}</p>}
                         <div className="flex justify-end gap-2">

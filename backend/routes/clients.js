@@ -107,6 +107,56 @@ router.put('/api/clients/:id/no-poly-required', async (req, res) => {
     }
 });
 
+// Card payments blocked (Business Administrators only): stops the client paying by credit card, e.g. after a disputed
+// card payment. Blocking needs a reason. Each change goes on the change log and the client's case notes.
+router.put('/api/clients/:id/card-payments', requireRole('Business Administrator'), async (req, res) => {
+    const db = await pool.connect();
+    try {
+        const { id } = req.params;
+        const { blocked, user } = req.body;
+        const reason = String(req.body.reason || '').trim();
+        if (typeof blocked !== 'boolean') return res.status(400).json({ error: 'blocked must be true or false.' });
+        if (blocked && !reason) return res.status(400).json({ error: 'Enter why card payments are being blocked.' });
+        await db.query('BEGIN');
+        const before = await db.query('SELECT CardPaymentsBlocked, CardBlockReason FROM Clients WHERE ClientId = $1 FOR UPDATE', [id]);
+        if (before.rows.length === 0) {
+            await db.query('ROLLBACK');
+            return res.status(404).json({ error: 'Client not found.' });
+        }
+        const result = await db.query(
+            `UPDATE Clients SET CardPaymentsBlocked = $1,
+                 CardBlockReason = CASE WHEN $1 THEN $2 ELSE NULL END,
+                 CardBlockedBy = CASE WHEN $1 THEN $3 ELSE NULL END,
+                 CardBlockedOn = CASE WHEN $1 THEN NOW() ELSE NULL END
+             WHERE ClientId = $4
+             RETURNING CardPaymentsBlocked, CardBlockReason, CardBlockedBy, CardBlockedOn`,
+            [blocked, reason || null, user, id]
+        );
+        const was = before.rows[0];
+        if (was.cardpaymentsblocked !== blocked || (blocked && was.cardblockreason !== reason)) {
+            await logClientChange(db, {
+                clientId: id, changedBy: user, changeType: 'Card Payments',
+                oldValue: was.cardpaymentsblocked ? 'Blocked' : 'Allowed', newValue: blocked ? 'Blocked' : 'Allowed',
+                details: reason || null,
+            });
+            await db.query(
+                `INSERT INTO Notes (Client, Date, "User", Comments, Category) VALUES ($1, NOW(), $2, $3, 'Admin')`,
+                [id, user, blocked
+                    ? `Credit card payments blocked by a Business Administrator. Reason: ${reason}`
+                    : `Credit card payments allowed again by a Business Administrator.${reason ? ` ${reason}` : ''}`]
+            );
+        }
+        await db.query('COMMIT');
+        await logAction(user, blocked ? 'Card Payments Blocked' : 'Card Payments Allowed', `Client ID ${id}${reason ? `: ${reason}` : ''}`);
+        const row = result.rows[0];
+        res.json({ cardpaymentsblocked: row.cardpaymentsblocked, cardblockreason: row.cardblockreason, cardblockedby: row.cardblockedby, cardblockedon: row.cardblockedon });
+    } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
+        res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
+    }
+});
 
 // Grants one of a federal client's bus passes: takes it off their count and adds a Bus Pass case note with its number
 router.post('/api/clients/:id/bus-pass', async (req, res) => {
