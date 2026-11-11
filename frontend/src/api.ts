@@ -1217,6 +1217,68 @@ export async function getUserActivity(from: string, to: string, user: string): P
     return jsonResponse(res, 'Failed to load the user activity report.');
 }
 
+// --- Monthly supervising agent (PO) reports. Business Administrators and Office Admins only. ---
+export interface PoReportClient {
+    clientid: number;
+    firstname: string;
+    lastname: string;
+    docnumber: string | null;
+    // Counts for the report month
+    attended: number;
+    calledin: number;
+    notecount: number;
+}
+
+export interface PoReportAgent {
+    name: string;
+    email: string | null;
+    // False when no Supervising Agents directory entry matches the name on the clients
+    inDirectory: boolean;
+    // The last Outlook draft made for this agent and month (making a draft doesn't mean it was sent)
+    lastDraft: { createdOn: string; createdBy: string | null; clientCount: number } | null;
+    clients: PoReportClient[];
+}
+
+export interface PoReportMonth {
+    month: string;
+    agents: PoReportAgent[];
+    // Active clients with no supervising agent, so they get no report
+    noAgent: { clientid: number; firstname: string; lastname: string; docnumber: string | null }[];
+}
+
+// month is YYYY-MM
+export async function getPoReportMonth(month: string): Promise<PoReportMonth> {
+    const res = await apiFetch(`${API_BASE}/reports/po-monthly?month=${encodeURIComponent(month)}`);
+    return jsonResponse(res, 'Failed to load the monthly PO reports.');
+}
+
+// Throws the server's error message for a failed file request
+async function fileResponse(res: Response, fallback: string, type: string): Promise<Blob> {
+    if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || fallback);
+    }
+    return new Blob([await res.arrayBuffer()], { type });
+}
+
+// One client's monthly report PDF
+export async function fetchPoClientReport(clientId: number, month: string): Promise<Blob> {
+    const res = await apiFetch(`${API_BASE}/reports/po-monthly/client/${clientId}/pdf?month=${encodeURIComponent(month)}`);
+    return fileResponse(res, 'Could not make the client report.', 'application/pdf');
+}
+
+// An unsent Outlook draft (.eml) to the agent with each active client's PDF attached, and its file name. Nothing is sent.
+export async function createPoReportDraft(month: string, agent: string, user: string): Promise<{ blob: Blob; fileName: string }> {
+    const res = await apiFetch(`${API_BASE}/reports/po-monthly/draft`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month, agent, user }),
+    });
+    const blob = await fileResponse(res, 'Could not make the Outlook draft.', 'message/rfc822');
+    const fileName = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'PO Reports.eml';
+    return { blob, fileName };
+}
+
 // Returns the session's deposit after the change, or null when it has none
 export async function setGroupCashDroppedOff(data: GroupSessionRef & { droppedOff: boolean; depositDate: string; user: string }): Promise<GroupCashDropOff | null> {
     const res = await apiFetch(`${API_BASE}/reports/group-cash-deposits`, {

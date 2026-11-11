@@ -49,7 +49,7 @@ test('the same programs skip polygraphs', () => {
     const fs = require('fs');
     const list = (file) => JSON.parse(/NO_POLY_PROGRAM_TYPES = (\[[^\]]*\])/.exec(fs.readFileSync(file, 'utf8'))[1].replace(/'/g, '"'));
     assert.deepEqual(
-        list(path.join(__dirname, '..', 'routes', 'polygraphs.js')),
+        list(path.join(__dirname, '..', 'lib', 'poly.js')),
         list(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'polygraph.ts')),
     );
 });

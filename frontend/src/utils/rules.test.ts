@@ -69,7 +69,7 @@ describe('report tabs', () => {
   });
 
   it('keeps the business-only reports from Office Admins', () => {
-    expect(reportTabsFor('Office Admin').map(t => t.id)).toEqual(['cashDeposits', 'counselorClients', 'userActivity']);
+    expect(reportTabsFor('Office Admin').map(t => t.id)).toEqual(['cashDeposits', 'poMonthly', 'federalSo', 'counselorClients', 'userActivity']);
     expect(currentReportFor('deposit', 'Office Admin')).toBe('cashDeposits');
   });
 });

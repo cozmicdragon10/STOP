@@ -30,6 +30,7 @@ app.use(require('./routes/callins'));
 app.use(require('./routes/polygraphs'));
 app.use(require('./routes/testing'));
 app.use(require('./routes/reports'));
+app.use(require('./routes/agentReports'));
 app.use(require('./routes/admin'));
 app.use(require('./routes/agents'));
 app.use(require('./routes/documents'));

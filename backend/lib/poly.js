@@ -1,5 +1,8 @@
 
 
+// Programs whose clients don't take polygraphs; mirrors NO_POLY_PROGRAM_TYPES in frontend/src/utils/polygraph.ts
+const NO_POLY_PROGRAM_TYPES = ['BIP', 'Fed Drug Test', 'Chaperon'];
+
 // A client's poly fee voucher runs 0 to this; paying the poly fee in full fills it
 const POLY_VOUCHER_MAX = 6;
 
@@ -99,4 +102,4 @@ const splitPolyPaidChange = (paidBefore, delta) => {
 const voucherChangeText = (poly) => (poly.vouchersRemoved > 0 ? ` ${poly.vouchersRemoved} poly fee voucher(s) removed.` : '')
     + (poly.vouchersAdded > 0 ? ` Poly fee paid in full: vouchers filled to ${poly.polyFeeVoucher}.` : '');
 
-module.exports = { POLY_VOUCHER_MAX, POLY_VOUCHER_MAX_BY_PHASE, polyVoucherMax, POLY_VOUCHER_MAX_SQL, POLY_NDI_WAIT, POLY_VOUCHER_EARNING_RESULTS, POLY_INCENTIVE_OVERRIDE_RESULTS, LAST_POLY_RESULT_SQL, activePolyFeeOverride, countPolyFeeFill, endPolyFeeOverride, polyOverrideText, changePolyFeePaid, splitPolyPaidChange, voucherChangeText };
+module.exports = { NO_POLY_PROGRAM_TYPES, POLY_VOUCHER_MAX,POLY_VOUCHER_MAX_BY_PHASE, polyVoucherMax, POLY_VOUCHER_MAX_SQL, POLY_NDI_WAIT, POLY_VOUCHER_EARNING_RESULTS, POLY_INCENTIVE_OVERRIDE_RESULTS, LAST_POLY_RESULT_SQL, activePolyFeeOverride, countPolyFeeFill, endPolyFeeOverride, polyOverrideText, changePolyFeePaid, splitPolyPaidChange, voucherChangeText };

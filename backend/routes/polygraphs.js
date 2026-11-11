@@ -2,12 +2,9 @@ const express = require('express');
 const { logAction, pool } = require('../db');
 const { requireRole } = require('../lib/auth');
 const { logClientChange } = require('../lib/changeLog');
-const { LAST_POLY_RESULT_SQL, POLY_INCENTIVE_OVERRIDE_RESULTS, POLY_NDI_WAIT, POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, endPolyFeeOverride, polyOverrideText } = require('../lib/poly');
+const { LAST_POLY_RESULT_SQL, NO_POLY_PROGRAM_TYPES, POLY_INCENTIVE_OVERRIDE_RESULTS, POLY_NDI_WAIT, POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, endPolyFeeOverride, polyOverrideText } = require('../lib/poly');
 
 const router = express.Router();
-
-// Programs whose clients don't take polygraphs; mirrors NO_POLY_PROGRAM_TYPES in frontend/src/utils/polygraph.ts
-const NO_POLY_PROGRAM_TYPES = ['BIP', 'Fed Drug Test', 'Chaperon'];
 
 // For printed receipts: when the client last took a polygraph and their next scheduled one (read only).
 // takesPolygraphs is false for programs without polygraphs and clients marked as not needing one.

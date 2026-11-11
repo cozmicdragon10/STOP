@@ -92,4 +92,4 @@ const buildDischargeSummaryPdf = (info) => new Promise((resolve, reject) => {
     doc.end();
 });
 
-module.exports = { buildDischargeSummaryPdf };
+module.exports = { buildDischargeSummaryPdf, LETTERHEAD, formatDate };
