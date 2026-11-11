@@ -1,5 +1,11 @@
 {
   "permissions": {
+    "defaultMode": "bypassPermissions",
+    "additionalDirectories": [
+      "D:\\DataImports",
+      "C:\\Users\\justi",
+      "C:\\Users\\justi\\AppData\\Local\\Temp\\claude"
+    ],
     "allow": [
       "Bash",
       "PowerShell",
