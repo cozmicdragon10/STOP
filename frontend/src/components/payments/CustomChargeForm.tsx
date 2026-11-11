@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { submitCustomCharge } from '../../api';
+import ClientPicker from '../ClientPicker';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { formatMoney } from '../../utils/ledger';
 
@@ -46,10 +47,7 @@ export default function CustomChargeForm({ clients, userEmail, onCharged, onSucc
     <form onSubmit={handleSubmit} className="space-y-5 max-w-xl">
       <div>
         <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Client</label>
-        <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required>
-          <option value="">Select a client…</option>
-          {clients.map(c => <option key={c.clientid} value={c.clientid}>{c.lastname}, {c.firstname}</option>)}
-        </select>
+        <ClientPicker clients={clients} value={clientId} onChange={setClientId} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required />
       </div>
 
       <div>
