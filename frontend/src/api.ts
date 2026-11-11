@@ -109,6 +109,8 @@ export interface Client extends Omit<ClientColumns, 'programtype'> {
     federalunits?: Record<string, number | string> | null;
     // Monthly refills by code ({ '6022': 8 }): on the 1st the code's units are set to this
     federalunitrefills?: Record<string, number | string> | null;
+    // Federal clients: what they pay for an individual session instead of the Individual price (blank = nothing)
+    copay?: Money | null;
     // The client's own program type, else the group's, else State SO
     programtype: string;
     lastattended: string | null;

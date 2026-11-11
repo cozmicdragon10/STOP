@@ -84,7 +84,7 @@ const sameValue = (field: string, a: unknown, b: unknown) => {
   if (field === 'federalunits' || field === 'federalunitrefills') return normalizedUnits(a) === normalizedUnits(b);
   const [x, y] = [String(a ?? ''), String(b ?? '')];
   if (isDateField(field)) return x.split('T')[0] === y.split('T')[0];
-  if (ACCOUNT_FIELDS.some(f => f.field === field) && x !== '' && y !== '') return Number(x) === Number(y);
+  if ((field === 'copay' || ACCOUNT_FIELDS.some(f => f.field === field)) && x !== '' && y !== '') return Number(x) === Number(y);
   return x === y;
 };
 const inputClass = 'w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm';
@@ -433,6 +433,17 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
               <p className="text-white font-medium">{client.assessor || '—'}</p>
             )}
           </div>
+          {/* Federal clients only: their individual sessions are charged this instead of the Individual price (blank = nothing) */}
+          {FEDERAL_PROGRAM_TYPES.includes(programType || '') && (
+            <div>
+              <p className="text-xs text-slate-500 mb-0.5">Copay (individual sessions)</p>
+              {editing ? (
+                <input type="number" min={0} step="0.01" value={form.copay ?? ''} onChange={e => setField('copay', e.target.value)} placeholder="None" className={inputClass} aria-label="Copay for individual sessions" />
+              ) : (
+                <p className="text-white font-medium">{client.copay === null || client.copay === undefined || client.copay === '' ? 'None' : `$${Number(client.copay).toFixed(2)}`}</p>
+              )}
+            </div>
+          )}
           {/* Federal clients only: how many bus passes they can still be granted (0 to 2); granting one adds a Bus Pass note */}
           {FEDERAL_PROGRAM_TYPES.includes(programType || '') && (
             <div>

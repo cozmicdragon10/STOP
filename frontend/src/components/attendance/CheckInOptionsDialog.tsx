@@ -3,6 +3,7 @@ import { clientFee, feeAlreadyCharged, type ClientRecord, type PaymentMethod, ty
 import { submitAccountPayment } from '../../api';
 import { FIRST_CHECKIN_MAX_OWED, formatBalance } from '../../utils/balance';
 import { feePeriodMonths } from '../../utils/soPhases';
+import { FEDERAL_PROGRAM_TYPES, individualSessionFee } from '../../utils/clients';
 import { printReceipt, type Receipt } from '../../utils/receipt';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import CardPaymentFields from '../payments/CardPaymentFields';
@@ -157,7 +158,8 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
   const baseBalance = locked ? row.receipt!.newBalance : Number(c.accountbalance || 0);
   const paymentNow = locked ? row.receipt!.amount : (parsePayment(row) ?? 0);
   // Each client's fee comes from their own account
-  const fee = individual ? individualFee : clientFee(c);
+  const fee = individual ? individualSessionFee(c, individualFee) : clientFee(c);
+  const federalCopay = individual && FEDERAL_PROGRAM_TYPES.includes(c.programtype || '');
   const afterCheckIn = baseBalance + fee - (locked ? 0 : paymentNow);
   const stillOwed = individual ? 0 : amountStillOwedToCheckIn(c, row);
   const minimumPayment = individual ? 0 : minimumCheckInPayment(c);
@@ -235,7 +237,7 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
                 <span className="text-white">{formatBalance(baseBalance)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">{individual ? 'Individual session (price from Admin)' : feeLabel(c, fee)}</span>
+                <span className="text-slate-400">{federalCopay ? (fee > 0 ? 'Individual session copay (federal client)' : 'Federal client: no copay (nothing charged)') : individual ? 'Individual session (price from Admin)' : feeLabel(c, fee)}</span>
                 <span className="text-red-400">{formatBalance(fee)}</span>
               </div>
               <div className="flex justify-between">

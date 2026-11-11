@@ -6,6 +6,7 @@ import { isMonthlyFeeClient } from '../utils/soPhases';
 import { bipCheckInBlockMessage } from '../utils/bip';
 import type { BipCheckInBlock } from '../utils/bip';
 import { drugTestedOn, needsDuration, outOfUnits, unitCodeFor, unitCodeLabel } from '../utils/federalUnits';
+import { individualSessionFee } from '../utils/clients';
 
 export interface ClientRecord {
   clientid: number;
@@ -41,6 +42,8 @@ export interface ClientRecord {
   federalunits?: Record<string, number | string> | null;
   // Fed Drug Test clients: date (YYYY-MM-DD) of their latest drug test; they can be tested once a day
   lastdrugtest?: string | null;
+  // Federal clients: what they pay for an individual session instead of the Individual price (blank = nothing)
+  copay?: number | string | null;
 }
 
 export interface GroupRecord {
@@ -444,7 +447,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     const { clients, fromSelection, makeupIds } = pendingCheckIn;
     addToSession(clients.map(client => ({
       client,
-      terms: { ...terms[client.clientid], fee: individualFee ?? clientFee(client) },
+      terms: { ...terms[client.clientid], fee: individualFee !== null ? individualSessionFee(client, individualFee) : clientFee(client) },
       // Approved make-ups are noted on the attendance record
       comments: makeupIds.has(client.clientid) ? MAKEUP_COMMENT : undefined,
     })));

@@ -7,6 +7,7 @@ const { logClientChange } = require('../lib/changeLog');
 const { printedReceiptProblem } = require('../lib/printedReceipts');
 const { INDIVIDUAL_SESSION_TYPES } = require('../lib/sql');
 const { UNIT_PROGRAMS, returnSessionUnits, useSessionUnits } = require('../lib/federalUnits');
+const { FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
 
 const router = express.Router();
 
@@ -116,6 +117,10 @@ router.post('/api/attendance/batch', async (req, res) => {
                 throw Object.assign(new Error(`${bip.rows.map(r => r.name).join('; ')}: BIP clients do not have individual sessions.`), { status: 400 });
             }
         }
+        // Federal clients' individual sessions are charged their Copay (nothing when blank), not the Individual price
+        const copays = individual ? new Map((await clientDb.query(
+            'SELECT ClientId, Copay FROM Clients WHERE ClientId = ANY($1::int[]) AND ProgramType = ANY($2::text[])',
+            [clientIds, FEDERAL_PROGRAM_TYPES])).rows.map(r => [r.clientid, Number(r.copay || 0)])) : new Map();
         // Federal SO clients use their 6022 (group) or 6012 (individual) units by how long they attended (lib/federalUnits.js)
         const unitClients = new Map((await clientDb.query(
             `SELECT ClientId, ProgramType, LastName || ', ' || FirstName AS name FROM Clients WHERE ClientId = ANY($1::int[]) AND ProgramType = ANY($2::text[])`,
@@ -136,7 +141,8 @@ router.post('/api/attendance/batch', async (req, res) => {
             const { attendanceId, newBalance, polyVoucherAwarded, feeCharged, feeReason } = await recordAttendance(clientDb, {
                 ...entry, group, date, sessionNumber: sessionNum, type: individual ? 'Individual' : (type || 'Group'), createdBy, paid: true, awardNdiVoucher: isSoGroup,
                 ...(individual ? {
-                    groupFee: individual.fee, feeType: 'Individual Fee', sessionTypeId: individual.sessionTypeId,
+                    groupFee: copays.has(Number(entry.client)) ? copays.get(Number(entry.client)) : individual.fee,
+                    feeType: copays.has(Number(entry.client)) ? 'Individual Copay' : 'Individual Fee', sessionTypeId: individual.sessionTypeId,
                     provider: groupRes.rows[0].counselor || null,
                 } : {}),
             });

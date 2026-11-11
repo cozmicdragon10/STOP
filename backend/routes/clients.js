@@ -633,8 +633,13 @@ router.put('/api/clients/:id', async (req, res) => {
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
             comments, programtype, race, dateofbirth, sex, pretrial, assessor, buspasses, buspassrefill, updatedBy,
-            individualgroupid, federalunits, federalunitrefills
+            individualgroupid, federalunits, federalunitrefills, copay
         } = req.body;
+        // Federal clients' copay for individual sessions: changed only when sent; blank clears it
+        const copayValue = copay === undefined || copay === null || copay === '' ? null : Math.round(Number(copay) * 100) / 100;
+        if (copayValue !== null && !(Number.isFinite(copayValue) && copayValue >= 0)) {
+            return res.status(400).json({ error: 'Copay must be $0.00 or more, or blank.' });
+        }
         // Bus passes and the monthly refill: whole numbers from 0 to BUS_PASS_MAX, changed only when sent
         const passCount = (value) => (value === undefined || value === null || value === '' ? null : Number(value));
         const busPasses = passCount(buspasses);
@@ -667,7 +672,7 @@ router.put('/api/clients/:id', async (req, res) => {
         if (individualGroup.error) return res.status(400).json({ error: individualGroup.error });
 
         // Tracked fields before the edit, for the change log
-        const beforeRes = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
+        const beforeRes = await pool.query('SELECT Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
         const before = beforeRes.rows[0];
 
         // The full set of poly fee vouchers depends on the phase the client will be in after this edit. A count sent back
@@ -740,7 +745,10 @@ router.put('/api/clients/:id', async (req, res) => {
                 BusPassRefill = COALESCE($36, BusPassRefill),
                 -- Only SO clients (after this edit) have an individual group
                 IndividualGroupId = CASE WHEN COALESCE($23, ProgramType) = ANY($39::text[])
-                    THEN (CASE WHEN $37::boolean THEN $38::int ELSE IndividualGroupId END) ELSE NULL END
+                    THEN (CASE WHEN $37::boolean THEN $38::int ELSE IndividualGroupId END) ELSE NULL END,
+                -- Federal clients only (after this edit); changed only when sent
+                Copay = CASE WHEN COALESCE($23, ProgramType) = ANY($42::text[])
+                    THEN (CASE WHEN $40::boolean THEN $41::numeric ELSE Copay END) ELSE NULL END
             WHERE ClientId = $24`,
             [
                 firstname || null, middlename || null, lastname || null, docnumber || null, supervisingagent || null,
@@ -759,6 +767,7 @@ router.put('/api/clients/:id', async (req, res) => {
                 assessor !== undefined, String(assessor ?? '').trim() || null,
                 busPasses, busPassRefill,
                 individualgroupid !== undefined, individualGroup.id, SO_PROGRAM_TYPES,
+                copay !== undefined, copayValue, FEDERAL_PROGRAM_TYPES,
             ]
         );
 
@@ -779,7 +788,7 @@ router.put('/api/clients/:id', async (req, res) => {
         );
 
         if (before && updated.rows[0]) {
-            const after = await pool.query('SELECT ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
+            const after = await pool.query('SELECT Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
             const now = after.rows[0];
             // An edit that makes the poly fee paid in full filled the vouchers (see the CASE above); that counts toward an override
             const wasFull = Number(before.polyfee) > 0 && Number(before.polyfeepaid) >= Number(before.polyfee);
@@ -802,6 +811,7 @@ router.put('/api/clients/:id', async (req, res) => {
                 ['Assessor', before.assessor, now.assessor],
                 ['Bus Passes', String(before.buspasses ?? 0), String(now.buspasses ?? 0)],
                 ['Bus Pass Refill', String(before.buspassrefill ?? 0), String(now.buspassrefill ?? 0)],
+                ['Copay', before.copay === null ? '' : `$${Number(before.copay).toFixed(2)}`, now.copay === null ? '' : `$${Number(now.copay).toFixed(2)}`],
             ];
             for (const [changeType, oldValue, newValue] of tracked) {
                 if ((oldValue || '') !== (newValue || '')) {

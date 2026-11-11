@@ -94,6 +94,10 @@ export const INDIVIDUAL_GROUP_TYPE = 'INDIVIDUAL';
 export const isIndividualGroup = (groupProgram?: string | null) => (groupProgram || '').trim().toUpperCase() === INDIVIDUAL_GROUP_TYPE;
 // The Admin price list's Individual price that an individual group check-in charges: the active Individual entry named
 // "Individual", else the first active one; null when there is none. Mirrors individualPrice in backend/lib/attendance.js.
+// What one client is charged for an individual session: federal clients pay their copay (nothing when blank), everyone
+// else the Admin Individual price. Mirrors the batch check-in in backend/routes/attendance.js.
+export const individualSessionFee = (client: { programtype?: string | null; copay?: number | string | null }, individualPrice: number) =>
+  FEDERAL_PROGRAM_TYPES.includes(client.programtype || '') ? Number(client.copay || 0) : individualPrice;
 export const individualPriceFrom = (types: { sessiontypeid: number; category: string; name: string; fee: number | string; active: boolean }[]): number | null => {
   const active = types.filter(t => t.category === 'Individual' && t.active)
     .sort((a, b) => Number(b.name === 'Individual') - Number(a.name === 'Individual') || a.sessiontypeid - b.sessiontypeid);
