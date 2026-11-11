@@ -59,6 +59,8 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
       ],
       // attendanceBalanceChange gives the shown sign; the receipt takes the stored one
       balanceBefore: -c.before, balanceAfter: -c.after, clientId,
+      // Reprinted from the account: the balance today is printed too, so the one from that session isn't taken for it
+      reprint: { currentBalance: balance, asOf: localYmd(att.date) },
     }, onError);
   };
   const [filters, setFilters] = useState(EMPTY_ATTENDANCE_FILTERS);

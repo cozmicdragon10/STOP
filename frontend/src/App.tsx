@@ -1108,6 +1108,7 @@ export default function App() {
                   onViewSlot={(slotId) => leaveAccountEdits(() => openPolySlot(slotId))}
                   onPaymentChanged={handleLedgerPaymentChanged}
                   onSuccess={setSuccessMsg}
+                  onError={setError}
                 />
               )}
 

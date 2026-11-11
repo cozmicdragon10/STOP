@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useUnsavedForm } from '../../hooks/useUnsavedForm';
-import { AlertCircle, Pencil, SlidersHorizontal, X } from 'lucide-react';
+import { AlertCircle, Pencil, Printer, SlidersHorizontal, X } from 'lucide-react';
+import { printReceipt } from '../../utils/receipt';
 import { adjustCashPayment, fetchPolyFeeOverride, getClientAttendance, getClientFinancials, recordCardPaymentAction } from '../../api';
 import type { CardPaymentAction, PaymentChangeResult, PolyFeeOverride } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
@@ -36,6 +37,8 @@ interface Props {
   onViewSlot: (slotId: number) => void;
   onPaymentChanged: (refresh: LedgerRefresh) => void;
   onSuccess: (message: string) => void;
+  // For reprinted payment receipts (pop-ups blocked)
+  onError: (message: string) => void;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -46,8 +49,35 @@ const ACTION_SUBMIT_LABELS: Record<PaymentActionKind, string> = { adjust: 'Save 
 
 // The Financial Ledger tab of a client's account: entries by month, and (Business Administrators) corrections to a
 // payment: adjust a cash payment, or refund, dispute, and settle a dispute on a card payment
-export default function ClientLedger({ client, role, userEmail, financials, bookedSlot, canViewSlot, onViewSlot, onPaymentChanged, onSuccess }: Props) {
+export default function ClientLedger({ client, role, userEmail, financials, bookedSlot, canViewSlot, onViewSlot, onPaymentChanged, onSuccess, onError }: Props) {
   const employeeLabel = useEmployeeLabel();
+
+  // Reprints the receipt for a past payment, marked as a copy: the amount as it stands now (after any adjustment), what
+  // it went to, and the balance saved with it. Refunds and disputes on a card payment are noted under it.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- ledger rows are untyped throughout App
+  const printPastPayment = (fin: any) => {
+    const card = fin.paymentmethod === 'Credit Card' ? cardPaymentStatus(fin, financials) : null;
+    const notes = [
+      fin.comments,
+      fin.adjustedon ? `Adjusted from ${formatMoney(Number(fin.originalamount))} on ${new Date(fin.adjustedon).toLocaleDateString()}.` : '',
+      card && card.refunded > 0 ? `Refunded ${formatMoney(card.refunded)}.` : '',
+      card && card.openDispute > 0 ? `${formatMoney(card.openDispute)} in dispute.` : '',
+      card && card.kept < Number(fin.amount) ? `Kept ${formatMoney(card.kept)} of ${formatMoney(Number(fin.amount))}.` : '',
+    ].filter(Boolean).join(' ');
+    printReceipt({
+      clientName: `${client.lastname}, ${client.firstname}`,
+      docNumber: client.docnumber || '',
+      amount: Number(fin.amount),
+      // Payments saved before the method was recorded were all cash
+      method: fin.paymentmethod || 'Cash',
+      newBalance: fin.finalbalance === null || fin.finalbalance === undefined ? undefined : Number(fin.finalbalance),
+      processedBy: fin.createdby || '',
+      date: new Date(fin.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }),
+      appliedTo: fin.feetype || undefined,
+      notes,
+      reprint: { currentBalance: Number(client.accountbalance) || 0, asOf: localYmd(fin.date) },
+    }, onError);
+  };
   const [filters, setFilters] = useState(EMPTY_LEDGER_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
   // Months (YYYY-MM) the user has collapsed
@@ -253,6 +283,11 @@ export default function ClientLedger({ client, role, userEmail, financials, book
                       )}
                       {!action && (
                         <div className="mt-1 flex sm:justify-end gap-3">
+                          {fin.type === 'Payment' && (
+                            <button type="button" onClick={() => printPastPayment(fin)} className={linkClass} title="Print a copy of the receipt for this payment">
+                              <Printer size={12} /> Print Receipt
+                            </button>
+                          )}
                           {canAdjust && <button type="button" onClick={() => startAction('adjust', Number(fin.amount))} className={linkClass}><Pencil size={12} /> Adjust</button>}
                           {isAdmin && card && !disputeOpen && card.kept > 0 && (
                             <>

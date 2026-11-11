@@ -12,6 +12,10 @@ export interface Receipt {
   newBalance: number;
   processedBy: string;
   date: string;
+  // What the payment went to (the ledger row's fee type, e.g. "Group Fee" or "Poly Fee"); printed when set
+  appliedTo?: string;
+  // Reprinted later from the client's ledger rather than printed when the payment was taken
+  reprint?: Reprint;
   // Portion of the payment applied to the poly fee, and the poly fee standing afterwards
   polyApplied?: number;
   polyFeePaid?: number;
@@ -43,6 +47,17 @@ export interface AttendanceReceipt {
   balanceAfter?: number;
   // The client, for the polygraph dates printed at the bottom
   clientId: number;
+  // Reprint of a past session (see Reprint below)
+  reprint?: Reprint;
+}
+
+// A receipt reprinted later from the client's account. It is marked as a copy, the balances from back then are labeled
+// as of that payment or session, and the client's balance today is printed as the total so the old one isn't taken for it.
+export interface Reprint {
+  // Stored sign: positive = owes
+  currentBalance: number;
+  // YYYY-MM-DD of the payment or session, for labeling the balance from back then
+  asOf: string;
 }
 
 const money = (n: number) => `$${n.toFixed(2)}`;
@@ -156,6 +171,19 @@ const counselorWithCredentials = async (nameOrEmail: string) => {
   }
 };
 
+// A reprint is marked as a copy at the top
+const copyBanner = (reprint?: Reprint) => (reprint ? '<p class="center"><b>** COPY **</b></p>' : '');
+// The balance after the payment or session: the receipt's total, or on a reprint a plain line dated to back then
+// followed by the client's balance today as the total
+const closingBalanceRows = (row: (label: string, value: string, cls?: string) => string, after: number | undefined, reprint?: Reprint) => {
+  if (!reprint) return after !== undefined ? row('Balance after', balanceText(after), 'total') : '';
+  // The date goes on a small line under the label, so it fits beside the amount on the 72 mm paper
+  const dated = (label: string, ymd: string, value: string, cls = '') =>
+    `<tr class="${cls}"><td>${label}<br><span class="tag">as of ${escapeHtml(shortDate(ymd))}</span></td><td class="r">${value}</td></tr>`;
+  return `${after !== undefined ? dated('Balance then', reprint.asOf, balanceText(after)) : ''}
+    ${dated('Balance today', ymdToday(), balanceText(reprint.currentBalance), 'total')}`;
+};
+
 // Prints a receipt for one attendance: what it was, its fee, its payment(s), the balance before and after, and the
 // client's last and next polygraph
 export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: string) => void) => {
@@ -169,6 +197,7 @@ export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: 
   const balanceBefore = r.balanceBefore === undefined ? undefined : r.balanceBefore + applied;
   const counselor = r.provider?.trim() ? counselorWithCredentials(r.provider.trim()) : Promise.resolve('');
   printReceiptPage('Attendance Receipt', Promise.all([polygraphSection(r.clientId), counselor]).then(([poly, counselorName]) => `
+    ${copyBanner(r.reprint)}
     ${clientLine(r.clientName, r.docNumber)}
     <p><b>${escapeHtml(r.sessionKind)}:</b> ${escapeHtml(r.sessionName)}</p>
     ${counselorName ? `<p><b>Counselor:</b> ${escapeHtml(counselorName)}</p>` : ''}
@@ -179,16 +208,18 @@ export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: 
       ${row(`${r.sessionKind} fee`, r.fee > 0 ? `-${money(r.fee)}` : money(r.fee))}
       ${paymentRows || row('Payment', 'None')}
       ${paid.length > 1 ? row('Total paid', `+${money(totalPaid)}`) : ''}
-      ${r.balanceAfter !== undefined ? row('Balance after', balanceText(r.balanceAfter), 'total') : ''}
+      ${closingBalanceRows(row, r.balanceAfter, r.reprint)}
     </table>
     ${poly}
   `), onError);
 };
 
 // A payment receipt (account payments, card payments, payments at check-in)
-export const printReceipt = (r: Receipt, onError: (message: string) => void) => {
+// newBalance may be left out when reprinting an old ledger row that has no balance saved with it
+export const printReceipt = (r: Omit<Receipt, 'newBalance'> & { newBalance?: number }, onError: (message: string) => void) => {
   const row = (label: string, value: string, cls = '') => `<tr class="${cls}"><td>${escapeHtml(label)}</td><td class="r">${value}</td></tr>`;
   printReceiptPage('Payment Receipt', `
+    ${copyBanner(r.reprint)}
     ${clientLine(r.clientName, r.docNumber)}
     <table>
       ${row('Paid on', escapeHtml(r.date))}
@@ -196,10 +227,11 @@ export const printReceipt = (r: Receipt, onError: (message: string) => void) => 
     <hr>
     <table>
       ${row('Payment method', escapeHtml(r.method))}
+      ${r.appliedTo ? row('Applied to', escapeHtml(r.appliedTo)) : ''}
       ${row('Amount paid', `+${money(r.amount)}`)}
       ${r.polyApplied ? `${row('To poly fee', money(r.polyApplied))}${row('To account', money(r.amount - r.polyApplied))}
         ${row('Poly fee paid', `${money(r.polyFeePaid ?? 0)} / ${money(r.polyFee ?? 0)}`)}` : ''}
-      ${row('Balance after', balanceText(r.newBalance), 'total')}
+      ${closingBalanceRows(row, r.newBalance, r.reprint)}
     </table>
     ${r.notes?.trim() ? `<p class="small">Notes: ${escapeHtml(r.notes.trim())}</p>` : ''}
   `, onError);
