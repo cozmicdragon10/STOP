@@ -98,35 +98,48 @@ const refillFederalUnits = async (db, month) => {
 };
 
 // Session units (Form 45 tokens). A Federal SO client's group session uses 6022 Group Units and an individual group
-// session 6012 Individual Units. When closing, the counselor picks how long they attended, which sets the units used.
-// A client with no units left (blank counts as none) can't be checked in, and only lengths they have units for are
-// offered. Mirrors frontend/src/utils/federalUnits.ts.
-const UNIT_PROGRAMS = ['Federal SO'];
+// session 6012 Individual Units: when closing, the counselor picks how long they attended, which sets the units used. A
+// Fed Drug Test client's drug test (DRUG TEST group) session uses one 1010 Drug Test Unit. A client with no units left
+// (blank counts as none) can't be checked in, and only lengths they have units for are offered.
+// Mirrors frontend/src/utils/federalUnits.ts.
+const UNIT_PROGRAMS = ['Federal SO', 'Fed Drug Test'];
+const UNIT_LABELS = { 6022: 'Group Units', 6012: 'Individual Units', 1010: 'Drug Test Units' };
+const isGroupType = (groupType, type) => String(groupType || '').trim().toUpperCase() === type;
+// The code a client's session in this group uses, or null when it uses none
+const unitCodeFor = (programType, groupType) => {
+    if (programType === 'Federal SO') return isGroupType(groupType, 'INDIVIDUAL') ? '6012' : '6022';
+    if (programType === 'Fed Drug Test' && isGroupType(groupType, 'DRUG TEST')) return '1010';
+    return null;
+};
+// Drug test sessions use one unit, whatever their length
+const FIXED_UNITS = { 1010: 1 };
 const DURATION_BANDS = [
     { key: 'under16', label: 'Less than 16 minutes', units: 0 },
     { key: '16-30', label: '16-30 minutes', units: 1 },
     { key: '31-60', label: '31-60 minutes', units: 2 },
     { key: '61-90', label: '61-90+ minutes', units: 3 },
 ];
-const unitCodeForGroup = (groupType) => (String(groupType || '').trim().toUpperCase() === 'INDIVIDUAL' ? '6012' : '6022');
 
 // Takes the units a closed session used off the client (locking their row) and records them on the attendance.
 // Throws { status: 400 } when the client has no units left, no length was picked, or the length needs more than they have.
-const useSessionUnits = async (db, { clientId, name, attendanceId, groupType, durationBand, changedBy, what }) => {
-    const code = unitCodeForGroup(groupType);
-    const label = code === '6012' ? 'Individual Units' : 'Group Units';
+// Returns null when the client's session in this group uses no units.
+const useSessionUnits = async (db, { clientId, programType, name, attendanceId, groupType, durationBand, changedBy, what }) => {
+    const code = unitCodeFor(programType, groupType);
+    if (!code) return null;
+    const label = UNIT_LABELS[code];
     const row = (await db.query('SELECT Units FROM ClientFederalUnits WHERE ClientId = $1 AND Code = $2 FOR UPDATE', [clientId, code])).rows[0];
     const left = row ? Number(row.units) : 0;
     const fail = (msg) => { throw Object.assign(new Error(msg), { status: 400 }); };
     if (left < 1) fail(`${name} has no ${code} ${label} left, so they can't be checked in. Enter their units on their account first.`);
-    const band = DURATION_BANDS.find(b => b.key === durationBand);
+    const fixed = FIXED_UNITS[code];
+    const band = fixed !== undefined ? { key: null, label: 'a drug test', units: fixed } : DURATION_BANDS.find(b => b.key === durationBand);
     if (!band) fail(`Choose how long ${name} attended.`);
     if (band.units > left) fail(`${name} has only ${left} ${code} ${label} left, not enough for ${band.label} (${band.units}).`);
     if (band.units > 0) {
         await db.query('UPDATE ClientFederalUnits SET Units = Units - $1 WHERE ClientId = $2 AND Code = $3', [band.units, clientId, code]);
         await logClientChange(db, {
             clientId, changedBy, changeType: `${code} ${label}`, oldValue: String(left), newValue: String(left - band.units),
-            details: `${band.units} used: ${what}, attended ${band.label}.`,
+            details: fixed !== undefined ? `${band.units} used: ${what}.` : `${band.units} used: ${what}, attended ${band.label}.`,
         });
     }
     await db.query('UPDATE Attendance SET DurationBand = $1, UnitCode = $2, UnitsUsed = $3 WHERE AttendanceId = $4',
@@ -134,24 +147,31 @@ const useSessionUnits = async (db, { clientId, name, attendanceId, groupType, du
     return { code, used: band.units, left: left - band.units };
 };
 
-// Names of the Federal SO clients in clientIds with no units left for this group's code (blank counts as none), so they
-// can't be checked in. [] when everyone may be.
+// The clients in clientIds whose session in this group uses units and who have none left for its code (blank counts as
+// none), so they can't be checked in: [{ name, code }]. [] when everyone may be.
 const clientsWithoutUnits = async (db, clientIds, groupType) => {
     if (!clientIds.length) return [];
-    const r = await db.query(
-        `SELECT c.LastName || ', ' || c.FirstName AS name FROM Clients c
-         LEFT JOIN ClientFederalUnits u ON u.ClientId = c.ClientId AND u.Code = $3
-         WHERE c.ClientId = ANY($1::int[]) AND c.ProgramType = ANY($2::text[]) AND COALESCE(u.Units, 0) < 1`,
-        [clientIds, UNIT_PROGRAMS, unitCodeForGroup(groupType)]
-    );
-    return r.rows.map(x => x.name);
+    const clients = (await db.query(
+        `SELECT c.ClientId, c.ProgramType, c.LastName || ', ' || c.FirstName AS name FROM Clients c
+         WHERE c.ClientId = ANY($1::int[]) AND c.ProgramType = ANY($2::text[])`, [clientIds, UNIT_PROGRAMS])).rows;
+    const out = [];
+    for (const c of clients) {
+        const code = unitCodeFor(c.programtype, groupType);
+        if (!code) continue;
+        const u = (await db.query('SELECT Units FROM ClientFederalUnits WHERE ClientId = $1 AND Code = $2', [c.clientid, code])).rows[0];
+        if (!u || Number(u.units) < 1) out.push({ name: c.name, code });
+    }
+    return out;
 };
+// The "no units left" refusal for clientsWithoutUnits' list
+const noUnitsMessage = (list) => `${list.map(x => `${x.name} (no ${x.code} ${UNIT_LABELS[x.code]} left)`).join('; ')}: `
+    + 'they can\'t be checked in. Enter their units on their account first.';
 
 // Gives back the units a deleted attendance used. Returns a sentence for the log, or ''.
 const returnSessionUnits = async (db, { att, changedBy }) => {
     const used = Number(att.unitsused || 0);
     if (!att.unitcode || used <= 0) return '';
-    const label = att.unitcode === '6012' ? 'Individual Units' : 'Group Units';
+    const label = UNIT_LABELS[att.unitcode] || 'Units';
     const before = (await db.query('SELECT Units FROM ClientFederalUnits WHERE ClientId = $1 AND Code = $2 FOR UPDATE', [att.client, att.unitcode])).rows[0];
     const old = before ? Number(before.units) : 0;
     await db.query(
@@ -166,8 +186,31 @@ const returnSessionUnits = async (db, { att, changedBy }) => {
     return ` ${used} ${att.unitcode} ${label} given back.`;
 };
 
+// Drug tests are once a day: the clients in clientIds already tested on date (closed in any DRUG TEST group, or on
+// another open drug test sheet for that date). except: the open sheet being saved ({ group, sessionNumber }).
+const drugTestedOn = async (db, clientIds, date, except = null) => {
+    if (!clientIds.length) return [];
+    const r = await db.query(
+        `SELECT DISTINCT c.LastName || ', ' || c.FirstName AS name FROM Clients c
+         WHERE c.ClientId = ANY($1::int[]) AND (
+             EXISTS (SELECT 1 FROM Attendance a JOIN Groups g ON g.GroupId = a."Group"
+                     WHERE a.Client = c.ClientId AND a.Date = $2::date AND UPPER(TRIM(g.ProgramType)) = 'DRUG TEST')
+          OR EXISTS (SELECT 1 FROM OpenGroupSessions o JOIN Groups g ON g.GroupId = o.GroupId,
+                            jsonb_array_elements(o.Entries) e
+                     WHERE o.SessionDate = $2::date AND UPPER(TRIM(g.ProgramType)) = 'DRUG TEST'
+                       AND (e->'client'->>'clientid')::int = c.ClientId
+                       AND NOT (o.GroupId IS NOT DISTINCT FROM $3::int AND o.SessionNumber IS NOT DISTINCT FROM $4::int)))`,
+        [clientIds, date, except?.group ?? null, except?.sessionNumber ?? null]
+    );
+    return r.rows.map(x => x.name);
+};
+// The date (YYYY-MM-DD) of a Fed Drug Test client's latest drug test, for the check-in screen's once-a-day block
+const LAST_DRUG_TEST_SQL = (client) => `(SELECT to_char(MAX(a.Date), 'YYYY-MM-DD') FROM Attendance a JOIN Groups dg ON dg.GroupId = a."Group"
+    WHERE a.Client = ${client} AND UPPER(TRIM(dg.ProgramType)) = 'DRUG TEST')`;
+
 module.exports = {
     FEDERAL_UNITS_SQL, saveClientFederalUnits, unitsProblem,
     FEDERAL_UNIT_REFILLS_SQL, saveClientUnitRefills, refillFederalUnits,
-    UNIT_PROGRAMS, DURATION_BANDS, unitCodeForGroup, useSessionUnits, returnSessionUnits, clientsWithoutUnits,
+    UNIT_PROGRAMS, DURATION_BANDS, unitCodeFor, useSessionUnits, returnSessionUnits, clientsWithoutUnits, noUnitsMessage,
+    drugTestedOn, LAST_DRUG_TEST_SQL,
 };

@@ -6,7 +6,7 @@ import type { ClientRecord, GroupCheckInState, GroupRecord, SessionEntry } from 
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import ClientPaymentDialog from '../payments/ClientPaymentDialog';
 import CoveringCounselorPicker from './CoveringCounselorPicker';
-import { bandsFor, unitCodeLabel, unitsLeft, usesUnits } from '../../utils/federalUnits';
+import { bandsFor, needsDuration, unitCodeFor, unitCodeLabel, unitsLeft } from '../../utils/federalUnits';
 
 interface Props {
   group: GroupRecord;
@@ -21,10 +21,10 @@ interface Props {
 
 const inputClass = 'bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm w-full';
 
-function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint, unitCode }: {
+function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint, groupProgram }: {
   entry: SessionEntry;
-  // The units code this group uses for Federal SO clients (6022 or 6012)
-  unitCode: string;
+  // The group's program type, which sets the units code the client's session uses
+  groupProgram: string | null;
   balance: number;
   onChange: (patch: Partial<Omit<SessionEntry, 'client'>>) => void;
   onRemove: () => void;
@@ -32,6 +32,7 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint,
   onPrint: (afterClose: number) => void;
 }) {
   const { client } = entry;
+  const unitCode = unitCodeFor(client, groupProgram);
   // What the account will read once the group closes: fee charged, cash payment from check-in recorded.
   // A card payment from check-in is already in the balance, so it is not subtracted again.
   const afterClose = balance + entry.fee - entry.payment;
@@ -104,7 +105,12 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint,
       </div>
 
       {/* Federal SO clients: how long they attended sets the units used; only lengths they have units for are offered */}
-      {usesUnits(client) && (
+      {unitCode && !needsDuration(client, groupProgram) && (
+        <p className="text-xs text-slate-400">
+          Uses 1 {unitCode} {unitCodeLabel(unitCode)} ({unitsLeft(client, unitCode)} left before this session).
+        </p>
+      )}
+      {unitCode && needsDuration(client, groupProgram) && (
         <label className="block">
           <span className="text-xs text-slate-400 uppercase font-semibold tracking-wide">How long did they attend? *</span>
           <select
@@ -138,7 +144,7 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint,
 }
 
 export default function ReviewStep({ group, wf, createdBy, canPickCover, onSuccess, onError, onSaved }: Props) {
-  const problem = validateSession(wf.session);
+  const problem = validateSession(wf.session, wf.groupProgram);
   const [paymentClient, setPaymentClient] = useState<ClientRecord | null>(null);
   // Balances after a payment taken on this screen. Session entries keep the balance they were checked in with.
   const [updatedBalances, setUpdatedBalances] = useState<Record<number, number>>({});
@@ -164,7 +170,7 @@ export default function ReviewStep({ group, wf, createdBy, canPickCover, onSucce
           <ReviewRow
             key={entry.client.clientid}
             entry={entry}
-            unitCode={wf.unitCode}
+            groupProgram={wf.groupProgram}
             balance={updatedBalances[entry.client.clientid] ?? entry.balance}
             onChange={patch => wf.updateEntry(entry.client.clientid, patch)}
             onRemove={() => wf.removeEntry(entry.client.clientid)}

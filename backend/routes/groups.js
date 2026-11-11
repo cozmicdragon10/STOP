@@ -3,7 +3,7 @@ const { pool } = require('../db');
 const { requireRole } = require('../lib/auth');
 const { groupNameFor, logClientChange } = require('../lib/changeLog');
 const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED, GROUP_ATTENDANCE } = require('../lib/sql');
-const { FEDERAL_UNITS_SQL } = require('../lib/federalUnits');
+const { FEDERAL_UNITS_SQL, LAST_DRUG_TEST_SQL } = require('../lib/federalUnits');
 
 const router = express.Router();
 
@@ -41,7 +41,7 @@ router.get('/api/groups/:id/clients', async (req, res) => {
             `SELECT c.*, ${ATTENDED_THIS_MONTH} AS AttendedThisMonth, ${FEE_ALREADY_CHARGED} AS FeeAlreadyCharged, ${ACTIVE_FEE_OVERRIDE} AS ActiveFeeOverride,
                     (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
                     (SELECT Date FROM Attendance WHERE Client = c.ClientId AND ${GROUP_ATTENDANCE} ORDER BY Date DESC LIMIT 1) AS LastGroupAttended,
-                    ${BIP_CHECKIN_BLOCK} AS BipCheckInBlock, ${FEDERAL_UNITS_SQL('c.ClientId')} AS FederalUnits
+                    ${BIP_CHECKIN_BLOCK} AS BipCheckInBlock, ${FEDERAL_UNITS_SQL('c.ClientId')} AS FederalUnits, CASE WHEN c.ProgramType = 'Fed Drug Test' THEN ${LAST_DRUG_TEST_SQL('c.ClientId')} END AS LastDrugTest
              FROM Clients c WHERE c.GroupId = $1 OR c.IndividualGroupId = $1`,
             [id]
         );

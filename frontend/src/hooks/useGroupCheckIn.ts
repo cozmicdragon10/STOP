@@ -5,7 +5,7 @@ import type { OpenGroupSession } from '../api';
 import { isMonthlyFeeClient } from '../utils/soPhases';
 import { bipCheckInBlockMessage } from '../utils/bip';
 import type { BipCheckInBlock } from '../utils/bip';
-import { outOfUnits, unitCodeLabel, usesUnits } from '../utils/federalUnits';
+import { drugTestedOn, needsDuration, outOfUnits, unitCodeFor, unitCodeLabel } from '../utils/federalUnits';
 
 export interface ClientRecord {
   clientid: number;
@@ -39,6 +39,8 @@ export interface ClientRecord {
   cardblockreason?: string | null;
   // Federal billing units by code (utils/federalUnits.ts); Federal SO clients use 6022 / 6012 per session
   federalunits?: Record<string, number | string> | null;
+  // Fed Drug Test clients: date (YYYY-MM-DD) of their latest drug test; they can be tested once a day
+  lastdrugtest?: string | null;
 }
 
 export interface GroupRecord {
@@ -110,13 +112,13 @@ export const clientFee = (client: ClientRecord): number => {
 };
 
 // Returns the first problem with the sheet, or null when it can be saved.
-export const validateSession = (entries: SessionEntry[]): string | null => {
+export const validateSession = (entries: SessionEntry[], groupProgram?: string | null): string | null => {
   if (entries.length === 0) return 'Check in at least one client before saving.';
   for (const e of entries) {
     const name = `${e.client.lastname}, ${e.client.firstname}`;
     if (!Number.isFinite(e.fee) || e.fee < 0) return `Enter a valid fee for ${name}.`;
     if (!Number.isFinite(e.payment) || e.payment < 0) return `Enter a valid payment for ${name}.`;
-    if (usesUnits(e.client) && !e.durationBand) return `Choose how long ${name} attended.`;
+    if (needsDuration(e.client, groupProgram) && !e.durationBand) return `Choose how long ${name} attended.`;
   }
   return null;
 };
@@ -189,8 +191,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   // Set while the picked group is a counselor's individual group: every client is charged this Admin Individual price
   // instead of their treatment fee, and BIP clients (who don't have individual sessions) can't be checked in
   const [individualFee, setIndividualFee] = useState<number | null>(null);
-  // The units code this group's sessions use for Federal SO clients: 6022 (group) or 6012 (individual group)
-  const [unitCode, setUnitCode] = useState('6022');
+  // The picked group's program type, which sets the units code each client's session uses (utils/federalUnits.ts)
+  const [groupProgram, setGroupProgram] = useState<string | null>(null);
 
   // Guards against a slow response for a previous group overwriting the current roster.
   const rosterRequestId = useRef(0);
@@ -201,8 +203,9 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   // client still waiting on their intake or reinstate assessment).
   const selectableRoster = useMemo(
     () => roster.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid) && !c.bipcheckinblock
-      && !(individualFee !== null && c.programtype === 'BIP') && !outOfUnits(c, unitCode)),
-    [roster, checkedInIds, attendedIds, individualFee, unitCode]
+      && !(individualFee !== null && c.programtype === 'BIP') && !outOfUnits(c, groupProgram)
+      && !drugTestedOn(c, groupProgram, sessionDate ?? todayLocal())),
+    [roster, checkedInIds, attendedIds, individualFee, groupProgram, sessionDate]
   );
 
   const allSelected = selectableRoster.length > 0 && selectableRoster.every(c => selectedIds.has(c.clientid));
@@ -418,9 +421,14 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     if (bipIndividual.length > 0) {
       notify.onError(`${bipIndividual.map(c => `${c.lastname}, ${c.firstname}`).join('; ')}: BIP clients do not have individual sessions.`);
     }
-    const noUnits = clients.filter(c => outOfUnits(c, unitCode) && !checkedInIds.has(c.clientid));
+    const noUnits = clients.filter(c => outOfUnits(c, groupProgram) && !checkedInIds.has(c.clientid));
     if (noUnits.length > 0) {
-      notify.onError(`${noUnits.map(c => `${c.lastname}, ${c.firstname}`).join('; ')}: no ${unitCode} ${unitCodeLabel(unitCode)} left, so they can't be checked in. Enter their units on their account first.`);
+      notify.onError(`${noUnits.map(c => { const code = unitCodeFor(c, groupProgram)!; return `${c.lastname}, ${c.firstname} (no ${code} ${unitCodeLabel(code)} left)`; }).join('; ')}: they can't be checked in. Enter their units on their account first.`);
+    }
+    const testedToday = clients.filter(c => drugTestedOn(c, groupProgram, sessionDate ?? todayLocal()) && !checkedInIds.has(c.clientid) && !noUnits.includes(c));
+    if (testedToday.length > 0) {
+      notify.onError(`${testedToday.map(c => `${c.lastname}, ${c.firstname}`).join('; ')} already had a drug test that day. Clients can be drug tested once a day.`);
+      noUnits.push(...testedToday);
     }
     const fresh = clients.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid) && !c.bipcheckinblock
       && !bipIndividual.includes(c) && !noUnits.includes(c));
@@ -486,7 +494,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
 
   const submitSession = async () => {
     if (groupId === null) return;
-    const problem = validateSession(session);
+    const problem = validateSession(session, groupProgram);
     if (problem) {
       notify.onError(problem);
       return;
@@ -570,8 +578,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     setCoveredBy,
     individualFee,
     setIndividualFee,
-    unitCode,
-    setUnitCode,
+    groupProgram,
+    setGroupProgram,
   };
 }
 

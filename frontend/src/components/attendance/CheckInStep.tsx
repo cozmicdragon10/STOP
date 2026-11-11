@@ -3,7 +3,8 @@ import type { ClientRecord, GroupRecord, GroupCheckInState } from '../../hooks/u
 import { formatBalance } from '../../utils/balance';
 import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
 import { bipCheckInBlockLabel, bipCheckInBlockMessage } from '../../utils/bip';
-import { outOfUnits, unitCodeLabel, unitsLeft, usesUnits } from '../../utils/federalUnits';
+import { drugTestedOn, outOfUnits, unitCodeFor, unitCodeLabel, unitsLeft } from '../../utils/federalUnits';
+import { todayLocal } from '../../hooks/useGroupCheckIn';
 
 interface Props {
   group: GroupRecord;
@@ -16,10 +17,11 @@ const buttonBase = 'px-4 py-2 rounded-lg text-sm font-semibold transition disabl
 const primaryButton = `${buttonBase} bg-blue-600 hover:bg-blue-500 text-white`;
 const secondaryButton = `${buttonBase} bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700`;
 
-function RosterRow({ client, checked, attended, selected, onToggle, onOpenClient, unitCode }: {
+function RosterRow({ client, checked, attended, selected, onToggle, onOpenClient, groupProgram, sessionDate }: {
   client: ClientRecord;
-  // The units code this group uses for Federal SO clients (6022 or 6012)
-  unitCode: string;
+  // The group's program type (sets the units code) and the session date (YYYY-MM-DD)
+  groupProgram: string | null;
+  sessionDate: string;
   checked: boolean;
   // Already attended this group today, so cannot be checked in again
   attended: boolean;
@@ -28,9 +30,11 @@ function RosterRow({ client, checked, attended, selected, onToggle, onOpenClient
   onOpenClient: () => void;
 }) {
   // A BIP client still waiting on their intake or reinstate assessment can't be checked in
-  // A Federal SO client with no units left for this group's code can't be checked in either
-  const unitsBlocked = !checked && !attended && outOfUnits(client, unitCode);
-  const bipBlocked = (!checked && !attended && !!client.bipcheckinblock) || unitsBlocked;
+  // A client with no units left for this group's code can't be checked in, nor one already drug tested that day
+  const unitCode = unitCodeFor(client, groupProgram);
+  const unitsBlocked = !checked && !attended && outOfUnits(client, groupProgram);
+  const testedToday = !checked && !attended && !unitsBlocked && drugTestedOn(client, groupProgram, sessionDate);
+  const bipBlocked = (!checked && !attended && !!client.bipcheckinblock) || unitsBlocked || testedToday;
   const tone = checked
     ? 'border-emerald-500/30 bg-emerald-500/5 opacity-70 cursor-default'
     : attended || bipBlocked
@@ -57,10 +61,15 @@ function RosterRow({ client, checked, attended, selected, onToggle, onOpenClient
             No {unitCode} units left
           </span>
         )}
-        {!unitsBlocked && usesUnits(client) && !checked && !attended && (
+        {testedToday && (
+          <span className="text-[0.625rem] font-semibold uppercase text-amber-400" title="Clients can be drug tested once a day.">
+            Already drug tested today
+          </span>
+        )}
+        {unitCode && !unitsBlocked && !testedToday && !checked && !attended && (
           <span className="text-[0.625rem] font-semibold uppercase text-sky-400">{unitsLeft(client, unitCode)} {unitCode} {unitCodeLabel(unitCode)} left</span>
         )}
-        {bipBlocked && !unitsBlocked && (
+        {bipBlocked && !unitsBlocked && !testedToday && (
           <span className="text-[0.625rem] font-semibold uppercase text-amber-400" title={bipCheckInBlockMessage(client.bipcheckinblock, `${client.lastname}, ${client.firstname}`)}>
             {bipCheckInBlockLabel(client.bipcheckinblock)}
           </span>
@@ -161,7 +170,8 @@ export default function CheckInStep({ group, wf, onOpenSearch, onOpenClient }: P
                 checked={wf.checkedInIds.has(c.clientid)}
                 attended={wf.attendedIds.has(c.clientid)}
                 selected={wf.selectedIds.has(c.clientid)}
-                unitCode={wf.unitCode}
+                groupProgram={wf.groupProgram}
+                sessionDate={wf.sessionDate ?? todayLocal()}
                 onToggle={() => wf.toggleSelect(c.clientid)}
                 onOpenClient={() => onOpenClient(c.clientid)}
               />

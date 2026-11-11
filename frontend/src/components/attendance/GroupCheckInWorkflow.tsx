@@ -5,7 +5,6 @@ import type { ClientRecord, GroupRecord } from '../../hooks/useGroupCheckIn';
 import { getSessionTypes } from '../../api';
 import type { ClosedGroupSession, OpenGroupSession, SessionType } from '../../api';
 import { individualPriceFrom, isIndividualGroup } from '../../utils/clients';
-import { unitCodeForGroup } from '../../utils/federalUnits';
 import CheckInStep from './CheckInStep';
 import ReviewStep from './ReviewStep';
 import ClientSearchModal from './ClientSearchModal';
@@ -128,10 +127,10 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
   useEffect(() => {
     setIndividualFee(individualGroup && sessionTypes ? individualPriceFrom(sessionTypes) : null);
   }, [individualGroup, sessionTypes, setIndividualFee]);
-  const { setUnitCode } = wf;
+  const { setGroupProgram } = wf;
   useEffect(() => {
-    setUnitCode(unitCodeForGroup(group?.programtype));
-  }, [group?.programtype, setUnitCode]);
+    setGroupProgram(group?.programtype ?? null);
+  }, [group?.programtype, setGroupProgram]);
   const currentStep = wf.groupId === null ? 1 : wf.view === 'review' ? 3 : 2;
   const searchableClients = group ? filterSearchableClients(clients, group.programtype, group.groupname) : [];
 

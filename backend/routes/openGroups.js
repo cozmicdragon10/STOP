@@ -3,7 +3,7 @@ const { logAction, pool } = require('../db');
 const { OPEN_GROUP_ADMIN_ROLES, openGroupViewer } = require('../lib/access');
 const { coveringCounselorFor } = require('../lib/cashResponsibility');
 const { keepPrintedMarks, printedEntries, printedReceiptProblem } = require('../lib/printedReceipts');
-const { clientsWithoutUnits, unitCodeForGroup } = require('../lib/federalUnits');
+const { clientsWithoutUnits, drugTestedOn, noUnitsMessage } = require('../lib/federalUnits');
 
 const router = express.Router();
 
@@ -98,8 +98,11 @@ router.put('/api/open-groups', async (req, res) => {
         const added = entries.map(e => Number(e.client?.clientid)).filter(id => id && !savedIds.has(id));
         const groupType = (await pool.query('SELECT ProgramType FROM Groups WHERE GroupId = $1', [group])).rows[0]?.programtype;
         const noUnits = await clientsWithoutUnits(pool, added, groupType);
-        if (noUnits.length) {
-            return res.status(400).json({ error: `${noUnits.join('; ')}: no ${unitCodeForGroup(groupType)} units left, so they can't be checked in. Enter their units on their account first.` });
+        if (noUnits.length) return res.status(400).json({ error: noUnitsMessage(noUnits) });
+        // Drug tests are once a day
+        if (String(groupType || '').trim().toUpperCase() === 'DRUG TEST') {
+            const tested = await drugTestedOn(pool, added, date, { group: Number(group), sessionNumber: sessionNum });
+            if (tested.length) return res.status(400).json({ error: `${tested.join('; ')} already had a drug test that day. Clients can be drug tested once a day.` });
         }
         const toSave = keepPrintedMarks(savedEntries, entries);
         const saved = await pool.query(

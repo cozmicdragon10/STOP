@@ -118,8 +118,19 @@ router.post('/api/attendance/batch', async (req, res) => {
         }
         // Federal SO clients use their 6022 (group) or 6012 (individual) units by how long they attended (lib/federalUnits.js)
         const unitClients = new Map((await clientDb.query(
-            `SELECT ClientId, LastName || ', ' || FirstName AS name FROM Clients WHERE ClientId = ANY($1::int[]) AND ProgramType = ANY($2::text[])`,
-            [clientIds, UNIT_PROGRAMS])).rows.map(r => [r.clientid, r.name]));
+            `SELECT ClientId, ProgramType, LastName || ', ' || FirstName AS name FROM Clients WHERE ClientId = ANY($1::int[]) AND ProgramType = ANY($2::text[])`,
+            [clientIds, UNIT_PROGRAMS])).rows.map(r => [r.clientid, r]));
+        // Drug tests are once a day: refuse a client already tested that date in any drug test group
+        if (groupType === 'DRUG TEST') {
+            const tested = await clientDb.query(
+                `SELECT DISTINCT c.LastName || ', ' || c.FirstName AS name FROM Attendance a JOIN Groups g ON g.GroupId = a."Group"
+                 JOIN Clients c ON c.ClientId = a.Client
+                 WHERE a.Client = ANY($1::int[]) AND a.Date = $2::date AND UPPER(TRIM(g.ProgramType)) = 'DRUG TEST'`,
+                [clientIds, date || new Date().toLocaleDateString('en-CA')]);
+            if (tested.rows.length) {
+                throw Object.assign(new Error(`${tested.rows.map(r => r.name).join('; ')} already had a drug test that day. Clients can be drug tested once a day.`), { status: 400 });
+            }
+        }
         const results = [];
         for (const entry of entries) {
             const { attendanceId, newBalance, polyVoucherAwarded, feeCharged, feeReason } = await recordAttendance(clientDb, {
@@ -129,9 +140,10 @@ router.post('/api/attendance/batch', async (req, res) => {
                     provider: groupRes.rows[0].counselor || null,
                 } : {}),
             });
-            if (unitClients.has(Number(entry.client))) {
+            const unitClient = unitClients.get(Number(entry.client));
+            if (unitClient) {
                 await useSessionUnits(clientDb, {
-                    clientId: Number(entry.client), name: unitClients.get(Number(entry.client)), attendanceId, groupType,
+                    clientId: Number(entry.client), programType: unitClient.programtype, name: unitClient.name, attendanceId, groupType,
                     durationBand: entry.durationBand, changedBy: createdBy, what: `session on ${date || 'today'}`,
                 });
             }
