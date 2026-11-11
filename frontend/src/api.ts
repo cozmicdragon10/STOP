@@ -105,6 +105,8 @@ export type CardBlock = Pick<ClientColumns, 'cardpaymentsblocked' | 'cardblockre
 export interface Client extends Omit<ClientColumns, 'programtype'> {
     groupname: string | null;
     individualgroupname?: string | null;
+    // Federal billing units by code ({ '6022': 4 }); a code with no entry is blank
+    federalunits?: Record<string, number | string> | null;
     // The client's own program type, else the group's, else State SO
     programtype: string;
     lastattended: string | null;
@@ -786,6 +788,32 @@ export async function getProgramFees(): Promise<ProgramFee[]> {
 // applyToClients: also move current clients still on the old price to the new one
 export async function saveProgramFee(data: { feekey: string; fee: number; applyToClients: boolean; user: string }): Promise<{ fee: ProgramFee; clientsUpdated: number }> {
     const res = await apiFetch(`${API_BASE}/program-fees/${encodeURIComponent(data.feekey)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return jsonResponse(res, 'Failed to save the price.');
+}
+
+// A federal billing code (Admin > Billing Federal Units). programs: the client programs that track its units.
+export interface FederalUnitCode {
+    code: string;
+    label: string;
+    programs: string[];
+    // Blank (null) until a Business Administrator sets it
+    price: Money | null;
+    updatedby: string | null;
+    updatedon: string | null;
+}
+
+export async function getFederalUnitCodes(): Promise<FederalUnitCode[]> {
+    const res = await apiFetch(`${API_BASE}/federal-units`);
+    return jsonResponse(res, 'Failed to load the federal billing units.');
+}
+
+// A blank price (null) clears it
+export async function saveFederalUnitPrice(data: { code: string; price: number | null; user: string }): Promise<FederalUnitCode> {
+    const res = await apiFetch(`${API_BASE}/federal-units/${encodeURIComponent(data.code)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),

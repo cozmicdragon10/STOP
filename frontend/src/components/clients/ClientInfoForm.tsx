@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle2, Settings, X } from 'lucide-react';
-import { updateClient } from '../../api';
-import type { ClientNote, SupervisingAgent } from '../../api';
+import { getFederalUnitCodes, updateClient } from '../../api';
+import type { ClientNote, FederalUnitCode, SupervisingAgent } from '../../api';
 import BusPassDialog from './BusPassDialog';
 import AgentPicker from '../agents/AgentPicker';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
@@ -77,7 +77,11 @@ const ACCOUNT_FIELDS: { label: string; field: string; prefix: string; step?: str
 ];
 const isDateField = (field: string) => field.includes('date') || field.includes('Date');
 // Compares a field the way it's shown: dates without their time, money and counts as numbers (150 and 150.00 match)
+// Federal units ({ code: units }) with blanks dropped and numbers compared as numbers, so 4 and "4.00" match
+const normalizedUnits = (units: unknown) => JSON.stringify(Object.entries((units ?? {}) as Record<string, unknown>)
+  .filter(([, v]) => v !== '' && v !== null && v !== undefined).map(([k, v]) => [k, Number(v)]).sort(([a], [b]) => String(a).localeCompare(String(b))));
 const sameValue = (field: string, a: unknown, b: unknown) => {
+  if (field === 'federalunits') return normalizedUnits(a) === normalizedUnits(b);
   const [x, y] = [String(a ?? ''), String(b ?? '')];
   if (isDateField(field)) return x.split('T')[0] === y.split('T')[0];
   if (ACCOUNT_FIELDS.some(f => f.field === field) && x !== '' && y !== '') return Number(x) === Number(y);
@@ -90,6 +94,11 @@ const inputClass = 'w-full bg-slate-900 border border-slate-700 rounded-lg px-2.
 // (Discharge / Activate) still shows and is saved.
 export default function ClientInfoForm({ client, discharged, groups, directoryAgents, counselors, polyOverrideActive, userEmail, loadError, onDismissLoadError, actionsSlot, onDirtyChange, leaveRequested, onLeaveResolved, onSaved, onBusPassGranted }: Props) {
   const [busPassOpen, setBusPassOpen] = useState(false);
+  // Federal billing codes (Admin > Billing Federal Units); each client program shows the codes it tracks
+  const [unitCodes, setUnitCodes] = useState<FederalUnitCode[]>([]);
+  useEffect(() => {
+    getFederalUnitCodes().then(setUnitCodes).catch(() => setUnitCodes([]));
+  }, []);
   // null while not editing; otherwise the fields changed so far
   const [edits, setEdits] = useState<Record<string, any> | null>(null); // eslint-disable-line @typescript-eslint/no-explicit-any
   const [saving, setSaving] = useState(false);
@@ -130,6 +139,12 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
 
   const shownError = error || loadError;
   const programType = form.programtype;
+  const programUnitCodes = unitCodes.filter(c => c.programs.includes(programType || ''));
+  const unitsOf = (source: { federalunits?: Record<string, unknown> | null }, code: string) => {
+    const v = source.federalunits?.[code];
+    return v === null || v === undefined || v === '' ? '' : String(Number(v));
+  };
+  const setUnits = (code: string, value: string) => setField('federalunits', { ...(form.federalunits ?? {}), [code]: value });
 
   return (
     <>
@@ -441,6 +456,24 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                   )}
                 </>
               )}
+            </div>
+          )}
+          {/* Federal billing units for the codes this client's program tracks (Federal SO, Fed Drug Test); blank until entered */}
+          {programUnitCodes.length > 0 && (
+            <div className="sm:col-span-2">
+              <p className="text-xs text-slate-500 mb-1">Federal Units</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {programUnitCodes.map(c => (
+                  <div key={c.code} className="bg-slate-950/50 border border-slate-800 rounded-lg px-2.5 py-1.5">
+                    <p className="text-[0.6875rem] text-slate-400 truncate" title={`${c.code} ${c.label}`}><span className="text-blue-400 font-semibold">{c.code}</span> {c.label}</p>
+                    {editing ? (
+                      <input type="number" min={0} step="any" value={unitsOf(form, c.code)} onChange={e => setUnits(c.code, e.target.value)} className={`${inputClass} mt-1`} aria-label={`${c.code} ${c.label}`} />
+                    ) : (
+                      <p className="text-white font-medium">{unitsOf(client, c.code) || '—'}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           {/* BIP, Fed Drug Test and Chaperon clients don't take polygraphs, so their poly fee and vouchers aren't shown */}

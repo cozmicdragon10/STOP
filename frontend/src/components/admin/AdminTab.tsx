@@ -4,6 +4,7 @@ import { addEmployee, getEmployees, getSystemLogs, updateEmployee } from '../../
 import type { SystemLog } from '../../api';
 import SessionPriceList from '../sessions/SessionPriceList';
 import ProgramFeeList from './ProgramFeeList';
+import FederalUnitList from './FederalUnitList';
 import { sortedUnique } from '../../utils/filters';
 import { CLIENT_SIDE_OPTIONS, COLOR_VISION_OPTIONS, DEFAULT_CUSTOM_COLORS, FONT_SIZE_OPTIONS, FONT_TYPE_OPTIONS, TABS_POSITION_OPTIONS, useTheme, type ClientSide, type ColorVision, type FontSize, type FontType, type StatusColor, type TabsPosition } from '../../hooks/useTheme';
 
@@ -262,6 +263,8 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
       </div>
 
       <ProgramFeeList userEmail={user.employeeemail} canEdit={isBusinessAdmin} onSuccess={onSuccess} />
+
+      <FederalUnitList userEmail={user.employeeemail} canEdit={isBusinessAdmin} onSuccess={onSuccess} />
 
       <SessionPriceList userEmail={user.employeeemail} canEdit={isBusinessAdmin} onSuccess={onSuccess} />
 

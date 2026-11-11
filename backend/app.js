@@ -26,6 +26,7 @@ app.use(require('./routes/attendance'));
 app.use(require('./routes/openGroups'));
 app.use(require('./routes/sessions'));
 app.use(require('./routes/programFees'));
+app.use(require('./routes/federalUnits'));
 app.use(require('./routes/financials'));
 app.use(require('./routes/callins'));
 app.use(require('./routes/polygraphs'));
