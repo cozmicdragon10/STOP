@@ -3,6 +3,7 @@ const { logAction, pool } = require('../db');
 const { OPEN_GROUP_ADMIN_ROLES, openGroupViewer } = require('../lib/access');
 const { coveringCounselorFor } = require('../lib/cashResponsibility');
 const { keepPrintedMarks, printedEntries, printedReceiptProblem } = require('../lib/printedReceipts');
+const { clientsWithoutUnits, unitCodeForGroup } = require('../lib/federalUnits');
 
 const router = express.Router();
 
@@ -92,6 +93,14 @@ router.put('/api/open-groups', async (req, res) => {
         const savedEntries = existing.rows[0]?.entries ?? [];
         const problem = printedReceiptProblem(savedEntries, entries);
         if (problem) return res.status(409).json({ error: problem });
+        // A Federal SO client newly put on the sheet needs units left for this group (6022 group, 6012 individual)
+        const savedIds = new Set(savedEntries.map(e => Number(e.client?.clientid)));
+        const added = entries.map(e => Number(e.client?.clientid)).filter(id => id && !savedIds.has(id));
+        const groupType = (await pool.query('SELECT ProgramType FROM Groups WHERE GroupId = $1', [group])).rows[0]?.programtype;
+        const noUnits = await clientsWithoutUnits(pool, added, groupType);
+        if (noUnits.length) {
+            return res.status(400).json({ error: `${noUnits.join('; ')}: no ${unitCodeForGroup(groupType)} units left, so they can't be checked in. Enter their units on their account first.` });
+        }
         const toSave = keepPrintedMarks(savedEntries, entries);
         const saved = await pool.query(
             `INSERT INTO OpenGroupSessions (GroupId, SessionDate, SessionNumber, Entries, CreatedBy, CoveredBy, UpdatedOn)

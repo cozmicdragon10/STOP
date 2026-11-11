@@ -6,6 +6,7 @@ const { coveringCounselorFor } = require('../lib/cashResponsibility');
 const { logClientChange } = require('../lib/changeLog');
 const { printedReceiptProblem } = require('../lib/printedReceipts');
 const { INDIVIDUAL_SESSION_TYPES } = require('../lib/sql');
+const { UNIT_PROGRAMS, returnSessionUnits, useSessionUnits } = require('../lib/federalUnits');
 
 const router = express.Router();
 
@@ -16,12 +17,17 @@ router.post('/api/attendance', async (req, res) => {
     const clientDb = await pool.connect();
     try {
         await clientDb.query('BEGIN');
+        // Federal SO group sessions use units, which only the group check-in (batch) handles
+        if (req.body.group) {
+            const unitClient = await clientDb.query('SELECT 1 FROM Clients WHERE ClientId = $1 AND ProgramType = ANY($2::text[])', [req.body.client, UNIT_PROGRAMS]);
+            if (unitClient.rows.length) throw Object.assign(new Error('Federal SO clients are checked in through group check-in, which uses their units.'), { status: 400 });
+        }
         const { attendanceId, newBalance } = await recordAttendance(clientDb, req.body);
         await clientDb.query('COMMIT');
         res.status(201).json({ success: true, attendanceId, newBalance });
     } catch (error) {
         await clientDb.query('ROLLBACK');
-        res.status(500).json({ error: error.message });
+        res.status(error.status || 500).json({ error: error.message });
     } finally {
         clientDb.release();
     }
@@ -110,6 +116,10 @@ router.post('/api/attendance/batch', async (req, res) => {
                 throw Object.assign(new Error(`${bip.rows.map(r => r.name).join('; ')}: BIP clients do not have individual sessions.`), { status: 400 });
             }
         }
+        // Federal SO clients use their 6022 (group) or 6012 (individual) units by how long they attended (lib/federalUnits.js)
+        const unitClients = new Map((await clientDb.query(
+            `SELECT ClientId, LastName || ', ' || FirstName AS name FROM Clients WHERE ClientId = ANY($1::int[]) AND ProgramType = ANY($2::text[])`,
+            [clientIds, UNIT_PROGRAMS])).rows.map(r => [r.clientid, r.name]));
         const results = [];
         for (const entry of entries) {
             const { attendanceId, newBalance, polyVoucherAwarded, feeCharged, feeReason } = await recordAttendance(clientDb, {
@@ -119,6 +129,12 @@ router.post('/api/attendance/batch', async (req, res) => {
                     provider: groupRes.rows[0].counselor || null,
                 } : {}),
             });
+            if (unitClients.has(Number(entry.client))) {
+                await useSessionUnits(clientDb, {
+                    clientId: Number(entry.client), name: unitClients.get(Number(entry.client)), attendanceId, groupType,
+                    durationBand: entry.durationBand, changedBy: createdBy, what: `session on ${date || 'today'}`,
+                });
+            }
             // The fee is worked out from the account when saving; a sheet shown with a different fee is reported back
             const feeSent = Math.round(Number(entry.groupFee || 0) * 100) / 100;
             const feeChange = feeCharged !== feeSent ? { feeSent, feeCharged, feeReason } : null;
@@ -267,6 +283,8 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
         await db.query('DELETE FROM CashPaymentDeposits WHERE TransactionId = ANY($1::int[])', [ledgerIds]);
         await db.query('DELETE FROM FinancialTransactions WHERE TransactionId = ANY($1::int[])', [ledgerIds]);
         await db.query('DELETE FROM Attendance WHERE AttendanceId = $1', [att.attendanceid]);
+        // Federal SO units the session used go back to the client
+        const unitsText = await returnSessionUnits(db, { att, changedBy: user });
 
         // When the check-in was recorded: its CreatedOn, else its ledger row, else the end of the session day
         const checkInAt = att.createdat || checkInRow?.at || `${att.day} 23:59:59`;
@@ -354,7 +372,7 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
             used: ' The poly fee voucher it earned was already used, so none was removed.',
         }[voucher] ?? '';
         const feeMovedText = feeMoved ? ` The $${feeMoved.amount.toFixed(2)} treatment fee moved to ${feeMoved.to}.` : '';
-        const details = `${what} on ${att.day}${session}: fee $${money(att.groupfee).toFixed(2)}, ${paid}.${feeMovedText}${voucherText} ${reason}`;
+        const details = `${what} on ${att.day}${session}: fee $${money(att.groupfee).toFixed(2)}, ${paid}.${feeMovedText}${voucherText}${unitsText} ${reason}`;
         await logClientChange(db, { clientId: att.client, changedBy: user, changeType: 'Attendance Deleted', oldValue: `${what} ${att.day}`, details });
         await db.query('COMMIT');
         await logAction(user, 'Attendance Deleted', `Client ID ${att.client}, attendance ${att.attendanceid}: ${details}`);

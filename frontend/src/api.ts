@@ -554,6 +554,8 @@ export interface BatchAttendanceEntry {
     paymentMethod: 'Cash' | 'Credit Card';
     voucherUsed: boolean;
     comments: string;
+    // Federal SO clients: how long they attended, which sets the 6022 / 6012 units used (utils/federalUnits.ts)
+    durationBand?: string;
 }
 
 export interface BatchAttendancePayload {

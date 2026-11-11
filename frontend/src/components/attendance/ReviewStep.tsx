@@ -6,6 +6,7 @@ import type { ClientRecord, GroupCheckInState, GroupRecord, SessionEntry } from 
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import ClientPaymentDialog from '../payments/ClientPaymentDialog';
 import CoveringCounselorPicker from './CoveringCounselorPicker';
+import { bandsFor, unitCodeLabel, unitsLeft, usesUnits } from '../../utils/federalUnits';
 
 interface Props {
   group: GroupRecord;
@@ -20,8 +21,10 @@ interface Props {
 
 const inputClass = 'bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm w-full';
 
-function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint }: {
+function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint, unitCode }: {
   entry: SessionEntry;
+  // The units code this group uses for Federal SO clients (6022 or 6012)
+  unitCode: string;
   balance: number;
   onChange: (patch: Partial<Omit<SessionEntry, 'client'>>) => void;
   onRemove: () => void;
@@ -100,6 +103,26 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint 
         </div>
       </div>
 
+      {/* Federal SO clients: how long they attended sets the units used; only lengths they have units for are offered */}
+      {usesUnits(client) && (
+        <label className="block">
+          <span className="text-xs text-slate-400 uppercase font-semibold tracking-wide">How long did they attend? *</span>
+          <select
+            value={entry.durationBand ?? ''}
+            onChange={e => onChange({ durationBand: e.target.value || undefined })}
+            className={`${inputClass} mt-1 ${entry.durationBand ? '' : 'border-amber-500'}`}
+          >
+            <option value="">-- Choose --</option>
+            {bandsFor(client, unitCode).map(b => (
+              <option key={b.key} value={b.key}>{b.label} ({b.units} unit{b.units === 1 ? '' : 's'})</option>
+            ))}
+          </select>
+          <span className="block text-xs text-slate-500 mt-1">
+            {unitsLeft(client, unitCode)} {unitCode} {unitCodeLabel(unitCode)} left before this session.
+          </span>
+        </label>
+      )}
+
       <label className="block">
         <span className="text-xs text-slate-400 uppercase font-semibold tracking-wide">Notes</span>
         <textarea
@@ -141,6 +164,7 @@ export default function ReviewStep({ group, wf, createdBy, canPickCover, onSucce
           <ReviewRow
             key={entry.client.clientid}
             entry={entry}
+            unitCode={wf.unitCode}
             balance={updatedBalances[entry.client.clientid] ?? entry.balance}
             onChange={patch => wf.updateEntry(entry.client.clientid, patch)}
             onRemove={() => wf.removeEntry(entry.client.clientid)}
