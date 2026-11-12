@@ -12,6 +12,8 @@ const https = { pfx: fs.readFileSync(certPath), passphrase: pfxPassword }
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
-  server: { host: true, https },
+  // Port 5173 is the production site, served by the backend from the build (backend/frontendServer.js);
+  // the dev server runs beside it on 5174
+  server: { host: true, https, port: 5174, strictPort: true },
   preview: { host: true, https },
 })

@@ -3,8 +3,9 @@ const express = require('express');
 const cors = require('cors');
 const { requireSession } = require('./lib/auth');
 
-// Browser pages allowed to call the API, comma-separated in CORS_ORIGINS (.env)
-const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'https://192.168.1.133:5173,https://localhost:5173')
+// Browser pages allowed to call the API, comma-separated in CORS_ORIGINS (.env): the production site (5173) and the
+// Vite dev server (5174)
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || 'https://192.168.1.133:5173,https://localhost:5173,https://192.168.1.133:5174,https://localhost:5174')
     .split(',').map(o => o.trim()).filter(Boolean);
 
 const app = express();

@@ -1,0 +1,11 @@
+{
+  "name": "stop-e2e",
+  "private": true,
+  "description": "End-to-end tests: two people editing at once, against a TEST COPY of the database. See README.md.",
+  "scripts": {
+    "test": "node run.js"
+  },
+  "dependencies": {
+    "playwright-core": "1.49.1"
+  }
+}

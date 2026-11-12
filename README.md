@@ -40,14 +40,21 @@ Make sure PostgreSQL is running and `DATABASE_URL` points at the STOP database. 
 
 ## Running the Application
 
-### Development Mode
+### On the office server (production)
+
+The backend serves the API on port 5000 and the built site on port 5173. A watchdog restarts it if it stops, and a
+Windows scheduled task starts it automatically. Code changes go live only when `deploy/update.ps1` runs. Setup,
+updates, rollback, and logs are covered in [deploy/README.md](deploy/README.md).
+
+### Development
 
 #### Start the Backend Server
 ```bash
 cd backend
 npm start
 ```
-The backend applies any pending migrations, then starts on `https://localhost:5000` (or the `PORT` in `.env`).
+The backend applies any pending migrations, then starts on `https://localhost:5000` (or the `PORT` in `.env`). On the
+office server it's already running under the watchdog; use `deploy/restart.ps1` there instead.
 
 #### Start the Frontend Development Server
 In a new terminal:
@@ -55,22 +62,11 @@ In a new terminal:
 cd frontend
 npm run dev
 ```
-The frontend will be available at `http://localhost:5173` (or the URL shown in your terminal)
+The dev server runs on `https://localhost:5174`, beside the live site on 5173. It uses the same API and database.
 
-### Production Build
-
-#### Build the Frontend
-```bash
-cd frontend
-npm run build
-```
-This generates an optimized production build in the `dist` folder.
-
-#### Run Backend in Production
-```bash
-cd backend
-npm start
-```
+### Tests
+- `npm test` in `backend/` and `npx vitest run` in `frontend/` (run vitest from PowerShell on Windows).
+- End-to-end tests of two people working at once, against a test copy of the database only: [e2e/README.md](e2e/README.md).
 
 ## Available Scripts
 
