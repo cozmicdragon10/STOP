@@ -1,6 +1,7 @@
 // The monthly supervising agent (PO) report: one PDF per client, and an unsent Outlook draft (.eml) per agent with
 // that agent's client PDFs attached. Nothing here sends email; the draft opens in Outlook and someone presses Send.
 const crypto = require('crypto');
+const { idText } = require('./lib/clientId');
 const PDFDocument = require('pdfkit');
 const { LETTERHEAD, formatDate } = require('./dischargeSummary');
 
@@ -11,6 +12,8 @@ const monthLabel = (month) => `${MONTHS[Number(month.slice(5, 7)) - 1]} ${month.
 // Attendance types that count as a session the client attended; Call-In is a called-in absence and
 // Closure/Holiday mean the group didn't meet
 const ATTENDED_TYPES = ['Group', 'Make-Up', 'Assessment', 'Individual'];
+// Programs that don't attend groups (polygraphs only): their reports have no attendance section, group, or counselor
+const NO_ATTENDANCE_PROGRAM_TYPES = ['Poly Only'];
 const ATTENDANCE_LABELS = { 'Call-In': 'Called in (absent)', Closure: 'Group closed', Holiday: 'Holiday (no group)' };
 
 const fullName = (c) => [c.firstname, c.middlename, c.lastname].filter(Boolean).join(' ');
@@ -74,9 +77,10 @@ const buildClientReportPdf = (info) => new Promise((resolve, reject) => {
         doc.y = lowest;
         doc.moveDown(0.3);
     };
-    fieldRow([['Participant', name], ['DOC #', client.docnumber]]);
+    fieldRow([['Participant', name], ['ID #', idText(client)]]);
     fieldRow([['Program', client.programtype], ['Program Start Date', formatDate(client.programstartdate)]]);
-    fieldRow([['Group', client.groupname], [staffTitle(client), withCredentials(client.counselor, client.counselorcredentials)]]);
+    const attends = !NO_ATTENDANCE_PROGRAM_TYPES.includes(client.programtype);
+    if (attends) fieldRow([['Group', client.groupname], [staffTitle(client), withCredentials(client.counselor, client.counselorcredentials)]]);
     fieldRow([['Supervising Agent', client.supervisingagent], ['Status', client.programstatus]]);
     doc.moveDown(0.8);
 
@@ -109,22 +113,24 @@ const buildClientReportPdf = (info) => new Promise((resolve, reject) => {
         doc.moveDown(0.6);
     };
 
-    // Attendance
-    heading('Attendance');
-    const attended = attendance.filter(a => ATTENDED_TYPES.includes(a.type)).length;
-    const calledIn = attendance.filter(a => a.type === 'Call-In').length;
-    const closed = attendance.filter(a => a.type === 'Closure' || a.type === 'Holiday').length;
-    line(`Sessions attended: ${attended}     Called in: ${calledIn}     Group closed/holiday: ${closed}`, { bold: true });
-    if (attended === 0) line(`Last date attended: ${formatDate(client.lastattended)}`);
-    doc.moveDown(0.4);
-    if (attendance.length > 0) {
-        table(
-            [{ label: 'Date', share: 0.2 }, { label: 'Group', share: 0.45 }, { label: 'Session', share: 0.35 }],
-            attendance.map(a => [formatDate(a.date), a.groupname || '', ATTENDANCE_LABELS[a.type] || a.type])
-        );
-    } else {
-        line('No attendance recorded this month.');
-        doc.moveDown(0.6);
+    // Attendance (not for programs that don't attend groups)
+    if (attends) {
+        heading('Attendance');
+        const attended = attendance.filter(a => ATTENDED_TYPES.includes(a.type)).length;
+        const calledIn = attendance.filter(a => a.type === 'Call-In').length;
+        const closed = attendance.filter(a => a.type === 'Closure' || a.type === 'Holiday').length;
+        line(`Sessions attended: ${attended}     Called in: ${calledIn}     Group closed/holiday: ${closed}`, { bold: true });
+        if (attended === 0) line(`Last date attended: ${formatDate(client.lastattended)}`);
+        doc.moveDown(0.4);
+        if (attendance.length > 0) {
+            table(
+                [{ label: 'Date', share: 0.2 }, { label: 'Group', share: 0.45 }, { label: 'Session', share: 0.35 }],
+                attendance.map(a => [formatDate(a.date), a.groupname || '', ATTENDANCE_LABELS[a.type] || a.type])
+            );
+        } else {
+            line('No attendance recorded this month.');
+            doc.moveDown(0.6);
+        }
     }
 
     // Polygraphs
@@ -193,9 +199,9 @@ const displayName = (s) => (/^[\x20-\x7e]*$/.test(s) ? `"${s.replace(/["\\]/g, '
 const safeFileName = (s) => s.replace(/[\\/:*?"<>|\r\n]+/g, ' ').replace(/[^\x20-\x7e]/g, '').replace(/\s+/g, ' ').trim();
 const base64Lines = (buf) => buf.toString('base64').replace(/.{1,76}/g, '$&\r\n');
 
-// The PDF's file name: 'Last, First - DOC 123456 - October 2026.pdf'
+// The PDF's file name: 'Last, First - DOC 123456 - October 2026.pdf' (the ID # with its type, e.g. PACTS)
 const reportFileName = (client, month) =>
-    `${safeFileName(`${client.lastname}, ${client.firstname}${client.docnumber ? ` - DOC ${client.docnumber}` : ''} - ${monthLabel(month)}`)}.pdf`;
+    `${safeFileName(`${client.lastname}, ${client.firstname}${idText(client) ? ` - ${idText(client)}` : ''} - ${monthLabel(month)}`)}.pdf`;
 
 const draftSubject = (month) => `Monthly Client Reports - ${monthLabel(month)}`;
 
@@ -204,7 +210,7 @@ const draftBody = ({ agentName, month, clients }) => [
     '',
     `Attached are the ${monthLabel(month)} monthly progress reports for the following client${clients.length === 1 ? '' : 's'} under your supervision:`,
     '',
-    ...clients.map(c => `  - ${c.lastname}, ${c.firstname}${c.docnumber ? ` (DOC ${c.docnumber})` : ''}`),
+    ...clients.map(c => `  - ${c.lastname}, ${c.firstname}${idText(c) ? ` (${idText(c)})` : ''}`),
     '',
     'Please let us know if you have any questions.',
     '',
@@ -249,5 +255,5 @@ const buildDraftEml = ({ to, month, clients, attachments }) => {
 const draftFileName = (agentName, month) => `${safeFileName(`PO Reports - ${agentName} - ${monthLabel(month)}`)}.eml`;
 
 module.exports = {
-    ATTENDED_TYPES, monthLabel, staffTitle, buildClientReportPdf, buildDraftEml, reportFileName, draftFileName, draftSubject,
+    ATTENDED_TYPES, NO_ATTENDANCE_PROGRAM_TYPES, monthLabel, staffTitle, buildClientReportPdf, buildDraftEml, reportFileName, draftFileName, draftSubject,
 };

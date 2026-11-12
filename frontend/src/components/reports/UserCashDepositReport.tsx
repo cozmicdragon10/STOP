@@ -3,6 +3,7 @@ import { getUserCashDeposits, setUserCashDroppedOff } from '../../api';
 import type { UserCashDepositRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
+import { idText } from '../../utils/clients';
 
 const NOT_RECORDED = 'Not recorded';
 
@@ -198,7 +199,7 @@ export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmai
                       <td className="p-3 pl-6 text-slate-200 whitespace-nowrap">{formatWhen(r.paidon)}</td>
                       <td className="p-3">
                         <span className="text-white">{r.lastname || r.firstname ? `${r.lastname}, ${r.firstname}` : '—'}</span>
-                        <span className="block text-[0.6875rem] text-slate-500">{[r.feetype, r.docnumber].filter(Boolean).join(' · ')}</span>
+                        <span className="block text-[0.6875rem] text-slate-500">{[r.feetype, idText(r)].filter(Boolean).join(' · ')}</span>
                         {r.comments && <span className="block text-[0.6875rem] text-slate-500 max-w-md truncate" title={r.comments}>{r.comments}</span>}
                       </td>
                       <td className="p-3 text-right font-semibold text-white">{money(cashOf(r))}</td>

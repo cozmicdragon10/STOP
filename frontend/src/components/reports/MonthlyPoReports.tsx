@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, FileText, Mail, TriangleAlert } from 'lucide
 import { createPoReportDraft, fetchPoClientReport, getPoReportMonth } from '../../api';
 import type { PoReportAgent, PoReportMonth } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
+import { idText } from '../../utils/clients';
 
 interface Props {
   userEmail: string;
@@ -96,7 +97,7 @@ export default function MonthlyPoReports({ userEmail, onOpenClient }: Props) {
   const agents = (data?.agents ?? []).filter(a =>
     (!onlyUndrafted || !a.lastDraft)
     && (!needle || a.name.toLowerCase().includes(needle)
-      || a.clients.some(c => `${c.lastname}, ${c.firstname} ${c.docnumber ?? ''}`.toLowerCase().includes(needle))));
+      || a.clients.some(c => `${c.lastname}, ${c.firstname} ${idText(c)}`.toLowerCase().includes(needle))));
   const clientTotal = data?.agents.reduce((n, a) => n + a.clients.length, 0) ?? 0;
   const draftedTotal = data?.agents.filter(a => a.lastDraft).length ?? 0;
   const noEmail = data?.agents.filter(a => !a.email).length ?? 0;
@@ -155,7 +156,7 @@ export default function MonthlyPoReports({ userEmail, onOpenClient }: Props) {
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
                 {data.noAgent.map(c => (
                   <button key={c.clientid} type="button" onClick={() => onOpenClient(c.clientid)} className="hover:underline text-left">
-                    {c.lastname}, {c.firstname}{c.docnumber ? ` (${c.docnumber})` : ''}
+                    {c.lastname}, {c.firstname}{c.docnumber ? ` (${idText(c)})` : ''}
                   </button>
                 ))}
               </div>
@@ -168,7 +169,7 @@ export default function MonthlyPoReports({ userEmail, onOpenClient }: Props) {
             type="search"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search agent, client, or DOC #"
+            placeholder="Search agent, client, or ID #"
             className="flex-1 min-w-[200px] bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white"
           />
           <label className="flex items-center gap-2 text-xs text-slate-300">
@@ -216,7 +217,7 @@ export default function MonthlyPoReports({ userEmail, onOpenClient }: Props) {
                 <table className="stack-table w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-slate-800/50 text-slate-400 uppercase">
-                      <th className="p-2 pl-11">Client</th><th className="p-2">DOC #</th>
+                      <th className="p-2 pl-11">Client</th><th className="p-2">ID #</th>
                       <th className="p-2">Attended</th><th className="p-2">Called in</th><th className="p-2">Notes</th><th className="p-2" />
                     </tr>
                   </thead>
@@ -226,9 +227,10 @@ export default function MonthlyPoReports({ userEmail, onOpenClient }: Props) {
                         <td className="p-2 pl-11">
                           <button type="button" onClick={() => onOpenClient(c.clientid)} className="font-medium text-white hover:underline text-left">{c.lastname}, {c.firstname}</button>
                         </td>
-                        <td data-label="DOC #" className="p-2 text-slate-300">{c.docnumber || '—'}</td>
-                        <td data-label="Attended" className={`p-2 ${c.attended === 0 ? 'text-amber-400' : 'text-slate-300'}`}>{c.attended}</td>
-                        <td data-label="Called in" className="p-2 text-slate-300">{c.calledin}</td>
+                        <td data-label="ID #" className="p-2 text-slate-300">{idText(c) || '—'}</td>
+                        <td data-label="Attended" className={`p-2 ${c.attended === 0 ? 'text-amber-400' : c.attended === null ? 'text-slate-500' : 'text-slate-300'}`}
+                          title={c.attended === null ? `${c.programtype} clients don't attend groups.` : undefined}>{c.attended ?? 'N/A'}</td>
+                        <td data-label="Called in" className={`p-2 ${c.calledin === null ? 'text-slate-500' : 'text-slate-300'}`}>{c.calledin ?? 'N/A'}</td>
                         <td data-label="Notes" className="p-2 text-slate-300">{c.notecount}</td>
                         <td className="p-2 text-right">
                           <button type="button" onClick={() => viewPdf(c.clientid)} className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300">

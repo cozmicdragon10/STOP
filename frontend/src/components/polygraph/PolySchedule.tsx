@@ -19,6 +19,7 @@ interface PickerClient {
   firstname: string;
   lastname: string;
   docnumber?: string | null;
+  doctype?: string | null;
 }
 
 // The client, poly type, and comment picked on each open slot's card (kept by App, since scheduling from a

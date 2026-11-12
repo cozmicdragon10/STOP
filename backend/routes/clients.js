@@ -1,4 +1,5 @@
 const express = require('express');
+const { ID_TYPES, idText } = require('../lib/clientId');
 const { buildDischargeSummaryPdf } = require('../dischargeSummary');
 const { logAction, pool } = require('../db');
 const { activeRoleFor } = require('../lib/access');
@@ -427,7 +428,7 @@ router.put('/api/notes/:noteId', async (req, res) => {
 router.get('/api/notes/pending', requireRole('Business Administrator'), async (req, res) => {
     try {
         const result = await pool.query(
-            `SELECT n.*, c.FirstName, c.LastName, c.DOCNumber, c.ProgramType, e.DisplayName AS AuthorName,
+            `SELECT n.*, c.FirstName, c.LastName, c.DOCNumber, c.DocType, c.ProgramType, e.DisplayName AS AuthorName,
                     (SELECT MAX(Date) FROM Attendance WHERE Client = n.Client) AS LastAttended
              FROM Notes n
              JOIN Clients c ON c.ClientId = n.Client
@@ -633,8 +634,12 @@ router.put('/api/clients/:id', async (req, res) => {
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
             comments, programtype, race, dateofbirth, sex, pretrial, assessor, buspasses, buspassrefill, updatedBy,
-            individualgroupid, federalunits, federalunitrefills, copay
+            individualgroupid, federalunits, federalunitrefills, copay, doctype
         } = req.body;
+        // The ID #'s kind (DOC, PACTS, ...): changed only when sent; blank clears it
+        if (doctype !== undefined && doctype !== null && doctype !== '' && !ID_TYPES.includes(doctype)) {
+            return res.status(400).json({ error: `ID # type must be one of: ${ID_TYPES.join(', ')}.` });
+        }
         // Federal clients' copay for individual sessions: changed only when sent; blank clears it
         const copayValue = copay === undefined || copay === null || copay === '' ? null : Math.round(Number(copay) * 100) / 100;
         if (copayValue !== null && !(Number.isFinite(copayValue) && copayValue >= 0)) {
@@ -672,7 +677,7 @@ router.put('/api/clients/:id', async (req, res) => {
         if (individualGroup.error) return res.status(400).json({ error: individualGroup.error });
 
         // Tracked fields before the edit, for the change log
-        const beforeRes = await pool.query('SELECT Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
+        const beforeRes = await pool.query('SELECT DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
         const before = beforeRes.rows[0];
 
         // The full set of poly fee vouchers depends on the phase the client will be in after this edit. A count sent back
@@ -748,7 +753,8 @@ router.put('/api/clients/:id', async (req, res) => {
                     THEN (CASE WHEN $37::boolean THEN $38::int ELSE IndividualGroupId END) ELSE NULL END,
                 -- Federal clients only (after this edit); changed only when sent
                 Copay = CASE WHEN COALESCE($23, ProgramType) = ANY($42::text[])
-                    THEN (CASE WHEN $40::boolean THEN $41::numeric ELSE Copay END) ELSE NULL END
+                    THEN (CASE WHEN $40::boolean THEN $41::numeric ELSE Copay END) ELSE NULL END,
+                DocType = CASE WHEN $43::boolean THEN $44::text ELSE DocType END
             WHERE ClientId = $24`,
             [
                 firstname || null, middlename || null, lastname || null, docnumber || null, supervisingagent || null,
@@ -768,6 +774,7 @@ router.put('/api/clients/:id', async (req, res) => {
                 busPasses, busPassRefill,
                 individualgroupid !== undefined, individualGroup.id, SO_PROGRAM_TYPES,
                 copay !== undefined, copayValue, FEDERAL_PROGRAM_TYPES,
+                doctype !== undefined, doctype || null,
             ]
         );
 
@@ -788,7 +795,7 @@ router.put('/api/clients/:id', async (req, res) => {
         );
 
         if (before && updated.rows[0]) {
-            const after = await pool.query('SELECT Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
+            const after = await pool.query('SELECT DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
             const now = after.rows[0];
             // An edit that makes the poly fee paid in full filled the vouchers (see the CASE above); that counts toward an override
             const wasFull = Number(before.polyfee) > 0 && Number(before.polyfeepaid) >= Number(before.polyfee);
@@ -805,6 +812,7 @@ router.put('/api/clients/:id', async (req, res) => {
                 });
             }
             const tracked = [
+                ['ID #', idText(before), idText(now)],
                 ['Program Status', before.programstatus, now.programstatus],
                 ['Program Type', before.programtype, now.programtype],
                 ['Supervising Agent', before.supervisingagent, now.supervisingagent],
@@ -841,6 +849,10 @@ router.put('/api/clients/:id', async (req, res) => {
 
         res.json({ success: true, client: updated.rows[0] });
     } catch (err) {
+        // 23505 = unique_violation: another client has this ID # and type
+        if (err.code === '23505') {
+            return res.status(409).json({ error: 'Another client already has this ID # (same type and number).' });
+        }
         console.error('Error updating client:', err);
         res.status(500).json({ error: err.message });
     }
@@ -854,8 +866,11 @@ router.post('/api/clients', async (req, res) => {
             programstartdate, programstatus, phase, groupid,
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
-            comments, programtype, treatmentfee, vouchers, pretrial, createdBy, individualgroupid
+            comments, programtype, treatmentfee, vouchers, pretrial, createdBy, individualgroupid, doctype
         } = req.body;
+        if (doctype && !ID_TYPES.includes(doctype)) {
+            return res.status(400).json({ error: `ID # type must be one of: ${ID_TYPES.join(', ')}.` });
+        }
         const individualGroup = await individualGroupFrom(individualgroupid);
         if (individualGroup.error) return res.status(400).json({ error: individualGroup.error });
         const individualGroupId = SO_PROGRAM_TYPES.includes(programtype) ? individualGroup.id : null;
@@ -864,7 +879,7 @@ router.post('/api/clients', async (req, res) => {
         const clientPhase = programtype === 'BIP' ? '0' : phase;
         const isPretrial = pretrial === true && PRETRIAL_PROGRAM_TYPES.includes(programtype);
 
-        // DOC # and supervising agent are optional; blanks are stored as NULL so the unique DOC # index allows many of them
+        // ID # and supervising agent are optional; blanks are stored as NULL so the unique ID # index allows many of them
         const required = {
             'First name': firstname, 'Last name': lastname, 'Program type': programtype,
             'Program start date': programstartdate, 'Program status': programstatus, Phase: clientPhase
@@ -883,13 +898,13 @@ router.post('/api/clients', async (req, res) => {
                 ProgramStartDate, ProgramStatus, Phase, GroupId,
                 Address, City, County, State, Zip,
                 MainPhone, AltPhone, EmergencyContact, EmergencyContactPhone,
-                Comments, ProgramType, TreatmentFee, Vouchers, Pretrial, IndividualGroupId
+                Comments, ProgramType, TreatmentFee, Vouchers, Pretrial, IndividualGroupId, DocType
             ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8, $9,
                 $10, $11, $12, $13, $14,
                 $15, $16, $17, $18,
-                $19, COALESCE($20, 'State SO'), COALESCE($21, 0), COALESCE($22, 0), $23, $24
+                $19, COALESCE($20, 'State SO'), COALESCE($21, 0), COALESCE($22, 0), $23, $24, $25
             ) RETURNING ClientId`,
             [
                 firstname.trim(), middlename?.trim() || null, lastname.trim(), docnumber?.trim() || null, supervisingagent?.trim() || null,
@@ -899,7 +914,7 @@ router.post('/api/clients', async (req, res) => {
                 comments || null, programtype || null,
                 treatmentfee !== undefined && treatmentfee !== null && treatmentfee !== '' ? Number(treatmentfee) : null,
                 vouchers !== undefined && vouchers !== null && vouchers !== '' ? Number(vouchers) : null,
-                isPretrial, individualGroupId
+                isPretrial, individualGroupId, doctype || null
             ]
         );
         await logClientChange(pool, {
@@ -910,9 +925,9 @@ router.post('/api/clients', async (req, res) => {
         });
         res.status(201).json({ success: true, clientId: result.rows[0].clientid, message: 'Client added successfully.' });
     } catch (err) {
-        // 23505 = unique_violation: DOC # is already on file
+        // 23505 = unique_violation: the ID # (same type and number) is already on file
         if (err.code === '23505') {
-            return res.status(409).json({ error: 'A client with this DOC # already exists.' });
+            return res.status(409).json({ error: 'A client with this ID # (same type and number) already exists.' });
         }
         console.error('Error creating client:', err);
         res.status(500).json({ error: err.message });

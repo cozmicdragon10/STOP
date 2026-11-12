@@ -53,6 +53,7 @@ export interface ClientColumns {
     middlename: string | null;
     lastname: string;
     docnumber: string | null;
+    doctype?: string | null;
     supervisingagent: string | null;
     programstartdate: string;
     lastdateattended: string | null;
@@ -244,6 +245,7 @@ export interface PendingNote extends ClientNote {
     firstname: string;
     lastname: string;
     docnumber: string | null;
+    doctype?: string | null;
     programtype: string | null;
     authorname: string | null;
     lastattended: string | null;
@@ -835,6 +837,7 @@ export interface OpenIndividualSession {
     firstname: string;
     lastname: string;
     docnumber: string | null;
+    doctype?: string | null;
     programtype: string | null;
     category: IndividualCategory;
     sessiontypeid: number;
@@ -941,6 +944,47 @@ export interface AccountPaymentResult {
     polyFeeVoucher: number;
     polyApplied: number;
     accountApplied: number;
+    // The ledger row(s) the payment saved: one, or two when it was split with the poly fee
+    transactionIds: number[];
+}
+
+// One ledger row found by its ID (Admin > Transaction Lookup)
+export interface TransactionRow {
+    transactionid: number;
+    client: number;
+    date: string;
+    type: string;
+    amount: Money;
+    feetype: string | null;
+    finalbalance: Money | null;
+    comments: string | null;
+    paymentmethod: string | null;
+    attendanceid: number | null;
+    originalamount: Money | null;
+    adjustedby: string | null;
+    adjustedon: string | null;
+    adjustmentreason: string | null;
+    relatedtransactionid: number | null;
+    disputestatus: string | null;
+    enteredby: string | null;
+}
+export interface TransactionLookup extends TransactionRow {
+    firstname: string | null;
+    lastname: string | null;
+    docnumber: string | null;
+    doctype?: string | null;
+    programtype: string | null;
+    // The check-in the row was saved with, if any
+    attendancedate: string | null;
+    attendancetype: string | null;
+    groupname: string | null;
+    // Rows tied to it: the same check-in's fee or payment, refunds, disputes
+    related: TransactionRow[];
+}
+
+export async function lookupTransaction(id: number): Promise<TransactionLookup> {
+    const res = await apiFetch(`${API_BASE}/transactions/${id}`);
+    return jsonResponse(res, 'Failed to look up the transaction.');
 }
 
 export async function submitAccountPayment(data: { client: number; amount: number; comments: string; createdBy: string; paymentMethod: 'Cash' | 'Credit Card'; applyToPolyFee?: boolean }): Promise<AccountPaymentResult> {
@@ -1103,6 +1147,7 @@ export interface AgentReportRow {
     firstname: string;
     lastname: string;
     docnumber: string | null;
+    doctype?: string | null;
     supervisingagent: string | null;
     accountbalance: Money | null;
     // A count, sent as text
@@ -1133,6 +1178,7 @@ export interface GroupReportRow {
     firstname: string;
     lastname: string;
     docnumber: string | null;
+    doctype?: string | null;
 }
 
 // from and to are YYYY-MM-DD, inclusive
@@ -1229,6 +1275,7 @@ export interface UserCashDepositRow {
     firstname: string | null;
     lastname: string | null;
     docnumber: string | null;
+    doctype?: string | null;
     depositdate: string | null;
     recordedby: string | null;
     recordedbyname: string | null;
@@ -1259,6 +1306,7 @@ export interface UserActivityRow {
     firstname: string | null;
     lastname: string | null;
     docnumber: string | null;
+    doctype?: string | null;
     enteredon: string;
     // Employee email; null for payments entered before who entered them was recorded
     enteredby: string | null;
@@ -1286,9 +1334,11 @@ export interface PoReportClient {
     firstname: string;
     lastname: string;
     docnumber: string | null;
-    // Counts for the report month
-    attended: number;
-    calledin: number;
+    doctype?: string | null;
+    programtype: string | null;
+    // Counts for the report month; attended and calledin are null for programs that don't attend groups (Poly Only)
+    attended: number | null;
+    calledin: number | null;
     notecount: number;
 }
 
@@ -1306,7 +1356,7 @@ export interface PoReportMonth {
     month: string;
     agents: PoReportAgent[];
     // Active clients with no supervising agent, so they get no report
-    noAgent: { clientid: number; firstname: string; lastname: string; docnumber: string | null }[];
+    noAgent: { clientid: number; firstname: string; lastname: string; docnumber: string | null; doctype?: string | null }[];
 }
 
 // month is YYYY-MM

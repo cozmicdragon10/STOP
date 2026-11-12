@@ -7,6 +7,7 @@ import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import { formatMoney } from '../../utils/ledger';
 import { printReceipt, type Receipt } from '../../utils/receipt';
+import { idText } from '../../utils/clients';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client rows are untyped throughout App */
 interface Props {
@@ -48,11 +49,12 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
       onSuccess(`${payWith} payment recorded! Updated Balance: ${formatBalance(res.newBalance)}`);
       setLastPayment({
         clientName: client ? `${client.lastname}, ${client.firstname}` : `Client #${clientId}`,
-        docNumber: client?.docnumber || '',
+        docNumber: idText(client),
         amount,
         method: payWith,
         notes: comments,
         newBalance: Number(res.newBalance),
+        transactionIds: res.transactionIds,
         processedBy: userEmail,
         date: new Date().toLocaleString()
       });

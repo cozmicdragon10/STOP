@@ -5,6 +5,7 @@ import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
 import { bipCheckInBlockLabel, bipCheckInBlockMessage } from '../../utils/bip';
 import { drugTestedOn, outOfUnits, unitCodeFor, unitCodeLabel, unitsLeft } from '../../utils/federalUnits';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
+import { idText } from '../../utils/clients';
 
 interface Props {
   group: GroupRecord;
@@ -74,7 +75,7 @@ function RosterRow({ client, checked, attended, selected, onToggle, onOpenClient
             {bipCheckInBlockLabel(client.bipcheckinblock)}
           </span>
         )}
-        <p className="text-xs text-slate-400 sm:ml-auto">DOC # {client.docnumber || '—'} · Bal {formatBalance(client.accountbalance)}</p>
+        <p className="text-xs text-slate-400 sm:ml-auto">ID # {idText(client) || '—'} · Bal {formatBalance(client.accountbalance)}</p>
       </div>
       {/* Inside the row's label, so it must not also tick the checkbox */}
       <button

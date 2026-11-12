@@ -96,6 +96,14 @@ export const isIndividualGroup = (groupProgram?: string | null) => (groupProgram
 // "Individual", else the first active one; null when there is none. Mirrors individualPrice in backend/lib/attendance.js.
 // What one client is charged for an individual session: federal clients pay their copay (nothing when blank), everyone
 // else the Admin Individual price. Mirrors the batch check-in in backend/routes/attendance.js.
+// A client's ID # (docnumber) isn't always a DOC number; doctype says which kind it is. Mirrors backend lib/clientId.js.
+export const ID_TYPES = ['DOC', 'PACTS', 'Case #', 'DHS', 'OCS'];
+// The ID # as shown, with its type in front when set: "PACTS 1423371 PB", "DOC 581422", or just the number
+export const idText = (c: { docnumber?: string | null; doctype?: string | null } | null | undefined) => {
+  const number = String(c?.docnumber ?? '').trim();
+  if (!number) return '';
+  return c?.doctype ? `${c.doctype} ${number}` : number;
+};
 export const individualSessionFee = (client: { programtype?: string | null; copay?: number | string | null }, individualPrice: number) =>
   FEDERAL_PROGRAM_TYPES.includes(client.programtype || '') ? Number(client.copay || 0) : individualPrice;
 export const individualPriceFrom = (types: { sessiontypeid: number; category: string; name: string; fee: number | string; active: boolean }[]): number | null => {

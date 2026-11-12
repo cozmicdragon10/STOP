@@ -1,6 +1,6 @@
 const express = require('express');
 const { logAction, pool } = require('../db');
-const { activeRoleFor } = require('../lib/access');
+const { activeRoleFor, OPEN_GROUP_ADMIN_ROLES } = require('../lib/access');
 const { assertCardAllowed } = require('../lib/cardBlock');
 const { logClientChange } = require('../lib/changeLog');
 const { polyVoucherMax, changePolyFeePaid, countPolyFeeFill, splitPolyPaidChange, voucherChangeText } = require('../lib/poly');
@@ -39,20 +39,24 @@ router.post('/api/financials/payment', async (req, res) => {
         // The payment that completes the poly fee fills the vouchers
         const newPolyVoucher = polyAmount > 0 && polyAmount >= polyOwed ? polyVoucherMax(clientRes.rows[0].phase) : Number(clientRes.rows[0].polyfeevoucher || 0);
 
+        // The ledger row(s) this payment saved, printed on its receipt (one, or two when it is split with the poly fee)
+        const transactionIds = [];
         if (polyAmount > 0) {
             // The poly fee is tracked separately, so the account balance is unchanged by this row
-            await clientDb.query(
+            const saved = await clientDb.query(
                 `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, EnteredBy)
-                 VALUES ($1, NOW(), 'Payment', $2, 'Poly Fee', $3, $4, $5, $6)`,
+                 VALUES ($1, NOW(), 'Payment', $2, 'Poly Fee', $3, $4, $5, $6) RETURNING TransactionId`,
                 [client, polyAmount, oldBalance, comment, paymentMethod, createdBy || null]
             );
+            transactionIds.push(saved.rows[0].transactionid);
         }
         if (accountAmount > 0) {
-            await clientDb.query(
+            const saved = await clientDb.query(
                 `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, EnteredBy)
-                 VALUES ($1, NOW(), 'Payment', $2, 'Account Payment', $3, $4, $5, $6)`,
+                 VALUES ($1, NOW(), 'Payment', $2, 'Account Payment', $3, $4, $5, $6) RETURNING TransactionId`,
                 [client, accountAmount, newBalance, comment, paymentMethod, createdBy || null]
             );
+            transactionIds.push(saved.rows[0].transactionid);
         }
 
         // Filling the vouchers remembers the count before (the right-hand PolyFeeVoucher is the pre-update value), so
@@ -67,7 +71,7 @@ router.post('/api/financials/payment', async (req, res) => {
         if (fillsVouchers) await countPolyFeeFill(clientDb, client, 1);
 
         await clientDb.query('COMMIT');
-        res.status(201).json({ success: true, newBalance, polyFeePaid: newPolyPaid, polyFeeVoucher: newPolyVoucher, polyApplied: polyAmount, accountApplied: accountAmount });
+        res.status(201).json({ success: true, newBalance, polyFeePaid: newPolyPaid, polyFeeVoucher: newPolyVoucher, polyApplied: polyAmount, accountApplied: accountAmount, transactionIds });
     } catch (error) {
         await clientDb.query('ROLLBACK');
         res.status(error.status || 500).json({ error: error.message });
@@ -77,6 +81,38 @@ router.post('/api/financials/payment', async (req, res) => {
 });
 
 // Custom fee charged to a client's account (Business Administrators only)
+// Admin > Transaction Lookup: one ledger row by the ID printed on its receipt, with its client, the check-in it was
+// taken at, and any rows tied to it (refunds, disputes). Office Admins and Business Administrators only.
+const LOOKUP_COLUMNS = `f.TransactionId, f.Client, f.Date, f.Type, f.Amount, f.FeeType, f.FinalBalance, f.Comments, f.PaymentMethod,
+    f.AttendanceId, f.OriginalAmount, f.AdjustedBy, f.AdjustedOn, f.AdjustmentReason, f.RelatedTransactionId, f.DisputeStatus, f.EnteredBy`;
+router.get('/api/transactions/:id', async (req, res) => {
+    try {
+        if (!OPEN_GROUP_ADMIN_ROLES.includes(req.user?.role)) {
+            return res.status(403).json({ error: 'Only Office Admins and Business Administrators can look up transactions.' });
+        }
+        const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0 || id > 2147483647) return res.status(400).json({ error: 'Enter the transaction ID number from the receipt.' });
+        const found = await pool.query(
+            `SELECT ${LOOKUP_COLUMNS}, c.FirstName, c.LastName, c.DocNumber, c.DocType, c.ProgramType,
+                    a.Date AS AttendanceDate, a.Type AS AttendanceType, g.GroupName
+             FROM FinancialTransactions f
+             LEFT JOIN Clients c ON c.ClientId = f.Client
+             LEFT JOIN Attendance a ON a.AttendanceId = f.AttendanceId
+             LEFT JOIN Groups g ON g.GroupId = a."Group"
+             WHERE f.TransactionId = $1`, [id]);
+        if (!found.rows[0]) return res.status(404).json({ error: `No transaction has the ID ${id}.` });
+        const tx = found.rows[0];
+        const related = await pool.query(
+            `SELECT ${LOOKUP_COLUMNS} FROM FinancialTransactions f
+             WHERE f.TransactionId <> $1 AND (f.RelatedTransactionId = $1 OR f.TransactionId = $2
+                OR (f.AttendanceId IS NOT NULL AND f.AttendanceId = $3))
+             ORDER BY f.Date, f.TransactionId`, [id, tx.relatedtransactionid, tx.attendanceid]);
+        res.json({ ...tx, related: related.rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 router.post('/api/financials/charge', async (req, res) => {
     const clientDb = await pool.connect();
     try {

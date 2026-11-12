@@ -9,6 +9,7 @@ interface CallInClient {
   firstname: string;
   lastname: string;
   docnumber?: string | null;
+  doctype?: string | null;
   groupid?: number | null;
   programstatus?: string | null;
 }

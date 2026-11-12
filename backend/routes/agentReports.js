@@ -7,7 +7,7 @@ const { logAction, pool } = require('../db');
 const { requireRole } = require('../lib/auth');
 const { NO_POLY_PROGRAM_TYPES } = require('../lib/poly');
 const {
-    ATTENDED_TYPES, monthLabel, buildClientReportPdf, buildDraftEml, reportFileName, draftFileName,
+    ATTENDED_TYPES, NO_ATTENDANCE_PROGRAM_TYPES, monthLabel, buildClientReportPdf, buildDraftEml, reportFileName, draftFileName,
 } = require('../agentReport');
 
 const router = express.Router();
@@ -24,7 +24,7 @@ const REPORTED_CLIENTS = `c.ProgramStatus = 'Active' AND COALESCE(TRIM(c.Supervi
 
 // Report clients matching the WHERE clause, with what the PDF header needs. Uses $1 (month start).
 const clientsSql = (where) => `
-    SELECT c.ClientId, c.FirstName, c.MiddleName, c.LastName, c.DOCNumber, c.SupervisingAgent, c.ProgramStatus,
+    SELECT c.ClientId, c.FirstName, c.MiddleName, c.LastName, c.DOCNumber, c.DocType, c.SupervisingAgent, c.ProgramStatus,
            c.ProgramStartDate, c.NoPolyRequired, COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
            g.GroupName, g.Counselor,
            -- The group counselor's credentials (e.g. "LPC"), matched by display name or email as receipts do
@@ -130,7 +130,7 @@ router.get('/api/reports/po-monthly', adminsOnly, async (req, res) => {
         );
         const lastDraft = new Map(drafts.rows.map(d => [d.agentkey, d]));
         const noAgent = await pool.query(
-            `SELECT c.ClientId, c.FirstName, c.LastName, c.DOCNumber FROM Clients c
+            `SELECT c.ClientId, c.FirstName, c.LastName, c.DOCNumber, c.DocType FROM Clients c
              WHERE c.ProgramStatus = 'Active' AND COALESCE(TRIM(c.SupervisingAgent), '') = ''
              ORDER BY c.LastName, c.FirstName`
         );
@@ -147,9 +147,12 @@ router.get('/api/reports/po-monthly', adminsOnly, async (req, res) => {
                     clients: [],
                 });
             }
+            // Poly Only clients don't attend groups, so they have no attendance counts
+            const attends = !NO_ATTENDANCE_PROGRAM_TYPES.includes(c.programtype);
             agents.get(c.agentkey).clients.push({
-                clientid: c.clientid, firstname: c.firstname, lastname: c.lastname, docnumber: c.docnumber,
-                attended: c.attended, calledin: c.calledin, notecount: c.notecount,
+                clientid: c.clientid, firstname: c.firstname, lastname: c.lastname, docnumber: c.docnumber, doctype: c.doctype,
+                programtype: c.programtype,
+                attended: attends ? c.attended : null, calledin: attends ? c.calledin : null, notecount: c.notecount,
             });
         }
         res.json({

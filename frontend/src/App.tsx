@@ -60,7 +60,7 @@ import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividu
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
 import { UnsavedFormsContext } from './hooks/useUnsavedForm';
-import { DISCHARGE_STATUSES } from './utils/clients';
+import { DISCHARGE_STATUSES, idText } from './utils/clients';
 import { scrollToStackedPanel } from './utils/layout';
 import { polygraphHistoryText, polygraphNotice, slotStart, slotSummary, takesPolygraphs } from './utils/polygraph';
 
@@ -457,9 +457,13 @@ export default function App() {
     }
   };
 
+  // A ledger row to scroll to and highlight on the open account (Admin > Transaction Lookup); cleared when an account opens
+  const [highlightTransactionId, setHighlightTransactionId] = useState<number | null>(null);
+
   // Drawer Log Loading
   const openClientLogs = async (client: any) => {
     setStatusDialog(null);
+    setHighlightTransactionId(null);
     setSelectedClientDetail(client);
     setClientTab('information');
     setAccountLoadError('');
@@ -500,6 +504,13 @@ export default function App() {
       setError(err instanceof Error && err.message ? err.message : 'Failed to load the client.');
     }
   };
+
+  // Opens the client's account on its Financial Ledger with one transaction scrolled to and highlighted
+  const openTransaction = (clientId: number, transactionId: number) => leaveAccountEdits(async () => {
+    await openClientById(clientId);
+    setClientTab('financials');
+    setHighlightTransactionId(transactionId);
+  });
 
   // Poly fields changed by a poly fee override; applied to the open client and the client list
   const applyPolyOverrideResult = (clientid: number, res: PolyFeeOverrideResult) => {
@@ -917,7 +928,7 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-400 mt-1">DOC #: <span className="text-slate-200 font-mono">{selectedClientDetail.docnumber}</span> | Program: <span className="text-blue-400 font-semibold">{selectedClientDetail.programtype || 'State SO'}</span> | Agent: {selectedClientDetail.supervisingagent}</p>
+                  <p className="text-xs text-slate-400 mt-1">ID #: <span className="text-slate-200 font-mono">{idText(selectedClientDetail)}</span> | Program: <span className="text-blue-400 font-semibold">{selectedClientDetail.programtype || 'State SO'}</span> | Agent: {selectedClientDetail.supervisingagent}</p>
                 </div>
                 <div className="flex flex-wrap gap-2 md:shrink-0 max-md:pr-12">
                   <div ref={setAccountActionsSlot} className="contents" />
@@ -1115,7 +1126,7 @@ export default function App() {
                   onDeleted={handleAttendanceDeleted}
                   onSuccess={setSuccessMsg}
                   clientName={`${selectedClientDetail.lastname}, ${selectedClientDetail.firstname}`}
-                  docNumber={selectedClientDetail.docnumber || ''}
+                  docNumber={idText(selectedClientDetail)}
                   onError={setError}
                 />
               )}
@@ -1127,6 +1138,7 @@ export default function App() {
                   role={role}
                   userEmail={user.employeeemail}
                   financials={clientFinancials}
+                  highlightTransactionId={highlightTransactionId}
                   bookedSlot={assignedSlotFor(selectedClientDetail.clientid)}
                   canViewSlot={isAllowed('polygraph')}
                   onViewSlot={(slotId) => leaveAccountEdits(() => openPolySlot(slotId))}
@@ -1598,7 +1610,7 @@ export default function App() {
         {activeTab === 'forms' && isAllowed('forms') && <FormsTab role={role} onSuccess={setSuccessMsg} />}
 
         {activeTab === 'admin' && (
-          <AdminTab user={user} employees={employees} onEmployeesChanged={setEmployees} onSuccess={setSuccessMsg} onError={setError} />
+          <AdminTab user={user} onOpenTransaction={openTransaction} employees={employees} onEmployeesChanged={setEmployees} onSuccess={setSuccessMsg} onError={setError} />
         )}
 
         {bipIntakePrompt && (

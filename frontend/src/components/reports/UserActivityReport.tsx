@@ -5,6 +5,7 @@ import { getUserActivity } from '../../api';
 import type { UserActivityRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { escapeHtml } from '../../utils/receipt';
+import { idText } from '../../utils/clients';
 
 interface Props {
   userEmail: string;
@@ -69,7 +70,7 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
     (!enteredBy || enteredByOf(r) === enteredBy)
     && (!detail || r.detail === detail)
     && (!method || r.paymentmethod === method)
-    && (!needle || [clientOf(r), r.docnumber, r.comments].some(v => String(v || '').toLowerCase().includes(needle))));
+    && (!needle || [clientOf(r), idText(r), r.comments].some(v => String(v || '').toLowerCase().includes(needle))));
 
   const payments = filtered.filter(r => r.kind === 'Payment');
   const notes = filtered.filter(r => r.kind === 'Note');
@@ -191,7 +192,7 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
           </label>
         )}
         <label className="text-xs text-slate-400 flex-1 min-w-[12rem]">Search
-          <input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Client, DOC #, or comments" className={`${select} w-full`} />
+          <input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Client, ID #, or comments" className={`${select} w-full`} />
         </label>
         {filtersOn && (
           <button type="button" onClick={() => { setKind(''); setEnteredBy(''); setDetail(''); setMethod(''); setSearch(''); }} className="h-9 text-xs text-slate-400 hover:text-white px-2">Clear filters</button>
@@ -235,7 +236,7 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
                 </td>
                 <td className="p-3 whitespace-nowrap">
                   <span className="text-white font-medium">{clientOf(r)}</span>
-                  {r.docnumber && <span className="block text-[0.6875rem] text-slate-500 font-mono">{r.docnumber}</span>}
+                  {r.docnumber && <span className="block text-[0.6875rem] text-slate-500 font-mono">{idText(r)}</span>}
                 </td>
                 <td className="p-3 text-right whitespace-nowrap">
                   {r.kind === 'Payment' && (

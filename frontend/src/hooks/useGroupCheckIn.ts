@@ -13,6 +13,7 @@ export interface ClientRecord {
   firstname: string;
   lastname: string;
   docnumber?: string | null;
+  doctype?: string | null;
   accountbalance?: number | string | null;
   groupname?: string | null;
   programstatus?: string | null;

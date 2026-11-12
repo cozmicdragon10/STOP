@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { AlertCircle, Ban, Pencil, Printer, SlidersHorizontal, X } from 'lucide-react';
 import { printReceipt } from '../../utils/receipt';
@@ -12,6 +12,7 @@ import { formatBalance } from '../../utils/balance';
 import { formatDisplayTime, localYmd } from '../../utils/dates';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { polyVoucherMax, slotSummary } from '../../utils/polygraph';
+import { idText } from '../../utils/clients';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client, ledger, and slot rows are untyped throughout App */
 export interface LedgerRefresh {
@@ -31,6 +32,8 @@ interface Props {
   userEmail: string;
   // The client's ledger, loaded by App with the account
   financials: any[];
+  // A transaction to scroll to and highlight (opened from Admin > Transaction Lookup)
+  highlightTransactionId?: number | null;
   // The slot this client is booked into, if any (poly fee changes can't return the vouchers it used)
   bookedSlot: any | null;
   canViewSlot: boolean;
@@ -51,7 +54,7 @@ const ACTION_SUBMIT_LABELS: Record<PaymentActionKind, string> = { adjust: 'Save 
 
 // The Financial Ledger tab of a client's account: entries by month, and (Business Administrators) corrections to a
 // payment: adjust a cash payment, or refund, dispute, and settle a dispute on a card payment
-export default function ClientLedger({ client, role, userEmail, financials, bookedSlot, canViewSlot, onViewSlot, onPaymentChanged, onSuccess, onError, onCardBlockChanged }: Props) {
+export default function ClientLedger({ client, role, userEmail, financials, highlightTransactionId, bookedSlot, canViewSlot, onViewSlot, onPaymentChanged, onSuccess, onError, onCardBlockChanged }: Props) {
   const employeeLabel = useEmployeeLabel();
   // Blocking card payments: the reason being typed; null when the form is closed
   const [blockReason, setBlockReason] = useState<string | null>(null);
@@ -93,11 +96,15 @@ export default function ClientLedger({ client, role, userEmail, financials, book
     ].filter(Boolean).join(' ');
     printReceipt({
       clientName: `${client.lastname}, ${client.firstname}`,
-      docNumber: client.docnumber || '',
+      docNumber: idText(client),
       amount: Number(fin.amount),
       // Payments saved before the method was recorded were all cash
       method: fin.paymentmethod || 'Cash',
       newBalance: fin.finalbalance === null || fin.finalbalance === undefined ? undefined : Number(fin.finalbalance),
+      // A poly fee payment leaves the account balance as it was; any other payment lowered it by its amount
+      balanceBefore: fin.finalbalance === null || fin.finalbalance === undefined ? undefined
+        : Number(fin.finalbalance) + (fin.feetype === 'Poly Fee' ? 0 : Number(fin.amount)),
+      transactionIds: [Number(fin.transactionid)],
       processedBy: fin.createdby || '',
       date: new Date(fin.date).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }),
       appliedTo: fin.feetype || undefined,
@@ -117,6 +124,24 @@ export default function ClientLedger({ client, role, userEmail, financials, book
   useUnsavedForm(paymentAction !== null);
   // Shown after a poly fee payment change when the client is already booked into a polygraph with vouchers
   const [scheduledPolyNotice, setScheduledPolyNotice] = useState<{ slotId: number; text: string } | null>(null);
+
+  // Opened to one transaction: clear the filters and open its month so it shows, then scroll to it once it's drawn
+  const highlightRow = highlightTransactionId ? financials.find(f => f.transactionid === highlightTransactionId) : undefined;
+  const highlightMonth = highlightRow ? localYmd(highlightRow.date).slice(0, 7) : null;
+  // Done once per highlighted row, while rendering (the ledger's rows load after the account opens)
+  const [revealed, setRevealed] = useState<number | null>(null);
+  if (highlightMonth && revealed !== highlightTransactionId) {
+    setRevealed(highlightTransactionId ?? null);
+    setFilters(f => ({ ...EMPTY_LEDGER_FILTERS, sort: f.sort }));
+    setCollapsedMonths(prev => { const next = new Set(prev); next.delete(highlightMonth); return next; });
+  }
+  useEffect(() => {
+    if (!highlightRow) return;
+    const timer = window.setTimeout(() => {
+      document.getElementById(`ledger-tx-${highlightTransactionId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [highlightTransactionId, highlightRow]);
 
   const isAdmin = role === 'Business Administrator';
   const search = filters.search.trim().toLowerCase();
@@ -336,7 +361,11 @@ export default function ClientLedger({ client, role, userEmail, financials, book
               const linkClass = 'inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white';
               const balance = ledgerBalanceChange(fin);
               return (
-                <div key={fin.transactionid} className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm">
+                <div key={fin.transactionid} id={`ledger-tx-${fin.transactionid}`}
+                  className={`bg-slate-950 border p-4 rounded-xl text-sm scroll-mt-24 ${fin.transactionid === highlightTransactionId ? 'border-amber-400 ring-2 ring-amber-400/60' : 'border-slate-800'}`}>
+                  {fin.transactionid === highlightTransactionId && (
+                    <p className="text-[0.625rem] uppercase tracking-wide font-semibold text-amber-400 mb-1">Transaction {fin.transactionid}</p>
+                  )}
                   <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
                     <div>
                       <p className="font-semibold text-white">

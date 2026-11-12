@@ -12,8 +12,7 @@ import ColumnPicker from '../ColumnPicker';
 import { useColumnLayout } from '../../hooks/useColumnLayout';
 import {
   PROGRAM_STATUSES, EDITABLE_PROGRAM_STATUSES, PRETRIAL_PROGRAM_TYPES, SO_PROGRAM_TYPES, STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase,
-  DEFAULT_CLIENT_FILTERS, SO_ATTENDANCE_LIMIT_MONTHS, isAttendanceOverdue, isIndividualGroup, GROUP_TYPES_BY_PROGRAM,
-} from '../../utils/clients';
+  DEFAULT_CLIENT_FILTERS, SO_ATTENDANCE_LIMIT_MONTHS, isAttendanceOverdue, isIndividualGroup, GROUP_TYPES_BY_PROGRAM, idText, ID_TYPES } from '../../utils/clients';
 import type { ClientFilters } from '../../utils/clients';
 import { SO_PHASES, SO_TREATMENT_FEES, bipTreatmentFee } from '../../utils/soPhases';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
@@ -40,7 +39,7 @@ interface Props {
 // New client form state. Program status and program type start at the most common values.
 // Start date defaults to today's local date, computed each time the form is reset.
 const getEmptyNewClient = () => ({
-  firstname: '', middlename: '', lastname: '', docnumber: '', supervisingagent: '',
+  firstname: '', middlename: '', lastname: '', doctype: '', docnumber: '', supervisingagent: '',
   programstartdate: new Date().toLocaleDateString('en-CA'),
   // Program type starts blank and must be chosen; phase and treatment fee are filled in from it
   programstatus: 'Active', phase: '', programtype: '', groupid: '', individualgroupid: '',
@@ -91,7 +90,7 @@ type SortKey = keyof typeof SORT_VALUES;
 // Roster columns in their default order. Each column sorts on its own SORT_VALUES entry; the Columns button lets each
 // user hide and reorder them (Full Name always shows; the ROSTER_DEFAULT_HIDDEN ones start hidden).
 const ROSTER_COLUMN_LABELS: Record<SortKey, string> = {
-  name: 'Full Name', doc: 'DOC #', agent: 'Agent', programtype: 'Program Type', pretrial: 'Pretrial', phase: 'Phase', group: 'Current Group',
+  name: 'Full Name', doc: 'ID #', agent: 'Agent', programtype: 'Program Type', pretrial: 'Pretrial', phase: 'Phase', group: 'Current Group',
   lastattended: 'Last Attended', lastpoly: 'Last Poly', status: 'Status', balance: 'Balance',
 };
 const ROSTER_COLUMN_KEYS = Object.keys(ROSTER_COLUMN_LABELS) as SortKey[];
@@ -99,7 +98,7 @@ const ROSTER_DEFAULT_HIDDEN: SortKey[] = ['pretrial'];
 /* eslint-disable @typescript-eslint/no-explicit-any -- client rows are untyped throughout App */
 const ROSTER_CELLS: Record<SortKey, (c: any) => ReactNode> = {
   name: c => <td className="p-3 font-medium text-white whitespace-nowrap">{c.lastname}, {c.firstname}</td>,
-  doc: c => <td className="p-3 text-slate-400 font-mono text-xs">{c.docnumber}</td>,
+  doc: c => <td className="p-3 text-slate-400 font-mono text-xs">{idText(c)}</td>,
   agent: c => <td className="p-3 text-slate-300 text-xs">{c.supervisingagent}</td>,
   programtype: c => <td className="p-3"><span className="bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2 py-0.5 rounded text-xs font-semibold">{c.programtype || 'State SO'}</span></td>,
   pretrial: c => {
@@ -178,7 +177,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
     }
   };
 
-  // Client directory search: matches name, DOC #, agent, group, program, phase, and status
+  // Client directory search: matches name, ID #, agent, group, program, phase, and status
   const clientSearchTerm = clientSearch.trim().toLowerCase();
   const clientFilterActive = Object.values(clientFilters).some(v => (Array.isArray(v) ? v.length > 0 : Boolean(v)));
   const distinctClientValues = (key: FilterKey): string[] => {
@@ -195,7 +194,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
     .filter(c => {
       if (clientSearchTerm && ![
         c.firstname, c.lastname, `${c.firstname} ${c.lastname}`, `${c.lastname}, ${c.firstname}`,
-        c.docnumber, c.supervisingagent, c.groupname, c.programtype, c.phase, c.programstatus
+        idText(c), c.supervisingagent, c.groupname, c.programtype, c.phase, c.programstatus
       ].some(v => String(v ?? '').toLowerCase().includes(clientSearchTerm))) return false;
 
       // Each list filter keeps clients matching any value picked in it; an empty list allows everything
@@ -278,7 +277,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
               type="search"
               value={clientSearch}
               onChange={(e) => setClientSearch(e.target.value)}
-              placeholder="Search name, DOC #, agent, group..."
+              placeholder="Search name, ID #, agent, group..."
               className="max-md:order-first bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs w-full md:w-64 max-w-full"
             />
             <button
@@ -362,9 +361,9 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
             onChange={(e) => setClientFilters({ ...clientFilters, docnumber: e.target.value as ClientFilters['docnumber'] })}
             className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
           >
-            <option value="">DOC #: All</option>
-            <option value="missing">No DOC #</option>
-            <option value="has">Has DOC #</option>
+            <option value="">ID #: All</option>
+            <option value="missing">No ID #</option>
+            <option value="has">Has ID #</option>
           </select>
 
           {clientFilterActive && (
@@ -390,7 +389,17 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
             {newClientField('First Name', 'firstname', 'text', true)}
             {newClientField('Middle Name', 'middlename')}
             {newClientField('Last Name', 'lastname', 'text', true)}
-            {newClientField('DOC #', 'docnumber')}
+            {/* ID #: what kind of number (DOC, PACTS, ...) and the number */}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">ID #</label>
+              <div className="flex gap-2">
+                <select value={newClient.doctype} onChange={e => setNewClient({ ...newClient, doctype: e.target.value })} aria-label="ID # type" className="w-28 shrink-0 bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm">
+                  <option value="">Type</option>
+                  {ID_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <input type="text" value={newClient.docnumber} onChange={e => setNewClient({ ...newClient, docnumber: e.target.value })} aria-label="ID # number" className="w-full min-w-0 bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
+              </div>
+            </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">Supervising Agent</label>
               <AgentPicker value={newClient.supervisingagent} onChange={v => setNewClient({ ...newClient, supervisingagent: v })} agents={directoryAgents} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
@@ -545,7 +554,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                     <span className={`whitespace-nowrap px-2 py-0.5 rounded-full font-medium ${c.programstatus === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>{c.programstatus === 'Discharged Supervision' ? 'Discharged' : c.programstatus}</span>
                   </span>
                   <span className="block text-xs text-slate-400 truncate">
-                    {[c.docnumber && `DOC ${c.docnumber}`, c.supervisingagent, c.groupname || UNASSIGNED_GROUP].filter(Boolean).join(' · ')}
+                    {[idText(c), c.supervisingagent, c.groupname || UNASSIGNED_GROUP].filter(Boolean).join(' · ')}
                   </span>
                   <span className="block text-xs text-slate-400">
                     Last attended: <span className={isAttendanceOverdue(c) ? 'text-red-400 font-semibold' : ''}>{c.lastattended ? new Date(c.lastattended).toLocaleDateString() : 'Never'}</span>

@@ -13,7 +13,7 @@ const businessOnly = requireRole('Business Administrator');
 router.get('/api/reports/agent', businessOnly, async (req, res) => {
     try {
         const query = `
-            SELECT c.ClientId, c.FirstName, c.LastName, c.DOCNumber, c.SupervisingAgent, c.AccountBalance,
+            SELECT c.ClientId, c.FirstName, c.LastName, c.DOCNumber, c.DocType, c.SupervisingAgent, c.AccountBalance,
             (SELECT COUNT(*) FROM Attendance WHERE Client = c.ClientId) AS TotalAttended,
             (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPolyDate,
             (SELECT Results FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPolyResult
@@ -36,7 +36,7 @@ router.get('/api/reports/groups', businessOnly, async (req, res) => {
         const result = await pool.query(
             `SELECT a.AttendanceId, a."Group" AS GroupId, COALESCE(g.GroupName, 'No Group') AS GroupName, g.Counselor,
                     to_char(a.Date, 'YYYY-MM-DD') AS Date, a.SessionNumber, a.Type, a.GroupFee, a.AccountPaid, a.PaymentMethod, a.VoucherUsed,
-                    c.ClientId, c.FirstName, c.LastName, c.DOCNumber
+                    c.ClientId, c.FirstName, c.LastName, c.DOCNumber, c.DocType, c.DocType
              FROM Attendance a
              JOIN Clients c ON c.ClientId = a.Client
              LEFT JOIN Groups g ON g.GroupId = a."Group"
@@ -247,7 +247,7 @@ router.put('/api/reports/group-cash-deposits', async (req, res) => {
 // Administrators see every payment; everyone else sees the ones they entered.
 const userCashSql = (where) => `
     SELECT f.TransactionId, f.Date AS PaidOn, f.Amount, f.FeeType, f.Comments, f.EnteredBy, ee.DisplayName AS EnteredByName,
-           c.ClientId, c.FirstName, c.LastName, c.DOCNumber,
+           c.ClientId, c.FirstName, c.LastName, c.DOCNumber, c.DocType,
            to_char(d.DepositDate, 'YYYY-MM-DD') AS DepositDate, d.RecordedBy, er.DisplayName AS RecordedByName, d.RecordedOn
     FROM FinancialTransactions f
     LEFT JOIN Attendance a ON a.AttendanceId = f.AttendanceId
@@ -332,7 +332,7 @@ router.get('/api/reports/user-activity', async (req, res) => {
             return res.status(403).json({ error: 'Only Business Administrators and Office Admins can see the user activity report.' });
         }
         const result = await pool.query(
-            `SELECT x.*, c.FirstName, c.LastName, c.DOCNumber, e.DisplayName AS EnteredByName, ed.DisplayName AS EditedByName
+            `SELECT x.*, c.FirstName, c.LastName, c.DOCNumber, c.DocType, e.DisplayName AS EnteredByName, ed.DisplayName AS EditedByName
              FROM (
                  SELECT 'Payment' AS Kind, f.TransactionId AS Id, f.Client, f.Date AS EnteredOn, f.EnteredBy,
                         f.Type AS Detail, f.Amount, f.PaymentMethod, f.FeeType, f.Comments, NULL::varchar AS EditedBy, NULL::timestamp AS EditedOn

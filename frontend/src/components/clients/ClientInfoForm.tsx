@@ -8,8 +8,7 @@ import AgentPicker from '../agents/AgentPicker';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import {
   BUS_PASS_MAX, CHAPERON_PHASES, CLIENT_FIELD_OPTIONS, EDITABLE_PROGRAM_STATUSES, FEDERAL_PROGRAM_TYPES, GROUP_TYPES_BY_PROGRAM, POLY_PROGRAM_TYPES, PRETRIAL_PROGRAM_TYPES, SO_ATTENDANCE_LIMIT_MONTHS, SO_PROGRAM_TYPES,
-  STATE_FEE_PROGRAM_TYPES, formatPhase, isAttendanceOverdue, isIndividualGroup, isWholeNumber,
-} from '../../utils/clients';
+  STATE_FEE_PROGRAM_TYPES, formatPhase, isAttendanceOverdue, isIndividualGroup, isWholeNumber, idText, ID_TYPES } from '../../utils/clients';
 import { SO_PHASES, SO_TREATMENT_FEES, bipTreatmentFee } from '../../utils/soPhases';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { ageFromBirthDate, toLocalDay } from '../../utils/dates';
@@ -48,7 +47,7 @@ const PERSONAL_FIELDS = [
   { label: 'First Name', field: 'firstname' },
   { label: 'Last Name', field: 'lastname' },
   { label: 'Middle Name', field: 'middlename' },
-  { label: 'DOC #', field: 'docnumber' },
+  { label: 'ID #', field: 'docnumber' },
   { label: 'Date of Birth', field: 'dateofbirth' },
   { label: 'Sex', field: 'sex' },
   { label: 'Race', field: 'race' },
@@ -238,6 +237,15 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                   <option value="">-- Select {label.toLowerCase()} --</option>
                   {CLIENT_FIELD_OPTIONS[field].map(o => <option key={o} value={o}>{o}</option>)}
                 </select>
+              ) : editing && field === 'docnumber' ? (
+                // What kind of number it is (DOC, PACTS, ...), then the number
+                <div className="flex gap-2">
+                  <select value={form.doctype || ''} onChange={e => setField('doctype', e.target.value)} aria-label="ID # type" className={`${inputClass.replace('w-full ', '')} w-28 shrink-0`}>
+                    <option value="">Type</option>
+                    {ID_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <input type="text" value={form.docnumber || ''} onChange={e => setField('docnumber', e.target.value)} aria-label="ID # number" className={`${inputClass} flex-1 min-w-0`} />
+                </div>
               ) : editing && field === 'supervisingagent' ? (
                 <AgentPicker value={form.supervisingagent || ''} onChange={v => setField('supervisingagent', v)} agents={directoryAgents} className={inputClass} />
               ) : editing ? (
@@ -264,6 +272,8 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                     ? (client.dateofbirth
                         ? <>{toLocalDay(client.dateofbirth).toLocaleDateString()} <span className="text-slate-400 font-normal">(Age {ageFromBirthDate(client.dateofbirth)})</span></>
                         : '—')
+                    : field === 'docnumber'
+                    ? (idText(client) || '—')
                     : isDateField(field)
                     ? (client[field] ? new Date(client[field]).toLocaleDateString() : '—')
                     : (client[field] || '—')}

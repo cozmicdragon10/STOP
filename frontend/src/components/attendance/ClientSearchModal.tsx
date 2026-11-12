@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Search, UserPlus, X } from 'lucide-react';
 import type { ClientRecord } from '../../hooks/useGroupCheckIn';
+import { idText } from '../../utils/clients';
 
 interface Props {
   clients: ClientRecord[];
@@ -30,7 +31,7 @@ export default function ClientSearchModal({ clients, checkedInIds, attendedIds, 
     const q = query.trim().toLowerCase();
     if (!q) return clients;
     return clients.filter(c =>
-      `${c.lastname}, ${c.firstname} ${c.docnumber ?? ''}`.toLowerCase().includes(q)
+      `${c.lastname}, ${c.firstname} ${idText(c)}`.toLowerCase().includes(q)
     );
   }, [clients, query]);
 
@@ -78,7 +79,7 @@ export default function ClientSearchModal({ clients, checkedInIds, attendedIds, 
               type="search"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder="Search by name or DOC #"
+              placeholder="Search by name or ID #"
               className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2.5 text-white text-sm"
             />
           </div>
@@ -106,7 +107,7 @@ export default function ClientSearchModal({ clients, checkedInIds, attendedIds, 
                     />
                     <div className="min-w-0 flex-1">
                       <p className="text-white truncate">{c.lastname}, {c.firstname}</p>
-                      <p className="text-xs text-slate-400 truncate">DOC # {c.docnumber || '—'} · {c.groupname || 'Unassigned'}</p>
+                      <p className="text-xs text-slate-400 truncate">ID # {idText(c) || '—'} · {c.groupname || 'Unassigned'}</p>
                     </div>
                     {onSheet && <span className="text-[0.625rem] font-semibold uppercase text-emerald-400">On sheet</span>}
                     {attended && <span className="text-[0.625rem] font-semibold uppercase text-amber-400">Attended today</span>}

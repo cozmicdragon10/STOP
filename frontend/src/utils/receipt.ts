@@ -10,6 +10,11 @@ export interface Receipt {
   amount: number;
   method: PaymentMethod;
   newBalance: number;
+  // The balance just before this payment (stored sign). Left out, it's worked out from newBalance: the part of the
+  // payment that went to the account (not the poly fee) is added back.
+  balanceBefore?: number;
+  // The ledger row ID(s) of the payment, printed beside "Thank you." and looked up in Admin > Transaction Lookup
+  transactionIds?: number[];
   processedBy: string;
   date: string;
   // What the payment went to (the ledger row's fee type, e.g. "Group Fee" or "Poly Fee"); printed when set
@@ -99,15 +104,17 @@ const RECEIPT_STYLE = `<style>
 
 const receiptHeader = (title: string) => `<div class="center"><div class="biz">Chandler &amp; Associates</div><h2>${title}</h2>
     <div class="small">${escapeHtml(new Date().toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }))}</div></div><hr>`;
-// The client's name with their DOC number to the right, e.g. "Sanchez, Jason      #581422"
+// The client's name with their ID # (and its type) to the right, e.g. "Sanchez, Jason      DOC 581422"
 const clientLine = (name: string, docNumber: string) =>
-  `<table><tr><td><b>${escapeHtml(name)}</b></td><td class="r"><b>${docNumber ? `#${escapeHtml(docNumber)}` : ''}</b></td></tr></table>`;
-const RECEIPT_FOOTER ='<hr><p class="center">Thank you.</p>';
+  `<table><tr><td><b>${escapeHtml(name)}</b></td><td class="r"><b>${docNumber ? escapeHtml(docNumber) : ''}</b></td></tr></table>`;
+// "Thank you." with the transaction ID number(s) beside it, when the receipt is for a saved payment
+const receiptFooter = (ids: number[] = []) =>
+  `<hr><p class="center">Thank you.${ids.length > 0 ? ` &nbsp; ${ids.map(id => escapeHtml(String(id))).join(', ')}` : ''}</p>`;
 
 // Writes the receipt into a small window sized like the paper and opens the print dialog. The window is opened right
 // away (while still handling the click, so pop-up blockers allow it); a body still loading is filled in when ready.
 // Pop-ups must be allowed for this site.
-const printReceiptPage = (title: string, body: string | Promise<string>, onError: (message: string) => void) => {
+const printReceiptPage = (title: string, body: string | Promise<string>, onError: (message: string) => void, transactionIds?: number[]) => {
   const win = window.open('', '_blank', 'width=360,height=640');
   if (!win) {
     onError('Allow pop-ups for this site to print receipts.');
@@ -115,7 +122,7 @@ const printReceiptPage = (title: string, body: string | Promise<string>, onError
   }
   const write = (html: string) => {
     win.document.open();
-    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>${RECEIPT_STYLE}</head><body>${receiptHeader(title)}${html}${RECEIPT_FOOTER}</body></html>`);
+    win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>${RECEIPT_STYLE}</head><body>${receiptHeader(title)}${html}${receiptFooter(transactionIds)}</body></html>`);
     win.document.close();
     win.focus();
     win.print();
@@ -218,6 +225,8 @@ export const printAttendanceReceipt = (r: AttendanceReceipt, onError: (message: 
 // newBalance may be left out when reprinting an old ledger row that has no balance saved with it
 export const printReceipt = (r: Omit<Receipt, 'newBalance'> & { newBalance?: number }, onError: (message: string) => void) => {
   const row = (label: string, value: string, cls = '') => `<tr class="${cls}"><td>${escapeHtml(label)}</td><td class="r">${value}</td></tr>`;
+  const balanceBefore = r.balanceBefore ?? (r.newBalance === undefined ? undefined
+    : Math.round((r.newBalance + r.amount - (r.polyApplied ?? 0)) * 100) / 100);
   printReceiptPage('Payment Receipt', `
     ${copyBanner(r.reprint)}
     ${clientLine(r.clientName, r.docNumber)}
@@ -228,11 +237,12 @@ export const printReceipt = (r: Omit<Receipt, 'newBalance'> & { newBalance?: num
     <table>
       ${row('Payment method', escapeHtml(r.method))}
       ${r.appliedTo ? row('Applied to', escapeHtml(r.appliedTo)) : ''}
+      ${balanceBefore !== undefined ? row('Balance before', balanceText(balanceBefore)) : ''}
       ${row('Amount paid', `+${money(r.amount)}`)}
       ${r.polyApplied ? `${row('To poly fee', money(r.polyApplied))}${row('To account', money(r.amount - r.polyApplied))}
         ${row('Poly fee paid', `${money(r.polyFeePaid ?? 0)} / ${money(r.polyFee ?? 0)}`)}` : ''}
       ${closingBalanceRows(row, r.newBalance, r.reprint)}
     </table>
     ${r.notes?.trim() ? `<p class="small">Notes: ${escapeHtml(r.notes.trim())}</p>` : ''}
-  `, onError);
+  `, onError, r.transactionIds);
 };

@@ -218,7 +218,7 @@ const canSeeIndividualSession = (viewer, row) => {
     return same(row.createdby, viewer.employeeemail) || (!!viewer.displayname && same(row.provider, viewer.displayname));
 };
 
-const OPEN_INDIVIDUAL_COLUMNS = `o.OpenSessionId, o.ClientId, c.FirstName, c.LastName, c.DOCNumber, c.ProgramType, o.Category, o.SessionTypeId,
+const OPEN_INDIVIDUAL_COLUMNS = `o.OpenSessionId, o.ClientId, c.FirstName, c.LastName, c.DOCNumber, c.DocType, c.ProgramType, o.Category, o.SessionTypeId,
     st.Name AS SessionTypeName, to_char(o.SessionDate, 'YYYY-MM-DD') AS SessionDate, o.Fee, o.Payment, o.PaymentMethod,
     o.Provider, o.Comments, o.PaymentComments, o.PaidOnOpen, o.CreatedBy, o.UpdatedOn`;
 const OPEN_INDIVIDUAL_FROM = `OpenIndividualSessions o JOIN Clients c ON c.ClientId = o.ClientId JOIN SessionTypes st ON st.SessionTypeId = o.SessionTypeId`;

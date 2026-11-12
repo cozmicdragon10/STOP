@@ -13,12 +13,14 @@ import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import { printAttendanceReceipt, printReceipt, type Receipt } from '../../utils/receipt';
+import { idText } from '../../utils/clients';
 
 interface TabClient {
   clientid: number;
   firstname: string;
   lastname: string;
   docnumber?: string | null;
+  doctype?: string | null;
   programtype?: string | null;
   accountbalance?: number | string | null;
   programstatus?: string | null;
@@ -286,10 +288,11 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
       });
       const receipt: Receipt = {
         clientName: `${client.lastname}, ${client.firstname}`,
-        docNumber: client.docnumber || '',
+        docNumber: idText(client),
         amount,
         method,
         newBalance: Number(res.newBalance),
+        transactionIds: res.transactionIds,
         processedBy: user.employeeemail,
         date: new Date().toLocaleString(),
       };
@@ -321,7 +324,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const printPendingReceipt = () => {
     if (!client) return;
     printAttendanceReceipt({
-      clientName: `${client.lastname}, ${client.firstname}`, docNumber: client.docnumber || '',
+      clientName: `${client.lastname}, ${client.firstname}`, docNumber: idText(client),
       sessionKind: form.category, sessionName: sessionType?.name ?? form.category, sessionDate: form.date, provider: form.provider || null,
       fee: Number.isFinite(fee) ? fee : 0,
       payments: [
@@ -336,7 +339,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const printClosedReceipt = (c: ClosedIndividualSession) => {
     const paidOnOpen = Number(c.paidonopen || 0);
     printAttendanceReceipt({
-      clientName: `${c.lastname}, ${c.firstname}`, docNumber: clients.find(x => x.clientid === c.clientid)?.docnumber || '',
+      clientName: `${c.lastname}, ${c.firstname}`, docNumber: idText(clients.find(x => x.clientid === c.clientid)),
       sessionKind: c.category, sessionName: c.sessiontypename || c.category, sessionDate: c.sessiondate, provider: c.provider,
       fee: Number(c.fee || 0),
       payments: [
@@ -598,7 +601,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
               <article className="bg-slate-950 border border-slate-800 rounded-lg p-4">
                 <div className="flex justify-between items-baseline gap-3 mb-3">
                   <p className="font-semibold text-white truncate">{client.lastname}, {client.firstname}</p>
-                  <p className="text-xs text-slate-400 whitespace-nowrap">DOC # {client.docnumber || '—'} · Balance {formatBalance(balanceBefore)}</p>
+                  <p className="text-xs text-slate-400 whitespace-nowrap">ID # {idText(client) || '—'} · Balance {formatBalance(balanceBefore)}</p>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-300 items-end">
                   <label className="flex flex-col gap-1">

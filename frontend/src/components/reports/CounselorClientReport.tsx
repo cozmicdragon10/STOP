@@ -4,12 +4,14 @@ import { SO_PHASES } from '../../utils/soPhases';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { escapeHtml } from '../../utils/receipt';
 import { useClientsByStatus } from '../../hooks/useClientsByStatus';
+import { idText } from '../../utils/clients';
 
 interface ReportClient {
   clientid: number;
   firstname: string;
   lastname: string;
   docnumber?: string | null;
+  doctype?: string | null;
   programtype?: string | null;
   programstatus?: string | null;
   phase?: string | null;
@@ -165,8 +167,8 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
       <h2>${escapeHtml(c.name)}: ${c.clients.length} ${program ? `${program} ` : ''}clients${both ? ` (${c.so.length} SO, ${c.bip.length} BIP)` : ''} in ${c.groups.length} groups</h2>
       ${c.groups.map(({ group, clients: members }) => `
         <h3>${escapeHtml(group.groupname)} <span>${escapeHtml(group.programtype || '')}${group.schedule ? ` · ${escapeHtml(group.schedule)}` : ''}${group.location ? ` · ${escapeHtml(group.location)}` : ''} · ${members.length} clients</span></h3>
-        ${members.length ? `<table><thead><tr><th>Client</th><th>DOC #</th><th>Program</th><th>Phase</th><th>Status</th><th>Last Attended</th><th class="r">Balance</th></tr></thead><tbody>
-          ${members.map(m => `<tr><td>${escapeHtml(`${m.lastname}, ${m.firstname}`)}</td><td>${escapeHtml(m.docnumber || '')}</td><td>${escapeHtml(m.programtype || '')}</td>
+        ${members.length ? `<table><thead><tr><th>Client</th><th>ID #</th><th>Program</th><th>Phase</th><th>Status</th><th>Last Attended</th><th class="r">Balance</th></tr></thead><tbody>
+          ${members.map(m => `<tr><td>${escapeHtml(`${m.lastname}, ${m.firstname}`)}</td><td>${escapeHtml(idText(m))}</td><td>${escapeHtml(m.programtype || '')}</td>
             <td>${escapeHtml(phaseLabel(m))}</td><td>${escapeHtml(m.programstatus || '')}</td><td>${formatDay(m.lastattended ?? m.lastdateattended)}</td><td class="r">${escapeHtml(formatBalance(m.accountbalance))}</td></tr>`).join('')}
         </tbody></table>` : '<p class="none">No clients.</p>'}
       `).join('')}
@@ -365,7 +367,7 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
                               <thead>
                                 <tr className="text-slate-500 uppercase tracking-wider">
                                   <th className="py-1.5 pr-3">Client</th>
-                                  <th className="py-1.5 pr-3">DOC #</th>
+                                  <th className="py-1.5 pr-3">ID #</th>
                                   <th className="py-1.5 pr-3">Program</th>
                                   <th className="py-1.5 pr-3">Phase</th>
                                   <th className="py-1.5 pr-3">Status</th>
@@ -377,7 +379,7 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
                                 {members.map(m => (
                                   <tr key={m.clientid} onClick={() => onOpenClient(m)} className="cursor-pointer hover:bg-slate-800/50" title="Open client account">
                                     <td className="py-1.5 pr-3 text-white font-medium">{m.lastname}, {m.firstname}</td>
-                                    <td className="py-1.5 pr-3 text-slate-400 font-mono">{m.docnumber || '—'}</td>
+                                    <td className="py-1.5 pr-3 text-slate-400 font-mono">{idText(m) || '—'}</td>
                                     <td className="py-1.5 pr-3 text-slate-300">{m.programtype || '—'}</td>
                                     <td className="py-1.5 pr-3 text-slate-300">{phaseLabel(m)}</td>
                                     <td className="py-1.5 pr-3 text-slate-300">{m.programstatus || '—'}</td>

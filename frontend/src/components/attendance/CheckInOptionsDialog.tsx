@@ -3,7 +3,7 @@ import { clientFee, feeAlreadyCharged, type ClientRecord, type PaymentMethod, ty
 import { submitAccountPayment } from '../../api';
 import { FIRST_CHECKIN_MAX_OWED, formatBalance } from '../../utils/balance';
 import { feePeriodMonths } from '../../utils/soPhases';
-import { FEDERAL_PROGRAM_TYPES, individualSessionFee } from '../../utils/clients';
+import { FEDERAL_PROGRAM_TYPES, individualSessionFee, idText } from '../../utils/clients';
 import { printReceipt, type Receipt } from '../../utils/receipt';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import CardPaymentFields from '../payments/CardPaymentFields';
@@ -107,10 +107,11 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
         processing: false,
         receipt: {
           clientName: `${c.lastname}, ${c.firstname}`,
-          docNumber: c.docnumber || '',
+          docNumber: idText(c),
           amount,
           method: 'Credit Card',
           newBalance: Number(res.newBalance),
+          transactionIds: res.transactionIds,
           processedBy: createdBy,
           date: new Date().toLocaleString(),
         },
@@ -191,7 +192,7 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
           <article className={`bg-slate-950 border rounded-lg p-4 ${rowValid && stillOwed === 0 ? 'border-slate-800' : 'border-red-500/50'}`}>
             <div className="flex justify-between items-baseline gap-3 mb-3">
               <p className="font-semibold text-white truncate">{c.lastname}, {c.firstname}</p>
-              <p className="text-xs text-slate-400 whitespace-nowrap">DOC # {c.docnumber || '—'} · Balance {formatBalance(c.accountbalance)}</p>
+              <p className="text-xs text-slate-400 whitespace-nowrap">ID # {idText(c) || '—'} · Balance {formatBalance(c.accountbalance)}</p>
             </div>
             {cardBlocked(c) && (
               <p className="mb-3 text-xs text-amber-400">{cardBlockedText(c)}</p>

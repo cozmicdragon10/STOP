@@ -5,6 +5,7 @@ import type { SupervisingAgent } from '../../api';
 import { usePagination } from '../../hooks/usePagination';
 import Pagination from '../Pagination';
 import { scrollToStackedPanel } from '../../utils/layout';
+import { idText } from '../../utils/clients';
 
 interface Props {
   // Current clients (not discharged); the selected agent's discharged clients are loaded on their own
@@ -333,7 +334,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
                 >
                   <div className="min-w-0">
                     <p className="font-semibold text-white truncate">{c.lastname}, {c.firstname}</p>
-                    <p className="text-slate-400 truncate">DOC # {c.docnumber || 'N/A'} · {c.groupname || 'No group'}</p>
+                    <p className="text-slate-400 truncate">ID # {idText(c) || 'N/A'} · {c.groupname || 'No group'}</p>
                   </div>
                   <span className={`shrink-0 whitespace-nowrap px-2 py-0.5 rounded-full font-medium ${c.programstatus === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
                     {c.programstatus === 'Discharged Supervision' ? 'Discharged' : c.programstatus}

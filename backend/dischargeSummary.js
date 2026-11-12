@@ -1,4 +1,5 @@
 const PDFDocument = require('pdfkit');
+const { idText } = require('./lib/clientId');
 
 // Letterhead printed at the top of every discharge summary
 const LETTERHEAD = {
@@ -67,7 +68,7 @@ const buildDischargeSummaryPdf = (info) => new Promise((resolve, reject) => {
         doc.x = left;
         doc.moveDown(0.4);
     };
-    fieldRow([['Participant\'s Name', fullName], ['DOC #', client.docnumber]]);
+    fieldRow([['Participant\'s Name', fullName], ['ID #', idText(client)]]);
     fieldRow([['Program', client.programtype], ['Discharge Date', formatDate(dischargedOn)]]);
     fieldRow([['Program Start Date', formatDate(client.programstartdate)], ['Supervising Agent', client.supervisingagent]]);
     fieldRow([['Group', client.groupname], ['Discharge Type', subcategory ? `${dischargeType} (${subcategory})` : dischargeType]]);

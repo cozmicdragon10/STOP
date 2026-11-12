@@ -5,6 +5,7 @@ import type { SystemLog } from '../../api';
 import SessionPriceList from '../sessions/SessionPriceList';
 import ProgramFeeList from './ProgramFeeList';
 import FederalUnitList from './FederalUnitList';
+import TransactionLookup from './TransactionLookup';
 import { sortedUnique } from '../../utils/filters';
 import { CLIENT_SIDE_OPTIONS, COLOR_VISION_OPTIONS, DEFAULT_CUSTOM_COLORS, FONT_SIZE_OPTIONS, FONT_TYPE_OPTIONS, TABS_POSITION_OPTIONS, useTheme, type ClientSide, type ColorVision, type FontSize, type FontType, type StatusColor, type TabsPosition } from '../../hooks/useTheme';
 
@@ -18,6 +19,8 @@ interface Employee {
 
 interface Props {
   user: { employeeemail: string; role: string };
+  // Transaction Lookup: opens the client's account on its ledger with the transaction highlighted
+  onOpenTransaction: (clientId: number, transactionId: number) => void;
   // Shared with the rest of the app (examiner names, counselor pickers), so App keeps the list
   employees: Employee[];
   onEmployeesChanged: (employees: Employee[]) => void;
@@ -40,7 +43,7 @@ const STATUS_CHIPS: { key: StatusColor; label: string; className: string }[] = [
 const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 
 // User accounts (Business Administrators create and edit them), the system audit log, and session prices
-export default function AdminTab({ user, employees, onEmployeesChanged, onSuccess, onError }: Props) {
+export default function AdminTab({ user, onOpenTransaction, employees, onEmployeesChanged, onSuccess, onError }: Props) {
   const isBusinessAdmin = user.role === 'Business Administrator';
   // Saved per browser, not per account
   const { theme, toggleTheme, colorVision, setColorVision, customColors, setCustomColors, fontSize, setFontSize, fontType, setFontType, tabsPosition, setTabsPosition, clientSide, setClientSide, clientTabsPosition, setClientTabsPosition } = useTheme();
@@ -261,6 +264,8 @@ export default function AdminTab({ user, employees, onEmployeesChanged, onSucces
         </div>
         )}
       </div>
+
+      <TransactionLookup onOpen={onOpenTransaction} />
 
       <ProgramFeeList userEmail={user.employeeemail} canEdit={isBusinessAdmin} onSuccess={onSuccess} />
 

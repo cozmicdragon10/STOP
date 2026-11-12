@@ -7,6 +7,7 @@ import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import ClientPaymentDialog from '../payments/ClientPaymentDialog';
 import CoveringCounselorPicker from './CoveringCounselorPicker';
 import { bandsFor, needsDuration, unitCodeFor, unitCodeLabel, unitsLeft } from '../../utils/federalUnits';
+import { idText } from '../../utils/clients';
 
 interface Props {
   group: GroupRecord;
@@ -42,7 +43,7 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint,
       <div className="flex justify-between items-start gap-3">
         <div className="min-w-0">
           <p className="font-semibold text-white truncate">{client.lastname}, {client.firstname}</p>
-          <p className="text-xs text-slate-400">DOC # {client.docnumber || '—'}</p>
+          <p className="text-xs text-slate-400">ID # {idText(client) || '—'}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <button
@@ -178,7 +179,7 @@ export default function ReviewStep({ group, wf, createdBy, canPickCover, onSucce
             onPrint={afterClose => {
               printAttendanceReceipt({
               clientName: `${entry.client.lastname}, ${entry.client.firstname}`,
-              docNumber: entry.client.docnumber || '',
+              docNumber: idText(entry.client),
               sessionKind: 'Group',
               sessionName: group.groupname,
               sessionDate: wf.sessionDate ?? todayLocal(),

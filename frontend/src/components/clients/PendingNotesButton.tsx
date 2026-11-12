@@ -5,6 +5,7 @@ import type { PendingNote } from '../../api';
 import { caseNoteLabel } from '../../utils/notes';
 import { toLocalDay } from '../../utils/dates';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
+import { idText } from '../../utils/clients';
 
 interface Props {
   userEmail: string;
@@ -98,7 +99,7 @@ export default function PendingNotesButton({ userEmail, refreshKey, onOpenClient
                   <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                     <button type="button" onClick={() => openAccount(group.clientId)} className="font-semibold text-white hover:text-blue-400" title="Open client account">{group.name}</button>
                     <span className="text-xs text-slate-500">
-                      {[group.note.docnumber && `DOC ${group.note.docnumber}`, group.note.programtype,
+                      {[idText(group.note), group.note.programtype,
                         `Last attended ${group.note.lastattended ? toLocalDay(group.note.lastattended).toLocaleDateString() : 'never'}`].filter(Boolean).join(' · ')}
                     </span>
                     <span className="ml-auto text-xs text-amber-400">{group.notes.length} note{group.notes.length === 1 ? '' : 's'}</span>

@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { idText } from '../utils/clients';
 
 interface PickerClient {
   clientid: number;
   firstname: string;
   lastname: string;
   docnumber?: string | null;
+  doctype?: string | null;
 }
 
 interface Props {
@@ -20,9 +22,9 @@ interface Props {
 const MAX_RESULTS = 50;
 const labelFor = (c: PickerClient) => `${c.lastname}, ${c.firstname}`;
 
-// Type a name or DOC # to find a client. Only a client picked from the list counts as a selection;
+// Type a name or ID # to find a client. Only a client picked from the list counts as a selection;
 // leaving the box with unmatched text puts back the current selection.
-export default function ClientPicker({ clients, value, onChange, placeholder = 'Search name or DOC #...', className, required }: Props) {
+export default function ClientPicker({ clients, value, onChange, placeholder = 'Search name or ID #...', className, required }: Props) {
   const selected = clients.find(c => String(c.clientid) === value) ?? null;
   const [text, setText] = useState(selected ? labelFor(selected) : '');
   const [open, setOpen] = useState(false);
@@ -38,7 +40,7 @@ export default function ClientPicker({ clients, value, onChange, placeholder = '
   const term = text.trim().toLowerCase();
   const searching = open && (!selected || text !== labelFor(selected));
   const matches = (searching && term
-    ? clients.filter(c => `${c.lastname}, ${c.firstname} ${c.firstname} ${c.lastname} ${c.docnumber ?? ''}`.toLowerCase().includes(term))
+    ? clients.filter(c => `${c.lastname}, ${c.firstname} ${c.firstname} ${c.lastname} ${idText(c)}`.toLowerCase().includes(term))
     : clients
   ).slice(0, MAX_RESULTS);
 
@@ -96,7 +98,7 @@ export default function ClientPicker({ clients, value, onChange, placeholder = '
               className={`px-3 py-1.5 cursor-pointer text-xs flex justify-between gap-3 ${i === highlight ? 'bg-blue-500/15 text-white' : 'text-slate-300'}`}
             >
               <span className="truncate">{labelFor(c)}</span>
-              {c.docnumber && <span className="text-slate-500 font-mono shrink-0">{c.docnumber}</span>}
+              {c.docnumber && <span className="text-slate-500 font-mono shrink-0">{idText(c)}</span>}
             </li>
           ))}
           {matches.length === 0 && <li className="px-3 py-2 text-xs text-slate-500">No clients match.</li>}

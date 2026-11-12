@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Printer } from 'lucide-react';
 import type { Client, Group } from '../../api';
 import { escapeHtml } from '../../utils/receipt';
+import { idText } from '../../utils/clients';
 
 interface Props {
   // Current clients (not discharged)
@@ -24,9 +25,9 @@ const formatDay = (value?: string | null) => {
 };
 const byName = (a: Client, b: Client) => `${a.lastname}, ${a.firstname}`.localeCompare(`${b.lastname}, ${b.firstname}`);
 
-const COLUMNS = ['Client', 'DOC / PACTS #', 'Program', 'Phase', 'Supervising Agent', 'Pretrial', 'Start Date', 'Last Attended'];
+const COLUMNS = ['Client', 'ID #', 'Program', 'Phase', 'Supervising Agent', 'Pretrial', 'Start Date', 'Last Attended'];
 const cells = (c: Client) => [
-  `${c.lastname}, ${c.firstname}`, c.docnumber || '—', c.programtype, c.phase || '—', c.supervisingagent || '—',
+  `${c.lastname}, ${c.firstname}`, idText(c) || '—', c.programtype, c.phase || '—', c.supervisingagent || '—',
   c.pretrial ? 'Yes' : '', formatDay(c.programstartdate), formatDay(c.lastattended ?? c.lastdateattended),
 ];
 

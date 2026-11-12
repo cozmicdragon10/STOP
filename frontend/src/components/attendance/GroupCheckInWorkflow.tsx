@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import GroupPicker from './GroupPicker';
 import { Check } from 'lucide-react';
 import { todayLocal, useGroupCheckIn } from '../../hooks/useGroupCheckIn';
 import type { ClientRecord, GroupRecord } from '../../hooks/useGroupCheckIn';
@@ -210,21 +211,14 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
         <label htmlFor="attendance-group" className="text-xs text-slate-400 uppercase font-semibold tracking-wide">
           1. Group{wf.view === 'review' && <span className="ml-2 normal-case text-slate-500">(locked during review)</span>}
         </label>
-        <select
+        <GroupPicker
           id="attendance-group"
-          value={wf.groupId ?? ''}
-          onChange={e => {
-            const id = e.target.value ? Number(e.target.value) : null;
-            pickGroup(id);
-          }}
+          groups={groups}
+          value={wf.groupId}
+          onChange={id => { if (id !== wf.groupId) pickGroup(id); }}
           disabled={wf.submitting || wf.view === 'review'}
-          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm"
-        >
-          <option value="">-- Choose Group --</option>
-          {groups.map(g => (
-            <option key={g.groupid} value={g.groupid}>{g.groupname}</option>
-          ))}
-        </select>
+          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm disabled:opacity-60"
+        />
         <div className="flex flex-wrap items-center gap-3 min-h-9">
           <label className="flex items-center gap-2 text-xs text-slate-300">
             <input

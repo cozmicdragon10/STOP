@@ -9,7 +9,7 @@ test('drug test clients have an observer; everyone else has a therapist', () => 
 });
 
 const client = {
-    clientid: 1, firstname: 'Test', middlename: null, lastname: 'Client', docnumber: '12345', programtype: 'State SO',
+    clientid: 1, firstname: 'Test', middlename: null, lastname: 'Client', docnumber: '12345', doctype: 'DOC', programtype: 'State SO',
     programstatus: 'Active', programstartdate: '2025-01-06', supervisingagent: 'Agent Smith', groupname: 'Monday PM',
     counselor: 'Counselor One', lastattended: '2026-10-27', lastpoly: '2026-08-01', takespolygraphs: true,
     nextpoly: { date: '2026-12-02', time: '14:30', location: 'OKC', address: '300 N Meridian' },
@@ -50,6 +50,7 @@ test('builds a report for a client with nothing this month and no polygraphs', a
 test('file names are safe for Windows', () => {
     assert.equal(reportFileName(client, '2026-10'), 'Client, Test - DOC 12345 - October 2026.pdf');
     assert.equal(reportFileName({ ...client, lastname: 'O"Brien/Jr', docnumber: null }, '2026-10'), 'O Brien Jr, Test - October 2026.pdf');
+    assert.equal(reportFileName({ ...client, doctype: 'PACTS', docnumber: '1423371 PB' }, '2026-10'), 'Client, Test - PACTS 1423371 PB - October 2026.pdf');
     assert.equal(draftFileName('J. Smith: OKC', '2026-10'), 'PO Reports - J. Smith OKC - October 2026.eml');
 });
 

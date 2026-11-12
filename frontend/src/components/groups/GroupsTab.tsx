@@ -5,7 +5,7 @@ import ScheduleSelect from '../ScheduleSelect';
 import { BY_APPOINTMENT } from '../../utils/schedule';
 import { DEFAULT_GROUP_FILTERS } from '../../utils/filters';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
-import { OBSERVER_ROLES, allowsByAppointment, clientFitsGroup, formatPhase, groupLeadLabel, isChaperonGroup, isDrugTestGroup } from '../../utils/clients';
+import { OBSERVER_ROLES, allowsByAppointment, clientFitsGroup, formatPhase, groupLeadLabel, isChaperonGroup, isDrugTestGroup, idText } from '../../utils/clients';
 import { toLocalDay } from '../../utils/dates';
 
 interface DirectoryGroup {
@@ -25,6 +25,7 @@ interface DirectoryClient {
   firstname: string;
   lastname: string;
   docnumber?: string | null;
+  doctype?: string | null;
   programtype?: string | null;
   programstatus?: string | null;
 }
@@ -331,7 +332,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
                     >
                       <td className="p-2.5">
                         <span className="font-medium text-white">{c.lastname}, {c.firstname}</span>
-                        {c.docnumber && <span className="ml-2 text-xs text-slate-500 font-mono">{c.docnumber}</span>}
+                        {c.docnumber && <span className="ml-2 text-xs text-slate-500 font-mono">{idText(c)}</span>}
                       </td>
                       <td data-label="Phase" className="p-2.5 text-slate-300">{formatPhase(c.programtype, c.phase) || '—'}</td>
                       <td data-label="Last Attended" className="p-2.5 text-slate-300">{c.lastattended ? toLocalDay(c.lastattended).toLocaleDateString() : 'Never'}</td>
@@ -353,7 +354,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
               type="search"
               value={assignClientSearch}
               onChange={(e) => setAssignClientSearch(e.target.value)}
-              placeholder="Search client name or DOC #..."
+              placeholder="Search client name or ID #..."
               className="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white text-xs w-64 max-w-full"
             />
           </div>
@@ -366,7 +367,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
             const searchTerm = assignClientSearch.trim().toLowerCase();
             const filteredClients = searchTerm
               ? unassignedClients.filter(c => [
-                  c.firstname, c.lastname, `${c.firstname} ${c.lastname}`, `${c.lastname}, ${c.firstname}`, c.docnumber
+                  c.firstname, c.lastname, `${c.firstname} ${c.lastname}`, `${c.lastname}, ${c.firstname}`, idText(c)
                 ].some(v => String(v ?? '').toLowerCase().includes(searchTerm)))
               : unassignedClients;
 
@@ -375,7 +376,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
                 {filteredClients.length > 0 ? (
                   filteredClients.map(c => (
                     <div key={c.clientid} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center gap-2 text-xs">
-                      <span>{c.lastname}, {c.firstname} ({c.docnumber})</span>
+                      <span>{c.lastname}, {c.firstname}{c.docnumber ? ` (${idText(c)})` : ''}</span>
                       <button onClick={() => handleAssignClient(c.clientid)} className="bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded">Assign</button>
                     </div>
                   ))

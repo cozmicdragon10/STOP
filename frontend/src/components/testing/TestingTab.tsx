@@ -9,6 +9,7 @@ interface TestingClient {
   firstname: string;
   lastname: string;
   docnumber?: string | null;
+  doctype?: string | null;
 }
 
 interface Props {

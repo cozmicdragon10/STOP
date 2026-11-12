@@ -7,6 +7,7 @@ import { takesPolygraphs } from '../../utils/polygraph';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import CardPaymentFields from './CardPaymentFields';
 import { emptyCardBilling, type CardBilling } from './cardBilling';
+import { idText } from '../../utils/clients';
 
 interface Props {
   client: ClientRecord;
@@ -84,10 +85,11 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
       const newPolyPaid = Number(res.polyFeePaid);
       setReceipt({
         clientName: `${client.lastname}, ${client.firstname}`,
-        docNumber: client.docnumber || '',
+        docNumber: idText(client),
         amount: parsedAmount,
         method,
         newBalance: Number(res.newBalance),
+        transactionIds: res.transactionIds,
         processedBy: createdBy,
         date: new Date().toLocaleString(),
         polyApplied,
@@ -108,7 +110,7 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
       <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[90dvh] flex flex-col">
         <header className="p-5 border-b border-slate-800">
           <h3 id="client-payment-title" className="font-semibold text-white">Payment: {client.lastname}, {client.firstname}</h3>
-          <p className="text-xs text-slate-400 mt-1">DOC # {client.docnumber || '—'}</p>
+          <p className="text-xs text-slate-400 mt-1">ID # {idText(client) || '—'}</p>
         </header>
 
         <div className="p-5 space-y-5 overflow-y-auto">

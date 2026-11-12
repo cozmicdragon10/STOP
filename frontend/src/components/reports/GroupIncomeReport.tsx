@@ -5,6 +5,7 @@ import { deleteGroupDeposit, getGroupDeposits, getGroupReport, saveGroupDeposit 
 import type { GroupDeposit, GroupReportRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { escapeHtml } from '../../utils/receipt';
+import { idText } from '../../utils/clients';
 
 interface GroupTotals {
   key: string;
@@ -305,10 +306,10 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
         const s = totalsFor(key, attendees);
         const deposit = deposits.get(sessionDepositKey(g, attendees));
         return `<p class="session">${escapeHtml(sessionLabel(g, attendees))} · ${attendees.length} attended · Deposit: ${escapeHtml(sessionDepositText(g, key, attendees))}${deposit?.notes ? ` (${escapeHtml(deposit.notes)})` : ''}</p>
-          <table class="attendees"><thead><tr><th>Client</th><th>DOC #</th><th>Type</th><th class="r">Fee</th><th class="r">Paid</th><th>Method</th></tr></thead><tbody>
+          <table class="attendees"><thead><tr><th>Client</th><th>ID #</th><th>Type</th><th class="r">Fee</th><th class="r">Paid</th><th>Method</th></tr></thead><tbody>
           ${attendees.map(r => {
             const paid = Number(r.accountpaid) || 0;
-            return `<tr><td>${escapeHtml(`${r.lastname}, ${r.firstname}`)}</td><td>${escapeHtml(r.docnumber || '—')}</td>
+            return `<tr><td>${escapeHtml(`${r.lastname}, ${r.firstname}`)}</td><td>${escapeHtml(idText(r) || '—')}</td>
               <td>${escapeHtml(r.type)}${r.voucherused ? ' · Voucher' : ''}</td><td class="r">${money(Number(r.groupfee) || 0)}</td>
               <td class="r">${money(paid)}</td><td>${paid > 0 ? escapeHtml(r.paymentmethod || 'Not recorded') : '—'}</td></tr>`;
           }).join('')}
@@ -602,7 +603,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
                               <thead>
                                 <tr className="text-slate-500 uppercase">
                                   <th className="py-1.5 pr-3 text-left">Client</th>
-                                  <th className="py-1.5 pr-3 text-left">DOC #</th>
+                                  <th className="py-1.5 pr-3 text-left">ID #</th>
                                   <th className="py-1.5 pr-3 text-left">Type</th>
                                   <th className="py-1.5 pr-3 text-right">Fee</th>
                                   <th className="py-1.5 pr-3 text-right">Paid</th>
@@ -615,7 +616,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
                                   return (
                                     <tr key={r.attendanceid} className="text-slate-300">
                                       <td className="py-1.5 pr-3 text-white">{r.lastname}, {r.firstname}</td>
-                                      <td className="py-1.5 pr-3 font-mono">{r.docnumber || '—'}</td>
+                                      <td className="py-1.5 pr-3 font-mono">{idText(r) || '—'}</td>
                                       <td className="py-1.5 pr-3">{r.type}{r.voucherused ? ' · Voucher' : ''}</td>
                                       <td className="py-1.5 pr-3 text-right">{money(Number(r.groupfee) || 0)}</td>
                                       <td className="py-1.5 pr-3 text-right">{money(paid)}</td>
