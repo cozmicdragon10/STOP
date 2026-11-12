@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import type { Dispatch, SetStateAction } from 'react';
 import { CheckCircle2, Pencil, PlusCircle, SlidersHorizontal, Trash2, Undo2 } from 'lucide-react';
-import { addClientNote, deleteClientNote, getClientNotes, reviewClientNote, updateClientNote } from '../../api';
+import { EditConflictError, addClientNote, deleteClientNote, getClientNotes, reviewClientNote, updateClientNote } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { caseNoteLabel } from '../../utils/notes';
@@ -57,6 +57,9 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
   const [noteError, setNoteError] = useState<{ noteId: number; message: string } | null>(null);
   // Unsaved changes: new text for edited notes, and notes marked for deletion
   const [drafts, setDrafts] = useState<Record<number, string>>({});
+  // Each edited note's text when editing it began; sent with the save so an edit someone else made meanwhile is caught
+  // instead of replaced
+  const [draftBases, setDraftBases] = useState<Record<number, string>>({});
   const [deletions, setDeletions] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -72,14 +75,20 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
     if (leaveRequested && !dirty) onLeaveResolved(true);
   }, [leaveRequested, dirty, onLeaveResolved]);
 
-  const setDraft = (noteId: number, text: string) => setDrafts(d => {
-    const next = { ...d };
-    if (text === savedText(noteId)) delete next[noteId];
-    else next[noteId] = text;
-    return next;
-  });
-  const dropDraft = (noteId: number) => setDrafts(d => { const next = { ...d }; delete next[noteId]; return next; });
-  const discardChanges = () => { setDrafts({}); setDeletions([]); setEditingNoteId(null); setNoteError(null); setSaveError(''); };
+  const setDraft = (noteId: number, text: string) => {
+    setDraftBases(b => (noteId in b ? b : { ...b, [noteId]: savedText(noteId) }));
+    setDrafts(d => {
+      const next = { ...d };
+      if (text === savedText(noteId)) delete next[noteId];
+      else next[noteId] = text;
+      return next;
+    });
+  };
+  const dropDraft = (noteId: number) => {
+    setDrafts(d => { const next = { ...d }; delete next[noteId]; return next; });
+    setDraftBases(b => { const next = { ...b }; delete next[noteId]; return next; });
+  };
+  const discardChanges = () => { setDrafts({}); setDraftBases({}); setDeletions([]); setEditingNoteId(null); setNoteError(null); setSaveError(''); };
 
   // Saves every staged deletion and edit. Stops at the first failure, keeping what wasn't saved. Returns whether all saved.
   const saveChanges = async () => {
@@ -104,9 +113,21 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
       for (const [id, text] of Object.entries(drafts)) {
         const noteId = Number(id);
         if (deletions.includes(noteId)) continue;
-        const saved = await updateClientNote(noteId, { user: user.employeeemail, comments: text });
-        setNotes(list => list.map(n => (n.noteid === noteId ? saved : n)));
-        dropDraft(noteId);
+        try {
+          const saved = await updateClientNote(noteId, { user: user.employeeemail, comments: text, original: draftBases[noteId] ?? savedText(noteId) });
+          setNotes(list => list.map(n => (n.noteid === noteId ? saved : n)));
+          dropDraft(noteId);
+        } catch (err) {
+          // Someone else edited this note meanwhile: show their version (Undo Changes brings it into the box) and keep
+          // this person's text. Saving again replaces theirs on purpose.
+          if (err instanceof EditConflictError) {
+            const current = err.current as { comments?: string | null };
+            setNotes(list => list.map(n => (n.noteid === noteId ? current : n)));
+            setDraftBases(b => ({ ...b, [noteId]: current.comments || '' }));
+            setEditingNoteId(noteId);
+          }
+          throw err;
+        }
       }
       setEditingNoteId(null);
       return true;

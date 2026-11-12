@@ -550,6 +550,21 @@ export default function App() {
     openClientIdRef.current = selectedClientDetail?.clientid ?? null;
   }, [selectedClientDetail]);
 
+  // The open client as it is on the server now (a save refused because someone else changed it, or a refresh): shown in
+  // the account and the client list
+  const applyFreshClient = useCallback((fresh: any) => {
+    setSelectedClientDetail((c: any) => (c && c.clientid === fresh.clientid ? { ...c, ...fresh } : c));
+    setClients(prev => prev.map(c => c.clientid === fresh.clientid ? { ...c, ...fresh } : c));
+  }, []);
+
+  // Coming back to the app (another window or browser tab) reloads the open account's details, balance, ledger, and
+  // attendance, so changes other people made meanwhile show. Not while a payment or discharge dialog is open, and at most
+  // every 15 seconds. A reload is dropped if the account changed on this screen while it loaded, so it never replaces
+  // something newer. Unsaved Edit Info changes stay: the form lays them over the reloaded client.
+  const accountRefresh = useRef({ client: null as any, financials: [] as any[], attendance: [] as any[], at: 0 });
+  useEffect(() => {
+    accountRefresh.current = { ...accountRefresh.current, client: selectedClientDetail, financials: clientFinancials, attendance: clientAttendance };
+  }, [selectedClientDetail, clientFinancials, clientAttendance]);
   // The page behind an open account doesn't scroll or show its scrollbar. Checks user too: an expired session swaps the
   // account for the login screen with the client still selected.
   const accountOpen = !!user && !!selectedClientDetail;
@@ -566,6 +581,35 @@ export default function App() {
   useEffect(() => {
     accountDialogOpen.current = showClientPayment || statusDialog !== null;
   }, [showClientPayment, statusDialog]);
+  // Reloads the open account on coming back to the app (see accountRefresh above)
+  useEffect(() => {
+    if (!accountOpen) return;
+    const refresh = async () => {
+      if (document.visibilityState !== 'visible' || accountDialogOpen.current) return;
+      const seen = accountRefresh.current;
+      if (!seen.client || Date.now() - seen.at < 15000) return;
+      accountRefresh.current = { ...seen, at: Date.now() };
+      try {
+        const [fresh, financials, attendance] = await Promise.all([
+          getClient(seen.client.clientid), getClientFinancials(seen.client.clientid), getClientAttendance(seen.client.clientid),
+        ]);
+        // Skip it all if anything on the account changed on this screen while it loaded
+        const now = accountRefresh.current;
+        if (now.client !== seen.client || now.financials !== seen.financials || now.attendance !== seen.attendance) return;
+        applyFreshClient(fresh);
+        setClientFinancials(financials);
+        setClientAttendance(attendance);
+      } catch (err) {
+        console.error('Failed to refresh the open account', err);
+      }
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [accountOpen, applyFreshClient]);
   useEffect(() => {
     if (!accountOpen) return;
     const unsavedWork = () => accountEditsDirty.current || notesEditsDirty.current || unsavedFormCount.current > 0;
@@ -1067,6 +1111,7 @@ export default function App() {
                     leaveRequested={leavePrompt?.kind === 'info'}
                     onLeaveResolved={resolveLeavePrompt}
                     onSaved={handleClientInfoSaved}
+                    onRefreshed={applyFreshClient}
                     onBusPassGranted={handleBusPassGranted}
                   />
 

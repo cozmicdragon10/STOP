@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle2, Settings, X } from 'lucide-react';
-import { getFederalUnitCodes, updateClient } from '../../api';
+import { EditConflictError, getFederalUnitCodes, updateClient } from '../../api';
 import type { ClientNote, FederalUnitCode, SupervisingAgent } from '../../api';
 import BusPassDialog from './BusPassDialog';
 import AgentPicker from '../agents/AgentPicker';
@@ -13,6 +13,7 @@ import { SO_PHASES, SO_TREATMENT_FEES, bipTreatmentFee } from '../../utils/soPha
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { ageFromBirthDate, toLocalDay } from '../../utils/dates';
 import { polyVoucherMax, takesPolygraphs } from '../../utils/polygraph';
+import { UNIT_FIELDS, editPayload, rebaseOrigins, recordOrigins, sameFieldValue } from '../../utils/clientEdits';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client and group rows are untyped throughout App */
 interface Props {
@@ -38,6 +39,8 @@ interface Props {
   onLeaveResolved: (leave: boolean) => void;
   // Saved; previousProgramType lets App ask about a BIP intake when the client was just moved to BIP
   onSaved: (saved: any, previousProgramType: string | null) => void;
+  // A save was refused because someone else changed the client: their current row, to show in place of the old one
+  onRefreshed: (current: any) => void;
   // A bus pass was granted: the client's new count and the Bus Pass note it added
   onBusPassGranted: (busPasses: number, note: ClientNote) => void;
 }
@@ -75,41 +78,41 @@ const ACCOUNT_FIELDS: { label: string; field: string; prefix: string; step?: str
   { label: 'Poly Fee Voucher', field: 'polyfeevoucher', prefix: '', step: '1', min: 0 },
 ];
 const isDateField = (field: string) => field.includes('date') || field.includes('Date');
-// Compares a field the way it's shown: dates without their time, money and counts as numbers (150 and 150.00 match)
-// Federal units ({ code: units }) with blanks dropped and numbers compared as numbers, so 4 and "4.00" match
-const normalizedUnits = (units: unknown) => JSON.stringify(Object.entries((units ?? {}) as Record<string, unknown>)
-  .filter(([, v]) => v !== '' && v !== null && v !== undefined).map(([k, v]) => [k, Number(v)]).sort(([a], [b]) => String(a).localeCompare(String(b))));
-const sameValue = (field: string, a: unknown, b: unknown) => {
-  if (field === 'federalunits' || field === 'federalunitrefills') return normalizedUnits(a) === normalizedUnits(b);
-  const [x, y] = [String(a ?? ''), String(b ?? '')];
-  if (isDateField(field)) return x.split('T')[0] === y.split('T')[0];
-  if ((field === 'copay' || ACCOUNT_FIELDS.some(f => f.field === field)) && x !== '' && y !== '') return Number(x) === Number(y);
-  return x === y;
-};
 const inputClass = 'w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-sm';
 
 // The Information tab's details: Personal, Contact, and Program & Account sections, shown read-only until Edit Info.
 // While editing, only the changed fields are kept, laid over the current client, so a status change made meanwhile
 // (Discharge / Activate) still shows and is saved.
-export default function ClientInfoForm({ client, discharged, groups, directoryAgents, counselors, polyOverrideActive, userEmail, loadError, onDismissLoadError, actionsSlot, onDirtyChange, leaveRequested, onLeaveResolved, onSaved, onBusPassGranted }: Props) {
+export default function ClientInfoForm({ client, discharged, groups, directoryAgents, counselors, polyOverrideActive, userEmail, loadError, onDismissLoadError, actionsSlot, onDirtyChange, leaveRequested, onLeaveResolved, onSaved, onRefreshed, onBusPassGranted }: Props) {
   const [busPassOpen, setBusPassOpen] = useState(false);
   // Federal billing codes (Admin > Billing Federal Units); each client program shows the codes it tracks
   const [unitCodes, setUnitCodes] = useState<FederalUnitCode[]>([]);
   useEffect(() => {
     getFederalUnitCodes().then(setUnitCodes).catch(() => setUnitCodes([]));
   }, []);
-  // null while not editing; otherwise the fields changed so far
+  // null while not editing; otherwise the fields changed so far. Federal units hold only the codes that were changed.
   const [edits, setEdits] = useState<Record<string, any> | null>(null); // eslint-disable-line @typescript-eslint/no-explicit-any
+  // Each changed field's value before this edit touched it; sent with the save so a change someone else made to the
+  // same field meanwhile is caught instead of replaced (utils/clientEdits.ts)
+  const [origins, setOrigins] = useState<Record<string, unknown>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const editing = edits !== null;
-  const form = { ...client, ...(edits ?? {}) };
+  const startEditing = () => { setOrigins({}); setEdits({}); };
+  const form = {
+    ...client, ...(edits ?? {}),
+    // Units not changed in this edit show their current count
+    ...Object.fromEntries(UNIT_FIELDS.filter(f => edits?.[f]).map(f => [f, { ...(client[f] ?? {}), ...edits![f] }])),
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const update = (changes: (f: any) => Record<string, any>) => setEdits(prev => ({ ...(prev ?? {}), ...changes({ ...client, ...(prev ?? {}) }) }));
+  const update = (changes: (f: any) => Record<string, any>) => {
+    setOrigins(o => recordOrigins(o, client, Object.keys(changes(form))));
+    setEdits(prev => ({ ...(prev ?? {}), ...changes({ ...client, ...(prev ?? {}) }) }));
+  };
   const setField = (field: string, value: unknown) => update(() => ({ [field]: value }));
 
   // A field typed back to what it was doesn't count as a change
-  const dirty = Object.entries(edits ?? {}).some(([field, value]) => !sameValue(field, value, client[field]));
+  const dirty = Object.entries(edits ?? {}).some(([field, value]) => !sameFieldValue(field, value, client[field]));
   useEffect(() => {
     onDirtyChange(dirty);
     return () => onDirtyChange(false);
@@ -124,11 +127,20 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
     setSaving(true);
     setError('');
     try {
-      const res = await updateClient(client.clientid, { ...form, updatedBy: userEmail });
+      // Only the changed fields are sent, so a payment or check-in made while this was open isn't undone
+      const { changes, expected } = editPayload(edits ?? {}, origins);
+      const res = await updateClient(client.clientid, { ...changes, expected, updatedBy: userEmail });
       // Prefer the row the server returned (includes joined group name); fall back to the form values
       onSaved({ ...form, ...(res.client ?? {}) }, client.programtype ?? null);
       setEdits(null);
     } catch (err) {
+      // Someone else changed a field this edit changes: show the client as it is now, keeping what was typed. Saving
+      // again (after reading the message) replaces their change on purpose.
+      if (err instanceof EditConflictError) {
+        const { client: current, conflicts } = err.current as { client: Record<string, unknown>; conflicts: string[] };
+        onRefreshed(current);
+        setOrigins(o => rebaseOrigins(o, current, conflicts));
+      }
       // Stay in edit mode so nothing typed is lost
       setError(err instanceof Error ? err.message : 'Failed to save client information.');
     } finally {
@@ -143,13 +155,13 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
     const v = source.federalunits?.[code];
     return v === null || v === undefined || v === '' ? '' : String(Number(v));
   };
-  const setUnits = (code: string, value: string) => setField('federalunits', { ...(form.federalunits ?? {}), [code]: value });
+  const setUnits = (code: string, value: string) => update(() => ({ federalunits: { ...(edits?.federalunits ?? {}), [code]: value } }));
   // Monthly refill (6022 / 6012): on the 1st the units are set to this, replacing what's left; blank = no refill
   const refillOf = (source: { federalunitrefills?: Record<string, unknown> | null }, code: string) => {
     const v = source.federalunitrefills?.[code];
     return v === null || v === undefined || v === '' ? '' : String(Number(v));
   };
-  const setRefill = (code: string, value: string) => setField('federalunitrefills', { ...(form.federalunitrefills ?? {}), [code]: value });
+  const setRefill = (code: string, value: string) => update(() => ({ federalunitrefills: { ...(edits?.federalunitrefills ?? {}), [code]: value } }));
 
   return (
     <>
@@ -193,7 +205,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
       {/* Edit / Save toolbar */}
       {actionsSlot && createPortal(!editing ? (
         <button
-          onClick={() => setEdits({})}
+          onClick={startEditing}
           className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
         >
           <Settings size={14} /> Edit Info

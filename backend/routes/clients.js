@@ -5,6 +5,7 @@ const { logAction, pool } = require('../db');
 const { activeRoleFor } = require('../lib/access');
 const { requireRole } = require('../lib/auth');
 const { groupNameFor, logClientChange } = require('../lib/changeLog');
+const { changedFields, clientConflictMessage } = require('../lib/editConflicts');
 const { POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, countPolyFeeFill } = require('../lib/poly');
 const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED } = require('../lib/sql');
 const { BUS_PASS_MAX, FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
@@ -407,16 +408,31 @@ const noteForChange = async (noteId, user) => {
 router.put('/api/notes/:noteId', async (req, res) => {
     try {
         const { noteId } = req.params;
-        const { user, comments } = req.body;
+        // original: the note's text when this person started editing it. If the note has been edited since, nothing is saved
+        // (409, with the note as it is now) so the other person's edit isn't silently replaced.
+        const { user, comments, original } = req.body;
         if (!String(comments || '').trim()) {
             return res.status(400).json({ error: 'The note cannot be empty.' });
         }
         const check = await noteForChange(noteId, user);
         if (check.error) return res.status(check.status).json({ error: check.error });
+        const checkOriginal = typeof original === 'string';
         const result = await pool.query(
-            'UPDATE Notes SET Comments = $1, EditedBy = $2, EditedOn = NOW() WHERE NoteId = $3 RETURNING *',
-            [String(comments).trim(), user, noteId]
+            `UPDATE Notes SET Comments = $1, EditedBy = $2, EditedOn = NOW()
+             WHERE NoteId = $3 AND (NOT $4::boolean OR COALESCE(Comments, '') = $5)
+             RETURNING *`,
+            [String(comments).trim(), user, noteId, checkOriginal, checkOriginal ? original : '']
         );
+        if (!result.rows.length) {
+            const current = (await pool.query('SELECT * FROM Notes WHERE NoteId = $1', [noteId])).rows[0];
+            if (!current) return res.status(404).json({ error: 'This note was deleted on another screen.' });
+            const by = current.editedby ? ` by ${current.editedby}` : '';
+            return res.status(409).json({
+                error: `Not saved: this note was edited${by} while you were editing it. Your text is still in the box. `
+                    + 'Use Undo Changes to see their version, or Save again to replace it with yours.',
+                note: current,
+            });
+        }
         await logAction(user, 'Edit Note', `Edited note ${noteId} on Client ID ${check.note.client}. Previous text: ${check.note.comments}`);
         res.json(result.rows[0]);
     } catch (err) {
@@ -624,7 +640,14 @@ const CLIENT_RACES = ['American Indian or Alaska Native', 'Asian', 'Black or Afr
 const CLIENT_SEXES = ['Male', 'Female'];
 
 // Update Client Information
-router.put('/api/clients/:id', async (req, res) => {
+// Edit Info saves only the fields that were changed; a field that isn't sent keeps its saved value. expected holds, for
+// each changed field, the value the screen showed when it was first changed: if someone else has changed that field since,
+// nothing is saved (409, with the current client) so their change isn't silently replaced (see lib/editConflicts.js).
+// The client row is locked for the whole save, like payments and check-ins, so they can't interleave with it.
+// Edit Info uses PATCH. PUT does the same and stays for screens loaded before PATCH existed, which send every field.
+// A new screen talking to a server that hasn't been restarted gets a 404 for PATCH instead of having unsent fields blanked.
+const updateClientInfo = async (req, res) => {
+    const db = await pool.connect();
     try {
         const { id } = req.params;
         const {
@@ -634,8 +657,11 @@ router.put('/api/clients/:id', async (req, res) => {
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
             comments, programtype, race, dateofbirth, sex, pretrial, assessor, buspasses, buspassrefill, updatedBy,
-            individualgroupid, federalunits, federalunitrefills, copay, doctype
+            individualgroupid, federalunits, federalunitrefills, copay, doctype, expected
         } = req.body;
+        // Columns the UPDATE sets outright (a blank clears them): only changed when the request sends them
+        const sent = ['middlename', 'programstartdate', 'groupid', 'address', 'city', 'county', 'state', 'zip', 'mainphone', 'altphone',
+            'emergencycontact', 'emergencycontactphone', 'comments', 'race', 'dateofbirth', 'sex'].filter(f => req.body[f] !== undefined);
         // The ID #'s kind (DOC, PACTS, ...): changed only when sent; blank clears it
         if (doctype !== undefined && doctype !== null && doctype !== '' && !ID_TYPES.includes(doctype)) {
             return res.status(400).json({ error: `ID # type must be one of: ${ID_TYPES.join(', ')}.` });
@@ -676,9 +702,23 @@ router.put('/api/clients/:id', async (req, res) => {
         const individualGroup = await individualGroupFrom(individualgroupid);
         if (individualGroup.error) return res.status(400).json({ error: individualGroup.error });
 
-        // Tracked fields before the edit, for the change log
-        const beforeRes = await pool.query('SELECT DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
+        await db.query('BEGIN');
+        const refuse = async (status, body) => {
+            await db.query('ROLLBACK');
+            return res.status(status).json(body);
+        };
+        // Tracked fields before the edit, for the change log; locks the client until the save is done
+        const beforeRes = await db.query('SELECT DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1 FOR UPDATE', [id]);
         const before = beforeRes.rows[0];
+        if (!before) return refuse(404, { error: 'Client not found.' });
+        // Someone else changed a field this edit changes: refuse, and send the client as it is now
+        if (expected && typeof expected === 'object') {
+            const current = (await db.query(clientRowsSql('WHERE c.ClientId = $1'), [id])).rows[0];
+            const conflicts = changedFields(expected, current);
+            if (conflicts.length) {
+                return refuse(409, { error: clientConflictMessage(conflicts, current), conflicts, client: current });
+            }
+        }
 
         // The full set of poly fee vouchers depends on the phase the client will be in after this edit. A count sent back
         // unchanged may be over a new phase's full set; the UPDATE below trims it.
@@ -686,46 +726,46 @@ router.put('/api/clients/:id', async (req, res) => {
         const polyVoucher = polyfeevoucher !== undefined && polyfeevoucher !== null && polyfeevoucher !== '' ? Number(polyfeevoucher) : null;
         if (polyVoucher !== null && (!Number.isInteger(polyVoucher) || polyVoucher < 0
             || (polyVoucher > fullSet && polyVoucher !== Number(before?.polyfeevoucher)))) {
-            return res.status(400).json({ error: `Poly fee voucher must be a whole number from 0 to ${fullSet}.` });
+            return refuse(400, { error: `Poly fee voucher must be a whole number from 0 to ${fullSet}.` });
         }
         // The poly fee total belongs to the override while one is active
-        const polyOverride = await activePolyFeeOverride(pool, id);
+        const polyOverride = await activePolyFeeOverride(db, id);
         if (polyOverride && polyfee !== undefined && polyfee !== null && polyfee !== '' && Number(polyfee) !== Number(before?.polyfee)) {
-            return res.status(400).json({ error: 'A temporary poly fee override is active. Change or remove the override to change the poly fee total.' });
+            return refuse(400, { error: 'A temporary poly fee override is active. Change or remove the override to change the poly fee total.' });
         }
         if (programstatus && programstatus !== before?.programstatus) {
             if (DISCHARGE_STATUSES.includes(before?.programstatus)) {
-                return res.status(400).json({ error: 'Program status is locked while the client is discharged. Use the Activate button.' });
+                return refuse(400, { error: 'Program status is locked while the client is discharged. Use the Activate button.' });
             }
             if (!EDITABLE_PROGRAM_STATUSES.includes(programstatus)) {
-                return res.status(400).json({ error: `Program status can only be changed to ${EDITABLE_PROGRAM_STATUSES.join(' or ')} here. Use the Discharge button for ${programstatus}.` });
+                return refuse(400, { error: `Program status can only be changed to ${EDITABLE_PROGRAM_STATUSES.join(' or ')} here. Use the Discharge button for ${programstatus}.` });
             }
         }
 
-        await pool.query(
+        await db.query(
             `UPDATE Clients SET 
                 FirstName = COALESCE($1, FirstName),
-                MiddleName = $2,
+                MiddleName = CASE WHEN 'middlename' = ANY($45::text[]) THEN $2 ELSE MiddleName END,
                 LastName = COALESCE($3, LastName),
                 DOCNumber = COALESCE($4, DOCNumber),
                 SupervisingAgent = COALESCE($5, SupervisingAgent),
-                ProgramStartDate = $6,
+                ProgramStartDate = CASE WHEN 'programstartdate' = ANY($45::text[]) THEN $6 ELSE ProgramStartDate END,
                 ProgramStatus = COALESCE($7, ProgramStatus),
                 Phase = COALESCE($8, Phase),
-                GroupId = $9,
+                GroupId = CASE WHEN 'groupid' = ANY($45::text[]) THEN $9 ELSE GroupId END,
                 TreatmentFee = COALESCE($10, TreatmentFee),
                 AccountBalance = COALESCE($11, AccountBalance),
                 Vouchers = COALESCE($12, Vouchers),
-                Address = $13,
-                City = $14,
-                County = $15,
-                State = $16,
-                Zip = $17,
-                MainPhone = $18,
-                AltPhone = $19,
-                EmergencyContact = $20,
-                EmergencyContactPhone = $21,
-                Comments = $22,
+                Address = CASE WHEN 'address' = ANY($45::text[]) THEN $13 ELSE Address END,
+                City = CASE WHEN 'city' = ANY($45::text[]) THEN $14 ELSE City END,
+                County = CASE WHEN 'county' = ANY($45::text[]) THEN $15 ELSE County END,
+                State = CASE WHEN 'state' = ANY($45::text[]) THEN $16 ELSE State END,
+                Zip = CASE WHEN 'zip' = ANY($45::text[]) THEN $17 ELSE Zip END,
+                MainPhone = CASE WHEN 'mainphone' = ANY($45::text[]) THEN $18 ELSE MainPhone END,
+                AltPhone = CASE WHEN 'altphone' = ANY($45::text[]) THEN $19 ELSE AltPhone END,
+                EmergencyContact = CASE WHEN 'emergencycontact' = ANY($45::text[]) THEN $20 ELSE EmergencyContact END,
+                EmergencyContactPhone = CASE WHEN 'emergencycontactphone' = ANY($45::text[]) THEN $21 ELSE EmergencyContactPhone END,
+                Comments = CASE WHEN 'comments' = ANY($45::text[]) THEN $22 ELSE Comments END,
                 ProgramType = COALESCE($23, ProgramType),
                 -- Right-hand columns are the pre-update values: fill the vouchers when this edit makes the poly fee paid in full,
                 -- and never leave more than the full set for the client's phase after the edit
@@ -739,9 +779,9 @@ router.put('/api/clients/:id', async (req, res) => {
                 END,
                 PolyFeePaid = COALESCE($26, PolyFeePaid),
                 PolyFee = COALESCE($27, PolyFee),
-                Race = $28,
-                DateOfBirth = $29,
-                Sex = $30,
+                Race = CASE WHEN 'race' = ANY($45::text[]) THEN $28 ELSE Race END,
+                DateOfBirth = CASE WHEN 'dateofbirth' = ANY($45::text[]) THEN $29 ELSE DateOfBirth END,
+                Sex = CASE WHEN 'sex' = ANY($45::text[]) THEN $30 ELSE Sex END,
                 -- Kept only while the client's program (after this edit) is one that has pretrial clients
                 Pretrial = COALESCE($31, Pretrial) AND COALESCE($23, ProgramType) = ANY($32::text[]),
                 -- Changed only when the request sends it (an empty value clears it)
@@ -775,15 +815,16 @@ router.put('/api/clients/:id', async (req, res) => {
                 individualgroupid !== undefined, individualGroup.id, SO_PROGRAM_TYPES,
                 copay !== undefined, copayValue, FEDERAL_PROGRAM_TYPES,
                 doctype !== undefined, doctype || null,
+                sent,
             ]
         );
 
         // Units are kept for the codes of the client's program after this edit
-        const programNow = (await pool.query('SELECT ProgramType FROM Clients WHERE ClientId = $1', [id])).rows[0]?.programtype;
-        await saveClientFederalUnits(pool, { clientId: id, programType: programNow, units: federalunits, changedBy: updatedBy });
-        await saveClientUnitRefills(pool, { clientId: id, programType: programNow, refills: federalunitrefills, changedBy: updatedBy });
+        const programNow = (await db.query('SELECT ProgramType FROM Clients WHERE ClientId = $1', [id])).rows[0]?.programtype;
+        await saveClientFederalUnits(db, { clientId: id, programType: programNow, units: federalunits, changedBy: updatedBy });
+        await saveClientUnitRefills(db, { clientId: id, programType: programNow, refills: federalunitrefills, changedBy: updatedBy });
 
-        const updated = await pool.query(
+        const updated = await db.query(
             `SELECT c.*, g.GroupName, ig.GroupName AS IndividualGroupName, ${FEDERAL_UNITS_SQL('c.ClientId')} AS FederalUnits, ${FEDERAL_UNIT_REFILLS_SQL('c.ClientId')} AS FederalUnitRefills, COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
                     (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
                     (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly
@@ -795,17 +836,17 @@ router.put('/api/clients/:id', async (req, res) => {
         );
 
         if (before && updated.rows[0]) {
-            const after = await pool.query('SELECT DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
+            const after = await db.query('SELECT DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
             const now = after.rows[0];
             // An edit that makes the poly fee paid in full filled the vouchers (see the CASE above); that counts toward an override
             const wasFull = Number(before.polyfee) > 0 && Number(before.polyfeepaid) >= Number(before.polyfee);
             const isFull = Number(updated.rows[0].polyfee) > 0 && Number(updated.rows[0].polyfeepaid) >= Number(updated.rows[0].polyfee);
-            if (!wasFull && isFull) await countPolyFeeFill(pool, id, 1);
+            if (!wasFull && isFull) await countPolyFeeFill(db, id, 1);
             // A phase change that trims the vouchers to the new phase's full set goes on the change log
             const vouchersBefore = Number(before.polyfeevoucher || 0);
             const vouchersAfter = Number(updated.rows[0].polyfeevoucher || 0);
             if ((before.phase || '') !== (updated.rows[0].phase || '') && vouchersBefore > fullSet && vouchersAfter < vouchersBefore) {
-                await logClientChange(pool, {
+                await logClientChange(db, {
                     clientId: id, changedBy: updatedBy, changeType: 'Poly Fee Vouchers',
                     oldValue: String(vouchersBefore), newValue: String(vouchersAfter),
                     details: `Phase changed to ${updated.rows[0].phase}: poly fee vouchers trimmed to its full set of ${fullSet}.`,
@@ -823,40 +864,46 @@ router.put('/api/clients/:id', async (req, res) => {
             ];
             for (const [changeType, oldValue, newValue] of tracked) {
                 if ((oldValue || '') !== (newValue || '')) {
-                    await logClientChange(pool, { clientId: id, changedBy: updatedBy, changeType, oldValue: oldValue || 'None', newValue: newValue || 'None' });
+                    await logClientChange(db, { clientId: id, changedBy: updatedBy, changeType, oldValue: oldValue || 'None', newValue: newValue || 'None' });
                 }
             }
             if (!!before.pretrial !== !!now.pretrial) {
-                await logClientChange(pool, {
+                await logClientChange(db, {
                     clientId: id, changedBy: updatedBy, changeType: 'Pretrial',
                     oldValue: before.pretrial ? 'Checked' : 'Unchecked', newValue: now.pretrial ? 'Checked' : 'Unchecked',
                     details: !now.pretrial && pretrial === true ? `Cleared: ${now.programtype} clients are not pretrial.` : undefined,
                 });
             }
             if ((before.groupid || null) !== (now.groupid || null)) {
-                await logClientChange(pool, {
+                await logClientChange(db, {
                     clientId: id, changedBy: updatedBy, changeType: 'Group',
                     oldValue: await groupNameFor(before.groupid), newValue: await groupNameFor(now.groupid),
                 });
             }
             if ((before.individualgroupid || null) !== (now.individualgroupid || null)) {
-                await logClientChange(pool, {
+                await logClientChange(db, {
                     clientId: id, changedBy: updatedBy, changeType: 'Individual Group',
                     oldValue: await groupNameFor(before.individualgroupid), newValue: await groupNameFor(now.individualgroupid),
                 });
             }
         }
 
+        await db.query('COMMIT');
         res.json({ success: true, client: updated.rows[0] });
     } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
         // 23505 = unique_violation: another client has this ID # and type
         if (err.code === '23505') {
             return res.status(409).json({ error: 'Another client already has this ID # (same type and number).' });
         }
         console.error('Error updating client:', err);
         res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
     }
-});
+};
+router.patch('/api/clients/:id', updateClientInfo);
+router.put('/api/clients/:id', updateClientInfo);
 
 // Create a new client. Starts with a zero balance, zero vouchers, and the default program type.
 router.post('/api/clients', async (req, res) => {

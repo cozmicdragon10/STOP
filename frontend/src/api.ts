@@ -426,19 +426,36 @@ export async function getClientChangeLog(clientId: number, user: string): Promis
 // Client fields the client forms send. Inputs may send numbers as text; the server converts them.
 export type ClientFields = Partial<Record<keyof ClientColumns, string | number | boolean | null>>;
 
-export async function updateClient(clientId: number, data: ClientFields & { updatedBy: string }) {
+// A save refused because someone else changed the same thing first (HTTP 409). current is the record as it is now.
+export class EditConflictError<T> extends Error {
+    current: T;
+    constructor(message: string, current: T) {
+        super(message);
+        this.name = 'EditConflictError';
+        this.current = current;
+    }
+}
+
+// Sends only the changed fields; expected holds each one's value as shown when it was first changed (see
+// backend/lib/editConflicts.js). Throws EditConflictError when someone else changed one of them meanwhile.
+// PATCH, not PUT: a server not restarted since this came in has no PATCH route, so it refuses (asking for a restart)
+// instead of treating the fields not sent as blank.
+export async function updateClient(clientId: number, data: ClientFields & { updatedBy: string; expected?: Record<string, unknown> }) {
     const res = await apiFetch(`${API_BASE}/clients/${clientId}`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
     });
     const text = await res.text();
-    let body: { success?: boolean; client?: Record<string, unknown>; error?: string };
+    let body: { success?: boolean; client?: Record<string, unknown>; error?: string; conflicts?: string[] };
     try {
         body = JSON.parse(text);
     } catch {
         // Express returns an HTML error page when the route is missing, which usually means the backend needs a restart
         throw new Error(`The server returned an unexpected response (HTTP ${res.status}). Restart the backend (node server.js) and try again.`);
+    }
+    if (res.status === 409 && body.conflicts && body.client) {
+        throw new EditConflictError(body.error || 'This client was changed on another screen.', { client: body.client, conflicts: body.conflicts });
     }
     if (!res.ok) {
         throw new Error(body.error || 'Failed to save client information.');
@@ -1525,12 +1542,19 @@ export async function addClientNote(clientId: number, data: { user: string; comm
 }
 
 // The note's author or a Business Administrator only; the server checks
-export async function updateClientNote(noteId: number, data: { user: string; comments: string }): Promise<ClientNote> {
+// original: the note's text when editing began. Throws EditConflictError (with the note as it is now) when the note
+// was edited by someone else meanwhile.
+export async function updateClientNote(noteId: number, data: { user: string; comments: string; original?: string }): Promise<ClientNote> {
     const res = await apiFetch(`${API_BASE}/notes/${noteId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
     });
+    if (res.status === 409) {
+        const body = await readJson(res) as { error?: string; note?: ClientNote } | null;
+        if (body?.note) throw new EditConflictError(body.error || 'This note was edited on another screen.', body.note);
+        throw new Error(body?.error || 'Failed to save the note.');
+    }
     return jsonResponse(res, 'Failed to save the note.');
 }
 
