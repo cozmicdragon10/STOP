@@ -96,9 +96,10 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const isAdmin = user.role === 'Business Administrator';
   const blankForm = useCallback((category: IndividualCategory = 'Assessment'): FormState => ({
     openSessionId: null, category, clientId: '', sessionTypeId: '', date: todayLocal(), fee: '', payment: '',
-    paymentMethod: 'Cash', provider: user.displayname || '', comments: '', paymentComments: '', card: emptyCardBilling, receipt: null,
+    // A counselor starts with themselves; everyone else picks the counselor
+    paymentMethod: 'Cash', provider: user.role === 'Counselor' ? user.displayname || '' : '', comments: '', paymentComments: '', card: emptyCardBilling, receipt: null,
     paidOnOpen: 0,
-  }), [user.displayname]);
+  }), [user.displayname, user.role]);
 
   const [form, setForm] = useState<FormState>(() => blankForm());
   const [reviewing, setReviewing] = useState(false);
@@ -183,11 +184,12 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
       setForm(f => (f.fee === '' || prices.includes(Number(f.fee).toFixed(2)) ? { ...f, fee: reinstatePrice.toFixed(2) } : f));
     }
   }
-  // Counselors and therapists first; the current user is always a choice
-  const providers = Array.from(new Set([
-    ...employees.filter(e => e.active !== false && e.role !== 'Polygrapher').map(e => e.displayname),
-    user.displayname || '', form.provider,
-  ].filter(Boolean))).sort((a, b) => a.localeCompare(b));
+  // Only active counselors can be picked
+  const providers = Array.from(new Set(employees
+    .filter(e => e.active !== false && e.role === 'Counselor' && e.displayname)
+    .map(e => e.displayname))).sort((a, b) => a.localeCompare(b));
+  // An open session saved earlier under someone who isn't a counselor still shows them, so reopening it keeps them
+  const savedNonCounselor = form.provider && !providers.includes(form.provider) ? form.provider : '';
 
   // Only Business Administrators change the fee; for everyone else it is the price list's (the server enforces this too)
   const fee = isAdmin ? Number(form.fee) : (listFee ?? 0);
@@ -530,6 +532,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                 <label className={label}>Counselor / Therapist</label>
                 <select value={form.provider} onChange={e => set({ provider: e.target.value })} className={input} required>
                   <option value="">Select…</option>
+                  {savedNonCounselor && <option value={savedNonCounselor}>{savedNonCounselor} (not a counselor)</option>}
                   {providers.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
