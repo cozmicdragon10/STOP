@@ -77,18 +77,28 @@ The dev server runs on `https://localhost:5174`, beside the live site on 5173. I
 - `npm run migrate:status` - List migrations that have not been applied yet
 
 ### Frontend
-- `npm run dev` - Start development server with Vite
-- `npm run build` - Build for production
+- `npm run dev` - Start the Vite development server on port 5174
+- `npm run build` - Check types and build into `frontend/dist` (on the office server, use `deploy/update.ps1` instead;
+  it builds into `site/builds/` and switches the live site over)
 - `npm test` - Run the unit tests (Vitest)
 - `npm run lint` - Run ESLint to check code quality
-- `npm run preview` - Preview the production build locally
+
+### Office server (`deploy/`, PowerShell)
+- `update.ps1` - Run the tests, build the site, switch to the new build, and restart
+- `rollback.ps1` - Switch the site back to an earlier build (`-List` shows them)
+- `restart.ps1` - Restart the server
+- `install-startup.ps1` - Register the scheduled task that keeps the server running (`-AtBoot` as administrator)
+
+### End-to-end tests (`e2e/`)
+- `node run.js --test-database` - Two people working at once, in the real site (test copy of the database only)
 
 ## Project Structure
 
 ```
 STOP/
 ├── backend/              # Express.js backend server
-│   ├── server.js         # Startup: runs migrations, then serves app.js over HTTPS
+│   ├── server.js         # Startup: runs migrations, then serves app.js (API, 5000) and the built site (5173) over HTTPS
+│   ├── frontendServer.js # Serves the build named in site/current.txt
 │   ├── app.js            # Express app; mounts every router in routes/
 │   ├── db.js             # PostgreSQL pool and the system log helper (logAction)
 │   ├── migrate.js        # Migration runner
@@ -99,6 +109,7 @@ STOP/
 │   │   ├── attendance.js         #   recording a check-in (fees, payments, BIP week, SO monthly fee)
 │   │   ├── cashResponsibility.js #   who holds a closed group session's cash
 │   │   ├── poly.js               #   poly fee vouchers, overrides, and poly fee payment changes
+│   │   ├── editConflicts.js      #   catching two people editing the same record (see below)
 │   │   └── changeLog.js, sql.js  #   client change log, shared SQL fragments
 │   ├── migrations/       # Numbered SQL migrations, applied in order
 │   ├── test/             # Backend tests
@@ -121,6 +132,10 @@ STOP/
 │       │   ├── sessions/     #   Assessments & Individuals, BIP intake and reinstate
 │       │   └── admin/, agents/, callin/, groups/, reports/, testing/  #   the other tabs
 │       └── utils/        # Business rules and formatting helpers (with *.test.ts tests)
+├── deploy/               # Office server: watchdog, startup task, update / rollback / restart (see deploy/README.md)
+├── e2e/                  # End-to-end tests of two people working at once (see e2e/README.md)
+├── site/                 # Not in git: builds/ (the last 5 site builds) and current.txt (the live one)
+├── logs/                 # Not in git: server.log
 └── README.md
 ```
 
@@ -139,6 +154,18 @@ reports changes back. Saves that finish after another client was opened don't ov
   taking money back after that is owed on the account balance instead.
 - **New accounts**: New User refuses an email that already has an account; existing accounts are changed with Edit,
   which signs the person out when their password changes or the account is deactivated.
+
+- **Two people at once** (`backend/lib/editConflicts.js`, `frontend/src/utils/clientEdits.ts`):
+  - Payments, check-ins, adjustments, and other money changes lock the client's row while they save, so overlapping
+    ones wait their turn instead of losing each other's changes.
+  - Edit Info sends only the fields that were changed (`PATCH /api/clients/:id`), with each one's value from when it
+    was first changed. If someone else changed one of those fields meanwhile, the save is refused, the current values
+    are shown, and saving again replaces them on purpose. A payment made while the form is open is never undone.
+  - Forms that save every field (employee accounts, groups, the price list, supervising agents) send the record as
+    they loaded it. If anything changed since, the save is refused and the form reloads with the current values, so a
+    stale form can't, for example, reactivate an account someone just deactivated.
+  - Case notes: an edit or delete is refused if the note was edited since it was shown.
+  - The open client account reloads when you come back to the app from another window.
 
 Some rules exist in both the backend and the frontend (the monthly fee rule, the first check-in limit, BIP check-in
 messages, call-in reasons). `backend/test/sharedRules.test.js` fails if the two copies drift apart.
@@ -186,6 +213,11 @@ migration that creates them from scratch yet.
 
 ## Troubleshooting
 
+- **Site or API not responding**: look at `logs/server.log`. The watchdog logs each start and stop, and waits longer
+  between attempts (up to 5 minutes) when the server keeps failing at startup. `Get-ScheduledTask 'STOP Server'` shows
+  whether the task is running.
 - **Database Connection Error**: Verify the `DATABASE_URL` in `.env` is correct and PostgreSQL is running
-- **Port Already in Use**: Change the `PORT` variable in `.env` or stop other services using that port
+- **Port Already in Use**: Stop whatever else is using 5000 or 5173 (a `node server.js` or dev server started by
+  hand), or change `PORT` / `FRONTEND_PORT` in `.env`. The site on 5173 failing to start is logged; the API keeps running.
+- **Old screens after an update**: the site is checked on every load, so a reload picks up the new version.
 - **SSL Certificate Error**: Ensure the certificate file exists at `backend/certs/stop-server.pfx` and the `SSL_PFX_PASSWORD` is correct
