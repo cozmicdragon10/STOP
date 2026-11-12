@@ -405,6 +405,10 @@ const noteForChange = async (noteId, user) => {
     return { note };
 };
 
+// An employee's display name for messages, falling back to their email
+const employeeName = async (email) => (await pool.query(
+    'SELECT DisplayName FROM EmployeeRoles WHERE LOWER(EmployeeEmail) = LOWER($1)', [email])).rows[0]?.displayname || email;
+
 router.put('/api/notes/:noteId', async (req, res) => {
     try {
         const { noteId } = req.params;
@@ -426,7 +430,7 @@ router.put('/api/notes/:noteId', async (req, res) => {
         if (!result.rows.length) {
             const current = (await pool.query('SELECT * FROM Notes WHERE NoteId = $1', [noteId])).rows[0];
             if (!current) return res.status(404).json({ error: 'This note was deleted on another screen.' });
-            const by = current.editedby ? ` by ${current.editedby}` : '';
+            const by = current.editedby ? ` by ${await employeeName(current.editedby)}` : '';
             return res.status(409).json({
                 error: `Not saved: this note was edited${by} while you were editing it. Your text is still in the box. `
                     + 'Use Undo Changes to see their version, or Save again to replace it with yours.',
@@ -503,7 +507,7 @@ router.delete('/api/notes/:noteId', async (req, res) => {
         if (!deleted.rows.length) {
             const current = (await pool.query('SELECT * FROM Notes WHERE NoteId = $1', [noteId])).rows[0];
             if (!current) return res.json({ success: true });
-            const by = current.editedby ? ` by ${current.editedby}` : '';
+            const by = current.editedby ? ` by ${await employeeName(current.editedby)}` : '';
             return res.status(409).json({
                 error: `Not deleted: this note was edited${by} after you opened it. Its current text is now shown. Delete it again if it should still go.`,
                 note: current,

@@ -19,8 +19,7 @@ router.get('/api/agents', async (req, res) => {
 
 router.post('/api/agents', async (req, res) => {
     try {
-        // expected: the agent as the form loaded it; a change made since then refuses the save (lib/editConflicts.js)
-        const { name, phone, email, user, expected } = req.body;
+        const { name, phone, email, user } = req.body;
         if (!AGENT_EDIT_ROLES.includes(await activeRoleFor(user))) {
             return res.status(403).json({ error: 'Only Business Administrators and Office Admins can add supervising agents.' });
         }
@@ -45,7 +44,8 @@ router.put('/api/agents/:id', async (req, res) => {
     const db = await pool.connect();
     try {
         const { id } = req.params;
-        const { name, phone, email, user } = req.body;
+        // expected: the agent as the form loaded it; a change made since then refuses the save (lib/editConflicts.js)
+        const { name, phone, email, user, expected } = req.body;
         if (!AGENT_EDIT_ROLES.includes(await activeRoleFor(user))) {
             return res.status(403).json({ error: 'Only Business Administrators and Office Admins can edit supervising agents.' });
         }

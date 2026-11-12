@@ -114,6 +114,8 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
             setNotes(list => list.map(n => (n.noteid === noteId ? current : n)));
             setDeletions(list => list.filter(id => id !== noteId));
             dropDraft(noteId);
+            // Shown under the note: with nothing left to save, the unsaved-changes bar (and its error) goes away
+            setNoteError({ noteId, message: err.message });
           }
           throw err;
         }
