@@ -4,6 +4,7 @@ const { OPEN_GROUP_ADMIN_ROLES, activeRoleFor, openGroupViewer } = require('../l
 const { recordAttendance } = require('../lib/attendance');
 const { logClientChange } = require('../lib/changeLog');
 const { BIP_CHECKIN_BLOCK, INDIVIDUAL_SESSION_TYPES, NEEDS_OUR_INTAKE, YMD } = require('../lib/sql');
+const { staleFields, staleMessage } = require('../lib/editConflicts');
 
 const router = express.Router();
 
@@ -185,27 +186,43 @@ router.post('/api/session-types', async (req, res) => {
     }
 });
 
-// Entries are deactivated rather than deleted, so closed sessions keep their name
+// Entries are deactivated rather than deleted, so closed sessions keep their name.
+// expected: the entry as the form loaded it; a change made since then (say, a new price) refuses the save instead of
+// being undone (lib/editConflicts.js)
+const SESSION_TYPE_FIELDS = [['name', 'Name'], ['fee', 'Price', 'money'], ['kind', 'Kind'], ['biponly', 'BIP clients only', 'yesno'],
+    ['latefee', 'Price after 6 months', 'money'], ['soonly', 'SO clients only', 'yesno'], ['active', 'Active', 'yesno']];
 router.put('/api/session-types/:id', async (req, res) => {
+    const db = await pool.connect();
     try {
-        const { active, user } = req.body;
+        const { active, user, expected } = req.body;
         if (await activeRoleFor(user) !== 'Business Administrator') {
             return res.status(403).json({ error: 'Only Business Administrators can change the price list.' });
         }
-        const beforeRes = await pool.query('SELECT * FROM SessionTypes WHERE SessionTypeId = $1', [req.params.id]);
+        await db.query('BEGIN');
+        const refuse = async (status, body) => {
+            await db.query('ROLLBACK');
+            return res.status(status).json(body);
+        };
+        const beforeRes = await db.query('SELECT * FROM SessionTypes WHERE SessionTypeId = $1 FOR UPDATE', [req.params.id]);
         const before = beforeRes.rows[0];
-        if (!before) return res.status(404).json({ error: 'Price list entry not found.' });
+        if (!before) return refuse(404, { error: 'Price list entry not found.' });
+        const stale = staleFields(expected, before, SESSION_TYPE_FIELDS);
+        if (stale.length) return refuse(409, { error: staleMessage('this price list entry', stale, before), conflict: true });
         const problem = sessionTypeProblem({ ...req.body, category: before.category });
-        if (problem) return res.status(400).json({ error: problem });
-        const result = await pool.query(
+        if (problem) return refuse(400, { error: problem });
+        const result = await db.query(
             'UPDATE SessionTypes SET Name = $1, Fee = $2, Kind = $3, BipOnly = $4, LateFee = $5, SoOnly = $6, Active = $7 WHERE SessionTypeId = $8 RETURNING *',
             [...sessionTypeValues(req.body), active !== false, req.params.id]
         );
+        await db.query('COMMIT');
         const after = result.rows[0];
         await logAction(user, 'Price List Changed', `${before.category}: ${describeSessionType(before)} to ${describeSessionType(after)}`);
         res.json(after);
     } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
         res.status(err.code === '23505' ? 409 : 500).json({ error: err.code === '23505' ? 'That name is already on the price list.' : err.message });
+    } finally {
+        db.release();
     }
 });
 

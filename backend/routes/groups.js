@@ -4,6 +4,7 @@ const { requireRole } = require('../lib/auth');
 const { groupNameFor, logClientChange } = require('../lib/changeLog');
 const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED, GROUP_ATTENDANCE } = require('../lib/sql');
 const { FEDERAL_UNITS_SQL, LAST_DRUG_TEST_SQL } = require('../lib/federalUnits');
+const { staleFields, staleMessage } = require('../lib/editConflicts');
 
 const router = express.Router();
 
@@ -51,27 +52,44 @@ router.get('/api/groups/:id/clients', async (req, res) => {
     }
 });
 
+// expected: the group as the form loaded it; a change made since then (say, a new counselor or deactivating the group)
+// refuses the save instead of being undone (lib/editConflicts.js)
+const GROUP_FIELDS = [['groupname', 'Group Name'], ['location', 'Location'], ['counselor', 'Counselor'], ['programtype', 'Program Type'],
+    ['schedule', 'Schedule'], ['address', 'Address'], ['active', 'Active', 'yesno']];
 router.put('/api/groups/:id', async (req, res) => {
+    const db = await pool.connect();
     try {
         const { id } = req.params;
-        const { groupName, location, counselor, programType, schedule, address, active } = req.body;
+        const { groupName, location, counselor, programType, schedule, address, active, expected } = req.body;
         const required = { 'Group name': groupName, Location: location, Counselor: counselor, 'Program type': programType, Schedule: schedule };
         const missing = Object.entries(required).filter(([, value]) => !String(value || '').trim()).map(([label]) => label);
         if (missing.length > 0) {
             return res.status(400).json({ error: `Required: ${missing.join(', ')}.` });
         }
-        const result = await pool.query(
-            `UPDATE Groups SET GroupName = $1, Location = $2, Counselor = $3, ProgramType = $4,
-                Schedule = $5, Address = $6, Active = $7
-             WHERE GroupId = $8 RETURNING GroupId`,
-            [groupName.trim(), location.trim(), counselor.trim(), programType.trim(), schedule.trim(), (address || '').trim(), active !== false, id]
-        );
-        if (result.rows.length === 0) {
+        await db.query('BEGIN');
+        const before = (await db.query('SELECT GroupName, Location, Counselor, ProgramType, Schedule, Address, Active FROM Groups WHERE GroupId = $1 FOR UPDATE', [id])).rows[0];
+        if (!before) {
+            await db.query('ROLLBACK');
             return res.status(404).json({ error: 'Group not found.' });
         }
+        const stale = staleFields(expected, before, GROUP_FIELDS);
+        if (stale.length) {
+            await db.query('ROLLBACK');
+            return res.status(409).json({ error: staleMessage('this group', stale, before), conflict: true });
+        }
+        await db.query(
+            `UPDATE Groups SET GroupName = $1, Location = $2, Counselor = $3, ProgramType = $4,
+                Schedule = $5, Address = $6, Active = $7
+             WHERE GroupId = $8`,
+            [groupName.trim(), location.trim(), counselor.trim(), programType.trim(), schedule.trim(), (address || '').trim(), active !== false, id]
+        );
+        await db.query('COMMIT');
         res.json({ success: true });
     } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
         res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
     }
 });
 

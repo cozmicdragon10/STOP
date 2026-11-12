@@ -82,4 +82,32 @@ const clientConflictMessage = (fields, row) => {
         + 'The current information is now shown. Your changes are still in the form: Save again to replace the other change with yours, or Cancel to keep it.';
 };
 
-module.exports = { sameValue, changedFields, clientConflictMessage, shownValue };
+// Whole-form saves (employee accounts, groups, the price list, supervising agents) send every field, so a stale form
+// would put back anything changed since it was opened, such as reactivating an account someone just deactivated.
+// The screen sends the record as it loaded it (expected); if any field the form saves is different now, the save is
+// refused and the screen reloads the form. fields: [key, label, kind] with kind 'money', 'yesno', or omitted for text.
+// No expected (a screen loaded before this check existed) means no check.
+const staleFields = (expected, current, fields) => {
+    if (!expected || typeof expected !== 'object' || !current) return [];
+    const json = JSON.parse(JSON.stringify(current));
+    return fields.filter(([key]) => Object.prototype.hasOwnProperty.call(expected, key)
+        && !sameValue(key, expected[key], json[key]));
+};
+
+const formatted = (value, kind) => {
+    if (kind === 'yesno') return value ? 'yes' : 'no';
+    if (value === null || value === undefined || String(value).trim() === '') return 'blank';
+    if (kind === 'money') return `$${Number(value).toFixed(2)}`;
+    const text = String(value);
+    return text.length > 60 ? `${text.slice(0, 57)}...` : text;
+};
+
+// The refusal for a whole-form save: what changed and its value now
+const staleMessage = (what, stale, current) => {
+    const json = JSON.parse(JSON.stringify(current));
+    const list = stale.map(([key, label, kind]) => `${label} (now ${formatted(json[key], kind)})`).join('; ');
+    return `Not saved: ${what} was changed on another screen since you opened it: ${list}. `
+        + 'The form now shows the current version. Make your change again if it is still needed.';
+};
+
+module.exports = { sameValue, changedFields, clientConflictMessage, shownValue, staleFields, staleMessage };

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Mail, Pencil, Phone, PlusCircle, Search, Trash2, UserCheck } from 'lucide-react';
-import { deleteSupervisingAgent, getClients, getSupervisingAgents, saveSupervisingAgent } from '../../api';
+import { EditConflictError, deleteSupervisingAgent, getClients, getSupervisingAgents, saveSupervisingAgent } from '../../api';
 import type { SupervisingAgent } from '../../api';
 import { usePagination } from '../../hooks/usePagination';
 import Pagination from '../Pagination';
@@ -50,6 +50,8 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
   const [showDischarged, setShowDischarged] = useState(false);
   // null: form closed; 0: adding; otherwise the id of the agent being edited
   const [editingId, setEditingId] = useState<number | null>(null);
+  // The agent as the form loaded it; sent with the save so a change made on another screen meanwhile is caught
+  const [editingOriginal, setEditingOriginal] = useState<SupervisingAgent | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
 
@@ -124,6 +126,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
   const openForm = (row: AgentRow | null) => {
     if (row?.agent) {
       setEditingId(row.agent.agentid);
+      setEditingOriginal(row.agent);
       setForm({ name: row.agent.name, phone: row.agent.phone || '', email: row.agent.email || '' });
     } else {
       setEditingId(0);
@@ -140,7 +143,8 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
     e.preventDefault();
     setSaving(true);
     try {
-      const { agent: saved, clientsRenamed } = await saveSupervisingAgent(editingId || null, { ...form, user: user.employeeemail });
+      const expected = editingId && editingOriginal ? { name: editingOriginal.name, phone: editingOriginal.phone, email: editingOriginal.email } : undefined;
+      const { agent: saved, clientsRenamed } = await saveSupervisingAgent(editingId || null, { ...form, user: user.employeeemail, expected });
       if (clientsRenamed > 0) {
         onSuccess(`Agent updated. ${clientsRenamed} client record(s) moved to the new name.`);
         onClientsChanged();
@@ -151,6 +155,17 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
       await loadAgents();
       setSelectedKey(agentKey(saved.name));
     } catch (err: any) {
+      // Changed on another screen since the form opened: reload the form with the agent as it is now
+      if (err instanceof EditConflictError && editingId) {
+        const fresh = await getSupervisingAgents().catch(() => null);
+        if (fresh) {
+          setAgents(fresh);
+          onAgentsLoaded(fresh);
+          const current = fresh.find(a => a.agentid === editingId);
+          if (current) openForm({ key: agentKey(current.name), agent: current, name: current.name, clients: [] });
+          else closeForm();
+        }
+      }
       onError(err.message || 'Failed to save the supervising agent.');
     } finally {
       setSaving(false);

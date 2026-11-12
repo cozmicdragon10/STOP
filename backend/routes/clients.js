@@ -490,11 +490,26 @@ router.post('/api/notes/:noteId/review', requireRole('Business Administrator'), 
 router.delete('/api/notes/:noteId', async (req, res) => {
     try {
         const { noteId } = req.params;
-        const { user } = req.body;
+        // original: the note's text as the screen showed it. If it was edited since, nothing is deleted (409, with the
+        // note as it is now) so a note isn't removed without its newest text being seen first.
+        const { user, original } = req.body;
         const check = await noteForChange(noteId, user);
         if (check.error) return res.status(check.status).json({ error: check.error });
-        await pool.query('DELETE FROM Notes WHERE NoteId = $1', [noteId]);
-        await logAction(user, 'Delete Note', `Deleted ${check.note.category || ''} note ${noteId} on Client ID ${check.note.client} by ${check.note.User}. Text: ${check.note.comments}`);
+        const checkOriginal = typeof original === 'string';
+        const deleted = await pool.query(
+            `DELETE FROM Notes WHERE NoteId = $1 AND (NOT $2::boolean OR COALESCE(Comments, '') = $3) RETURNING Comments`,
+            [noteId, checkOriginal, checkOriginal ? original : '']
+        );
+        if (!deleted.rows.length) {
+            const current = (await pool.query('SELECT * FROM Notes WHERE NoteId = $1', [noteId])).rows[0];
+            if (!current) return res.json({ success: true });
+            const by = current.editedby ? ` by ${current.editedby}` : '';
+            return res.status(409).json({
+                error: `Not deleted: this note was edited${by} after you opened it. Its current text is now shown. Delete it again if it should still go.`,
+                note: current,
+            });
+        }
+        await logAction(user, 'Delete Note', `Deleted ${check.note.category || ''} note ${noteId} on Client ID ${check.note.client} by ${check.note.User}. Text: ${deleted.rows[0].comments}`);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });

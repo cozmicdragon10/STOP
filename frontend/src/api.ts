@@ -436,6 +436,15 @@ export class EditConflictError<T> extends Error {
     }
 }
 
+// Like jsonResponse, but a save refused because the record changed on another screen since it was loaded (409 with
+// conflict, or with the note as it is now) throws EditConflictError so the screen can reload it
+async function savedResponse<T>(res: Response, fallback: string): Promise<T> {
+    if (res.status !== 409) return jsonResponse(res, fallback);
+    const body = await readJson(res) as { error?: string; conflict?: boolean; note?: unknown } | null;
+    if (body?.conflict || body?.note) throw new EditConflictError(body.error || fallback, body.note ?? null);
+    throw new Error(body?.error || fallback);
+}
+
 // Sends only the changed fields; expected holds each one's value as shown when it was first changed (see
 // backend/lib/editConflicts.js). Throws EditConflictError when someone else changed one of them meanwhile.
 // PATCH, not PUT: a server not restarted since this came in has no PATCH route, so it refuses (asking for a restart)
@@ -503,7 +512,8 @@ export async function deleteClient(clientId: number, userEmail: string) {
     return body as { success: true; message: string };
 }
 
-export async function updateGroup(groupId: number, data: { groupName: string; location: string; counselor: string; programType: string; schedule: string; address: string; active: boolean }) {
+// expected: the group as the form loaded it; throws EditConflictError when it was changed on another screen since
+export async function updateGroup(groupId: number, data: { groupName: string; location: string; counselor: string; programType: string; schedule: string; address: string; active: boolean; expected?: Record<string, unknown> }) {
     const res = await apiFetch(`${API_BASE}/groups/${groupId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -516,6 +526,9 @@ export async function updateGroup(groupId: number, data: { groupName: string; lo
     } catch {
         // Express returns an HTML error page when the route is missing, which usually means the backend needs a restart
         throw new Error(`The server returned an unexpected response (HTTP ${res.status}). Restart the backend (node server.js) and try again.`);
+    }
+    if (res.status === 409 && (body as { conflict?: boolean }).conflict) {
+        throw new EditConflictError(body.error || 'This group was changed on another screen.', null);
     }
     if (!res.ok) {
         throw new Error(body.error || 'Failed to update group.');
@@ -787,13 +800,15 @@ export async function getSessionTypes(): Promise<SessionType[]> {
 export async function saveSessionType(data: {
     id?: number; category: IndividualCategory; name: string; fee: number; active: boolean;
     kind: SessionTypeKind; bipOnly: boolean; soOnly: boolean; lateFee: number | null; user: string;
+    // The entry as the form loaded it (edits); throws EditConflictError when it was changed on another screen since
+    expected?: Record<string, unknown>;
 }): Promise<SessionType> {
     const res = await apiFetch(`${API_BASE}/session-types${data.id ? `/${data.id}` : ''}`, {
         method: data.id ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
     });
-    return jsonResponse(res, 'Failed to save the price list entry.');
+    return savedResponse(res, 'Failed to save the price list entry.');
 }
 
 // Standard treatment fees kept in Admin: feekey is an SO phase (State SO / Voluntary SO price) or 'BIP'
@@ -1436,13 +1451,15 @@ export async function getEmployees(): Promise<Employee[]> {
     return jsonResponse(res, 'Failed to load employees.');
 }
 
-export async function updateEmployee(email: string, data: { displayName: string; role: string; active: boolean; updatedBy: string; password?: string; credentials?: string }) {
+// expected: the account as the form loaded it; throws EditConflictError when it was changed on another screen since
+export async function updateEmployee(email: string, data: { displayName: string; role: string; active: boolean; updatedBy: string; password?: string; credentials?: string; expected?: Record<string, unknown> }) {
     const res = await apiFetch(`${API_BASE}/admin/employees/${encodeURIComponent(email)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
     });
     const body = await res.json();
+    if (res.status === 409 && body.conflict) throw new EditConflictError(body.error || 'This account was changed on another screen.', null);
     if (!res.ok) {
         throw new Error(body.error || 'Failed to update account.');
     }
@@ -1494,13 +1511,14 @@ export async function getSupervisingAgents(): Promise<SupervisingAgent[]> {
 
 // Business Administrators and Office Admins only; the server checks the role. Renaming an agent moves their clients
 // to the new name; clientsRenamed counts them (always 0 for a new agent).
-export async function saveSupervisingAgent(agentId: number | null, data: { name: string; phone: string; email: string; user: string }): Promise<{ agent: SupervisingAgent; clientsRenamed: number }> {
+// expected (edits): the agent as the form loaded it; throws EditConflictError when it was changed on another screen since
+export async function saveSupervisingAgent(agentId: number | null, data: { name: string; phone: string; email: string; user: string; expected?: Record<string, unknown> }): Promise<{ agent: SupervisingAgent; clientsRenamed: number }> {
     const res = await apiFetch(agentId ? `${API_BASE}/agents/${agentId}` : `${API_BASE}/agents`, {
         method: agentId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
     });
-    if (agentId) return jsonResponse(res, 'Failed to save the supervising agent.');
+    if (agentId) return savedResponse(res, 'Failed to save the supervising agent.');
     return { agent: await jsonResponse<SupervisingAgent>(res, 'Failed to save the supervising agent.'), clientsRenamed: 0 };
 }
 
@@ -1574,13 +1592,14 @@ export async function reviewClientNote(noteId: number, data: { decision: 'approv
     return jsonResponse(res, 'Failed to review the note.');
 }
 
-export async function deleteClientNote(noteId: number, user: string): Promise<{ success: true }> {
+// original: the note's text as shown; throws EditConflictError (with the note as it is now) when it was edited since
+export async function deleteClientNote(noteId: number, user: string, original?: string): Promise<{ success: true }> {
     const res = await apiFetch(`${API_BASE}/notes/${noteId}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user }),
+        body: JSON.stringify({ user, original }),
     });
-    return jsonResponse(res, 'Failed to delete the note.');
+    return savedResponse(res, 'Failed to delete the note.');
 }
 
 // Newest first

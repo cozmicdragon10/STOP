@@ -146,3 +146,32 @@ test('a field typed back to what it was is not sent', async () => {
     a.set('mainphone', '555-0100');
     assert.deepEqual(a.save(row()).changes, {});
 });
+
+// Whole-form saves (accounts, agents, groups, the price list)
+const { staleFields, staleMessage } = require('../lib/editConflicts');
+const EMPLOYEE = [['displayname', 'Display Name'], ['role', 'Role'], ['active', 'Active', 'yesno'], ['credentials', 'Credentials']];
+const PRICE = [['name', 'Name'], ['fee', 'Price', 'money'], ['active', 'Active', 'yesno'], ['latefee', 'Price after 6 months', 'money']];
+
+test('an account deactivated by another admin is not reactivated by a stale form', () => {
+    const loaded = { displayname: 'Pat Doe', role: 'Counselor', active: true, credentials: 'LPC' };
+    const now = { ...loaded, active: false };
+    const stale = staleFields(asSeen(loaded), now, EMPLOYEE);
+    assert.deepEqual(stale.map(([k]) => k), ['active']);
+    assert.match(staleMessage('this account', stale, now), /^Not saved: this account was changed on another screen since you opened it: Active \(now no\)\./);
+});
+
+test('an unchanged record saves, and blanks match whether null or empty', () => {
+    const loaded = { displayname: 'Pat Doe', role: 'Counselor', active: true, credentials: null };
+    assert.deepEqual(staleFields(asSeen(loaded), { ...loaded, credentials: '' }, EMPLOYEE), []);
+});
+
+test('a price changed meanwhile is caught and shown as money', () => {
+    const loaded = { name: '50-Minute Individual', fee: '80.00', active: true, latefee: null };
+    const now = { ...loaded, fee: '95.00' };
+    const stale = staleFields(asSeen(loaded), now, PRICE);
+    assert.match(staleMessage('this price list entry', stale, now), /Price \(now \$95\.00\)/);
+});
+
+test('a screen loaded before the check existed (no expected) is not checked', () => {
+    assert.deepEqual(staleFields(undefined, { active: false }, EMPLOYEE), []);
+});

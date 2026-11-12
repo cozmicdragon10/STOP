@@ -2,6 +2,7 @@ const express = require('express');
 const { logAction, pool } = require('../db');
 const { activeRoleFor } = require('../lib/access');
 const { logClientChange } = require('../lib/changeLog');
+const { staleFields, staleMessage } = require('../lib/editConflicts');
 
 const router = express.Router();
 
@@ -18,7 +19,8 @@ router.get('/api/agents', async (req, res) => {
 
 router.post('/api/agents', async (req, res) => {
     try {
-        const { name, phone, email, user } = req.body;
+        // expected: the agent as the form loaded it; a change made since then refuses the save (lib/editConflicts.js)
+        const { name, phone, email, user, expected } = req.body;
         if (!AGENT_EDIT_ROLES.includes(await activeRoleFor(user))) {
             return res.status(403).json({ error: 'Only Business Administrators and Office Admins can add supervising agents.' });
         }
@@ -53,10 +55,15 @@ router.put('/api/agents/:id', async (req, res) => {
         const newName = name.trim();
 
         await db.query('BEGIN');
-        const before = await db.query('SELECT Name FROM SupervisingAgents WHERE AgentId = $1 FOR UPDATE', [id]);
+        const before = await db.query('SELECT Name, Phone, Email FROM SupervisingAgents WHERE AgentId = $1 FOR UPDATE', [id]);
         if (before.rows.length === 0) {
             await db.query('ROLLBACK');
             return res.status(404).json({ error: 'Supervising agent not found.' });
+        }
+        const stale = staleFields(expected, before.rows[0], [['name', 'Name'], ['phone', 'Phone'], ['email', 'Email']]);
+        if (stale.length) {
+            await db.query('ROLLBACK');
+            return res.status(409).json({ error: staleMessage('this supervising agent', stale, before.rows[0]), conflict: true });
         }
         const oldName = before.rows[0].name;
         const result = await db.query(

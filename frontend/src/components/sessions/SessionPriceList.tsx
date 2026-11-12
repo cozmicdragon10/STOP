@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PlusCircle } from 'lucide-react';
-import { getSessionTypes, saveSessionType } from '../../api';
+import { EditConflictError, getSessionTypes, saveSessionType } from '../../api';
 import type { IndividualCategory, SessionType, SessionTypeKind } from '../../api';
 
 interface Props {
@@ -38,6 +38,14 @@ export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Prop
   const [types, setTypes] = useState<SessionType[]>([]);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<EditState | null>(null);
+  // The entry as the form loaded it; sent with the save so a change made on another screen meanwhile (such as a new
+  // price) is caught instead of undone
+  const [editingOriginal, setEditingOriginal] = useState<SessionType | null>(null);
+  const editEntry = (t: SessionType) => {
+    setError('');
+    setEditingOriginal(t);
+    setEditing({ id: t.sessiontypeid, category: t.category, name: t.name, fee: Number(t.fee).toFixed(2), active: t.active, kind: t.kind, bipOnly: t.biponly, soOnly: t.soonly, lateFee: t.latefee !== null ? Number(t.latefee).toFixed(2) : '' });
+  };
   const [saving, setSaving] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
 
@@ -53,14 +61,26 @@ export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Prop
     if (reinstate && !validPrice(editing.lateFee)) { setError('Enter the price for a reinstate done 6 months to a year after the intake.'); return; }
     setSaving(true);
     setError('');
+    const o = editing.id ? editingOriginal : null;
+    const expected = o ? { name: o.name, fee: o.fee, kind: o.kind, biponly: o.biponly, latefee: o.latefee, soonly: o.soonly, active: o.active } : undefined;
     try {
       const saved = await saveSessionType({
         ...editing, soOnly: editing.soOnly && editing.kind === 'Standard', name: editing.name.trim(), fee: Number(editing.fee), lateFee: reinstate ? Number(editing.lateFee) : null, user: userEmail,
+        expected,
       });
       setTypes(prev => (editing.id ? prev.map(t => (t.sessiontypeid === saved.sessiontypeid ? saved : t)) : [...prev, saved]));
       onSuccess(`${saved.category} "${saved.name}" saved.`);
       setEditing(null);
     } catch (err: any) {
+      // Changed on another screen since the form opened: reload the list and the form with the entry as it is now
+      if (err instanceof EditConflictError && editing.id) {
+        const fresh = await getSessionTypes().catch(() => null);
+        if (fresh) {
+          setTypes(fresh);
+          const current = fresh.find(t => t.sessiontypeid === editing.id);
+          if (current) editEntry(current);
+        }
+      }
       setError(err.message || 'Failed to save the price list entry.');
     } finally {
       setSaving(false);
@@ -172,7 +192,7 @@ export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Prop
                       {t.kind === 'BIP Reinstate' && t.latefee !== null && <span className="block text-[0.6875rem] font-normal text-slate-400">${Number(t.latefee).toFixed(2)} after 6 mo.</span>}
                     </span>
                     {canEdit && (
-                      <button type="button" onClick={() => { setError(''); setEditing({ id: t.sessiontypeid, category: t.category, name: t.name, fee: Number(t.fee).toFixed(2), active: t.active, kind: t.kind, bipOnly: t.biponly, soOnly: t.soonly, lateFee: t.latefee !== null ? Number(t.latefee).toFixed(2) : '' }); }} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1 rounded font-semibold">Edit</button>
+                      <button type="button" onClick={() => editEntry(t)} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1 rounded font-semibold">Edit</button>
                     )}
                   </div>
                 </div>

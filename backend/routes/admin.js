@@ -2,6 +2,7 @@ const express = require('express');
 const { hashPassword } = require('../passwords');
 const { logAction, pool } = require('../db');
 const { ADMIN_ROLES, endSessionsFor, requireRole } = require('../lib/auth');
+const { staleFields, staleMessage } = require('../lib/editConflicts');
 
 const router = express.Router();
 
@@ -10,6 +11,8 @@ const credentialsFor = (role, credentials) => (String(role || '').trim() === 'Co
 // Account changes and the system log are for the Admin tab's roles only. The employee list stays open to every
 // logged-in role because the other tabs use it to name counselors and polygraphers.
 const adminOnly = requireRole(...ADMIN_ROLES);
+// What the account form saves, checked against the account as the form loaded it
+const EMPLOYEE_FIELDS = [['displayname', 'Display Name'], ['role', 'Role'], ['active', 'Active', 'yesno'], ['credentials', 'Credentials']];
 
 router.get('/api/admin/employees', async (req, res) => {
     try {
@@ -22,28 +25,39 @@ router.get('/api/admin/employees', async (req, res) => {
 });
 
 // Edit an existing account's name, role, and active status. The email is the account key and cannot change.
+// expected: the account as the form loaded it; if it has changed since (say, deactivated by another admin), nothing is
+// saved (409) so the form can't quietly undo that (see lib/editConflicts.js)
 router.put('/api/admin/employees/:email', adminOnly, async (req, res) => {
+    const db = await pool.connect();
     try {
         const email = req.params.email;
-        const { displayName, role, active, updatedBy, password } = req.body;
+        const { displayName, role, active, updatedBy, password, expected } = req.body;
         if (!String(displayName || '').trim() || !String(role || '').trim()) {
             return res.status(400).json({ error: 'Display name and role are required.' });
         }
-        const before = await pool.query('SELECT DisplayName, Role, Active, Credentials FROM EmployeeRoles WHERE EmployeeEmail = $1', [email]);
+        await db.query('BEGIN');
+        const before = await db.query('SELECT DisplayName, Role, Active, Credentials FROM EmployeeRoles WHERE EmployeeEmail = $1 FOR UPDATE', [email]);
         if (before.rows.length === 0) {
+            await db.query('ROLLBACK');
             return res.status(404).json({ error: 'Account not found.' });
+        }
+        const stale = staleFields(expected, before.rows[0], EMPLOYEE_FIELDS);
+        if (stale.length) {
+            await db.query('ROLLBACK');
+            return res.status(409).json({ error: staleMessage('this account', stale, before.rows[0]), conflict: true });
         }
         // Blank password means "keep the current one"
         const newPassword = String(password || '');
         const passwordHash = newPassword ? await hashPassword(newPassword) : null;
         // Credentials are kept as they are when the request doesn't send them
         const credentials = req.body.credentials === undefined ? (role.trim() === 'Counselor' ? before.rows[0].credentials : null) : credentialsFor(role, req.body.credentials);
-        const result = await pool.query(
+        const result = await db.query(
             `UPDATE EmployeeRoles SET DisplayName = $1, Role = $2, Active = $3,
                 PasswordHash = COALESCE($4, PasswordHash), Credentials = $6
              WHERE EmployeeEmail = $5 RETURNING EmployeeEmail`,
             [displayName.trim(), role.trim(), active !== false, passwordHash, email, credentials]
         );
+        await db.query('COMMIT');
         // A new password or a deactivated account signs that employee out everywhere
         if (passwordHash || active === false) await endSessionsFor(email);
         const old = before.rows[0];
@@ -55,7 +69,10 @@ router.put('/api/admin/employees/:email', adminOnly, async (req, res) => {
         );
         res.json({ success: true, employeeEmail: result.rows[0].employeeemail });
     } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
         res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
     }
 });
 

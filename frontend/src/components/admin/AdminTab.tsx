@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Activity, Moon, PlusCircle, Sun } from 'lucide-react';
-import { addEmployee, getEmployees, getSystemLogs, updateEmployee } from '../../api';
+import { EditConflictError, addEmployee, getEmployees, getSystemLogs, updateEmployee } from '../../api';
 import type { SystemLog } from '../../api';
 import SessionPriceList from '../sessions/SessionPriceList';
 import ProgramFeeList from './ProgramFeeList';
@@ -55,6 +55,9 @@ export default function AdminTab({ user, onOpenTransaction, employees, onEmploye
   const [empRole, setEmpRole] = useState('Counselor');
   // Email of the account being edited, or null when adding a new one
   const [editingEmail, setEditingEmail] = useState<string | null>(null);
+  // The account as the form loaded it; sent with the save so a change another admin made meanwhile (such as
+  // deactivating it) is caught instead of undone
+  const [editingOriginal, setEditingOriginal] = useState<Employee | null>(null);
   const [empActive, setEmpActive] = useState(true);
   const [empPassword, setEmpPassword] = useState('');
   // Counselors only, e.g. "LPC" or "LPC, LADC-MH"; printed after their name on receipts
@@ -90,6 +93,7 @@ export default function AdminTab({ user, onOpenTransaction, employees, onEmploye
   const startEditEmployee = (emp: Employee) => {
     setShowEmployeeForm(true);
     setEditingEmail(emp.employeeemail);
+    setEditingOriginal(emp);
     setEmpEmail(emp.employeeemail);
     setEmpName(emp.displayname || '');
     setEmpRole(emp.role || 'Counselor');
@@ -103,7 +107,8 @@ export default function AdminTab({ user, onOpenTransaction, employees, onEmploye
     setSaving(true);
     try {
       if (editingEmail) {
-        await updateEmployee(editingEmail, { displayName: empName, role: empRole, active: empActive, updatedBy: user.employeeemail, password: empPassword, credentials: empCredentials });
+        const expected = editingOriginal ? { displayname: editingOriginal.displayname, role: editingOriginal.role, active: editingOriginal.active, credentials: editingOriginal.credentials } : undefined;
+        await updateEmployee(editingEmail, { displayName: empName, role: empRole, active: empActive, updatedBy: user.employeeemail, password: empPassword, credentials: empCredentials, expected });
         onSuccess(empPassword ? 'Account updated and password changed!' : 'Account updated successfully!');
       } else {
         await addEmployee({
@@ -121,6 +126,15 @@ export default function AdminTab({ user, onOpenTransaction, employees, onEmploye
       const updated = await getEmployees();
       if (Array.isArray(updated)) onEmployeesChanged(updated);
     } catch (err) {
+      // Changed by another admin since the form opened: reload the form with the account as it is now
+      if (err instanceof EditConflictError && editingEmail) {
+        const fresh = await getEmployees().catch(() => null);
+        if (Array.isArray(fresh)) {
+          onEmployeesChanged(fresh);
+          const current = fresh.find(e => e.employeeemail === editingEmail);
+          if (current) startEditEmployee(current);
+        }
+      }
       onError(errorText(err, 'Error saving account.'));
     } finally {
       setSaving(false);

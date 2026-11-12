@@ -104,7 +104,19 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
     let approvalChanged = false;
     try {
       for (const noteId of deletions) {
-        await deleteClientNote(noteId, user.employeeemail);
+        try {
+          // The text as shown: if someone edited the note meanwhile, it isn't deleted unseen
+          await deleteClientNote(noteId, user.employeeemail, draftBases[noteId] ?? savedText(noteId));
+        } catch (err) {
+          // Show the note's current text and take off the deletion mark; deleting it again is a deliberate choice
+          if (err instanceof EditConflictError) {
+            const current = err.current as { noteid: number };
+            setNotes(list => list.map(n => (n.noteid === noteId ? current : n)));
+            setDeletions(list => list.filter(id => id !== noteId));
+            dropDraft(noteId);
+          }
+          throw err;
+        }
         if (notes.find(n => n.noteid === noteId)?.approvalstatus === 'Pending') approvalChanged = true;
         setNotes(list => list.filter(n => n.noteid !== noteId));
         setDeletions(list => list.filter(id => id !== noteId));

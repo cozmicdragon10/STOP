@@ -1,6 +1,6 @@
 import { Fragment, useRef, useState } from 'react';
 import { SlidersHorizontal, X } from 'lucide-react';
-import { assignClientToGroup, createGroup, deleteGroup, getGroupClients, updateGroup } from '../../api';
+import { EditConflictError, assignClientToGroup, createGroup, deleteGroup, getGroupClients, getGroups, updateGroup } from '../../api';
 import ScheduleSelect from '../ScheduleSelect';
 import { BY_APPOINTMENT } from '../../utils/schedule';
 import { DEFAULT_GROUP_FILTERS } from '../../utils/filters';
@@ -218,24 +218,36 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
   const handleUpdateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedGroupDetail || !canEditGroupDetails) return;
+    // The group as the form loaded it: a change made on another screen meanwhile (such as a new counselor or
+    // deactivating it) refuses the save instead of being undone
+    const g = selectedGroupDetail;
+    const expected = { groupname: g.groupname, location: g.location, counselor: g.counselor, programtype: g.programtype, schedule: g.schedule, address: g.address, active: g.active };
     try {
-      await updateGroup(selectedGroupDetail.groupid, {
+      await updateGroup(g.groupid, {
         groupName: editGroupName,
         location: denormalizeLocation(editLocation),
         counselor: editCounselor,
         programType: editProgramType,
         schedule: editSchedule,
         address: editAddress,
-        active: editActive
+        active: editActive,
+        expected,
       });
+      // As the server stored it (trimmed, full location name), so a second save from this form matches
       setSelectedGroupDetail({
-        ...selectedGroupDetail,
-        groupname: editGroupName, location: editLocation, counselor: editCounselor, programtype: editProgramType,
-        schedule: editSchedule, address: editAddress, active: editActive
+        ...g,
+        groupname: editGroupName.trim(), location: denormalizeLocation(editLocation).trim(), counselor: editCounselor.trim(),
+        programtype: editProgramType.trim(), schedule: editSchedule.trim(), address: editAddress.trim(), active: editActive
       });
       onSuccess('Group details updated successfully!');
       onGroupsChanged();
     } catch (err) {
+      // Changed on another screen since the form opened: reload the form with the group as it is now
+      if (err instanceof EditConflictError) {
+        const fresh = (await getGroups().catch(() => [])).find(x => x.groupid === g.groupid);
+        onGroupsChanged();
+        if (fresh) await handleOpenGroup(fresh as DirectoryGroup);
+      }
       onError(errorText(err, 'Error updating group.'));
     }
   };
