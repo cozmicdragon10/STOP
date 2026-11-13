@@ -12,6 +12,8 @@ export interface ClientRecord {
   clientid: number;
   firstname: string;
   lastname: string;
+  // The Comments on the client's account (Personal Information), shown under their name while checking in
+  comments?: string | null;
   docnumber?: string | null;
   doctype?: string | null;
   accountbalance?: number | string | null;

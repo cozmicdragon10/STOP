@@ -7,6 +7,13 @@ import { drugTestedOn, outOfUnits, unitCodeFor, unitCodeLabel, unitsLeft } from 
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { idText } from '../../utils/clients';
 
+// The Comments from the client's account, under their name: up to two lines, with the whole comment on hover
+const AccountComment = ({ text }: { text?: string | null }) => {
+  const comment = String(text ?? '').trim();
+  if (!comment) return null;
+  return <p className="basis-full text-xs text-amber-200/90 whitespace-pre-line line-clamp-2 mt-0.5" title={comment}>{comment}</p>;
+};
+
 interface Props {
   group: GroupRecord;
   wf: GroupCheckInState;
@@ -76,6 +83,7 @@ function RosterRow({ client, checked, attended, selected, onToggle, onOpenClient
           </span>
         )}
         <p className="text-xs text-slate-400 sm:ml-auto">ID # {idText(client) || '—'} · Bal {formatBalance(client.accountbalance)}</p>
+        <AccountComment text={client.comments} />
       </div>
       {/* Inside the row's label, so it must not also tick the checkbox */}
       <button
@@ -190,7 +198,10 @@ export default function CheckInStep({ group, wf, onOpenSearch, onOpenClient }: P
           <ul className="divide-y divide-slate-800 border border-slate-800 rounded-lg overflow-hidden">
             {wf.session.map(e => (
               <li key={e.client.clientid} className="flex justify-between items-center gap-3 px-3 py-2 bg-slate-950 text-sm">
-                <span className="text-white truncate">{e.client.lastname}, {e.client.firstname}</span>
+                <span className="min-w-0">
+                  <span className="block text-white truncate">{e.client.lastname}, {e.client.firstname}</span>
+                  <AccountComment text={e.client.comments} />
+                </span>
                 {e.receiptPrinted ? (
                   <span
                     className="text-slate-400 p-1"
