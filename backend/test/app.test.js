@@ -9,7 +9,7 @@ const routes = () => app.router.stack
 
 test('every API route is mounted once', () => {
     const list = routes();
-    assert.equal(list.length, 109);
+    assert.equal(list.length, 107);
     assert.equal(new Set(list).size, list.length, 'a route is registered twice');
     for (const r of list) assert.match(r, /^(GET|POST|PUT|PATCH|DELETE) \/api\//);
 });
@@ -17,7 +17,7 @@ test('every API route is mounted once', () => {
 test('each API area has its routes', () => {
     const list = routes();
     for (const prefix of ['/api/auth/', '/api/clients', '/api/groups', '/api/attendance', '/api/open-groups', '/api/session-types',
-        '/api/individual-sessions/', '/api/financials/', '/api/callin/', '/api/polygraphs/', '/api/testing', '/api/reports/',
+        '/api/individual-sessions/', '/api/financials/', '/api/callin/', '/api/polygraphs/', '/api/reports/',
         '/api/admin/', '/api/agents']) {
         assert.ok(list.some(r => r.split(' ')[1].startsWith(prefix)), `no routes under ${prefix}`);
     }

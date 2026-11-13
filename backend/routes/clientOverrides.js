@@ -4,6 +4,8 @@ const { activeRoleFor } = require('../lib/access');
 const { logClientChange } = require('../lib/changeLog');
 const { activePolyFeeOverride, changePolyFeePaid, endPolyFeeOverride, polyOverrideText, voucherChangeText } = require('../lib/poly');
 
+const { requireRole } = require('../lib/auth');
+
 const router = express.Router();
 
 router.get('/api/clients/:id/fee-override', async (req, res) => {
@@ -21,7 +23,8 @@ router.get('/api/clients/:id/fee-override', async (req, res) => {
     }
 });
 
-router.post('/api/clients/:id/fee-override', async (req, res) => {
+// Business Administrators only, as on the client's Information tab
+router.post('/api/clients/:id/fee-override', requireRole('Business Administrator'), async (req, res) => {
     try {
         const { id } = req.params;
         const { reducedFee, expirationDate, createdBy } = req.body;
@@ -60,7 +63,7 @@ router.post('/api/clients/:id/fee-override', async (req, res) => {
     }
 });
 
-router.delete('/api/clients/:id/fee-override', async (req, res) => {
+router.delete('/api/clients/:id/fee-override', requireRole('Business Administrator'), async (req, res) => {
     try {
         const { id } = req.params;
         const { removedBy } = req.body;

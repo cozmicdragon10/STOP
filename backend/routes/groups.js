@@ -7,6 +7,8 @@ const { FEDERAL_UNITS_SQL, LAST_DRUG_TEST_SQL } = require('../lib/federalUnits')
 const { staleFields, staleMessage } = require('../lib/editConflicts');
 
 const router = express.Router();
+// Group details, and new groups, are changed by Business Administrators and Office Admins (as on the Groups tab)
+const groupEditors = requireRole('Business Administrator', 'Office Admin');
 
 // Group program types each client program can be assigned to; mirrors GROUP_TYPES_BY_PROGRAM in frontend/src/utils/clients.ts
 // An INDIVIDUAL group (a counselor's individual sessions) takes clients of any program; SO clients keep it in
@@ -56,7 +58,7 @@ router.get('/api/groups/:id/clients', async (req, res) => {
 // refuses the save instead of being undone (lib/editConflicts.js)
 const GROUP_FIELDS = [['groupname', 'Group Name'], ['location', 'Location'], ['counselor', 'Counselor'], ['programtype', 'Program Type'],
     ['schedule', 'Schedule'], ['address', 'Address'], ['active', 'Active', 'yesno']];
-router.put('/api/groups/:id', async (req, res) => {
+router.put('/api/groups/:id', groupEditors, async (req, res) => {
     const db = await pool.connect();
     try {
         const { id } = req.params;
@@ -93,7 +95,7 @@ router.put('/api/groups/:id', async (req, res) => {
     }
 });
 
-router.post('/api/groups', async (req, res) => {
+router.post('/api/groups', groupEditors, async (req, res) => {
     try {
         const { groupName, location, counselor, programType, schedule, address } = req.body;
         const required = { 'Group name': groupName, Location: location, Counselor: counselor, 'Program type': programType, Schedule: schedule };

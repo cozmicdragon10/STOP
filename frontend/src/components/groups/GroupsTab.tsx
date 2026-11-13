@@ -96,7 +96,8 @@ const errorText = (err: unknown, fallback: string) => (err instanceof Error && e
 // The Group Directory: filters, sorting, the New Group form, and the Roster / Assign Clients / Group Details panel
 // that opens under a group's row
 export default function GroupsTab({ groups, clients, employees, role, userEmail, onSuccess, onError, onGroupsChanged, onOpenClient }: Props) {
-  const canEditGroupDetails = role !== 'Office Admin';
+  // Group details (and new groups) are changed by Business Administrators and Office Admins; counselors see them read-only
+  const canEditGroupDetails = role === 'Business Administrator' || role === 'Office Admin';
   const canDeleteGroups = role === 'Business Administrator';
 
   const [selectedGroupDetail, setSelectedGroupDetail] = useState<DirectoryGroup | null>(null);
@@ -442,14 +443,14 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
         <div className="flex flex-wrap justify-between items-center gap-3 mb-4">
           <div className="flex items-center gap-3">
             <h2 className="font-semibold text-white">Group Directory</h2>
-            <button
+            {canEditGroupDetails && <button
               type="button"
               onClick={() => {
                 if (!showNewGroupForm) setNewGroup(withNewGroupDefaults(newGroup, section));
                 setShowNewGroupForm(s => !s);
               }}
               className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-semibold"
-            >+ New Group</button>
+            >+ New Group</button>}
           </div>
           <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800" role="tablist" aria-label="Group type">
             {GROUP_SECTIONS.map(s => (

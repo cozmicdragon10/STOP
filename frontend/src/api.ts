@@ -267,15 +267,6 @@ export interface PolygraphResult {
     polygraphdatetime: string | null;
 }
 
-export interface TestResult {
-    testid: number;
-    client: number | null;
-    testtype: string;
-    score: string | null;
-    notes: string | null;
-    date: string | null;
-}
-
 // Reduced treatment fee until a date
 export interface TempFeeOverride {
     overrideid: number;
@@ -1161,20 +1152,6 @@ export async function submitPolygraphResult(data: {
         body: JSON.stringify(data),
     });
     return jsonResponse(res, 'Error completing polygraph slot.');
-}
-
-export async function getClientTests(clientId: number): Promise<TestResult[]> {
-    const res = await apiFetch(`${API_BASE}/testing/${clientId}`);
-    return jsonResponse(res, 'Could not load the test history.');
-}
-
-export async function submitTestResult(data: { client: number; testType: string; score: string; notes: string; date: string }): Promise<TestResult> {
-    const res = await apiFetch(`${API_BASE}/testing`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-    });
-    return jsonResponse(res, 'Could not save the test result.');
 }
 
 export interface AgentReportRow {

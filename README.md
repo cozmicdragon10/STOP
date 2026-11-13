@@ -130,7 +130,7 @@ STOP/
 │       │   │                 #   notes, polygraphs, attachments, change log)
 │       │   ├── polygraph/    #   Poly Admin, Poly Schedule, Poly Results, and the booking/cancel dialogs
 │       │   ├── sessions/     #   Assessments & Individuals, BIP intake and reinstate
-│       │   └── admin/, agents/, callin/, groups/, reports/, testing/  #   the other tabs
+│       │   └── admin/, agents/, callin/, groups/, reports/, settings/  #   the other tabs
 │       └── utils/        # Business rules and formatting helpers (with *.test.ts tests)
 ├── deploy/               # Office server: watchdog, startup task, update / rollback / restart (see deploy/README.md)
 ├── e2e/                  # End-to-end tests of two people working at once (see e2e/README.md)
@@ -180,7 +180,6 @@ The backend provides REST API endpoints for:
 - Financial transactions (`/api/financials/`)
 - Call-in logs (`/api/callin/`)
 - Polygraph scheduling (`/api/polygraphs/`)
-- Testing (`/api/testing/`)
 - Reports (`/api/reports/`)
 - Admin functions (`/api/admin/`)
 
@@ -195,6 +194,19 @@ The backend provides REST API endpoints for:
 - **Admin-only routes:** the system log needs an Office Admin or Business Administrator session; creating or changing
   an employee account, and deleting a group, need a Business Administrator. Nobody can change their own role, and the
   last active Business Administrator can't be demoted or deactivated (`backend/lib/accounts.js`).
+- **Roles** (checked by the server, not just hidden on screen):
+  - **Business Administrator:** everything. Only role that creates or changes employee accounts, discharges clients,
+    and changes a client's balance, treatment fee, vouchers or poly fee by hand on the Information tab (every such
+    change goes on the client's change log; `backend/lib/moneyFields.js`). Anyone may save the price list's treatment
+    fee for a client's program and phase.
+  - **Office Admin:** every tab; edits group details and creates groups (with Business Administrators).
+  - **Counselor:** clients, attendance, assessments, call-ins, groups (read-only details), polygraphs, Cash Deposits
+    report, agents, forms.
+  - **Polygrapher:** the Polygraphs tab (open, cancel and reschedule slots, record results), Forms (read-only), and a
+    limited Client Roster: a client's personal, contact and program information, polygraph history, and documents
+    (view and upload). No balances, fees, notes, payments or edits; enforced in `backend/lib/polygrapherAccess.js`.
+  - Everyone has a **Settings** tab for their own colors, fonts and layout, and anyone but a Polygrapher can activate
+    a discharged client.
 - **Login attempts:** 5 failed attempts for an email locks that email for 15 minutes.
 - **CORS:** only the addresses in `CORS_ORIGINS` can call the API from a browser.
 

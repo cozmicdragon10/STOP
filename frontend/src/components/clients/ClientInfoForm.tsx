@@ -41,6 +41,11 @@ interface Props {
   onSaved: (saved: any, previousProgramType: string | null) => void;
   // A save was refused because someone else changed the client: their current row, to show in place of the old one
   onRefreshed: (current: any) => void;
+  // Only Business Administrators change the balance, fees, vouchers and poly fee here (the server enforces it). Others
+  // see them read-only; the treatment fee still follows the price list when they change the program or phase.
+  canEditMoney: boolean;
+  // A Polygrapher's view: read-only, without the money and billing fields
+  limited: boolean;
   // A bus pass was granted: the client's new count and the Bus Pass note it added
   onBusPassGranted: (busPasses: number, note: ClientNote) => void;
 }
@@ -83,7 +88,7 @@ const inputClass = 'w-full bg-slate-900 border border-slate-700 rounded-lg px-2.
 // The Information tab's details: Personal, Contact, and Program & Account sections, shown read-only until Edit Info.
 // While editing, only the changed fields are kept, laid over the current client, so a status change made meanwhile
 // (Discharge / Activate) still shows and is saved.
-export default function ClientInfoForm({ client, discharged, groups, directoryAgents, counselors, polyOverrideActive, userEmail, loadError, onDismissLoadError, actionsSlot, onDirtyChange, leaveRequested, onLeaveResolved, onSaved, onRefreshed, onBusPassGranted }: Props) {
+export default function ClientInfoForm({ client, discharged, groups, directoryAgents, counselors, polyOverrideActive, userEmail, loadError, onDismissLoadError, actionsSlot, onDirtyChange, leaveRequested, onLeaveResolved, onSaved, onRefreshed, canEditMoney, limited, onBusPassGranted }: Props) {
   const [busPassOpen, setBusPassOpen] = useState(false);
   // Federal billing codes (Admin > Billing Federal Units); each client program shows the codes it tracks
   const [unitCodes, setUnitCodes] = useState<FederalUnitCode[]>([]);
@@ -203,7 +208,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
       )}
 
       {/* Edit / Save toolbar */}
-      {actionsSlot && createPortal(!editing ? (
+      {actionsSlot && !limited && createPortal(!editing ? (
         <button
           onClick={startEditing}
           className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
@@ -300,14 +305,16 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
               <p className="text-white font-medium">{client.lastpoly ? new Date(client.lastpoly).toLocaleDateString() : '—'}</p>
             </div>
           )}
-          <div className="sm:col-span-2">
-            <p className="text-xs text-slate-500 mb-0.5">Comments</p>
-            {editing ? (
-              <textarea rows={3} value={form.comments || ''} onChange={e => setField('comments', e.target.value)} className={inputClass} />
-            ) : (
-              <p className="text-white font-medium">{client.comments || '—'}</p>
-            )}
-          </div>
+          {!limited && (
+            <div className="sm:col-span-2">
+              <p className="text-xs text-slate-500 mb-0.5">Comments</p>
+              {editing ? (
+                <textarea rows={3} value={form.comments || ''} onChange={e => setField('comments', e.target.value)} className={inputClass} />
+              ) : (
+                <p className="text-white font-medium">{client.comments || '—'}</p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -330,7 +337,10 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
 
       {/* Section 3 – Program & Account Info */}
       <div className="bg-slate-950 border border-slate-800 rounded-xl p-5">
-        <h3 className="text-xs font-bold uppercase text-blue-400 mb-4 tracking-wider">Program &amp; Account Info</h3>
+        <h3 className="text-xs font-bold uppercase text-blue-400 mb-4 tracking-wider">{limited ? 'Program Info' : <>Program &amp; Account Info</>}</h3>
+        {editing && !canEditMoney && (
+          <p className="text-xs text-slate-500 -mt-2 mb-4">The balance, fees, vouchers and poly fee are changed by a Business Administrator. The treatment fee follows the price list for the program and phase.</p>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
           <div>
             <p className="text-xs text-slate-500 mb-0.5">Program Type</p>
@@ -456,7 +466,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
             )}
           </div>
           {/* Federal clients only: their individual sessions are charged this instead of the Individual price (blank = nothing) */}
-          {FEDERAL_PROGRAM_TYPES.includes(programType || '') && (
+          {!limited && FEDERAL_PROGRAM_TYPES.includes(programType || '') && (
             <div>
               <p className="text-xs text-slate-500 mb-0.5">Copay (individual sessions)</p>
               {editing ? (
@@ -467,7 +477,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
             </div>
           )}
           {/* Federal clients only: how many bus passes they can still be granted (0 to 2); granting one adds a Bus Pass note */}
-          {FEDERAL_PROGRAM_TYPES.includes(programType || '') && (
+          {!limited && FEDERAL_PROGRAM_TYPES.includes(programType || '') && (
             <div>
               <p className="text-xs text-slate-500 mb-0.5">Bus Passes</p>
               {editing ? (
@@ -498,7 +508,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
             </div>
           )}
           {/* Federal billing units for the codes this client's program tracks (Federal SO, Fed Drug Test); blank until entered */}
-          {programUnitCodes.length > 0 && (
+          {!limited && programUnitCodes.length > 0 && (
             <div className="sm:col-span-2">
               <p className="text-xs text-slate-500 mb-1">Federal Units</p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -524,10 +534,10 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
             </div>
           )}
           {/* BIP, Fed Drug Test and Chaperon clients don't take polygraphs, so their poly fee and vouchers aren't shown */}
-          {ACCOUNT_FIELDS.filter(({ field }) => !(!takesPolygraphs(programType) && field === 'polyfeevoucher')).map(({ label, field, prefix, step = '0.01', min, max }) => (
+          {!limited && ACCOUNT_FIELDS.filter(({ field }) => !(!takesPolygraphs(programType) && field === 'polyfeevoucher')).map(({ label, field, prefix, step = '0.01', min, max }) => (
             <div key={field}>
               <p className="text-xs text-slate-500 mb-0.5">{label}</p>
-              {editing ? (
+              {editing && canEditMoney ? (
                 <input
                   type="number"
                   step={step}
@@ -540,18 +550,19 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
               ) : field === 'accountbalance' ? (
                 <p className={`font-medium ${toDisplayBalance(client[field]) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(client[field])}</p>
               ) : field === 'polyfeevoucher' ? (
-                <p className="font-medium text-white">{Number(client[field] ?? 0)}/{polyVoucherMax(client.phase)}</p>
+                <p className="font-medium text-white">{Number(form[field] ?? 0)}/{polyVoucherMax(form.phase)}</p>
               ) : (
+                // While editing, the treatment fee shown is the one the new program or phase gives
                 <p className="font-medium text-white">
-                  {prefix}{client[field] != null ? Number(client[field]).toFixed(2) : '—'}
+                  {prefix}{form[field] != null && form[field] !== '' ? Number(form[field]).toFixed(2) : '—'}
                 </p>
               )}
             </div>
           ))}
           {/* Poly fee progress: amount paid so far out of the total poly fee */}
-          {takesPolygraphs(programType) && <div>
+          {!limited && takesPolygraphs(programType) && <div>
             <p className="text-xs text-slate-500 mb-0.5">Poly Fee (Paid / Total)</p>
-            {editing ? (
+            {editing && canEditMoney ? (
               <div className="flex items-center gap-2">
                 {(['polyfeepaid', 'polyfee'] as const).map((field, i) => (
                   <Fragment key={field}>

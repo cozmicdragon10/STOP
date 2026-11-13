@@ -6,6 +6,7 @@ const { activeRoleFor } = require('../lib/access');
 const { requireRole } = require('../lib/auth');
 const { groupNameFor, logClientChange } = require('../lib/changeLog');
 const { changedFields, clientConflictMessage } = require('../lib/editConflicts');
+const { MONEY_FIELDS, LABELS: MONEY_LABELS, moneyEditProblem, moneyText, standardTreatmentFee } = require('../lib/moneyFields');
 const { POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, countPolyFeeFill } = require('../lib/poly');
 const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED, SESSION_FEE_SQL } = require('../lib/sql');
 const { BUS_PASS_MAX, FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
@@ -682,9 +683,11 @@ const updateClientInfo = async (req, res) => {
             treatmentfee, accountbalance, vouchers, polyfeevoucher, polyfeepaid, polyfee,
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
-            comments, programtype, race, dateofbirth, sex, pretrial, assessor, buspasses, buspassrefill, updatedBy,
+            comments, programtype, race, dateofbirth, sex, pretrial, assessor, buspasses, buspassrefill,
             individualgroupid, federalunits, federalunitrefills, copay, doctype, expected
         } = req.body;
+        // Changes are logged under whoever is signed in, whether or not the screen sent its name
+        const updatedBy = req.user?.employeeemail || req.body.updatedBy;
         // Columns the UPDATE sets outright (a blank clears them): only changed when the request sends them
         const sent = ['middlename', 'programstartdate', 'groupid', 'address', 'city', 'county', 'state', 'zip', 'mainphone', 'altphone',
             'emergencycontact', 'emergencycontactphone', 'comments', 'race', 'dateofbirth', 'sex'].filter(f => req.body[f] !== undefined);
@@ -734,7 +737,7 @@ const updateClientInfo = async (req, res) => {
             return res.status(status).json(body);
         };
         // Tracked fields before the edit, for the change log; locks the client until the save is done
-        const beforeRes = await db.query('SELECT DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1 FOR UPDATE', [id]);
+        const beforeRes = await db.query('SELECT AccountBalance, TreatmentFee, Vouchers, DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1 FOR UPDATE', [id]);
         const before = beforeRes.rows[0];
         if (!before) return refuse(404, { error: 'Client not found.' });
         // Someone else changed a field this edit changes: refuse, and send the client as it is now
@@ -749,6 +752,12 @@ const updateClientInfo = async (req, res) => {
         // The full set of poly fee vouchers depends on the phase the client will be in after this edit. A count sent back
         // unchanged may be over a new phase's full set; the UPDATE below trims it.
         const fullSet = polyVoucherMax(phase || before?.phase);
+        // The balance, fees, vouchers and poly fee are a Business Administrator's to change by hand (lib/moneyFields.js)
+        const moneyProblem = moneyEditProblem({
+            role: req.user?.role, body: req.body, before, voucherMax: fullSet,
+            standardFee: await standardTreatmentFee(db, programtype || before.programtype, phase || before.phase),
+        });
+        if (moneyProblem) return refuse(403, { error: moneyProblem });
         const polyVoucher = polyfeevoucher !== undefined && polyfeevoucher !== null && polyfeevoucher !== '' ? Number(polyfeevoucher) : null;
         if (polyVoucher !== null && (!Number.isInteger(polyVoucher) || polyVoucher < 0
             || (polyVoucher > fullSet && polyVoucher !== Number(before?.polyfeevoucher)))) {
@@ -871,7 +880,8 @@ const updateClientInfo = async (req, res) => {
             // A phase change that trims the vouchers to the new phase's full set goes on the change log
             const vouchersBefore = Number(before.polyfeevoucher || 0);
             const vouchersAfter = Number(updated.rows[0].polyfeevoucher || 0);
-            if ((before.phase || '') !== (updated.rows[0].phase || '') && vouchersBefore > fullSet && vouchersAfter < vouchersBefore) {
+            const vouchersTrimmed = (before.phase || '') !== (updated.rows[0].phase || '') && vouchersBefore > fullSet && vouchersAfter < vouchersBefore;
+            if (vouchersTrimmed) {
                 await logClientChange(db, {
                     clientId: id, changedBy: updatedBy, changeType: 'Poly Fee Vouchers',
                     oldValue: String(vouchersBefore), newValue: String(vouchersAfter),
@@ -886,7 +896,11 @@ const updateClientInfo = async (req, res) => {
                 ['Assessor', before.assessor, now.assessor],
                 ['Bus Passes', String(before.buspasses ?? 0), String(now.buspasses ?? 0)],
                 ['Bus Pass Refill', String(before.buspassrefill ?? 0), String(now.buspassrefill ?? 0)],
-                ['Copay', before.copay === null ? '' : `$${Number(before.copay).toFixed(2)}`, now.copay === null ? '' : `$${Number(now.copay).toFixed(2)}`],
+                ['Copay', before.copay === null ? '' : `${Number(before.copay).toFixed(2)}`, now.copay === null ? '' : `${Number(now.copay).toFixed(2)}`],
+                // Every change to the money fields, so a balance can't change without a trail (vouchers trimmed by a phase
+                // change are logged above with the reason)
+                ...MONEY_FIELDS.filter(f => !(f === 'polyfeevoucher' && vouchersTrimmed))
+                    .map(f => [MONEY_LABELS[f], moneyText(f, before[f]), moneyText(f, updated.rows[0][f])]),
             ];
             for (const [changeType, oldValue, newValue] of tracked) {
                 if ((oldValue || '') !== (newValue || '')) {

@@ -13,6 +13,8 @@ interface Props {
   userEmail: string;
   // Business Administrators only
   canDelete: boolean;
+  // Everyone but Polygraphers, who view and upload only
+  canRename?: boolean;
   onSuccess: (message: string) => void;
 }
 
@@ -26,7 +28,7 @@ const errorText = (err: unknown, fallback: string) => (err instanceof Error && e
 
 // The Attachments tab of a client's account. Loaded each time it is shown (App remounts it after a discharge saves a
 // discharge summary PDF here).
-export default function ClientAttachments({ clientId, userEmail, canDelete, onSuccess }: Props) {
+export default function ClientAttachments({ clientId, userEmail, canDelete, canRename = true, onSuccess }: Props) {
   const employeeLabel = useEmployeeLabel();
   const [attachments, setAttachments] = useState<ClientAttachment[]>([]);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -208,7 +210,7 @@ export default function ClientAttachments({ clientId, userEmail, canDelete, onSu
                 <button type="button" onClick={() => handleOpen(a, 'print')} title="Print" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"><Printer size={13} /> Print</button>
               </>
             )}
-            <button type="button" onClick={() => startRename(a)} title="Rename" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"><Pencil size={13} /> Rename</button>
+            {canRename && <button type="button" onClick={() => startRename(a)} title="Rename" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"><Pencil size={13} /> Rename</button>}
             <button type="button" onClick={() => handleOpen(a, 'download')} title="Download" className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"><Download size={13} /> Download</button>
             {canDelete && (
               <button type="button" onClick={() => handleDelete(a)} title="Delete" aria-label={`Delete ${a.filename}`} className="text-red-400 hover:text-red-300 hover:bg-red-500/10 px-2 py-1.5 rounded-lg bg-red-500/5 border border-red-500/20"><Trash2 size={13} /></button>

@@ -65,7 +65,8 @@ router.get('/api/polygraphs/slots', async (req, res) => {
     }
 });
 
-router.post('/api/polygraphs/slots', async (req, res) => {
+// Business Administrators and Polygraphers open slots, as on the Polygraphs tab
+router.post('/api/polygraphs/slots', requireRole('Business Administrator', 'Polygrapher'), async (req, res) => {
     try {
         const { location, address, date, time, polygrapher, type, comments, slots } = req.body;
 
@@ -633,7 +634,8 @@ router.post('/api/polygraphs/slots/:slotId/reschedule', requireRole('Business Ad
 });
 
 // Delete Polygraph Slot (and any associated appointments)
-router.delete('/api/polygraphs/slots/:slotId', async (req, res) => {
+// Business Administrators only, as on the Polygraphs tab
+router.delete('/api/polygraphs/slots/:slotId', requireRole('Business Administrator'), async (req, res) => {
     try {
         const { slotId } = req.params;
         await pool.query('DELETE FROM PolygraphAppointments WHERE SlotId = $1', [slotId]);

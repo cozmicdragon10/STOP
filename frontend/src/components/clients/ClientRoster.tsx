@@ -33,6 +33,8 @@ interface Props {
   onError: (message: string) => void;
   // Extra buttons in the header, e.g. the Business Administrator's Notes to Approve
   headerActions?: ReactNode;
+  // A Polygrapher's roster: no balances and no New Client
+  limited?: boolean;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -94,6 +96,7 @@ const ROSTER_COLUMN_LABELS: Record<SortKey, string> = {
   lastattended: 'Last Attended', lastpoly: 'Last Poly', status: 'Status', balance: 'Balance',
 };
 const ROSTER_COLUMN_KEYS = Object.keys(ROSTER_COLUMN_LABELS) as SortKey[];
+const LIMITED_ROSTER_COLUMN_KEYS = ROSTER_COLUMN_KEYS.filter(k => k !== 'balance');
 const ROSTER_DEFAULT_HIDDEN: SortKey[] = ['pretrial'];
 /* eslint-disable @typescript-eslint/no-explicit-any -- client rows are untyped throughout App */
 const ROSTER_CELLS: Record<SortKey, (c: any) => ReactNode> = {
@@ -125,7 +128,9 @@ const ROSTER_CELLS: Record<SortKey, (c: any) => ReactNode> = {
 
 // The Client Roster tab: searchable, filterable client list and the New Client form. Clicking a row opens the
 // client's account (App's drawer).
-export default function ClientRoster({ clients, activeGroups, directoryAgents, userEmail, onOpenClient, onCreated, onSuccess, onError, headerActions }: Props) {
+export default function ClientRoster({ clients, activeGroups, directoryAgents, userEmail, onOpenClient, onCreated, onSuccess, onError, headerActions, limited = false }: Props) {
+  // A Polygrapher's roster leaves out the balance (the server doesn't send it to them either)
+  const columnKeys = limited ? LIMITED_ROSTER_COLUMN_KEYS : ROSTER_COLUMN_KEYS;
   const [clientSearch, setClientSearch] = useState('');
   const [clientFilters, setClientFilters] = useState<ClientFilters>(DEFAULT_CLIENT_FILTERS);
   // Clients with the picked statuses; Status: All and the discharge statuses load discharged clients from the server
@@ -229,7 +234,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
   });
 
   // Which columns show and in what order, saved in this browser
-  const columns = useColumnLayout('clientRosterColumns', ROSTER_COLUMN_KEYS, ['name'], ROSTER_DEFAULT_HIDDEN);
+  const columns = useColumnLayout(limited ? 'clientRosterColumnsLimited' : 'clientRosterColumns', columnKeys, ['name'], ROSTER_DEFAULT_HIDDEN);
 
   // Column sorting: clicking a header sorts by it ascending, clicking again flips the direction
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'name', dir: 1 });
@@ -271,7 +276,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3">
           <h2 className="font-semibold text-white">Active Client Directory</h2>
           <div className="flex flex-wrap items-center gap-2 md:gap-3">
-            <button type="button" onClick={() => setShowNewClientForm(s => !s)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap">+ New Client</button>
+            {!limited && <button type="button" onClick={() => setShowNewClientForm(s => !s)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap">+ New Client</button>}
             {headerActions}
             <input
               type="search"
@@ -317,7 +322,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
             onChange={(e) => setSort({ key: e.target.value as SortKey, dir: 1 })}
             className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
           >
-            {ROSTER_COLUMN_KEYS.map(key => <option key={key} value={key}>Sort: {ROSTER_COLUMN_LABELS[key]}</option>)}
+            {columnKeys.map(key => <option key={key} value={key}>Sort: {ROSTER_COLUMN_LABELS[key]}</option>)}
           </select>
           <button
             type="button"
@@ -545,7 +550,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                 <button type="button" onClick={() => onOpenClient(c)} className="flex-1 min-w-0 text-left p-4 space-y-1.5">
                   <span className="flex items-baseline justify-between gap-3">
                     <span className="font-medium text-white truncate">{c.lastname}, {c.firstname}</span>
-                    <span className={`shrink-0 text-sm font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</span>
+                    {!limited && <span className={`shrink-0 text-sm font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</span>}
                   </span>
                   <span className="flex flex-wrap items-center gap-1.5 text-xs">
                     <span className="bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2 py-0.5 rounded font-semibold">{c.programtype || 'State SO'}</span>

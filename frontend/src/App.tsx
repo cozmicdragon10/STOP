@@ -2,8 +2,8 @@ import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { 
   Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
   DollarSign, Calendar, Activity, PhoneCall, ShieldAlert, 
-  Layers, CheckSquare, BarChart3, Settings, Trash2, RotateCcw, Home, History,
-  Paperclip, UserCheck, ClipboardList, SlidersHorizontal, Lock
+  Layers, BarChart3, Settings, Trash2, RotateCcw, Home, History,
+  Paperclip, UserCheck, ClipboardList, SlidersHorizontal, Lock, Palette
 } from 'lucide-react';
 import {
   loginUser, logoutUser, setSessionEndedHandler, getClient, getClients, getGroups, getProgramFees,
@@ -27,8 +27,8 @@ import CustomChargeForm from './components/payments/CustomChargeForm';
 import SupervisingAgentsTab from './components/agents/SupervisingAgentsTab';
 import CallInTab from './components/callin/CallInTab';
 import GroupsTab from './components/groups/GroupsTab';
-import TestingTab from './components/testing/TestingTab';
 import AdminTab from './components/admin/AdminTab';
+import SettingsTab from './components/settings/SettingsTab';
 import FormsTab from './components/forms/FormsTab';
 import PolySlotForm from './components/polygraph/PolySlotForm';
 import PolyResults from './components/polygraph/PolyResults';
@@ -470,6 +470,17 @@ export default function App() {
     setClientFeeOverride(null);
     setClientPolyOverride(null);
     setPolyOverrideLoadError('');
+    // A Polygrapher's account shows information, polygraph history and documents only; the rest isn't theirs to load
+    if (user?.role === 'Polygrapher') {
+      setClientAttendance([]);
+      setClientFinancials([]);
+      setClientNotes([]);
+      const polys = await getClientPolygraphs(client.clientid);
+      setClientPolygraphs(polys);
+      setClientPolygraphsFor(client.clientid);
+      setClientPolygraphsAt(Date.now());
+      return;
+    }
     const [att, fin, notes, polys] = await Promise.all([
       getClientAttendance(client.clientid),
       getClientFinancials(client.clientid),
@@ -590,8 +601,11 @@ export default function App() {
       if (!seen.client || Date.now() - seen.at < 15000) return;
       accountRefresh.current = { ...seen, at: Date.now() };
       try {
+        const limitedAccount = user?.role === 'Polygrapher';
         const [fresh, financials, attendance] = await Promise.all([
-          getClient(seen.client.clientid), getClientFinancials(seen.client.clientid), getClientAttendance(seen.client.clientid),
+          getClient(seen.client.clientid),
+          limitedAccount ? seen.financials : getClientFinancials(seen.client.clientid),
+          limitedAccount ? seen.attendance : getClientAttendance(seen.client.clientid),
         ]);
         // Skip it all if anything on the account changed on this screen while it loaded
         const now = accountRefresh.current;
@@ -679,10 +693,13 @@ export default function App() {
   // Role Permissions
   const role = user.role;
   const isAllowed = (tab: string) => {
+    // Everyone has their own Settings (appearance and layout)
+    if (tab === 'settings') return true;
     if (role === 'Office Admin' || role === 'Business Administrator') return true;
     // Reports holds only the Cash Deposits report for them
-    if (role === 'Counselor' || role === 'Therapist') return ['clients', 'attendance', 'sessions', 'callin', 'polygraph', 'groups', 'testing', 'reports', 'agents', 'forms'].includes(tab);
-    if (role === 'Polygrapher') return ['polygraph', 'forms'].includes(tab);
+    if (role === 'Counselor') return ['clients', 'attendance', 'sessions', 'callin', 'polygraph', 'groups', 'reports', 'agents', 'forms'].includes(tab);
+    // A limited Client Roster and account (see the server's lib/polygrapherAccess.js)
+    if (role === 'Polygrapher') return ['clients', 'polygraph', 'forms'].includes(tab);
     // Unknown roles get no sections, rather than full access
     return false;
   };
@@ -695,11 +712,11 @@ export default function App() {
     { tab: 'sessions', icon: ClipboardList, label: 'Assessments', shortLabel: 'Assessments' },
     { tab: 'callin', icon: PhoneCall, label: 'Call-In Log', shortLabel: 'Call-In' },
     { tab: 'groups', icon: Layers, label: 'Groups' },
-    { tab: 'testing', icon: CheckSquare, label: 'Testing' },
     { tab: 'polygraph', icon: ShieldAlert, label: 'Polygraphs' },
     { tab: 'reports', icon: BarChart3, label: 'Reports' },
     { tab: 'agents', icon: UserCheck, label: 'Supervising Agents', shortLabel: 'Agents' },
     { tab: 'forms', icon: FileText, label: 'Forms' },
+    { tab: 'settings', icon: Palette, label: 'Settings' },
     { tab: 'admin', icon: Settings, label: 'Admin' },
   ].filter(item => item.tab === 'home' || isAllowed(item.tab));
 
@@ -772,7 +789,9 @@ export default function App() {
     { tab: 'attachments', icon: Paperclip, label: 'Attachments' },
     { tab: 'changelog', icon: History, label: 'Change Log' },
   ].filter(item => (item.tab !== 'polygraphs' || takesPolygraphs(selectedClientDetail?.programtype))
-    && (item.tab !== 'changelog' || role === 'Business Administrator'));
+    && (item.tab !== 'changelog' || role === 'Business Administrator')
+    // A Polygrapher sees the client's information, polygraph history and documents only
+    && (role !== 'Polygrapher' || ['information', 'polygraphs', 'attachments'].includes(item.tab)));
 
   return (
     <EmployeeLabelProvider employees={employees}>
@@ -851,11 +870,11 @@ export default function App() {
                   { tab: 'sessions', icon: ClipboardList, label: 'Assessments', description: 'Record one-client assessments with payments. Individual sessions are checked in on the Attendance tab.' },
                   { tab: 'callin', icon: PhoneCall, label: 'Call-In Log', description: 'Log client and group call-ins.' },
                   { tab: 'groups', icon: Layers, label: 'Groups', description: 'Manage group schedules, counselors, and rosters.' },
-                  { tab: 'testing', icon: CheckSquare, label: 'Testing', description: 'Record and review test results.' },
                   { tab: 'polygraph', icon: ShieldAlert, label: 'Polygraphs', description: 'Schedule polygraph slots and record results.' },
-                  { tab: 'reports', icon: BarChart3, label: 'Reports', description: role === 'Counselor' || role === 'Therapist' ? 'Group cash deposits you hold.' : 'Agent, income, and deposit reports.' },
+                  { tab: 'reports', icon: BarChart3, label: 'Reports', description: role === 'Counselor' ? 'Group cash deposits you hold.' : 'Agent, income, and deposit reports.' },
                   { tab: 'agents', icon: UserCheck, label: 'Supervising Agents', description: 'Probation officer contacts and their assigned clients.' },
-                  { tab: 'admin', icon: Settings, label: 'Admin', description: 'Employees, roles, and system logs.' },
+                  { tab: 'admin', icon: Settings, label: 'Admin', description: 'Employees, roles, prices, and system logs.' },
+                  { tab: 'settings', icon: Palette, label: 'Settings', description: 'Your colors, fonts, and layout.' },
                 ].filter(s => isAllowed(s.tab)).map(s => (
                   <button key={s.tab} onClick={() => setActiveTab(s.tab)} className="text-left bg-slate-900 hover:bg-slate-800/70 border border-slate-800 hover:border-slate-700 rounded-xl p-5 transition">
                     <div className="flex items-center gap-2 text-blue-400">
@@ -874,6 +893,7 @@ export default function App() {
           // Stays mounted while another tab is showing so the roster's search, filters, and New Client form are kept
           <div className={activeTab === 'clients' ? '' : 'hidden'}>
             <ClientRoster
+              limited={role === 'Polygrapher'}
               clients={clients}
               activeGroups={activeGroups}
               directoryAgents={directoryAgents}
@@ -954,12 +974,14 @@ export default function App() {
                 <div className="min-w-0 pr-12 md:pr-0">
                   <div className="flex flex-wrap items-center gap-3">
                     <h2 className="text-xl font-bold text-white">{selectedClientDetail.firstname} {selectedClientDetail.lastname}</h2>
+                    {role !== 'Polygrapher' && (
                     <span
                       title="Account balance"
                       className={`text-sm font-semibold px-2.5 py-0.5 rounded-full border ${toDisplayBalance(selectedClientDetail.accountbalance) < 0 ? 'text-red-400 bg-red-500/10 border-red-500/30' : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'}`}
                     >
                       {formatBalance(selectedClientDetail.accountbalance)} Balance
                     </span>
+                    )}
                     {/* Ticked on the Information tab; only Federal SO and Fed Drug Test clients can be pretrial */}
                     {selectedClientDetail.pretrial && <span className="-ml-1 text-sm font-semibold text-amber-300">(Pretrial)</span>}
                     {/* Set on the Ledger tab by a Business Administrator */}
@@ -976,15 +998,15 @@ export default function App() {
                 </div>
                 <div className="flex flex-wrap gap-2 md:shrink-0 max-md:pr-12">
                   <div ref={setAccountActionsSlot} className="contents" />
-                  <button
+                  {role !== 'Polygrapher' && <button
                     type="button"
                     onClick={() => setShowClientPayment(true)}
                     className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
                   >
                     <DollarSign size={14} /> Make Payment
-                  </button>
-                  {/* Discharged clients get Activate (any account type); everyone else gets Discharge (Business Administrators only) */}
-                  {clientIsDischarged ? (
+                  </button>}
+                  {/* Discharged clients get Activate (any role but Polygrapher); everyone else gets Discharge (Business Administrators only) */}
+                  {clientIsDischarged ? role !== 'Polygrapher' && (
                     <button
                       type="button"
                       onClick={() => setStatusDialog('activate')}
@@ -1112,11 +1134,13 @@ export default function App() {
                     onLeaveResolved={resolveLeavePrompt}
                     onSaved={handleClientInfoSaved}
                     onRefreshed={applyFreshClient}
+                    canEditMoney={role === 'Business Administrator'}
+                    limited={role === 'Polygrapher'}
                     onBusPassGranted={handleBusPassGranted}
                   />
 
                   {/* Section 4 – Temporary Fee Override */}
-                  <TempFeeOverridePanel
+                  {role !== 'Polygrapher' && <TempFeeOverridePanel
                     key={`fee-${selectedClientDetail.clientid}`}
                     client={selectedClientDetail}
                     role={role}
@@ -1128,11 +1152,11 @@ export default function App() {
                       loadDashboardData();
                     }}
                     onSuccess={setSuccessMsg}
-                  />
+                  />}
 
                   {/* Section 5 – Temporary Poly Fee Override: a reduced poly fee for a number of fills, not a date.
                       BIP, Fed Drug Test and Chaperon clients don't take polygraphs, so they have no poly fee. */}
-                  {takesPolygraphs(selectedClientDetail.programtype) && <PolyFeeOverridePanel
+                  {role !== 'Polygrapher' && takesPolygraphs(selectedClientDetail.programtype) && <PolyFeeOverridePanel
                     key={`poly-${selectedClientDetail.clientid}`}
                     client={selectedClientDetail}
                     role={role}
@@ -1225,6 +1249,7 @@ export default function App() {
                   clientId={selectedClientDetail.clientid}
                   userEmail={user.employeeemail}
                   canDelete={role === 'Business Administrator'}
+                  canRename={role !== 'Polygrapher'}
                   onSuccess={setSuccessMsg}
                 />
               )}
@@ -1485,7 +1510,6 @@ export default function App() {
         )}
 
         {/* TESTING MODULE TAB */}
-        {activeTab === 'testing' && <TestingTab clients={clients} onSuccess={setSuccessMsg} />}
 
         {/* Polygraph assignment prompts. Outside the Polygraph tab so they also open over a client's account,
             which can schedule from its Polygraphs section. */}
@@ -1653,6 +1677,8 @@ export default function App() {
 
         {/* ADMIN TAB */}
         {activeTab === 'forms' && isAllowed('forms') && <FormsTab role={role} onSuccess={setSuccessMsg} />}
+
+        {activeTab === 'settings' && <SettingsTab />}
 
         {activeTab === 'admin' && (
           <AdminTab user={user} onOpenTransaction={openTransaction} employees={employees} onEmployeesChanged={setEmployees} onSuccess={setSuccessMsg} onError={setError} />

@@ -2,6 +2,7 @@
 const express = require('express');
 const cors = require('cors');
 const { requireSession } = require('./lib/auth');
+const { polygrapherAccess } = require('./lib/polygrapherAccess');
 
 // Browser pages allowed to call the API, comma-separated in CORS_ORIGINS (.env): the production site (5173) and the
 // Vite dev server (5174)
@@ -17,6 +18,8 @@ app.use(cors({ origin: CORS_ORIGINS }));
 app.use(express.json());
 // Everything below needs a logged-in session, except POST /api/auth/login
 app.use(requireSession);
+// Polygrapher accounts reach only their own part of the app (lib/polygrapherAccess.js)
+app.use(polygrapherAccess);
 
 // Mounted in the order the routes were originally declared, so matching is unchanged
 app.use(require('./routes/auth'));
@@ -31,7 +34,6 @@ app.use(require('./routes/federalUnits'));
 app.use(require('./routes/financials'));
 app.use(require('./routes/callins'));
 app.use(require('./routes/polygraphs'));
-app.use(require('./routes/testing'));
 app.use(require('./routes/reports'));
 app.use(require('./routes/agentReports'));
 app.use(require('./routes/admin'));
