@@ -1,4 +1,5 @@
 const express = require('express');
+const { ymdOf } = require('../lib/dates');
 const { logAction, pool } = require('../db');
 const { requireRole } = require('../lib/auth');
 const { logClientChange } = require('../lib/changeLog');
@@ -143,7 +144,7 @@ router.post('/api/polygraphs/results', async (req, res) => {
             const slotRes = await pool.query('SELECT Date, Time FROM PolygraphSlots WHERE SlotId = $1', [slotId]);
             const slot = slotRes.rows[0];
             if (slot) {
-                const dateStr = slot.date instanceof Date ? slot.date.toISOString().split('T')[0] : String(slot.date).split('T')[0];
+                const dateStr = ymdOf(slot.date);
                 polygraphDateTime = `${dateStr} ${slot.time}`;
             }
         }
@@ -169,7 +170,7 @@ const formatSlotTime = (value) => {
 
 // Describes a slot for case notes: "at <location> on 10/19/2026 @ 9:00 AM with examiner <name>"
 const slotNoteContext = async (slot) => {
-    const dateStr = slot.date instanceof Date ? slot.date.toISOString().split('T')[0] : String(slot.date).split('T')[0];
+    const dateStr = ymdOf(slot.date);
     const [year, month, day] = dateStr.split('-');
     const examinerRes = await pool.query('SELECT DisplayName FROM EmployeeRoles WHERE EmployeeEmail = $1', [slot.polygrapher]);
     const examiner = examinerRes.rows[0]?.displayname || slot.polygrapher || 'Unassigned';
@@ -210,7 +211,7 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
                 return res.status(409).json({ error: 'This slot is closed: its reservation was cancelled after the appointment time.' });
             }
         }
-        const dateStr = slot.date instanceof Date ? slot.date.toISOString().split('T')[0] : String(slot.date).split('T')[0];
+        const dateStr = ymdOf(slot.date);
         const scheduledDateTime = `${dateStr} ${slot.time}`;
         const slotType = type || slot.type || 'Maintenance';
         const noteContext = await slotNoteContext(slot);
@@ -360,7 +361,7 @@ const POLY_CANCEL_NOTICE_HOURS = 48;
 
 // When a slot starts, in server local time. Times may be stored as "14:30:00" or "2:30 PM".
 const slotStart = (slot) => {
-    const dateStr = slot.date instanceof Date ? slot.date.toISOString().split('T')[0] : String(slot.date || '').split('T')[0];
+    const dateStr = ymdOf(slot.date);
     const [year, month, day] = dateStr.split('-').map(Number);
     const match = /^\s*(\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm)?\s*$/i.exec(String(slot.time || ''));
     if (!year || !month || !day || !match) return null;

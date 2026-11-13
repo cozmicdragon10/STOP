@@ -1,4 +1,5 @@
 const express = require('express');
+const { todayLocal } = require('../lib/dates');
 const { logAction, pool } = require('../db');
 const { OPEN_GROUP_ADMIN_ROLES, activeRoleFor, openGroupViewer } = require('../lib/access');
 const { recordAttendance } = require('../lib/attendance');
@@ -156,7 +157,7 @@ router.delete('/api/outside-bip-assessments/:id', async (req, res) => {
 
 router.get('/api/clients/:id/bip-intake', async (req, res) => {
     try {
-        const date = YMD.test(String(req.query.date || '')) ? req.query.date : new Date().toISOString().slice(0, 10);
+        const date = YMD.test(String(req.query.date || '')) ? req.query.date : todayLocal();
         const intake = await lastBipIntake(pool, req.params.id, date);
         // needsOurIntake: no reinstate allowed (discharged after an outside intake); our own intake is needed
         const ourRes = await pool.query(`SELECT ${NEEDS_OUR_INTAKE('$1::int')} AS needs`, [req.params.id]);

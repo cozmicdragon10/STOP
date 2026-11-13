@@ -1,4 +1,5 @@
 const { assertCardAllowed } = require('./cardBlock');
+const { todayLocal } = require('./dates');
 const { LAST_POLY_RESULT_SQL, POLY_VOUCHER_EARNING_RESULTS, polyVoucherMax } = require('./poly');
 const {
     BIP_CHECKIN_BLOCK, FEE_ONCE_PER_PERIOD_PROGRAMS, FEE_PERIOD_MONTHS, GROUP_ATTENDANCE, INDIVIDUAL_SESSION_TYPES, MONTHLY_FEE_PHASES,
@@ -41,7 +42,7 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         throw new Error(`Client ${client} not found.`);
     }
 
-    const sessionDate = date || new Date().toISOString().split('T')[0];
+    const sessionDate = date || todayLocal();
     const sessionNum = Number(sessionNumber) > 0 ? Math.floor(Number(sessionNumber)) : 1;
 
     // A BIP client needs a completed BIP intake (and a BIP reinstate after any discharge) before group check-in

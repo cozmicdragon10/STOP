@@ -1,4 +1,5 @@
 const express = require('express');
+const { todayLocal } = require('../lib/dates');
 const { ID_TYPES, idText } = require('../lib/clientId');
 const { buildDischargeSummaryPdf } = require('../dischargeSummary');
 const { logAction, pool } = require('../db');
@@ -716,7 +717,7 @@ const updateClientInfo = async (req, res) => {
         if (sex && !CLIENT_SEXES.includes(sex)) {
             return res.status(400).json({ error: `Sex must be one of: ${CLIENT_SEXES.join(', ')}.` });
         }
-        if (dateofbirth && String(dateofbirth).split('T')[0] > new Date().toISOString().split('T')[0]) {
+        if (dateofbirth && String(dateofbirth).split('T')[0] > todayLocal()) {
             return res.status(400).json({ error: 'Date of birth cannot be in the future.' });
         }
 
