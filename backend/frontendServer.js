@@ -26,10 +26,12 @@ const currentBuild = (site = SITE, fallback = FALLBACK) => {
     return hasIndex(fallback) ? fallback : null;
 };
 
-// The app for a built frontend folder
-const frontendApp = (dist) => {
+// The app for a built frontend folder. With `api` (the app from app.js), requests to /api/... on this port go to the API
+// too, so the screens call it on their own address: one port is all that has to reach the outside, with no CORS needed.
+const frontendApp = (dist, api) => {
     const app = express();
     app.disable('x-powered-by');
+    if (api) app.use((req, res, next) => (req.path.startsWith('/api/') ? api(req, res, next) : next()));
     // Built files have a content hash in their names, so they can be cached for good
     app.use('/assets', express.static(path.join(dist, 'assets'), { immutable: true, maxAge: '365d', fallthrough: false }));
     // Everything else, index.html above all, is checked on every load so an update reaches everyone on their next reload

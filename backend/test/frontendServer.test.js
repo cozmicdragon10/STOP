@@ -38,6 +38,23 @@ test('current.txt cannot point outside site/builds', () => {
     assert.equal(currentBuild(l2.site, l2.dist), null);
 });
 
+test('the site port passes /api requests to the API and serves the screens for everything else', async () => {
+    const express = require('express');
+    const http = require('http');
+    const { frontendApp } = require('../frontendServer');
+    const l = layout({ fallback: true });
+    const api = express();
+    api.get('/api/ping', (req, res) => res.json({ path: req.path }));
+    const server = http.createServer(frontendApp(l.dist, api)).listen(0);
+    try {
+        const base = `http://127.0.0.1:${server.address().port}`;
+        assert.deepEqual(await (await fetch(`${base}/api/ping`)).json(), { path: '/api/ping' });
+        assert.equal(await (await fetch(`${base}/clients`)).text(), '<html></html>');
+    } finally {
+        server.close();
+    }
+});
+
 test('nothing to serve gives null', () => {
     const l = layout({});
     assert.equal(currentBuild(l.site, l.dist), null);

@@ -1,7 +1,10 @@
 import type { SessionEntry } from './hooks/useGroupCheckIn';
 import type { BipCheckInBlock } from './utils/bip';
 
-const API_BASE = 'https://192.168.1.133:5000/api';
+// The built site calls the API on its own address (the server answers /api on the site's port too; see
+// backend/frontendServer.js), so it works at any address it is opened by: inside the office or from outside. The Vite
+// dev server (5174) has no API of its own, so it uses the backend's port 5000 on the same machine.
+const API_BASE = import.meta.env.DEV ? `https://${globalThis.location?.hostname || 'localhost'}:5000/api` : '/api';
 
 // The login session token. Held in memory only, so reloading the page logs out (as before sessions existed).
 // It is kept on the page's global object rather than in this module, so a copy of this module loaded by a live code

@@ -26,7 +26,7 @@ runMigrations(pool)
     // The built screens, on the address staff use (see frontendServer.js); skipped when there is no build
     const build = currentBuild();
     if (build) {
-      https.createServer(tlsOptions, frontendApp(build))
+      https.createServer(tlsOptions, frontendApp(build, app))
         // A busy port (say, the Vite dev server left running on it) is logged; the API keeps running
         .on('error', err => console.error(`Could not serve the site on port ${FRONTEND_PORT}: ${err.message}`))
         .listen(FRONTEND_PORT, '0.0.0.0', () => {
