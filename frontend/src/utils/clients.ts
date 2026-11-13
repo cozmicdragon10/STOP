@@ -18,6 +18,10 @@ export const DISCHARGE_SUBCATEGORIES: Record<string, string[]> = {
 export const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
   { type: 'Client Created', label: 'Client Created' },
   // Information
+  { type: 'First Name', label: 'First Name' },
+  { type: 'Middle Name', label: 'Middle Name' },
+  { type: 'Last Name', label: 'Last Name' },
+  // Before names were logged by part
   { type: 'Name', label: 'Name' },
   { type: 'ID #', label: 'ID #' },
   { type: 'ID # Type Set', label: 'ID # Type Set' },

@@ -3,8 +3,8 @@ import { CHANGE_LOG_TYPES, changeLogFilters } from './clients';
 
 describe('change log filters', () => {
   it('lists only the types the log has, in the usual order, then other types alphabetically', () => {
-    const changes = ['Payment', '6022 Units', 'Name', 'Attendance Added', 'Payment', '6012 Units'].map(changetype => ({ changetype }));
-    expect(changeLogFilters(changes).map(f => f.type)).toEqual(['Name', 'Attendance Added', 'Payment', '6012 Units', '6022 Units']);
+    const changes = ['Payment', '6022 Units', 'Middle Name', 'Attendance Added', 'Payment', '6012 Units'].map(changetype => ({ changetype }));
+    expect(changeLogFilters(changes).map(f => f.type)).toEqual(['Middle Name', 'Attendance Added', 'Payment', '6012 Units', '6022 Units']);
   });
 
   it('keeps the friendly labels', () => {

@@ -11,8 +11,9 @@ const row = (changes = {}) => ({
     ...changes,
 });
 
-test('a middle name added is logged as a name change with the full names', () => {
-    assert.deepEqual(clientInfoChanges(row(), row({ middlename: 'Paul' })), [['Name', 'John Smith', 'John Paul Smith']]);
+test('a middle name change is logged as just the middle name', () => {
+    assert.deepEqual(clientInfoChanges(row(), row({ middlename: 'Paul' })), [['Middle Name', '', 'Paul']]);
+    assert.deepEqual(clientInfoChanges(row({ middlename: 'Paul' }), row({ middlename: 'Peter' })), [['Middle Name', 'Paul', 'Peter']]);
 });
 
 test('nothing changed logs nothing, and blank, null and spaces count as the same', () => {
@@ -25,7 +26,7 @@ test('every Edit Info field is compared, with dates as MM/DD/YYYY', () => {
         phase: 'Phase 2 - Monthly', programstartdate: new Date(2026, 1, 1), dateofbirth: new Date(1991, 2, 3),
         sex: 'Female', race: 'Other', address: '2 Oak Ave', city: 'OKC', county: 'Oklahoma', state: 'TX', zip: '73102',
         mainphone: '555-0101', altphone: '555-0102', emergencycontact: 'Jane', emergencycontactphone: '555-0103', comments: 'Note',
-        lastname: 'Smyth',
+        firstname: 'Jon', middlename: 'Paul', lastname: 'Smyth',
     });
     const changes = clientInfoChanges(row(), after);
     assert.deepEqual(changes.map(c => c[0]), CLIENT_INFO_FIELDS.map(f => f[0]));

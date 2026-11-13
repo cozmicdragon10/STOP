@@ -33,12 +33,12 @@ const dateText = (value) => {
     return m ? `${m[2]}/${m[3]}/${m[1]}` : String(value);
 };
 
-const fullName = (c) => [c.firstname, c.middlename, c.lastname].map(p => String(p ?? '').trim()).filter(Boolean).join(' ');
-
 // The Edit Info fields logged by clientInfoChanges, as [change type, how to read it from a client row]. The ID #, status,
 // program, agent, assessor, groups, pretrial, bus passes, copay and money fields are logged separately in routes/clients.js.
 const CLIENT_INFO_FIELDS = [
-    ['Name', fullName],
+    ['First Name', c => c.firstname],
+    ['Middle Name', c => c.middlename],
+    ['Last Name', c => c.lastname],
     ['Phase', c => c.phase],
     ['Program Start Date', c => dateText(c.programstartdate)],
     ['Date of Birth', c => dateText(c.dateofbirth)],
@@ -71,5 +71,5 @@ const noteText = (text) => {
 };
 
 module.exports = {
-    logClientChange, groupNameFor, dollars, dateText, fullName, CLIENT_INFO_FIELDS, CLIENT_INFO_COLUMNS, clientInfoChanges, noteText,
+    logClientChange, groupNameFor, dollars, dateText, CLIENT_INFO_FIELDS, CLIENT_INFO_COLUMNS, clientInfoChanges, noteText,
 };
