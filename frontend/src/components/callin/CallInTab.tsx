@@ -11,6 +11,8 @@ interface CallInClient {
   docnumber?: string | null;
   doctype?: string | null;
   groupid?: number | null;
+  // An SO client's counselor's individual group, apart from their regular group
+  individualgroupid?: number | null;
   programstatus?: string | null;
 }
 
@@ -106,7 +108,7 @@ export default function CallInTab({ clients, groups, user, onLogged }: Props) {
             />
             {selectedGroup && (
               <p className="text-xs text-slate-500 mt-1.5">
-                Will be logged for {clients.filter(c => c.groupid === Number(selectedGroup) && c.programstatus === 'Active').length} active client(s) in this group.
+                Will be logged for {clients.filter(c => (c.groupid === Number(selectedGroup) || c.individualgroupid === Number(selectedGroup)) && c.programstatus === 'Active').length} active client(s) in this group.
               </p>
             )}
             <div className="mt-4">

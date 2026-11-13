@@ -48,6 +48,12 @@ export const cardPaymentStatus = (payment: any, ledger: any[]) => {
   };
 };
 
+// A check-in that took a payment has one ledger row, the payment; sessionfee is the fee charged at that check-in
+// (SESSION_FEE_SQL in backend/lib/sql.js). 0 for every other row.
+export const sessionFeeOf = (fin: any) => Number(fin.sessionfee || 0);
+// What a month's rows charged: fee rows, plus the fees of check-ins whose row is their payment
+export const feesCharged = (rows: any[]) => rows.reduce((t, f) => t + (f.type === 'Charge' ? Number(f.amount || 0) : sessionFeeOf(f)), 0);
+
 // Ledger rows store the balance after each transaction. Working back from the amount gives the balance before it.
 export const ledgerBalanceChange = (fin: any) => {
   if (fin.finalbalance === null || fin.finalbalance === undefined) return null;
@@ -55,6 +61,7 @@ export const ledgerBalanceChange = (fin: any) => {
   const after = Number(fin.finalbalance);
   // Poly fee payments are tracked apart from the account, so they leave the balance where it was
   const changesBalance = fin.feetype !== 'Poly Fee';
-  const before = !changesBalance ? after : addsToOwed(fin) ? after - amount : after + amount;
+  // A check-in's payment row also carries its fee: the balance went up by the fee and down by the payment
+  const before = !changesBalance ? after : addsToOwed(fin) ? after - amount : after + amount - sessionFeeOf(fin);
   return { before: toDisplayBalance(before), after: toDisplayBalance(after), changesBalance };
 };

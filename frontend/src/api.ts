@@ -223,6 +223,9 @@ export interface FinancialTransaction {
     adjustmentreason: string | null;
     relatedtransactionid: number | null;
     disputestatus: string | null;
+    // On a client's ledger: the fee charged at the check-in this payment was taken at (a check-in has one ledger
+    // row, its payment); null on every other row
+    sessionfee?: Money | null;
 }
 
 export interface ClientNote {

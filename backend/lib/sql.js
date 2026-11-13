@@ -61,9 +61,15 @@ const FEE_ALREADY_CHARGED = `CASE
 
 const ACTIVE_FEE_OVERRIDE =`(SELECT o.ReducedFee FROM TemporaryFeeOverrides o WHERE o.ClientId = c.ClientId AND o.ExpirationDate >= CURRENT_DATE ORDER BY o.CreatedOn DESC LIMIT 1)`;
 
+// A check-in that takes a payment writes one ledger row, the payment (lib/attendance.js recordAttendance); its fee is on
+// the attendance row only. For ledger row f joined to its attendance a, this is that fee, or NULL for any other row
+// (charges, account payments, refunds and disputes), so the fee is counted exactly once.
+const SESSION_FEE_SQL = `CASE WHEN f.Type = 'Payment' AND f.RelatedTransactionId IS NULL AND f.Comments LIKE 'Payment applied during %'
+    AND a.GroupFee > 0 THEN a.GroupFee END`;
+
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
 module.exports = {
     INDIVIDUAL_SESSION_TYPES, GROUP_ATTENDANCE, NEEDS_OUR_INTAKE, BIP_CHECKIN_BLOCK, bipCheckInBlockMessage, ATTENDED_THIS_MONTH,
-    MONTHLY_FEE_PHASES, FEE_PERIOD_MONTHS, FEE_ONCE_PER_PERIOD_PROGRAMS, FEE_ALREADY_CHARGED, ACTIVE_FEE_OVERRIDE, YMD,
+    MONTHLY_FEE_PHASES, FEE_PERIOD_MONTHS, FEE_ONCE_PER_PERIOD_PROGRAMS, FEE_ALREADY_CHARGED, ACTIVE_FEE_OVERRIDE, SESSION_FEE_SQL, YMD,
 };

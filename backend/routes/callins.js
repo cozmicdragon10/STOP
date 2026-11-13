@@ -56,7 +56,8 @@ router.post('/api/callin/group', async (req, res) => {
         const reasonText = reason ? ` (Reason: ${reason})` : '';
         const forText = forDate ? ` (For: ${forDate})` : '';
 
-        const clientsRes = await clientDb.query(`SELECT ClientId FROM Clients WHERE GroupId = $1 AND ProgramStatus = 'Active'`, [group]);
+        // Everyone on the group's roster: clients whose regular group or individual group it is (as the Groups tab counts them)
+        const clientsRes = await clientDb.query(`SELECT ClientId FROM Clients WHERE (GroupId = $1 OR IndividualGroupId = $1) AND ProgramStatus = 'Active'`, [group]);
         for (let c of clientsRes.rows) {
             await clientDb.query(
                 `INSERT INTO EventLog (Client, "Group", Type, Comment, CreatedBy, CallInReason, CallInDate) VALUES ($1, $2, 'Group Call-In', $3, $4, $5, $6)`,

@@ -7,7 +7,7 @@ const { requireRole } = require('../lib/auth');
 const { groupNameFor, logClientChange } = require('../lib/changeLog');
 const { changedFields, clientConflictMessage } = require('../lib/editConflicts');
 const { POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, countPolyFeeFill } = require('../lib/poly');
-const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED } = require('../lib/sql');
+const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED, SESSION_FEE_SQL } = require('../lib/sql');
 const { BUS_PASS_MAX, FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
 const { FEDERAL_UNITS_SQL, FEDERAL_UNIT_REFILLS_SQL, LAST_DRUG_TEST_SQL, saveClientFederalUnits, saveClientUnitRefills, unitsProblem } = require('../lib/federalUnits');
 
@@ -342,7 +342,14 @@ router.get('/api/clients/:id/attendance', async (req, res) => {
 router.get('/api/clients/:id/financials', async (req, res) => {
     try {
         const { id } = req.params;
-        const result = await pool.query('SELECT * FROM FinancialTransactions WHERE Client = $1 ORDER BY Date DESC', [id]);
+        // A check-in has one ledger row: its payment when money was taken, otherwise its fee (lib/attendance.js). SessionFee
+        // is the fee charged at the check-in whose payment row this is, so the ledger can show the fee beside the payment.
+        const result = await pool.query(
+            `SELECT f.*, ${SESSION_FEE_SQL} AS SessionFee
+             FROM FinancialTransactions f LEFT JOIN Attendance a ON a.AttendanceId = f.AttendanceId
+             WHERE f.Client = $1 ORDER BY f.Date DESC`,
+            [id]
+        );
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: err.message });

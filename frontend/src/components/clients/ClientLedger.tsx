@@ -7,7 +7,7 @@ import type { CardBlock, CardPaymentAction, PaymentChangeResult, PolyFeeOverride
 import RecordFilterBar from './RecordFilterBar';
 import MonthHeader from './MonthHeader';
 import { EMPTY_LEDGER_FILTERS, groupByMonth, sortedUnique, toggleInSet } from '../../utils/filters';
-import { LEDGER_TONES, PAYMENT_REVERSAL_TYPES, cardPaymentStatus, formatMoney, ledgerBalanceChange, signedMoney } from '../../utils/ledger';
+import { LEDGER_TONES, PAYMENT_REVERSAL_TYPES, cardPaymentStatus, feesCharged, formatMoney, ledgerBalanceChange, sessionFeeOf, signedMoney } from '../../utils/ledger';
 import { formatBalance } from '../../utils/balance';
 import { formatDisplayTime, localYmd } from '../../utils/dates';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
@@ -147,7 +147,8 @@ export default function ClientLedger({ client, role, userEmail, financials, high
   const search = filters.search.trim().toLowerCase();
   const shown = financials.filter(f => {
     const day = localYmd(f.date);
-    if (filters.type && f.type !== filters.type) return false;
+    // A check-in's payment row also holds its fee, so it counts as a Charge too
+    if (filters.type && f.type !== filters.type && !(filters.type === 'Charge' && sessionFeeOf(f) > 0)) return false;
     if (filters.feeType && f.feetype !== filters.feeType) return false;
     if (filters.method && f.paymentmethod !== filters.method) return false;
     if (filters.from && day < filters.from) return false;
@@ -329,7 +330,8 @@ export default function ClientLedger({ client, role, userEmail, financials, high
         <p className="text-center text-slate-500 text-sm py-4">No ledger entries match these filters.</p>
       )}
       {groupByMonth(shown, filters.sort).map(month => {
-        const charges = month.rows.filter(f => f.type === 'Charge').reduce((t, f) => t + Number(f.amount || 0), 0);
+        // Includes the fees of check-ins that took a payment (their one row is the payment)
+        const charges = feesCharged(month.rows);
         // Net of refunds and disputes
         const payments = month.rows.filter(f => f.type !== 'Charge')
           .reduce((t, f) => t + (PAYMENT_REVERSAL_TYPES.includes(f.type) ? -1 : 1) * Number(f.amount || 0), 0);
@@ -360,6 +362,8 @@ export default function ClientLedger({ client, role, userEmail, financials, high
               };
               const linkClass = 'inline-flex items-center gap-1 text-xs text-slate-400 hover:text-white';
               const balance = ledgerBalanceChange(fin);
+              // The fee charged at the check-in this payment was taken at
+              const sessionFee = sessionFeeOf(fin);
               return (
                 <div key={fin.transactionid} id={`ledger-tx-${fin.transactionid}`}
                   className={`bg-slate-950 border p-4 rounded-xl text-sm scroll-mt-24 ${fin.transactionid === highlightTransactionId ? 'border-amber-400 ring-2 ring-amber-400/60' : 'border-slate-800'}`}>
@@ -393,7 +397,10 @@ export default function ClientLedger({ client, role, userEmail, financials, high
                       )}
                     </div>
                     <div className="sm:text-right sm:shrink-0 sm:pl-4">
-                      <p className={`font-bold ${tone.text}`}>{minus ? '-' : '+'}${Number(fin.amount).toFixed(2)}</p>
+                      {sessionFee > 0 && (
+                        <p className={`font-bold ${LEDGER_TONES.charge.text}`}>-${sessionFee.toFixed(2)} <span className="text-xs font-normal text-slate-400">fee charged</span></p>
+                      )}
+                      <p className={`font-bold ${tone.text}`}>{minus ? '-' : '+'}${Number(fin.amount).toFixed(2)}{sessionFee > 0 && <span className="text-xs font-normal text-slate-400"> paid</span>}</p>
                       {balance && (
                         <p className={`text-xs mt-1 ${balance.after < 0 ? 'text-red-400' : 'text-slate-400'}`}>
                           {balance.changesBalance ? <>Balance {signedMoney(balance.before)} → {signedMoney(balance.after)}</> : <>Balance unchanged: {signedMoney(balance.after)}</>}

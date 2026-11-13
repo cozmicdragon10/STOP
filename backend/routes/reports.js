@@ -3,7 +3,7 @@ const { logAction, pool } = require('../db');
 const { activeRoleFor, openGroupViewer } = require('../lib/access');
 const { requireRole } = require('../lib/auth');
 const { groupNameFor } = require('../lib/changeLog');
-const { YMD } = require('../lib/sql');
+const { SESSION_FEE_SQL, YMD } = require('../lib/sql');
 const { withResponsible, OPEN_GROUP_ADMIN_ROLES } = require('../lib/cashResponsibility');
 
 const router = express.Router();
@@ -361,7 +361,10 @@ router.get('/api/reports/deposit', businessOnly, async (req, res) => {
         // Refunds and disputes take money back; a won dispute puts it back
         const payments = await pool.query(`SELECT SUM(CASE WHEN Type IN ('Payment', 'Dispute Won') THEN Amount ELSE -Amount END)
                                            FROM FinancialTransactions WHERE Type IN ('Payment', 'Dispute Won', 'Refund', 'Dispute')`);
-        const charges = await pool.query("SELECT SUM(Amount) FROM FinancialTransactions WHERE Type = 'Charge'");
+        // Fees: charge rows, plus the fee of each check-in that took a payment (its one ledger row is the payment)
+        const charges = await pool.query(
+            `SELECT COALESCE(SUM(CASE WHEN f.Type = 'Charge' THEN f.Amount END), 0) + COALESCE(SUM(${SESSION_FEE_SQL}), 0) AS sum
+             FROM FinancialTransactions f LEFT JOIN Attendance a ON a.AttendanceId = f.AttendanceId`);
         const transactions = await pool.query("SELECT * FROM FinancialTransactions ORDER BY Date DESC LIMIT 50");
         res.json({
             totalRevenue: Number(payments.rows[0].sum || 0),

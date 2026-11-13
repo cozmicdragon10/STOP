@@ -3,6 +3,7 @@ const { hashPassword } = require('../passwords');
 const { logAction, pool } = require('../db');
 const { ADMIN_ROLES, endSessionsFor, requireRole } = require('../lib/auth');
 const { staleFields, staleMessage } = require('../lib/editConflicts');
+const { accountChangeProblem } = require('../lib/accounts');
 
 const router = express.Router();
 
@@ -11,6 +12,8 @@ const credentialsFor = (role, credentials) => (String(role || '').trim() === 'Co
 // Account changes and the system log are for the Admin tab's roles only. The employee list stays open to every
 // logged-in role because the other tabs use it to name counselors and polygraphers.
 const adminOnly = requireRole(...ADMIN_ROLES);
+// Creating and changing accounts is for Business Administrators, as on the Admin tab (Office Admins see the list only)
+const accountsOnly = requireRole('Business Administrator');
 // What the account form saves, checked against the account as the form loaded it
 const EMPLOYEE_FIELDS = [['displayname', 'Display Name'], ['role', 'Role'], ['active', 'Active', 'yesno'], ['credentials', 'Credentials']];
 
@@ -27,7 +30,7 @@ router.get('/api/admin/employees', async (req, res) => {
 // Edit an existing account's name, role, and active status. The email is the account key and cannot change.
 // expected: the account as the form loaded it; if it has changed since (say, deactivated by another admin), nothing is
 // saved (409) so the form can't quietly undo that (see lib/editConflicts.js)
-router.put('/api/admin/employees/:email', adminOnly, async (req, res) => {
+router.put('/api/admin/employees/:email', accountsOnly, async (req, res) => {
     const db = await pool.connect();
     try {
         const email = req.params.email;
@@ -45,6 +48,17 @@ router.put('/api/admin/employees/:email', adminOnly, async (req, res) => {
         if (stale.length) {
             await db.query('ROLLBACK');
             return res.status(409).json({ error: staleMessage('this account', stale, before.rows[0]), conflict: true });
+        }
+        // Who may change which account (lib/accounts.js), judged by the session, not by anything the browser sent
+        const others = await db.query(
+            "SELECT COUNT(*) AS n FROM EmployeeRoles WHERE Role = 'Business Administrator' AND Active = TRUE AND LOWER(EmployeeEmail) <> LOWER($1)", [email]);
+        const problem = accountChangeProblem({
+            actor: req.user, target: { employeeemail: email, role: before.rows[0].role, active: before.rows[0].active },
+            next: { role, active: active !== false }, otherActiveTopRole: Number(others.rows[0].n),
+        });
+        if (problem) {
+            await db.query('ROLLBACK');
+            return res.status(403).json({ error: problem });
         }
         // Blank password means "keep the current one"
         const newPassword = String(password || '');
@@ -76,12 +90,18 @@ router.put('/api/admin/employees/:email', adminOnly, async (req, res) => {
     }
 });
 
-router.post('/api/admin/employees', adminOnly, async (req, res) => {
+router.post('/api/admin/employees', accountsOnly, async (req, res) => {
     try {
         const { employeeEmail, displayName, role, location, active, password, credentials } = req.body;
         if (!String(password || '').trim()) {
             return res.status(400).json({ error: 'A password is required for a new account.' });
         }
+        if (!String(employeeEmail || '').trim() || !String(displayName || '').trim()) {
+            return res.status(400).json({ error: 'An email and a display name are required.' });
+        }
+        // Only a Business Administrator creates a Business Administrator (lib/accounts.js)
+        const problem = accountChangeProblem({ actor: req.user, target: null, next: { role, active }, otherActiveTopRole: 0 });
+        if (problem) return res.status(403).json({ error: problem });
         // New User never overwrites an existing account (a mistyped email would reset someone's role and password);
         // existing accounts are changed with Edit, which also signs them out when the password changes
         const taken = await pool.query('SELECT 1 FROM EmployeeRoles WHERE LOWER(EmployeeEmail) = LOWER($1)', [employeeEmail || '']);

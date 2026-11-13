@@ -192,8 +192,9 @@ The backend provides REST API endpoints for:
 - **Identity:** the server takes the acting employee from the session, never from the request. Fields such as `user`,
   `createdBy`, `updatedBy`, `assignedBy`, `removedBy`, `?user=` and the `X-User` header are overwritten with the session's email
   (`backend/lib/auth.js`).
-- **Admin-only routes:** account changes and the system log need an Office Admin or Business Administrator session;
-  deleting a group needs a Business Administrator.
+- **Admin-only routes:** the system log needs an Office Admin or Business Administrator session; creating or changing
+  an employee account, and deleting a group, need a Business Administrator. Nobody can change their own role, and the
+  last active Business Administrator can't be demoted or deactivated (`backend/lib/accounts.js`).
 - **Login attempts:** 5 failed attempts for an email locks that email for 15 minutes.
 - **CORS:** only the addresses in `CORS_ORIGINS` can call the API from a browser.
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { attendanceBalanceChange, cardPaymentStatus, ledgerBalanceChange, signedMoney } from './ledger';
+import { attendanceBalanceChange, cardPaymentStatus, feesCharged, ledgerBalanceChange, signedMoney } from './ledger';
 import { formatBalance, toDisplayBalance } from './balance';
 
 describe('balance display', () => {
@@ -41,6 +41,21 @@ describe('ledgerBalanceChange', () => {
   it('works back from the stored balance after a payment', () => {
     expect(ledgerBalanceChange({ type: 'Payment', amount: 50, finalbalance: 100 }))
       .toEqual({ before: -150, after: -100, changesBalance: true });
+  });
+
+  it('counts the fee of the check-in a payment was taken at', () => {
+    // Had $20.00 credit (stored -20), charged a $180 group fee and paid $10 at check-in: owes $150
+    expect(ledgerBalanceChange({ type: 'Payment', amount: 10, finalbalance: 150, sessionfee: '180.00' }))
+      .toEqual({ before: 20, after: -150, changesBalance: true });
+  });
+
+  it('adds check-in fees on payment rows to the fees of a month, once each', () => {
+    expect(feesCharged([
+      { type: 'Charge', amount: '35.00' },
+      { type: 'Payment', amount: '10.00', sessionfee: '180.00' },
+      { type: 'Payment', amount: '20.00', sessionfee: null },
+      { type: 'Refund', amount: '5.00' },
+    ])).toBe(215);
   });
 
   it('treats charges and refunds as adding to what is owed', () => {
