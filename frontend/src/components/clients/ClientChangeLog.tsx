@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getClientChangeLog } from '../../api';
 import type { ClientChange } from '../../api';
-import { CHANGE_LOG_TYPES } from '../../utils/clients';
+import { CHANGE_LOG_TYPES, changeLogFilters } from '../../utils/clients';
 import { formatLogMonthDay, formatLogTime, formatLogYear } from '../../utils/dates';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 
@@ -39,9 +39,9 @@ export default function ClientChangeLog({ clientId, userEmail }: Props) {
 
   return (
     <div className="space-y-3">
-      {/* One filter per change type; counts reflect the whole log */}
+      {/* One filter per change type the log has; counts reflect the whole log */}
       <div className="flex flex-wrap gap-2">
-        {[{ type: '', label: 'All' }, ...CHANGE_LOG_TYPES].map(({ type, label }) => {
+        {[{ type: '', label: 'All' }, ...changeLogFilters(changes)].map(({ type, label }) => {
           const count = type ? changes.filter(c => c.changetype === type).length : changes.length;
           const active = filter === type;
           return (

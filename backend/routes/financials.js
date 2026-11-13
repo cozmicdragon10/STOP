@@ -2,7 +2,8 @@ const express = require('express');
 const { logAction, pool } = require('../db');
 const { activeRoleFor, OPEN_GROUP_ADMIN_ROLES } = require('../lib/access');
 const { assertCardAllowed } = require('../lib/cardBlock');
-const { logClientChange } = require('../lib/changeLog');
+const { dollars, logClientChange } = require('../lib/changeLog');
+const { moneyText } = require('../lib/moneyFields');
 const { polyVoucherMax, changePolyFeePaid, countPolyFeeFill, splitPolyPaidChange, voucherChangeText } = require('../lib/poly');
 
 const router = express.Router();
@@ -69,6 +70,16 @@ router.post('/api/financials/payment', async (req, res) => {
             [newBalance, newPolyPaid, newPolyVoucher, client, fillsVouchers]
         );
         if (fillsVouchers) await countPolyFeeFill(clientDb, client, 1);
+
+        const split = polyAmount > 0
+            ? ` ${dollars(polyAmount)} to the poly fee (paid ${dollars(oldPolyPaid)} → ${dollars(newPolyPaid)})${accountAmount > 0 ? `, ${dollars(accountAmount)} to the account` : ''}.`
+            : '';
+        const filled = fillsVouchers ? ` Poly fee paid in full: vouchers filled to ${newPolyVoucher}.` : '';
+        await logClientChange(clientDb, {
+            clientId: client, changedBy: createdBy, changeType: 'Payment',
+            oldValue: moneyText('accountbalance', oldBalance), newValue: moneyText('accountbalance', newBalance),
+            details: `${dollars(payAmount)} ${paymentMethod} payment (receipt ${transactionIds.join(', ')}).${split}${filled} ${comment}`.trim(),
+        });
 
         await clientDb.query('COMMIT');
         res.status(201).json({ success: true, newBalance, polyFeePaid: newPolyPaid, polyFeeVoucher: newPolyVoucher, polyApplied: polyAmount, accountApplied: accountAmount, transactionIds });
@@ -144,6 +155,11 @@ router.post('/api/financials/charge', async (req, res) => {
         );
 
         await clientDb.query('UPDATE Clients SET AccountBalance = $1 WHERE ClientId = $2', [newBalance, client]);
+        await logClientChange(clientDb, {
+            clientId: client, changedBy: createdBy, changeType: 'Custom Fee',
+            oldValue: moneyText('accountbalance', oldBalance), newValue: moneyText('accountbalance', newBalance),
+            details: `${dollars(chargeAmount)} custom fee charged: ${comments.trim()}`,
+        });
 
         await clientDb.query('COMMIT');
         await logAction(createdBy, 'Custom Fee Charged', `Charged Client ID ${client} a custom fee of $${chargeAmount.toFixed(2)}: ${comments.trim()}`);

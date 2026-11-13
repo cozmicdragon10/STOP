@@ -13,25 +13,77 @@ export const DISCHARGE_SUBCATEGORIES: Record<string, string[]> = {
   'Terminated': ['Violence', 'New Criminal Charge'],
 };
 
-// Change Log filter choices: the stored change type and how it is labelled
+// Change Log change types in the order their filters are listed, and how each is labelled. The server logs every change to
+// an account (backend/lib/changeLog.js); a type not listed here (e.g. a federal unit code) is labelled as stored.
 export const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
   { type: 'Client Created', label: 'Client Created' },
+  // Information
+  { type: 'Name', label: 'Name' },
+  { type: 'ID #', label: 'ID #' },
+  { type: 'ID # Type Set', label: 'ID # Type Set' },
+  { type: 'Date of Birth', label: 'Date of Birth' },
+  { type: 'Sex', label: 'Sex' },
+  { type: 'Race', label: 'Race' },
+  { type: 'Address', label: 'Address' },
+  { type: 'City', label: 'City' },
+  { type: 'County', label: 'County' },
+  { type: 'State', label: 'State' },
+  { type: 'Zip', label: 'Zip' },
+  { type: 'Main Phone', label: 'Main Phone' },
+  { type: 'Alt Phone', label: 'Alt Phone' },
+  { type: 'Emergency Contact', label: 'Emergency Contact' },
+  { type: 'Emergency Contact Phone', label: 'Emergency Contact Phone' },
+  { type: 'Comments', label: 'Comments' },
+  // Program
   { type: 'Program Status', label: 'Program Status' },
   { type: 'Program Type', label: 'Program Type' },
+  { type: 'Program Start Date', label: 'Program Start Date' },
+  { type: 'Phase', label: 'Phase' },
   { type: 'Supervising Agent', label: 'Supervising Agent' },
   { type: 'Group', label: 'Group' },
+  { type: 'Individual Group', label: 'Individual Group' },
   { type: 'Assessor', label: 'Assessor' },
+  { type: 'Outside BIP Assessment', label: 'Outside BIP Assessment' },
+  { type: 'Pretrial', label: 'Pretrial' },
   { type: 'Bus Passes', label: 'Bus Passes' },
   { type: 'Bus Pass Refill', label: 'Bus Pass Refill' },
-  { type: 'Pretrial', label: 'Pretrial' },
-  { type: 'No Poly Required', label: 'No Poly Required' },
-  { type: 'Fee Override', label: 'Temporary Fee Override' },
-  { type: 'Poly Fee Override', label: 'Poly Fee Override' },
+  // Attendance
+  { type: 'Attendance Added', label: 'Attendance Added' },
+  { type: 'Attendance Deleted', label: 'Attendance Deleted' },
+  { type: 'Call-In', label: 'Call-In' },
+  // Money
+  { type: 'Payment', label: 'Payment' },
+  { type: 'Custom Fee', label: 'Custom Fee' },
   { type: 'Payment Adjusted', label: 'Payment Adjusted' },
   { type: 'Payment Refunded', label: 'Payment Refunded' },
   { type: 'Payment Disputed', label: 'Payment Disputed' },
-  { type: 'Attendance Deleted', label: 'Attendance Deleted' },
+  { type: 'Account Balance', label: 'Account Balance' },
+  { type: 'Treatment Fee', label: 'Treatment Fee' },
+  { type: 'Fee Override', label: 'Temporary Fee Override' },
+  { type: 'Vouchers', label: 'Vouchers' },
+  { type: 'Copay', label: 'Copay' },
+  { type: 'Card Payments', label: 'Card Payments' },
+  // Polygraphs
+  { type: 'Polygraph', label: 'Polygraph' },
+  { type: 'No Poly Required', label: 'No Poly Required' },
+  { type: 'Poly Fee', label: 'Poly Fee' },
+  { type: 'Poly Fee Paid', label: 'Poly Fee Paid' },
+  { type: 'Poly Fee Vouchers', label: 'Poly Fee Vouchers' },
+  { type: 'Poly Fee Override', label: 'Poly Fee Override' },
+  // Records
+  { type: 'Case Note', label: 'Case Note' },
+  { type: 'Attachment', label: 'Attachment' },
 ];
+
+// The Change Log's filters: only the types this client's log has, in CHANGE_LOG_TYPES order, then any other stored types
+// alphabetically
+export const changeLogFilters = (changes: { changetype: string }[]) => {
+  const present = new Set(changes.map(c => c.changetype));
+  const known = CHANGE_LOG_TYPES.filter(t => present.has(t.type));
+  const others = [...present].filter(type => !CHANGE_LOG_TYPES.some(t => t.type === type)).sort()
+    .map(type => ({ type, label: type }));
+  return [...known, ...others];
+};
 
 // Programs that use the SO phase schedule
 export const SO_PROGRAM_TYPES = ['State SO', 'Federal SO', 'Voluntary SO'];

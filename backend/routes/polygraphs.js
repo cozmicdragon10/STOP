@@ -2,7 +2,7 @@ const express = require('express');
 const { ymdOf } = require('../lib/dates');
 const { logAction, pool } = require('../db');
 const { requireRole } = require('../lib/auth');
-const { logClientChange } = require('../lib/changeLog');
+const { dateText, logClientChange, noteText: shortText } = require('../lib/changeLog');
 const { LAST_POLY_RESULT_SQL, NO_POLY_PROGRAM_TYPES, POLY_INCENTIVE_OVERRIDE_RESULTS, POLY_NDI_WAIT, POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, endPolyFeeOverride, polyOverrideText } = require('../lib/poly');
 
 const router = express.Router();
@@ -153,6 +153,13 @@ router.post('/api/polygraphs/results', async (req, res) => {
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
             [client, date, type, results, polygrapher, notes, polygraphDateTime, continueIncentive]
         );
+        const examiner = (await pool.query('SELECT DisplayName FROM EmployeeRoles WHERE EmployeeEmail = $1', [polygrapher])).rows[0]?.displayname || polygrapher;
+        await logClientChange(pool, {
+            clientId: client, changedBy: user, changeType: 'Polygraph', newValue: results || 'Result recorded',
+            details: `${type ? `${type} polygraph` : 'Polygraph'} result recorded for ${dateText(polygraphDateTime || date)}${examiner ? ` with examiner ${examiner}` : ''}.`
+                + (continueIncentive ? ' Incentive program continued by Business Administrator override.' : '')
+                + (String(notes || '').trim() ? ` Notes: ${shortText(notes)}` : ''),
+        });
         res.status(201).json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -341,6 +348,7 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
             `INSERT INTO Notes (Client, Date, "User", Comments, Category) VALUES ($1, NOW(), $2, $3, 'Polygraph')`,
             [clientId, user || 'Unknown', noteText]
         );
+        await logClientChange(db, { clientId, changedBy: user, changeType: 'Polygraph', newValue: 'Scheduled', details: noteText });
 
         await db.query('COMMIT');
         if (waitBypassed) {
@@ -475,6 +483,7 @@ router.post('/api/polygraphs/slots/:slotId/open', async (req, res) => {
                 `INSERT INTO Notes (Client, Date, "User", Comments, Category) VALUES ($1, NOW(), $2, $3, 'Polygraph')`,
                 [client, user || 'Unknown', noteText]
             );
+            await logClientChange(db, { clientId: client, changedBy: user, changeType: 'Polygraph', newValue: 'Canceled', details: noteText });
         }
 
         if (appointmentPassed && apptRes.rows.length > 0) {
@@ -620,6 +629,7 @@ router.post('/api/polygraphs/slots/:slotId/reschedule', requireRole('Business Ad
                 `INSERT INTO Notes (Client, Date, "User", Comments, Category) VALUES ($1, NOW(), $2, $3, 'Polygraph')`,
                 [client, user || 'Unknown', noteText]
             );
+            await logClientChange(db, { clientId: client, changedBy: user, changeType: 'Polygraph', newValue: 'Rescheduled', details: noteText });
         }
 
         await db.query('COMMIT');
@@ -637,14 +647,34 @@ router.post('/api/polygraphs/slots/:slotId/reschedule', requireRole('Business Ad
 // Delete Polygraph Slot (and any associated appointments)
 // Business Administrators only, as on the Polygraphs tab
 router.delete('/api/polygraphs/slots/:slotId', requireRole('Business Administrator'), async (req, res) => {
+    const db = await pool.connect();
     try {
         const { slotId } = req.params;
-        await pool.query('DELETE FROM PolygraphAppointments WHERE SlotId = $1', [slotId]);
-        await pool.query('DELETE FROM PolygraphSlots WHERE SlotId = $1', [slotId]);
+        await db.query('BEGIN');
+        const slot = (await db.query('SELECT * FROM PolygraphSlots WHERE SlotId = $1', [slotId])).rows[0];
+        // A client booked into the slot loses the booking; that goes on their change log (vouchers used aren't returned)
+        const booked = (await db.query(
+            "DELETE FROM PolygraphAppointments WHERE SlotId = $1 RETURNING Client, Status, PolyVouchersUsed", [slotId]
+        )).rows.filter(a => a.status === 'Scheduled' && a.client);
+        if (slot) {
+            const context = booked.length ? await slotNoteContext(slot) : '';
+            for (const a of booked) {
+                const used = Number(a.polyvouchersused || 0);
+                await logClientChange(db, {
+                    clientId: a.client, changedBy: req.user.employeeemail, changeType: 'Polygraph', newValue: 'Canceled',
+                    details: `Polygraph slot ${context} was deleted.${used > 0 ? ` The ${used} poly fee voucher${used === 1 ? '' : 's'} used to book it ${used === 1 ? 'was' : 'were'} not returned.` : ''}`,
+                });
+            }
+        }
+        await db.query('DELETE FROM PolygraphSlots WHERE SlotId = $1', [slotId]);
+        await db.query('COMMIT');
         res.json({ success: true, message: 'Polygraph slot deleted successfully.' });
     } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
         console.error('Error deleting slot:', err);
         res.status(500).json({ error: 'Failed to delete slot.' });
+    } finally {
+        db.release();
     }
 });
 

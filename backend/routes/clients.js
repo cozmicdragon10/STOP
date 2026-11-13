@@ -5,7 +5,7 @@ const { buildDischargeSummaryPdf } = require('../dischargeSummary');
 const { logAction, pool } = require('../db');
 const { activeRoleFor } = require('../lib/access');
 const { requireRole } = require('../lib/auth');
-const { groupNameFor, logClientChange } = require('../lib/changeLog');
+const { CLIENT_INFO_COLUMNS, clientInfoChanges, groupNameFor, logClientChange, noteText } = require('../lib/changeLog');
 const { changedFields, clientConflictMessage } = require('../lib/editConflicts');
 const { MONEY_FIELDS, LABELS: MONEY_LABELS, moneyEditProblem, moneyText, standardTreatmentFee } = require('../lib/moneyFields');
 const { POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, countPolyFeeFill } = require('../lib/poly');
@@ -394,6 +394,10 @@ router.post('/api/clients/:id/notes', async (req, res) => {
             'INSERT INTO Notes (Client, Date, "User", Comments, Category, ApprovalStatus) VALUES ($1, NOW(), $2, $3, $4, $5) RETURNING *',
             [id, user, comments, category, approvalStatus]
         );
+        await logClientChange(pool, {
+            clientId: id, changedBy: user, changeType: 'Case Note', newValue: 'Added',
+            details: `${category} note${approvalStatus ? ' (awaiting Business Administrator approval)' : ''}: ${noteText(comments)}`,
+        });
         await logAction(user, 'Add Note', `Added note to Client ID ${id}${approvalStatus ? ' (awaiting Business Administrator approval)' : ''}`);
         res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -446,6 +450,10 @@ router.put('/api/notes/:noteId', async (req, res) => {
                 note: current,
             });
         }
+        await logClientChange(pool, {
+            clientId: check.note.client, changedBy: user, changeType: 'Case Note', newValue: 'Edited',
+            details: `${check.note.category || ''} note by ${check.note.User || 'Unknown'}. Was: ${noteText(check.note.comments)} Now: ${noteText(comments)}`.trim(),
+        });
         await logAction(user, 'Edit Note', `Edited note ${noteId} on Client ID ${check.note.client}. Previous text: ${check.note.comments}`);
         res.json(result.rows[0]);
     } catch (err) {
@@ -492,7 +500,12 @@ router.post('/api/notes/:noteId/review', requireRole('Business Administrator'), 
              WHERE NoteId = $5 RETURNING *`,
             [status, user, edited, String(comments ?? '').trim(), noteId]
         );
-        await logAction(user, `Note ${status}`, `${status} ${note.category || ''} note ${noteId} on Client ID ${note.client} by ${note.User}.`
+        await logClientChange(pool, {
+            clientId: note.client, changedBy: user, changeType: 'Case Note', newValue: status,
+            details: `${note.category || ''} note by ${note.User || 'Unknown'}`.trim()
+                + (edited ? `, edited before approval. Was: ${noteText(note.comments)} Now: ${noteText(comments)}` : `: ${noteText(note.comments)}`),
+        });
+        await logAction(user, `Note ${status}`,`${status} ${note.category || ''} note ${noteId} on Client ID ${note.client} by ${note.User}.`
             + (edited ? ` Edited before approval. Previous text: ${note.comments}` : ` Text: ${note.comments}`));
         res.json(result.rows[0]);
     } catch (err) {
@@ -522,7 +535,11 @@ router.delete('/api/notes/:noteId', async (req, res) => {
                 note: current,
             });
         }
-        await logAction(user, 'Delete Note', `Deleted ${check.note.category || ''} note ${noteId} on Client ID ${check.note.client} by ${check.note.User}. Text: ${deleted.rows[0].comments}`);
+        await logClientChange(pool, {
+            clientId: check.note.client, changedBy: user, changeType: 'Case Note', newValue: 'Deleted',
+            details: `${check.note.category || ''} note by ${check.note.User || 'Unknown'}: ${noteText(deleted.rows[0].comments)}`.trim(),
+        });
+        await logAction(user, 'Delete Note',`Deleted ${check.note.category || ''} note ${noteId} on Client ID ${check.note.client} by ${check.note.User}. Text: ${deleted.rows[0].comments}`);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -585,6 +602,7 @@ router.post('/api/clients/:id/attachments', express.raw({ type: 'application/oct
              RETURNING AttachmentId, ClientId, FileName, ContentType, FileSize, UploadedBy, UploadedOn`,
             [id, fileName.slice(0, 255), contentType.slice(0, 255), req.body.length, req.body, user]
         );
+        await logClientChange(pool, { clientId: id, changedBy: user, changeType: 'Attachment', newValue: 'Added', details: result.rows[0].filename });
         await logAction(user, 'Add Attachment', `Client ID ${id}: ${fileName}`);
         res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -637,7 +655,13 @@ router.patch('/api/attachments/:attachmentId', async (req, res) => {
              RETURNING AttachmentId, ClientId, FileName, ContentType, FileSize, UploadedBy, UploadedOn`,
             [fileName.slice(0, 255), req.params.attachmentId]
         );
-        await logAction(user, 'Rename Attachment', `Client ID ${before.clientid}: ${before.filename} to ${result.rows[0].filename}`);
+        if (before.filename !== result.rows[0].filename) {
+            await logClientChange(pool, {
+                clientId: before.clientid, changedBy: user, changeType: 'Attachment',
+                oldValue: before.filename, newValue: result.rows[0].filename, details: 'Renamed.',
+            });
+        }
+        await logAction(user, 'Rename Attachment',`Client ID ${before.clientid}: ${before.filename} to ${result.rows[0].filename}`);
         res.json(result.rows[0]);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -656,7 +680,10 @@ router.delete('/api/attachments/:attachmentId', async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Attachment not found.' });
         }
-        await logAction(user, 'Delete Attachment', `Client ID ${result.rows[0].clientid}: ${result.rows[0].filename}`);
+        await logClientChange(pool, {
+            clientId: result.rows[0].clientid, changedBy: user, changeType: 'Attachment', newValue: 'Deleted', details: result.rows[0].filename,
+        });
+        await logAction(user, 'Delete Attachment',`Client ID ${result.rows[0].clientid}: ${result.rows[0].filename}`);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -738,7 +765,7 @@ const updateClientInfo = async (req, res) => {
             return res.status(status).json(body);
         };
         // Tracked fields before the edit, for the change log; locks the client until the save is done
-        const beforeRes = await db.query('SELECT AccountBalance, TreatmentFee, Vouchers, DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Phase, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1 FOR UPDATE', [id]);
+        const beforeRes = await db.query(`SELECT ${CLIENT_INFO_COLUMNS}, AccountBalance, TreatmentFee, Vouchers, DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1 FOR UPDATE`, [id]);
         const before = beforeRes.rows[0];
         if (!before) return refuse(404, { error: 'Client not found.' });
         // Someone else changed a field this edit changes: refuse, and send the client as it is now
@@ -872,7 +899,7 @@ const updateClientInfo = async (req, res) => {
         );
 
         if (before && updated.rows[0]) {
-            const after = await db.query('SELECT DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1', [id]);
+            const after = await db.query(`SELECT ${CLIENT_INFO_COLUMNS}, DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1`, [id]);
             const now = after.rows[0];
             // An edit that makes the poly fee paid in full filled the vouchers (see the CASE above); that counts toward an override
             const wasFull = Number(before.polyfee) > 0 && Number(before.polyfeepaid) >= Number(before.polyfee);
@@ -890,6 +917,8 @@ const updateClientInfo = async (req, res) => {
                 });
             }
             const tracked = [
+                // Name, phase, dates, race, sex, address, phones, emergency contact, comments
+                ...clientInfoChanges(before, now),
                 ['ID #', idText(before), idText(now)],
                 ['Program Status', before.programstatus, now.programstatus],
                 ['Program Type', before.programtype, now.programtype],

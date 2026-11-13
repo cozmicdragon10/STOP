@@ -1,4 +1,6 @@
 const { assertCardAllowed } = require('./cardBlock');
+const { dateText, dollars, logClientChange } = require('./changeLog');
+const { moneyText } = require('./moneyFields');
 const { todayLocal } = require('./dates');
 const { LAST_POLY_RESULT_SQL, POLY_VOUCHER_EARNING_RESULTS, polyVoucherMax } = require('./poly');
 const {
@@ -179,6 +181,21 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
             if (polyVoucherAwarded) await db.query('UPDATE Attendance SET PolyVoucherAwarded = TRUE WHERE AttendanceId = $1', [attendanceId]);
         }
     }
+
+    // The check-in goes on the client's change log with what it did to the account
+    const groupName = group
+        ? (await db.query('SELECT GroupName FROM Groups WHERE GroupId = $1', [group])).rows[0]?.groupname || `Group ${group}`
+        : null;
+    const charged = `fee ${dollars(feeNum)}${feeReason ? ` (${feeReason})` : ''}`;
+    const payment = paidNum > 0 ? `paid ${dollars(paidNum)} ${paymentMethod}` : 'no payment';
+    await logClientChange(db, {
+        clientId: client, changedBy: createdBy, changeType: 'Attendance Added',
+        oldValue: moneyText('accountbalance', oldBalance), newValue: moneyText('accountbalance', newBalance),
+        details: `${groupName || type}${groupName && type && type !== 'Group' ? ` (${type})` : ''}${sessionNum > 1 ? ` session ${sessionNum}` : ''} on ${dateText(sessionDate)}: ${charged}, ${payment}.`
+            + (newPhase ? ` BIP week now ${newPhase}.` : '')
+            + (polyVoucherAwarded ? ' Earned a poly fee voucher.' : '')
+            + (comments ? ` ${comments}` : ''),
+    });
 
     // feeCharged and feeReason: what the account was charged and why, for telling the user when it differs from what was sent
     return { attendanceId, newBalance, polyVoucherAwarded, feeCharged: feeNum, feeReason };

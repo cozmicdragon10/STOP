@@ -1,5 +1,6 @@
 const express = require('express');
 const { pool } = require('../db');
+const { logClientChange, noteText } = require('../lib/changeLog');
 
 const router = express.Router();
 
@@ -26,6 +27,7 @@ router.post('/api/callin/client', async (req, res) => {
             `INSERT INTO Notes (Client, Date, "User", Comments, Category) VALUES ($1, $2, $3, $4, 'Call-In')`,
             [client, date || new Date(), createdBy, `[Call-In Log]${reasonText}: ${comment}`]
         );
+        await logClientChange(clientDb, { clientId: client, changedBy: createdBy, changeType: 'Call-In', newValue: reason || 'Logged', details: noteText(comment) });
 
         await clientDb.query('COMMIT');
         res.status(201).json({ success: true, eventId: eventRes.rows[0].eventid });
@@ -67,6 +69,10 @@ router.post('/api/callin/group', async (req, res) => {
                 `INSERT INTO Notes (Client, Date, "User", Comments, Category) VALUES ($1, $2, $3, $4, 'Call-In')`,
                 [c.clientid, date || new Date(), createdBy, `[Group Call-In Log]${forText}${reasonText}: ${comment}`]
             );
+            await logClientChange(clientDb, {
+                clientId: c.clientid, changedBy: createdBy, changeType: 'Call-In', newValue: reason || 'Logged',
+                details: `Group call-in${forDate ? ` for ${forDate}` : ''}: ${noteText(comment)}`,
+            });
         }
 
         await clientDb.query('COMMIT');

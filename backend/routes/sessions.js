@@ -3,7 +3,8 @@ const { todayLocal } = require('../lib/dates');
 const { logAction, pool } = require('../db');
 const { OPEN_GROUP_ADMIN_ROLES, activeRoleFor, openGroupViewer } = require('../lib/access');
 const { recordAttendance } = require('../lib/attendance');
-const { logClientChange } = require('../lib/changeLog');
+const { dateText, dollars, logClientChange } = require('../lib/changeLog');
+const { moneyText } = require('../lib/moneyFields');
 const { BIP_CHECKIN_BLOCK, INDIVIDUAL_SESSION_TYPES, NEEDS_OUR_INTAKE, YMD } = require('../lib/sql');
 const { staleFields, staleMessage } = require('../lib/editConflicts');
 
@@ -368,6 +369,11 @@ router.put('/api/individual-sessions/open', async (req, res) => {
                 [s.client, s.payment, newBalance, `Payment applied when opening ${s.typeName} session on ${s.date}.${note ? ` ${note}` : ''}`, s.paymentMethod, viewer.employeeemail]
             );
             await db.query('UPDATE Clients SET AccountBalance = $1 WHERE ClientId = $2', [newBalance, s.client]);
+            await logClientChange(db, {
+                clientId: s.client, changedBy: viewer.employeeemail, changeType: 'Payment',
+                oldValue: moneyText('accountbalance', balRes.rows[0].accountbalance), newValue: moneyText('accountbalance', newBalance),
+                details: `${dollars(s.payment)} ${s.paymentMethod} payment when opening ${s.typeName} on ${dateText(s.date)}.${note ? ` ${note}` : ''}`,
+            });
         }
         // A payment applied now is not stored as pending on the open session
         const pending = payNow ? 0 : s.payment;
