@@ -1,9 +1,13 @@
 const { Pool } = require('pg');
 require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+const { chooseDatabase } = require('./lib/databaseTarget');
+
+// The live database, or the developer copy when APP_ENV=dev (see lib/databaseTarget.js)
+const databaseTarget = chooseDatabase();
 
 // Connects lazily on the first query; server.js confirms the connection at startup by running migrations
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: databaseTarget.url,
 });
 
 // Helper for Logging
@@ -18,4 +22,4 @@ const logAction = async (userEmail, action, details, type = 'Audit') => {
     }
 };
 
-module.exports = { pool, logAction };
+module.exports = { pool, logAction, databaseTarget };

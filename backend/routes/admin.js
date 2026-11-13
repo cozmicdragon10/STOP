@@ -51,7 +51,7 @@ router.put('/api/admin/employees/:email', accountsOnly, async (req, res) => {
         }
         // Who may change which account (lib/accounts.js), judged by the session, not by anything the browser sent
         const others = await db.query(
-            "SELECT COUNT(*) AS n FROM EmployeeRoles WHERE Role = 'Business Administrator' AND Active = TRUE AND LOWER(EmployeeEmail) <> LOWER($1)", [email]);
+            "SELECT COUNT(*) AS n FROM EmployeeRoles WHERE Role IN ('Business Administrator', 'DEV') AND Active = TRUE AND LOWER(EmployeeEmail) <> LOWER($1)", [email]);
         const problem = accountChangeProblem({
             actor: req.user, target: { employeeemail: email, role: before.rows[0].role, active: before.rows[0].active },
             next: { role, active: active !== false }, otherActiveTopRole: Number(others.rows[0].n),

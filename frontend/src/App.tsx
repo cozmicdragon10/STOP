@@ -3,7 +3,7 @@ import {
   Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
   DollarSign, Calendar, Activity, PhoneCall, ShieldAlert, 
   Layers, BarChart3, Settings, Trash2, RotateCcw, Home, History,
-  Paperclip, UserCheck, ClipboardList, SlidersHorizontal, Lock, Palette
+  Paperclip, UserCheck, ClipboardList, SlidersHorizontal, Lock, Palette, Code2
 } from 'lucide-react';
 import {
   loginUser, logoutUser, setSessionEndedHandler, getClient, getClients, getGroups, getProgramFees,
@@ -28,6 +28,7 @@ import SupervisingAgentsTab from './components/agents/SupervisingAgentsTab';
 import CallInTab from './components/callin/CallInTab';
 import GroupsTab from './components/groups/GroupsTab';
 import AdminTab from './components/admin/AdminTab';
+import DevTab from './components/dev/DevTab';
 import SettingsTab from './components/settings/SettingsTab';
 import FormsTab from './components/forms/FormsTab';
 import PolySlotForm from './components/polygraph/PolySlotForm';
@@ -706,6 +707,8 @@ export default function App() {
   const isAllowed = (tab: string) => {
     // Everyone has their own Settings (appearance and layout)
     if (tab === 'settings') return true;
+    // The DEV menu is for DEV accounts only (they otherwise act as Business Administrators; the server checks)
+    if (tab === 'dev') return user.isdev === true;
     if (role === 'Office Admin' || role === 'Business Administrator') return true;
     // Reports holds only the Cash Deposits report for them
     if (role === 'Counselor') return ['clients', 'attendance', 'sessions', 'callin', 'polygraph', 'groups', 'reports', 'agents', 'forms'].includes(tab);
@@ -729,6 +732,7 @@ export default function App() {
     { tab: 'forms', icon: FileText, label: 'Forms' },
     { tab: 'settings', icon: Palette, label: 'Settings' },
     { tab: 'admin', icon: Settings, label: 'Admin' },
+    { tab: 'dev', icon: Code2, label: 'DEV' },
   ].filter(item => item.tab === 'home' || isAllowed(item.tab));
 
   const getExaminerDisplayName = (email: string) =>
@@ -829,7 +833,7 @@ export default function App() {
         <div className="hidden md:flex items-center gap-4 shrink-0">
           <div className="text-right">
             <p className="text-sm font-medium text-white">{user.displayname}</p>
-            <span className="text-xs bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/20 font-semibold">{user.role}</span>
+            <span className="text-xs bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/20 font-semibold">{user.isdev ? 'DEV' : user.role}</span>
           </div>
           <button onClick={handleLogout} className="bg-slate-800 hover:bg-slate-700 p-2 rounded-lg text-slate-400 hover:text-white transition"><LogOut size={18} /></button>
         </div>
@@ -1720,6 +1724,8 @@ export default function App() {
         {activeTab === 'forms' && isAllowed('forms') && <FormsTab role={role} onSuccess={setSuccessMsg} />}
 
         {activeTab === 'settings' && <SettingsTab />}
+
+        {activeTab === 'dev' && isAllowed('dev') && <DevTab />}
 
         {activeTab === 'admin' && (
           <AdminTab user={user} onOpenTransaction={openTransaction} employees={employees} onEmployeesChanged={setEmployees} onSuccess={setSuccessMsg} onError={setError} />

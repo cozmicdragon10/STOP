@@ -53,8 +53,10 @@ updates, rollback, and logs are covered in [deploy/README.md](deploy/README.md).
 cd backend
 npm start
 ```
-The backend applies any pending migrations, then starts on `https://localhost:5000` (or the `PORT` in `.env`). On the
-office server it's already running under the watchdog; use `deploy/restart.ps1` there instead.
+`npm start` runs locally with `APP_ENV=dev`: it uses the developer database (`DEV_DATABASE_URL`, `stop_dev`), never the
+live one, and listens on `https://localhost:5100` (the site on 5180). The live API on 5000 can keep running beside it.
+Startup logs `Using database stop_dev (APP_ENV dev)`. The deployed server runs `node server.js` without `APP_ENV`
+(see `deploy/run-server.ps1`), so it always uses `DATABASE_URL`, the live `stop_db`.
 
 #### Start the Frontend Development Server
 In a new terminal:
@@ -62,7 +64,8 @@ In a new terminal:
 cd frontend
 npm run dev
 ```
-The dev server runs on `https://localhost:5174`, beside the live site on 5173. It uses the same API and database.
+The dev server runs on `https://localhost:5174`. It calls the local backend on port 5100 (`VITE_API_PORT` in
+`frontend/.env.development`), so its data is the `stop_dev` database, not the live one.
 
 ### Tests
 - `npm test` in `backend/` and `npx vitest run` in `frontend/` (run vitest from PowerShell on Windows).
@@ -195,6 +198,14 @@ The backend provides REST API endpoints for:
   an employee account, and deleting a group, need a Business Administrator. Nobody can change their own role, and the
   last active Business Administrator can't be demoted or deactivated (`backend/lib/accounts.js`).
 - **Roles** (checked by the server, not just hidden on screen):
+  - **DEV:** a developer account. Everything a Business Administrator can do (the server reads the role as Business
+    Administrator, `backend/lib/roles.js`), plus the **DEV** menu (server and database information, `/api/dev/*`). Only a
+    DEV account can give out the DEV role or change a DEV account.
+    The DEV menu's **Database Sync** (`backend/lib/dbSync.js`) copies the whole database (schema, data, views) between
+    the app database and a local copy on the same PostgreSQL server (`stop_dev`, or `DEV_DATABASE_NAME` in `.env`).
+    *Pull* replaces the local copy. *Push* replaces the live database after backing it up to `backups/` (git-ignored),
+    must be confirmed by typing the database name, and logs out anyone who logged in after the last pull. pg_dump/psql come from `PG_BIN` or the newest
+    `C:\Program Files\PostgreSQL\<version>\bin`.
   - **Business Administrator:** everything. Only role that creates or changes employee accounts, discharges clients,
     and changes a client's balance, treatment fee, vouchers or poly fee by hand on the Information tab (every such
     change goes on the client's change log; `backend/lib/moneyFields.js`). Anyone may save the price list's treatment

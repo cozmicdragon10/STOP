@@ -1,4 +1,5 @@
 const express = require('express');
+const { effectiveRole } = require('../lib/roles');
 const { logAction, pool } = require('../db');
 const { activeRoleFor, OPEN_GROUP_ADMIN_ROLES } = require('../lib/access');
 const { assertCardAllowed } = require('../lib/cardBlock');
@@ -132,7 +133,7 @@ router.post('/api/financials/charge', async (req, res) => {
             'SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE',
             [createdBy]
         );
-        if (roleRes.rows[0]?.role !== 'Business Administrator') {
+        if (effectiveRole(roleRes.rows[0]?.role) !== 'Business Administrator') {
             return res.status(403).json({ error: 'Only Business Administrators can charge custom fees.' });
         }
         if (!(Number(amount) > 0)) {

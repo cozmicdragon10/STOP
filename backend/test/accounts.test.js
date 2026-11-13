@@ -41,3 +41,16 @@ test('the role must be a real one', () => {
     assert.match(problem(owner, null, { role: 'Therapist', active: true }), /Role must be one of/);
     assert.match(problem(owner, account('Counselor'), { role: '', active: true }), /Role must be one of/);
 });
+
+test('only a DEV account hands out or changes the DEV role, and DEV counts as a Business Administrator', () => {
+    const dev = { employeeemail: 'dev@stop.local', role: 'Business Administrator', isdev: true };
+    assert.equal(problem(dev, null, { role: 'DEV', active: true }), null);
+    assert.equal(problem(dev, account('Counselor'), { role: 'DEV', active: true }), null);
+    assert.equal(problem(dev, account('Business Administrator'), { role: 'Counselor', active: true }), null);
+    assert.match(problem(owner, null, { role: 'DEV', active: true }), /Only a DEV account can give/);
+    assert.match(problem(owner, account('DEV'), { role: 'DEV', active: false }), /Only a DEV account can change/);
+    assert.match(problem(office, account('DEV'), { role: 'Counselor', active: true }), /Only a DEV account can change/);
+    // The last active Business Administrator or DEV account can't be demoted
+    assert.match(problem(dev, account('DEV'), { role: 'Counselor', active: true }, 0), /only active Business Administrator/);
+    assert.equal(problem(dev, account('DEV'), { role: 'Business Administrator', active: true }, 0), null);
+});

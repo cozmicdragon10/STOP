@@ -39,5 +39,6 @@ app.use(require('./routes/agentReports'));
 app.use(require('./routes/admin'));
 app.use(require('./routes/agents'));
 app.use(require('./routes/documents'));
+app.use(require('./routes/dev'));
 
 module.exports = app;

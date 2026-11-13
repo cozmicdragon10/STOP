@@ -1,4 +1,5 @@
 const express = require('express');
+const { effectiveRole } = require('../lib/roles');
 const { todayLocal } = require('../lib/dates');
 const { ID_TYPES, idText } = require('../lib/clientId');
 const { buildDischargeSummaryPdf } = require('../dischargeSummary');
@@ -102,7 +103,7 @@ router.put('/api/clients/:id/no-poly-required', async (req, res) => {
             return res.status(400).json({ error: 'noPolyRequired must be true or false.' });
         }
         const roleRes = await pool.query('SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [user]);
-        if (roleRes.rows[0]?.role !== 'Business Administrator') {
+        if (effectiveRole(roleRes.rows[0]?.role) !== 'Business Administrator') {
             return res.status(403).json({ error: 'Only Business Administrators can change No Poly Required.' });
         }
         const beforeRes = await pool.query('SELECT NoPolyRequired FROM Clients WHERE ClientId = $1', [id]);
@@ -257,7 +258,7 @@ const changeProgramStatus = (action) => async (req, res) => {
     const db = await pool.connect();
     try {
         const roleRes = await db.query('SELECT Role, DisplayName FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [user]);
-        if (!roleRes.rows[0] || (action.adminOnly && roleRes.rows[0].role !== 'Business Administrator')) {
+        if (!roleRes.rows[0] || (action.adminOnly && effectiveRole(roleRes.rows[0].role) !== 'Business Administrator')) {
             return res.status(403).json({ error: action.adminOnly ? 'Only Business Administrators can discharge clients.' : 'Only active employees can activate clients.' });
         }
         await db.query('BEGIN');
@@ -673,7 +674,7 @@ router.delete('/api/attachments/:attachmentId', async (req, res) => {
     try {
         const user = req.get('X-User') || '';
         const roleRes = await pool.query('SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [user]);
-        if (roleRes.rows[0]?.role !== 'Business Administrator') {
+        if (effectiveRole(roleRes.rows[0]?.role) !== 'Business Administrator') {
             return res.status(403).json({ error: 'Only Business Administrators can delete attachments.' });
         }
         const result = await pool.query('DELETE FROM ClientAttachments WHERE AttachmentId = $1 RETURNING ClientId, FileName', [req.params.attachmentId]);
@@ -1080,7 +1081,7 @@ router.delete('/api/clients/:id', async (req, res) => {
             'SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE',
             [userEmail]
         );
-        const userRole = userResult.rows[0]?.role;
+        const userRole = effectiveRole(userResult.rows[0]?.role);
         if (userRole !== 'Business Administrator') {
             return res.status(403).json({ error: 'Only Business Administrators can delete clients.' });
         }
@@ -1108,7 +1109,7 @@ router.get('/api/clients/:id/change-log', async (req, res) => {
     try {
         const { id } = req.params;
         const roleRes = await pool.query('SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [req.query.user]);
-        if (roleRes.rows[0]?.role !== 'Business Administrator') {
+        if (effectiveRole(roleRes.rows[0]?.role) !== 'Business Administrator') {
             return res.status(403).json({ error: 'Only Business Administrators can view the change log.' });
         }
         const result = await pool.query(

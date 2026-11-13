@@ -16,7 +16,7 @@ STOP: a full-stack office app (clients, groups, attendance, payments, polygraphs
 - Frontend tests: `cd frontend && npx vitest run` (run from PowerShell on Windows)
 - Frontend type check + build: `cd frontend && npm run build`
 - Lint: `cd frontend && npm run lint`
-- Dev: `cd backend && npm start`, then `cd frontend && npm run dev`
+- Dev: `cd backend && npm start` (local: APP_ENV=dev, stop_dev database, API on 5100), then `cd frontend && npm run dev`
 - Migrations: `cd backend && npm run migrate:status`
 
 ## Rules to follow

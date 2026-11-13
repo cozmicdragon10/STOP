@@ -3,8 +3,9 @@ import type { BipCheckInBlock } from './utils/bip';
 
 // The built site calls the API on its own address (the server answers /api on the site's port too; see
 // backend/frontendServer.js), so it works at any address it is opened by: inside the office or from outside. The Vite
-// dev server (5174) has no API of its own, so it uses the backend's port 5000 on the same machine.
-const API_BASE = import.meta.env.DEV ? `https://${globalThis.location?.hostname || 'localhost'}:5000/api` : '/api';
+// dev server (5174) has no API of its own, so it uses the local backend on the same machine: port 5100 (VITE_API_PORT in
+// frontend/.env.development, matching `npm start` in backend/). The live API on 5000 is not used by the dev server.
+const API_BASE = import.meta.env.DEV ? `https://${globalThis.location?.hostname || 'localhost'}:${String(import.meta.env.VITE_API_PORT || '5100')}/api` : '/api';
 
 // The login session token. Held in memory only, so reloading the page logs out (as before sessions existed).
 // It is kept on the page's global object rather than in this module, so a copy of this module loaded by a live code
@@ -1478,6 +1479,61 @@ export async function getSystemLogs(): Promise<SystemLog[]> {
         throw new Error(body?.error || 'Failed to load the system logs.');
     }
     return body;
+}
+
+// The DEV menu's server and database information; DEV accounts only, the server checks
+export interface DevInfo {
+    server: { node: string; platform: string; hostname: string; uptimeSeconds: number; startedAt: string; memoryMb: number; environment: string };
+    database: { name: string; version: string; size: string; now: string; migrationCount: number; recentMigrations: { name: string; appliedon: string }[] };
+    activeSessions: number;
+    activeAccountsByRole: { role: string; n: number }[];
+}
+
+export async function getDevInfo(): Promise<DevInfo> {
+    const res = await apiFetch(`${API_BASE}/dev/info`);
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body?.server) {
+        throw new Error(body?.error || 'Failed to load the DEV information.');
+    }
+    return body;
+}
+
+// DEV Database Sync: the app database and the dev copy (stop_dev) on the same PostgreSQL server
+export interface DevDatabase {
+    name: string;
+    exists: boolean;
+    size?: string;
+    tables?: number;
+    views?: number;
+    rows?: number;
+    migrations?: { count: number; latest: string | null };
+}
+
+export interface DevSyncStatus { app: DevDatabase; dev: DevDatabase; pgBin: string }
+
+export interface DevSyncResult {
+    direction: 'pull' | 'push';
+    from: string;
+    to: string;
+    backupFile: string | null;
+    seconds: number;
+    status: DevSyncStatus;
+}
+
+export async function getDevSyncStatus(): Promise<DevSyncStatus> {
+    const res = await apiFetch(`${API_BASE}/dev/sync`);
+    return jsonResponse(res, 'Failed to load the database sync status.');
+}
+
+// pull: the app database is copied over the dev copy. push: the dev copy replaces the app database (backed up first);
+// confirm must be the app database's name, the server checks.
+export async function runDevSync(direction: 'pull' | 'push', confirm?: string): Promise<DevSyncResult> {
+    const res = await apiFetch(`${API_BASE}/dev/sync/${direction}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm }),
+    });
+    return jsonResponse(res, `The database ${direction} failed.`);
 }
 
 export interface SupervisingAgent {

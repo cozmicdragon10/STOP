@@ -17,7 +17,7 @@ interface Employee {
 }
 
 interface Props {
-  user: { employeeemail: string; role: string };
+  user: { employeeemail: string; role: string; isdev?: boolean };
   // Transaction Lookup: opens the client's account on its ledger with the transaction highlighted
   onOpenTransaction: (clientId: number, transactionId: number) => void;
   // Shared with the rest of the app (examiner names, counselor pickers), so App keeps the list
@@ -28,6 +28,8 @@ interface Props {
 }
 
 const ROLES = ['Office Admin', 'Business Administrator', 'Counselor', 'Polygrapher'];
+// Only a DEV account can give out the DEV role (the server checks, backend lib/accounts.js)
+const DEV_ROLE = 'DEV';
 // New accounts get this location; it isn't editable here
 const NEW_ACCOUNT_LOCATION = 'Oklahoma City';
 
@@ -171,7 +173,7 @@ export default function AdminTab({ user, onOpenTransaction, employees, onEmploye
           <input type="text" value={empName} onChange={(e) => setEmpName(e.target.value)} placeholder="Full Display Name" className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm" required />
           <input type="password" value={empPassword} onChange={(e) => setEmpPassword(e.target.value)} autoComplete="new-password" placeholder={editingEmail ? 'New password (leave blank to keep current)' : 'Password'} className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm" required={editingEmail === null} />
           <select value={empRole} onChange={(e) => setEmpRole(e.target.value)} disabled={editingEmail === user.employeeemail} className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm disabled:opacity-50">
-            {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+            {(user.isdev || empRole === DEV_ROLE ? [...ROLES, DEV_ROLE] : ROLES).map(r => <option key={r} value={r}>{r}</option>)}
           </select>
           {empRole === 'Counselor' && (
             <label className="block">

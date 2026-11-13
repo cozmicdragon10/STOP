@@ -16,3 +16,5 @@ dist/
 Thumbs.db
 logs/
 site/
+# Database backups taken before a DEV push (lib/dbSync.js); they hold client data
+backups/

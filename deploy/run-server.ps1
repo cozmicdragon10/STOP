@@ -15,6 +15,12 @@ try { $mutex = New-Object System.Threading.Mutex($false, 'Global\STOP-Server-Wat
 catch { $mutex = New-Object System.Threading.Mutex($false, 'STOP-Server-Watchdog') }
 if (-not $mutex.WaitOne(0)) { exit 0 }
 
+# The deployed server always uses the live database and its ports. These are set here so nothing in backend/.env
+# (such as a local APP_ENV, PORT or FRONTEND_PORT) can change them; dotenv does not overwrite variables already set.
+$env:APP_ENV = 'production'
+$env:PORT = '5000'
+$env:FRONTEND_PORT = '5173'
+
 $node = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
 if (-not $node) { $node = 'C:\Program Files\nodejs\node.exe' }
 

@@ -1,4 +1,5 @@
 const express = require('express');
+const { effectiveRole } = require('../lib/roles');
 const { ymdOf } = require('../lib/dates');
 const { logAction, pool } = require('../db');
 const { requireRole } = require('../lib/auth');
@@ -134,7 +135,7 @@ router.post('/api/polygraphs/results', async (req, res) => {
                 return res.status(400).json({ error: 'Incentive program continuation only applies to Inconclusive or No Opinion results.' });
             }
             const roleRes = await pool.query('SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [user]);
-            if (roleRes.rows[0]?.role !== 'Business Administrator') {
+            if (effectiveRole(roleRes.rows[0]?.role) !== 'Business Administrator') {
                 return res.status(403).json({ error: 'Only Business Administrators can continue the incentive program.' });
             }
         }
@@ -246,7 +247,7 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
                 });
             }
             const roleRes = await db.query('SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [user]);
-            if (roleRes.rows[0]?.role !== 'Business Administrator') {
+            if (effectiveRole(roleRes.rows[0]?.role) !== 'Business Administrator') {
                 return res.status(403).json({ error: 'Only Business Administrators can bypass the polygraph waiting period.' });
             }
             waitBypassed = lastPoly;
@@ -427,7 +428,7 @@ router.post('/api/polygraphs/slots/:slotId/open', async (req, res) => {
         }
         if (overrideVoucherRule) {
             const roleRes = await db.query('SELECT Role FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [user]);
-            if (roleRes.rows[0]?.role !== 'Business Administrator') {
+            if (effectiveRole(roleRes.rows[0]?.role) !== 'Business Administrator') {
                 return res.status(403).json({ error: 'Only Business Administrators can override the poly voucher return.' });
             }
         }

@@ -1,7 +1,7 @@
 const express = require('express');
 const { verifyPassword } = require('../passwords');
 const { logAction, pool } = require('../db');
-const { LOGIN_LOCK_MINUTES, createSession, bearerToken, endSession, loginLocked, recordLoginFailure, clearLoginFailures } = require('../lib/auth');
+const { LOGIN_LOCK_MINUTES, createSession, bearerToken, endSession, loginLocked, recordLoginFailure, clearLoginFailures, sessionUser } = require('../lib/auth');
 
 const router = express.Router();
 
@@ -28,7 +28,7 @@ router.post('/api/auth/login', async (req, res) => {
         await logAction(email, 'User Login', 'User logged in successfully', 'Login');
         // Never send the password hash to the browser
         const { passwordhash, ...user } = row;
-        res.json({ success: true, user, token });
+        res.json({ success: true, user: sessionUser(user), token });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

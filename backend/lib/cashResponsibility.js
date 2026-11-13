@@ -1,4 +1,5 @@
 const { pool } = require('../db');
+const { effectiveRole } = require('./roles');
 const { OPEN_GROUP_ADMIN_ROLES } = require('./access');
 
 // Who is responsible for a closed group session's cash:
@@ -35,7 +36,7 @@ const withResponsible = (sessionsSql, adminRolesParam) => `
 // keep is the value already saved on the open check-in, kept when someone else saves or closes it.
 const coveringCounselorFor = async (requesterEmail, coveredBy, keep = null) => {
     const roleRes = await pool.query('SELECT Role FROM EmployeeRoles WHERE LOWER(EmployeeEmail) = LOWER($1) AND Active = TRUE', [requesterEmail || '']);
-    if (!OPEN_GROUP_ADMIN_ROLES.includes(roleRes.rows[0]?.role)) return keep;
+    if (!OPEN_GROUP_ADMIN_ROLES.includes(effectiveRole(roleRes.rows[0]?.role))) return keep;
     const email = String(coveredBy || '').trim();
     if (!email) return null;
     const emp = await pool.query('SELECT EmployeeEmail FROM EmployeeRoles WHERE LOWER(EmployeeEmail) = LOWER($1) AND Active = TRUE', [email]);

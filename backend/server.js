@@ -1,7 +1,7 @@
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const { pool } = require('./db');
+const { pool, databaseTarget } = require('./db');
 const { runMigrations } = require('./migrate');
 const app = require('./app');
 const { startMonthlyRefills } = require('./lib/busPasses');
@@ -20,6 +20,7 @@ const tlsOptions = {
 runMigrations(pool)
   .then(() => {
     console.log('Connected to PostgreSQL database successfully.');
+    console.log(`Using database ${databaseTarget.name} (APP_ENV ${databaseTarget.appEnv})`);
     https.createServer(tlsOptions, app).listen(PORT, '0.0.0.0', () => {
       console.log(`STOP Backend Server running on https://OKC-SERVER:${PORT}`);
     });

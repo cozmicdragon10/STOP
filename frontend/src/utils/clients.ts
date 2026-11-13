@@ -187,7 +187,8 @@ export const isChaperonGroup = (groupProgram?: string | null) => CHAPERON_GROUP_
 export const allowsByAppointment = (groupProgram?: string | null) =>
   isDrugTestGroup(groupProgram) || isChaperonGroup(groupProgram) || isIndividualGroup(groupProgram);
 export const groupLeadLabel = (groupProgram?: string | null) => (isDrugTestGroup(groupProgram) ? 'Observer' : 'Counselor');
-export const OBSERVER_ROLES = ['Office Admin', 'Business Administrator'];
+// DEV accounts act as Business Administrators (backend lib/roles.js)
+export const OBSERVER_ROLES = ['Office Admin', 'Business Administrator', 'DEV'];
 // Whether a client of this program can be put in a group of this program type: BIP groups take BIP clients, SO groups
 // take SO clients, DRUG TEST groups take Fed Drug Test clients, CHAPERON and FED CHAPERON groups take Chaperon clients. A group without a program type,
 // or an INDIVIDUAL group, takes anyone. Mirrors the server's check on assignment.

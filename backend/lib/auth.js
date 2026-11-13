@@ -2,6 +2,7 @@
 // other request. Only a SHA-256 hash of the token is stored, so the Sessions table alone can't be used to log in.
 const crypto = require('crypto');
 const { pool } = require('../db');
+const { effectiveRole, isDevRole } = require('./roles');
 
 const SESSION_HOURS = Number(process.env.SESSION_HOURS) || 12;
 const ADMIN_ROLES = ['Office Admin', 'Business Administrator'];
@@ -42,6 +43,10 @@ const stampIdentity = (req, email) => {
     req.headers['x-user-email'] = email;
 };
 
+// The employee as the rest of the app sees them: a DEV account acts as a Business Administrator (role) and is marked
+// isdev, which opens the DEV menu. accountrole keeps the role stored on the account.
+const sessionUser = (row) => ({ ...row, accountrole: row.role, role: effectiveRole(row.role), isdev: isDevRole(row.role) });
+
 // Every API route except login needs a valid session. Sets req.user to the employee (email, display name, role).
 const requireSession = async (req, res, next) => {
     if (req.path === '/api/auth/login') return next();
@@ -55,7 +60,7 @@ const requireSession = async (req, res, next) => {
             [hashToken(token)]
         );
         if (result.rows.length === 0) return res.status(401).json({ error: 'Your session has ended. Please log in again.' });
-        req.user = result.rows[0];
+        req.user = sessionUser(result.rows[0]);
         stampIdentity(req, req.user.employeeemail);
         next();
     } catch (err) {
@@ -65,6 +70,11 @@ const requireSession = async (req, res, next) => {
 
 // Limits a route to the given roles (checked against the session, not anything the browser sends)
 const requireRole = (...roles) => (req, res, next) => (roles.includes(req.user?.role)
+    ? next()
+    : res.status(403).json({ error: 'You do not have permission to do that.' }));
+
+// Limits a route to DEV accounts (the DEV menu)
+const requireDev = (req, res, next) => (req.user?.isdev === true
     ? next()
     : res.status(403).json({ error: 'You do not have permission to do that.' }));
 
@@ -92,5 +102,5 @@ const clearLoginFailures = (email) => loginFailures.delete(loginKey(email));
 
 module.exports = {
     ADMIN_ROLES, LOGIN_LOCK_MINUTES, createSession, bearerToken, endSession, endSessionsFor, stampIdentity,
-    requireSession, requireRole, loginLocked, recordLoginFailure, clearLoginFailures,
+    requireSession, requireRole, requireDev, sessionUser, loginLocked, recordLoginFailure, clearLoginFailures,
 };
