@@ -1509,6 +1509,28 @@ export interface DevDatabase {
     migrations?: { count: number; latest: string | null };
 }
 
+export interface DevSession {
+    sessionHash: string;
+    email: string;
+    displayName: string | null;
+    role: string | null;
+    createdOn: string;
+    expiresOn: string;
+    current: boolean;
+}
+
+// Logins that have not expired, newest first (DEV only; the server checks)
+export async function getDevSessions(): Promise<DevSession[]> {
+    const res = await apiFetch(`${API_BASE}/dev/sessions`);
+    return jsonResponse(res, 'Failed to load the active sessions.');
+}
+
+// Signs one session out; the server refuses the DEV account's own session
+export async function endDevSession(sessionHash: string): Promise<{ success: true; email: string }> {
+    const res = await apiFetch(`${API_BASE}/dev/sessions/${encodeURIComponent(sessionHash)}`, { method: 'DELETE' });
+    return jsonResponse(res, 'Failed to end the session.');
+}
+
 export interface DevSyncStatus { app: DevDatabase; dev: DevDatabase; pgBin: string }
 
 export interface DevSyncResult {

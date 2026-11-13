@@ -101,6 +101,6 @@ const recordLoginFailure = (email) => {
 const clearLoginFailures = (email) => loginFailures.delete(loginKey(email));
 
 module.exports = {
-    ADMIN_ROLES, LOGIN_LOCK_MINUTES, createSession, bearerToken, endSession, endSessionsFor, stampIdentity,
+    ADMIN_ROLES, LOGIN_LOCK_MINUTES, createSession, bearerToken, hashToken, endSession, endSessionsFor,stampIdentity,
     requireSession, requireRole, requireDev, sessionUser, loginLocked, recordLoginFailure, clearLoginFailures,
 };

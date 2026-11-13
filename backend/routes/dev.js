@@ -2,7 +2,7 @@
 const express = require('express');
 const os = require('os');
 const { pool, logAction } = require('../db');
-const { requireDev } = require('../lib/auth');
+const { requireDev, bearerToken, hashToken } = require('../lib/auth');
 const dbSync = require('../lib/dbSync');
 
 const router = express.Router();
@@ -30,6 +30,51 @@ router.get('/api/dev/info', requireDev, async (req, res) => {
             activeSessions: sessions.rows[0].n,
             activeAccountsByRole: employees.rows,
         });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Logins that have not expired, newest first. Only the hash is stored, so a session is named by its hash; current
+// marks the session making the request.
+router.get('/api/dev/sessions', requireDev, async (req, res) => {
+    try {
+        const current = hashToken(bearerToken(req));
+        const result = await pool.query(
+            `SELECT s.TokenHash, s.EmployeeEmail, e.DisplayName, e.Role, s.CreatedOn, s.ExpiresOn
+             FROM Sessions s LEFT JOIN EmployeeRoles e ON LOWER(e.EmployeeEmail) = LOWER(s.EmployeeEmail)
+             WHERE s.ExpiresOn > NOW()
+             ORDER BY s.CreatedOn DESC`
+        );
+        res.json(result.rows.map(r => ({
+            sessionHash: r.tokenhash.trim(),
+            email: r.employeeemail,
+            displayName: r.displayname ?? null,
+            role: r.role ?? null,
+            createdOn: r.createdon,
+            expiresOn: r.expireson,
+            current: r.tokenhash.trim() === current,
+        })));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Signs one session out. The DEV account's own session is refused here: use Log out for that.
+router.delete('/api/dev/sessions/:sessionHash', requireDev, async (req, res) => {
+    const { sessionHash } = req.params;
+    if (!/^[0-9a-f]{64}$/.test(sessionHash)) return res.status(400).json({ error: 'That is not a session.' });
+    if (sessionHash === hashToken(bearerToken(req))) {
+        return res.status(400).json({ error: 'That is your own session. Use Log out to end it.' });
+    }
+    try {
+        const removed = await pool.query(
+            'DELETE FROM Sessions WHERE TokenHash = $1 RETURNING EmployeeEmail', [sessionHash]
+        );
+        if (removed.rowCount === 0) return res.status(404).json({ error: 'That session has already ended.' });
+        const email = removed.rows[0].employeeemail;
+        await logAction(req.user.employeeemail, 'DEV Session Ended', `Signed out a session for ${email}.`, 'Admin');
+        res.json({ success: true, email });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
