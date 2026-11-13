@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, RotateCcw } from 'lucide-react';
 import { deletePolygraphSlot, submitPolygraphResult } from '../../api';
-import { POLY_INCENTIVE_OVERRIDE_RESULTS } from '../../utils/polygraph';
+import { POLY_INCENTIVE_OVERRIDE_RESULTS, cancelReservationHint, cancelReservationLabel } from '../../utils/polygraph';
 import { formatDisplayTime, getLocalDateString } from '../../utils/dates';
 import { scrollToStackedPanel } from '../../utils/layout';
 
@@ -188,8 +188,9 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
             <button
               type="button"
               onClick={() => onCancelReservation(selected.slotid)}
+              title={cancelReservationHint(selected)}
               className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-600/40 px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition">
-              <RotateCcw size={15} /> Cancel Reservation & Reopen
+              <RotateCcw size={15} /> {cancelReservationLabel(selected)}
             </button>
             <button type="button" onClick={() => setSelectedId(null)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2.5 rounded-lg text-sm">
               Close

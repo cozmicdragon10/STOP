@@ -2,7 +2,7 @@ const express = require('express');
 const { logAction, pool } = require('../db');
 const { OPEN_GROUP_ADMIN_ROLES, openGroupViewer } = require('../lib/access');
 const { coveringCounselorFor } = require('../lib/cashResponsibility');
-const { keepPrintedMarks, printedEntries, printedReceiptProblem } = require('../lib/printedReceipts');
+const { cashDiscardProblem, keepPrintedMarks, printedEntries, printedReceiptProblem } = require('../lib/printedReceipts');
 const { clientsWithoutUnits, drugTestedOn, noUnitsMessage } = require('../lib/federalUnits');
 
 const router = express.Router();
@@ -146,14 +146,20 @@ router.delete('/api/open-groups/:id', async (req, res) => {
         if (existing.rows[0] && printedEntries(existing.rows[0].entries).length > 0) {
             return res.status(409).json({ error: printedReceiptError });
         }
+        // Cash entered on the sheet is only recorded on close; discarding would lose the record of it
+        const cashProblem = existing.rows[0] ? cashDiscardProblem(existing.rows[0].entries) : null;
+        if (cashProblem) return res.status(409).json({ error: cashProblem });
         const deleted = await pool.query(
             `DELETE FROM OpenGroupSessions WHERE OpenSessionId = $1
                AND NOT jsonb_path_exists(Entries, '$[*] ? (@.receiptPrinted == true)')
+               AND NOT jsonb_path_exists(Entries, '$[*] ? (@.payment.double() > 0)')
              RETURNING OpenSessionId`,
             [id]
         );
         if (existing.rows[0] && deleted.rows.length === 0) {
-            return res.status(409).json({ error: printedReceiptError });
+            // A receipt was printed, or cash entered, on another screen just now
+            const now = (await pool.query('SELECT Entries FROM OpenGroupSessions WHERE OpenSessionId = $1', [id])).rows[0];
+            return res.status(409).json({ error: (now && cashDiscardProblem(now.entries)) || printedReceiptError });
         }
         if (removedBy) {
             await logAction(removedBy, 'Group Check-In Discarded', `Discarded open check-in ID ${id}`);

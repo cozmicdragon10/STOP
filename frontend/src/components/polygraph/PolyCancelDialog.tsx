@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { reopenPolygraphSlot } from '../../api';
-import { POLY_CANCEL_NOTICE_HOURS, POLY_CANCEL_REASONS, polyVoucherReturnRule, slotStart } from '../../utils/polygraph';
+import { POLY_CANCEL_NOTICE_HOURS, POLY_CANCEL_REASONS, polyVoucherReturnRule, slotHasPassed } from '../../utils/polygraph';
 
 interface Props {
   // The assigned slot being cancelled (as listed on the schedule)
@@ -24,10 +24,7 @@ export default function PolyCancelDialog({ slot, role, userEmail, onClose, onCan
   const [saving, setSaving] = useState(false);
 
   // A reservation cancelled after its appointment time closes the slot instead of reopening it (checked when opened)
-  const [passed] = useState(() => {
-    const start = slotStart(slot);
-    return start !== null && start.getTime() <= Date.now();
-  });
+  const [passed] = useState(() => slotHasPassed(slot));
 
   const reasonRule = polyVoucherReturnRule(reason, slot);
   const voucherRule = voucherOverride ? null : reasonRule;

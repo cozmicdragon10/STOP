@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { POLY_VOUCHER_MAX, polygraphHistoryText, polygraphNotice, polySchedulingNeeds, polyVoucherReturnRule, slotStart } from './polygraph';
+import { POLY_VOUCHER_MAX, polygraphHistoryText, polygraphNotice, polySchedulingNeeds, polyVoucherReturnRule, slotStart, cancelReservationHint, cancelReservationLabel } from './polygraph';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -93,5 +93,17 @@ describe('polygraphHistoryText', () => {
     const text = polygraphHistoryText([{ date: '2026-01-01', polygraphdatetime: new Date(2026, 6, 10, 9).toISOString() }], new Date(2026, 6, 15));
     expect(text.startsWith('5 days since last polygraph')).toBe(true);
     expect(text.endsWith(').')).toBe(true);
+  });
+});
+
+describe('cancel reservation label', () => {
+  const now = new Date(2026, 10, 12, 12, 0);
+  it('offers to reopen a slot whose appointment is still ahead', () => {
+    expect(cancelReservationLabel({ date: '2026-11-13', time: '09:00:00' }, now)).toBe('Cancel Reservation & Reopen');
+    expect(cancelReservationHint({ date: '2026-11-13', time: '09:00:00' }, now)).toBeUndefined();
+  });
+  it('only cancels, and says the slot closes, once the appointment time has passed', () => {
+    expect(cancelReservationLabel({ date: '2026-11-05', time: '9:00 AM' }, now)).toBe('Cancel Reservation');
+    expect(cancelReservationHint({ date: '2026-11-12', time: '11:30:00' }, now)).toMatch(/closes the slot/);
   });
 });

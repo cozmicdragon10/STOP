@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { keepPrintedMarks, printedEntries, printedReceiptProblem } = require('../lib/printedReceipts');
+const { cashDiscardProblem, keepPrintedMarks, printedEntries, printedReceiptProblem } = require('../lib/printedReceipts');
 
 const entry = (clientid, extra = {}) => ({
     client: { clientid, firstname: 'Jason', lastname: `Client${clientid}` },
@@ -40,4 +40,21 @@ test('closing the group must include each printed client as printed', () => {
     assert.match(printedReceiptProblem(saved, [{ client: 2, groupFee: 180, accountPaid: 10, paymentMethod: 'Cash' }], { closing: true }), /can't be removed/);
     assert.match(printedReceiptProblem(saved, batch(0), { closing: true }), /can't change/);
     assert.match(printedReceiptProblem(saved, batch(10, 0), { closing: true }), /can't change/);
+});
+
+
+test('a sheet with cash entered cannot be discarded, and says who paid', () => {
+    const sheet = [
+        { client: { clientid: 1, lastname: 'Doe', firstname: 'Jan' }, payment: 20, paymentMethod: 'Cash' },
+        { client: { clientid: 2, lastname: 'Roe', firstname: 'Sam' }, payment: 0, cardPaid: 40 },
+    ];
+    const problem = cashDiscardProblem(sheet);
+    assert.match(problem, /Doe, Jan \(\$20\.00\)/);
+    assert.doesNotMatch(problem, /Roe/);
+});
+
+test('a sheet with only card payments or no money can be discarded', () => {
+    assert.equal(cashDiscardProblem([{ client: { clientid: 2 }, payment: 0, cardPaid: 40 }]), null);
+    assert.equal(cashDiscardProblem([]), null);
+    assert.equal(cashDiscardProblem(null), null);
 });

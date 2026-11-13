@@ -9,6 +9,17 @@ const nameOf = (entry) => (entry?.client?.lastname
     : `Client ID ${clientIdOf(entry)}`);
 
 const printedEntries = (entries) => (Array.isArray(entries) ? entries : []).filter(e => e && e.receiptPrinted);
+// Clients on an open sheet with cash (or voucher) money entered. It's only recorded when the group closes, so discarding
+// the sheet would leave no record it was taken. Card payments are on the account already and don't count here.
+const cashEntries = (entries) => (Array.isArray(entries) ? entries : []).filter(e => e && cents(e.payment) > 0);
+// Why a sheet with cash on it can't be discarded, or null
+const cashDiscardProblem = (entries) => {
+    const withCash = cashEntries(entries);
+    if (!withCash.length) return null;
+    const list = withCash.map(e => `${nameOf(e)} ($${(cents(e.payment) / 100).toFixed(2)})`).join(', ');
+    return `Cash was entered at this check-in for ${list}. It's only recorded when the group closes, so discarding would lose `
+        + 'the record of it. Close the group, or if no cash was actually taken, open the check-in and set those payments to $0 first.';
+};
 
 // Fee, check-in payment, and payment method as printed. Open sheet entries use fee/payment/paymentMethod/cardPaid; the
 // batch sent to close the group uses groupFee/accountPaid/paymentMethod and has no card payment (already on the account).
@@ -40,4 +51,4 @@ const keepPrintedMarks = (saved, next) => {
     return next.map(e => (printedIds.has(clientIdOf(e)) ? { ...e, receiptPrinted: true } : e));
 };
 
-module.exports = { printedEntries, printedReceiptProblem, keepPrintedMarks };
+module.exports = { cashEntries, cashDiscardProblem, printedEntries, printedReceiptProblem, keepPrintedMarks };

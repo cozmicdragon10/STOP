@@ -60,7 +60,7 @@ import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividu
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
 import { UnsavedFormsContext } from './hooks/useUnsavedForm';
-import { DISCHARGE_STATUSES, idText } from './utils/clients';
+import { DISCHARGE_STATUSES, GROUP_TYPES_BY_PROGRAM, idText } from './utils/clients';
 import { scrollToStackedPanel } from './utils/layout';
 import { polygraphHistoryText, polygraphNotice, slotStart, slotSummary, takesPolygraphs } from './utils/polygraph';
 
@@ -210,6 +210,16 @@ export default function App() {
 
   // Inactive groups stay in the directory but are hidden from every picker for new assignments and sessions
   const activeGroups = groups.filter(g => g.active !== false);
+  // Home page counts. The client list holds everyone not discharged; "without a group" is active clients whose program
+  // attends groups (GROUP_TYPES_BY_PROGRAM, so not Poly Only) with neither a regular nor an individual group.
+  const homeCounts = (() => {
+    const active = clients.filter(c => c.programstatus === 'Active');
+    return {
+      active: active.length,
+      inactive: clients.length - active.length,
+      needGroup: active.filter(c => GROUP_TYPES_BY_PROGRAM[c.programtype || ''] && !c.groupid && !c.individualgroupid).length,
+    };
+  })();
 
   // Employee accounts: managed on the Admin tab, also used for examiner names and counselor pickers
   const [employees, setEmployees] = useState<any[]>([]);
@@ -623,7 +633,7 @@ export default function App() {
       window.removeEventListener('focus', refresh);
       document.removeEventListener('visibilitychange', refresh);
     };
-  }, [accountOpen, applyFreshClient]);
+  }, [accountOpen, applyFreshClient, user?.role]);
   useEffect(() => {
     if (!accountOpen) return;
     const unsavedWork = () => accountEditsDirty.current || notesEditsDirty.current || unsavedFormCount.current > 0;
@@ -848,16 +858,18 @@ export default function App() {
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-                <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Current Clients</p>
-                <p className="text-3xl font-bold text-white mt-2">{clients.length}</p>
+                <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Active Clients</p>
+                <p className="text-3xl font-bold text-white mt-2">{homeCounts.active}</p>
+                <p className="text-xs text-slate-500 mt-1">{homeCounts.inactive} more not discharged but inactive</p>
               </div>
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
                 <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Active Groups</p>
                 <p className="text-3xl font-bold text-white mt-2">{activeGroups.length}</p>
               </div>
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-                <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Clients Not in a Group</p>
-                <p className="text-3xl font-bold text-white mt-2">{clients.filter(c => !c.groupid).length}</p>
+                <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Active Clients Without a Group</p>
+                <p className={`text-3xl font-bold mt-2 ${homeCounts.needGroup > 0 ? 'text-amber-400' : 'text-white'}`}>{homeCounts.needGroup}</p>
+                <p className="text-xs text-slate-500 mt-1">In a program that attends groups (not Poly Only)</p>
               </div>
             </div>
 
@@ -1427,6 +1439,15 @@ export default function App() {
                               className="text-slate-500 p-1 shrink-0"
                               title="An attendance receipt was printed for a client in this session, so it can't be discarded. Close the group to save the attendance."
                               aria-label={`Open check-in for ${o.groupname} has a printed receipt and can't be discarded`}
+                            >
+                              <Lock size={14} />
+                            </span>
+                          ) : o.entries.some(e => Number(e.payment) > 0) ? (
+                            // Cash on the sheet is only recorded when the group closes, so the session can't be discarded
+                            <span
+                              className="text-slate-500 p-1 shrink-0"
+                              title="Cash was entered at this check-in. It's only recorded when the group closes, so this session can't be discarded. Close the group, or open it and set the cash payments to $0 first."
+                              aria-label={`Open check-in for ${o.groupname} has cash entered and can't be discarded`}
                             >
                               <Lock size={14} />
                             </span>

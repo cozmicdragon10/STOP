@@ -1,6 +1,7 @@
 import { CalendarClock, RotateCcw, Trash2 } from 'lucide-react';
 import ClientPicker from '../ClientPicker';
 import { formatDisplayTime, localYmd } from '../../utils/dates';
+import { cancelReservationHint, cancelReservationLabel } from '../../utils/polygraph';
 
 export interface ScheduleSlot {
   slotid: number;
@@ -119,8 +120,9 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
                           {rescheduleButton(slot.slotid)}
                           <button
                             onClick={() => onCancelReservation(slot.slotid)}
+                            title={cancelReservationHint(slot)}
                             className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-600/40 px-3 py-1.5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition">
-                            <RotateCcw size={13} /> Cancel Reservation & Reopen
+                            <RotateCcw size={13} /> {cancelReservationLabel(slot)}
                           </button>
                         </div>
                       </div>

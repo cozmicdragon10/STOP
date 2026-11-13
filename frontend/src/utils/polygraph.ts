@@ -79,6 +79,17 @@ export const slotStart = (slot: any): Date | null => {
   return new Date(year, month - 1, day, hours, Number(match[2]));
 };
 
+// Cancelling a reservation reopens the slot, unless the appointment time has passed: then the slot closes (the server
+// decides; PolyCancelDialog says so too). The cancel button's label and hover text say which.
+export const slotHasPassed = (slot: any, now = new Date()) => {
+  const start = slotStart(slot);
+  return start !== null && start.getTime() <= now.getTime();
+};
+export const cancelReservationLabel = (slot: any, now = new Date()) =>
+  (slotHasPassed(slot, now) ? 'Cancel Reservation' : 'Cancel Reservation & Reopen');
+export const cancelReservationHint = (slot: any, now = new Date()) =>
+  (slotHasPassed(slot, now) ? 'The appointment time has passed, so cancelling closes the slot instead of reopening it.' : undefined);
+
 // One-line description of a slot: date @ time · location
 export const slotSummary = (slot: { date: string; time?: string; location?: string | null }) =>
   `${new Date(slot.date).toLocaleDateString()} @ ${formatDisplayTime(slot.time)}${slot.location ? ` · ${slot.location}` : ''}`;
