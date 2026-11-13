@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Printer } from 'lucide-react';
 import { SO_PHASES } from '../../utils/soPhases';
-import { formatBalance, toDisplayBalance } from '../../utils/balance';
+import { formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
 import { escapeHtml } from '../../utils/receipt';
 import { useClientsByStatus } from '../../hooks/useClientsByStatus';
 import { idText } from '../../utils/clients';
@@ -169,7 +169,7 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
         <h3>${escapeHtml(group.groupname)} <span>${escapeHtml(group.programtype || '')}${group.schedule ? ` · ${escapeHtml(group.schedule)}` : ''}${group.location ? ` · ${escapeHtml(group.location)}` : ''} · ${members.length} clients</span></h3>
         ${members.length ? `<table><thead><tr><th>Client</th><th>ID #</th><th>Program</th><th>Phase</th><th>Status</th><th>Last Attended</th><th class="r">Balance</th></tr></thead><tbody>
           ${members.map(m => `<tr><td>${escapeHtml(`${m.lastname}, ${m.firstname}`)}</td><td>${escapeHtml(idText(m))}</td><td>${escapeHtml(m.programtype || '')}</td>
-            <td>${escapeHtml(phaseLabel(m))}</td><td>${escapeHtml(m.programstatus || '')}</td><td>${formatDay(m.lastattended ?? m.lastdateattended)}</td><td class="r">${escapeHtml(formatBalance(m.accountbalance))}</td></tr>`).join('')}
+            <td>${escapeHtml(phaseLabel(m))}</td><td>${escapeHtml(m.programstatus || '')}</td><td>${formatDay(m.lastattended ?? m.lastdateattended)}</td><td class="r">${escapeHtml(formatBalanceLabeled(m.accountbalance))}</td></tr>`).join('')}
         </tbody></table>` : '<p class="none">No clients.</p>'}
       `).join('')}
     `).join('');
@@ -384,7 +384,7 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
                                     <td className="py-1.5 pr-3 text-slate-300">{phaseLabel(m)}</td>
                                     <td className="py-1.5 pr-3 text-slate-300">{m.programstatus || '—'}</td>
                                     <td className="py-1.5 pr-3 text-slate-400">{formatDay(m.lastattended ?? m.lastdateattended)}</td>
-                                    <td className={`py-1.5 text-right ${toDisplayBalance(m.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(m.accountbalance)}</td>
+                                    <td className={`py-1.5 text-right ${toDisplayBalance(m.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalanceLabeled(m.accountbalance)}</td>
                                   </tr>
                                 ))}
                               </tbody>

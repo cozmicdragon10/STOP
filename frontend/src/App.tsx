@@ -19,7 +19,7 @@ import {
 import type { CardBlock, ClientNote, ClosedGroupSession, OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
-import { formatBalance, toDisplayBalance } from './utils/balance';
+import { balanceWord, formatBalance, formatBalanceLabeled, toDisplayBalance } from './utils/balance';
 import { applyProgramFees } from './utils/soPhases';
 import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
 import AccountPaymentForm from './components/payments/AccountPaymentForm';
@@ -196,6 +196,7 @@ export default function App() {
   const [polyLocationFilter, setPolyLocationFilter] = useState('');
   const [polyDateFrom, setPolyDateFrom] = useState('');
   const [polyDateTo, setPolyDateTo] = useState('');
+  const [polyShowPast, setPolyShowPast] = useState(false);
   // Poly Schedule only: '', 'Open', 'Assigned', or 'Closed'
   const [polyStatusFilter, setPolyStatusFilter] = useState('');
   const [polyDateSort, setPolyDateSort] = useState<'asc' | 'desc'>('asc');
@@ -764,8 +765,15 @@ export default function App() {
   // Poly Schedule also filters by slot status; the counts are for the slots the other filters leave
   const POLY_SLOT_STATUSES = ['Open', 'Assigned', 'Closed'];
   const slotStatus = (s: { status?: string | null }) => s.status || 'Open';
-  const polyStatusCounts = Object.fromEntries(POLY_SLOT_STATUSES.map(st => [st, examinerSlots.filter(s => slotStatus(s) === st).length]));
-  const scheduleSlots = polyStatusFilter ? examinerSlots.filter(s => slotStatus(s) === polyStatusFilter) : examinerSlots;
+  // Poly Schedule opens on today: earlier days are hidden unless asked for or a From date is set. Poly Results keeps them.
+  const polyToday = todayLocal();
+  const isPastSlot = (s: { date?: string | null }) => String(s.date || '').split('T')[0] < polyToday;
+  const hidePastSlots = !polyShowPast && !polyDateFrom;
+  const timeSlots = hidePastSlots ? examinerSlots.filter(s => !isPastSlot(s)) : examinerSlots;
+  const polyStatusCounts = Object.fromEntries(POLY_SLOT_STATUSES.map(st => [st, timeSlots.filter(s => slotStatus(s) === st).length]));
+  const statusFiltered = (list: typeof examinerSlots) => polyStatusFilter ? list.filter(s => slotStatus(s) === polyStatusFilter) : list;
+  const scheduleSlots = statusFiltered(timeSlots);
+  const pastScheduleCount = statusFiltered(examinerSlots).filter(isPastSlot).length;
   const scheduleFiltersActive = polyFiltersActive || !!polyStatusFilter;
   const clearPolyFilters = () => {
     setPolyExaminerFilter('');
@@ -783,6 +791,9 @@ export default function App() {
   const openPolySlot = (slotId: number) => {
     setSelectedClientDetail(null);
     clearPolyFilters();
+    // A slot on an earlier day is hidden by default; show those so it is in the list
+    const slot = polySlots.find(s => s.slotid === slotId);
+    if (slot && String(slot.date || '').split('T')[0] < todayLocal()) setPolyShowPast(true);
     setPolySubTab('schedule');
     setActiveTab('polygraph');
     setHighlightedSlotId(slotId);
@@ -991,7 +1002,7 @@ export default function App() {
                       title="Account balance"
                       className={`text-sm font-semibold px-2.5 py-0.5 rounded-full border ${toDisplayBalance(selectedClientDetail.accountbalance) < 0 ? 'text-red-400 bg-red-500/10 border-red-500/30' : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'}`}
                     >
-                      {formatBalance(selectedClientDetail.accountbalance)} Balance
+                      {balanceWord(selectedClientDetail.accountbalance) ? formatBalanceLabeled(selectedClientDetail.accountbalance) : `${formatBalance(selectedClientDetail.accountbalance)} Balance`}
                     </span>
                     )}
                     {/* Ticked on the Information tab; only Federal SO and Fed Drug Test clients can be pretrial */}
@@ -1600,7 +1611,7 @@ export default function App() {
                 {polySubTab === 'schedule' && (
                   <label className="text-xs text-slate-400">Status
                     <select value={polyStatusFilter} onChange={(e) => setPolyStatusFilter(e.target.value)} className="block mt-1 w-full md:w-auto h-9 bg-slate-950 border border-slate-700 rounded-lg px-3 text-xs text-slate-200">
-                      <option value="">All Statuses ({examinerSlots.length})</option>
+                      <option value="">All Statuses ({timeSlots.length})</option>
                       {POLY_SLOT_STATUSES.map(st => <option key={st} value={st}>{st} ({polyStatusCounts[st]})</option>)}
                     </select>
                   </label>
@@ -1658,6 +1669,15 @@ export default function App() {
                   setPolySlots(await getPolygraphSlots());
                 }}
               />
+            )}
+
+            {polySubTab === 'schedule' && !polyDateFrom && pastScheduleCount > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3 text-xs text-slate-400">
+                <span>{polyShowPast ? `Showing ${pastScheduleCount} slot${pastScheduleCount === 1 ? '' : 's'} from earlier days.` : `Starting from today. ${pastScheduleCount} slot${pastScheduleCount === 1 ? '' : 's'} from earlier days hidden.`}</span>
+                <button type="button" onClick={() => setPolyShowPast(v => !v)} className="text-blue-400 hover:text-blue-300 font-medium">
+                  {polyShowPast ? 'Hide earlier days' : 'Show earlier days'}
+                </button>
+              </div>
             )}
 
             {polySubTab === 'schedule' && (

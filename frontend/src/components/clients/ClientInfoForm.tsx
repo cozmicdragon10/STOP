@@ -10,7 +10,7 @@ import {
   BUS_PASS_MAX, CHAPERON_PHASES, CLIENT_FIELD_OPTIONS, EDITABLE_PROGRAM_STATUSES, FEDERAL_PROGRAM_TYPES, GROUP_TYPES_BY_PROGRAM, POLY_PROGRAM_TYPES, PRETRIAL_PROGRAM_TYPES, SO_ATTENDANCE_LIMIT_MONTHS, SO_PROGRAM_TYPES,
   STATE_FEE_PROGRAM_TYPES, formatPhase, isAttendanceOverdue, isIndividualGroup, isWholeNumber, idText, ID_TYPES } from '../../utils/clients';
 import { SO_PHASES, SO_TREATMENT_FEES, bipTreatmentFee } from '../../utils/soPhases';
-import { formatBalance, toDisplayBalance } from '../../utils/balance';
+import { formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
 import { ageFromBirthDate, toLocalDay } from '../../utils/dates';
 import { polyVoucherMax, takesPolygraphs } from '../../utils/polygraph';
 import { UNIT_FIELDS, editPayload, rebaseOrigins, recordOrigins, sameFieldValue } from '../../utils/clientEdits';
@@ -548,7 +548,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                   className={inputClass}
                 />
               ) : field === 'accountbalance' ? (
-                <p className={`font-medium ${toDisplayBalance(client[field]) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(client[field])}</p>
+                <p className={`font-medium ${toDisplayBalance(client[field]) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalanceLabeled(client[field])}</p>
               ) : field === 'polyfeevoucher' ? (
                 <p className="font-medium text-white">{Number(form[field] ?? 0)}/{polyVoucherMax(form.phase)}</p>
               ) : (

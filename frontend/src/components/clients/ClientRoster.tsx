@@ -15,7 +15,7 @@ import {
   DEFAULT_CLIENT_FILTERS, SO_ATTENDANCE_LIMIT_MONTHS, isAttendanceOverdue, isIndividualGroup, GROUP_TYPES_BY_PROGRAM, idText, ID_TYPES } from '../../utils/clients';
 import type { ClientFilters } from '../../utils/clients';
 import { SO_PHASES, SO_TREATMENT_FEES, bipTreatmentFee } from '../../utils/soPhases';
-import { formatBalance, toDisplayBalance } from '../../utils/balance';
+import { formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
 import { takesPolygraphs } from '../../utils/polygraph';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client and group rows are untyped throughout App */
@@ -122,7 +122,7 @@ const ROSTER_CELLS: Record<SortKey, (c: any) => ReactNode> = {
   ),
   lastpoly: c => <td className="p-3 text-slate-400 text-xs">{!takesPolygraphs(c.programtype) ? '—' : c.lastpoly ? new Date(c.lastpoly).toLocaleDateString() : 'None'}</td>,
   status: c => <td className="p-3"><span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium ${c.programstatus === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`} title={c.programstatus}>{c.programstatus === 'Discharged Supervision' ? 'Discharged' : c.programstatus}</span></td>,
-  balance: c => <td className={`p-3 font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</td>,
+  balance: c => <td className={`p-3 font-semibold whitespace-nowrap ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalanceLabeled(c.accountbalance)}</td>,
 };
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -550,7 +550,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                 <button type="button" onClick={() => onOpenClient(c)} className="flex-1 min-w-0 text-left p-4 space-y-1.5">
                   <span className="flex items-baseline justify-between gap-3">
                     <span className="font-medium text-white truncate">{c.lastname}, {c.firstname}</span>
-                    {!limited && <span className={`shrink-0 text-sm font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(c.accountbalance)}</span>}
+                    {!limited && <span className={`shrink-0 text-sm font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalanceLabeled(c.accountbalance)}</span>}
                   </span>
                   <span className="flex flex-wrap items-center gap-1.5 text-xs">
                     <span className="bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2 py-0.5 rounded font-semibold">{c.programtype || 'State SO'}</span>

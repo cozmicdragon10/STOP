@@ -12,3 +12,15 @@ export const formatBalance = (stored: number | string | null | undefined): strin
   const shown = toDisplayBalance(stored);
   return `${shown < 0 ? '-' : ''}$${Math.abs(shown).toFixed(2)}`;
 };
+
+// A client's standing balance with a word saying which way it runs, e.g. "-$180.00 owed" or "$55.00 credit", so a
+// reader who doesn't know the office's sign convention can't take it backwards. Fee and payment amounts keep formatBalance.
+export const balanceWord = (stored: number | string | null | undefined): string => {
+  const shown = toDisplayBalance(stored);
+  return shown < 0 ? 'owed' : shown > 0 ? 'credit' : '';
+};
+
+export const formatBalanceLabeled = (stored: number | string | null | undefined): string => {
+  const word = balanceWord(stored);
+  return word ? `${formatBalance(stored)} ${word}` : formatBalance(stored);
+};

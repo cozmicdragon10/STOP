@@ -1,6 +1,6 @@
 import { Lock, Save, Search, Trash2, UserRound } from 'lucide-react';
 import type { ClientRecord, GroupRecord, GroupCheckInState } from '../../hooks/useGroupCheckIn';
-import { formatBalance } from '../../utils/balance';
+import { formatBalanceLabeled } from '../../utils/balance';
 import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
 import { bipCheckInBlockLabel, bipCheckInBlockMessage } from '../../utils/bip';
 import { drugTestedOn, outOfUnits, unitCodeFor, unitCodeLabel, unitsLeft } from '../../utils/federalUnits';
@@ -82,7 +82,7 @@ function RosterRow({ client, checked, attended, selected, onToggle, onOpenClient
             {bipCheckInBlockLabel(client.bipcheckinblock)}
           </span>
         )}
-        <p className="text-xs text-slate-400 sm:ml-auto">ID # {idText(client) || '—'} · Bal {formatBalance(client.accountbalance)}</p>
+        <p className="text-xs text-slate-400 sm:ml-auto">ID # {idText(client) || '—'} · Bal {formatBalanceLabeled(client.accountbalance)}</p>
         <AccountComment text={client.comments} />
       </div>
       {/* Inside the row's label, so it must not also tick the checkbox */}

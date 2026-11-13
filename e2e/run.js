@@ -226,7 +226,7 @@ const scenarios = {
 
     async 'open account refreshes on coming back to the window'({ page, t, me }) {
         await openClient(page);
-        const badge = async () => (await page.getByText(/ Balance$/).filter({ visible: true }).first().innerText()).trim();
+        const badge = async () => (await page.getByTitle('Account balance').filter({ visible: true }).first().innerText()).trim();
         const pay = await api('POST', '/financials/payment', { client: t.clientId, amount: 5, paymentMethod: 'Cash', comments: 'e2e: refresh on return', createdBy: me });
         await page.evaluate(() => window.dispatchEvent(new Event('focus')));
         await pause(page);

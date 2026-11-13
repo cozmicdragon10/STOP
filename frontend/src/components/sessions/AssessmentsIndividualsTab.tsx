@@ -10,7 +10,7 @@ import ClientPicker from '../ClientPicker';
 import CardPaymentFields from '../payments/CardPaymentFields';
 import { emptyCardBilling, type CardBilling } from '../payments/cardBilling';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
-import { formatBalance, toDisplayBalance } from '../../utils/balance';
+import { formatBalance, formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import { printAttendanceReceipt, printReceipt, type Receipt } from '../../utils/receipt';
 import { idText } from '../../utils/clients';
@@ -464,6 +464,8 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
             <h2 className="text-lg font-bold text-white">Assessments</h2>
             <p className="text-xs text-slate-400 mt-0.5">One client per session. Save it as open, then review and close it to record the attendance, fee, and payment.</p>
           </div>
+          {/* Only while an old Individual session is open; with one choice there's nothing to switch */}
+          {shownCategories.length > 1 && (
           <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
             {shownCategories.map(c => (
               <button
@@ -477,6 +479,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
               </button>
             ))}
           </div>
+          )}
         </div>
 
         {!reviewing ? (
@@ -489,7 +492,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
               <ClientPicker clients={clients} value={form.clientId} onChange={id => set({ clientId: id, ...(form.receipt ? { payment: '', receipt: null } : {}) })} className={input} required />
               {client && (
                 <p className="text-xs text-slate-500 mt-1.5">
-                  {client.programtype || 'No program'} · Balance <span className={toDisplayBalance(client.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatBalance(client.accountbalance)}</span>
+                  {client.programtype || 'No program'} · Balance <span className={toDisplayBalance(client.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatBalanceLabeled(client.accountbalance)}</span>
                 </p>
               )}
               {bipIndividual && <p className="text-xs text-amber-400 mt-1.5">BIP clients do not have individual sessions.</p>}
@@ -742,7 +745,8 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
             ))}
           </div>
         </div>
-        <div className={`grid ${shownCategories.length > 1 ? 'grid-cols-2' : 'grid-cols-1'} bg-slate-950 border border-slate-800 rounded-lg p-0.5 my-3`}>
+        {shownCategories.length > 1 && (
+        <div className="grid grid-cols-2 bg-slate-950 border border-slate-800 rounded-lg p-0.5 my-3">
           {shownCategories.map(c => {
             const count = openSessions.filter(o => o.category === c).length;
             return (
@@ -752,6 +756,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
             );
           })}
         </div>
+        )}
 
         {listError ? (
           <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3 mt-4">{listError}</p>

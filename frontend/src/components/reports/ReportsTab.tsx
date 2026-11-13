@@ -3,7 +3,7 @@ import type { ComponentProps } from 'react';
 import { getAgentReport, getDepositReport } from '../../api';
 import { reportTabsFor, currentReportFor } from '../../utils/reports';
 import { PROGRAM_STATUSES } from '../../utils/clients';
-import { formatBalance } from '../../utils/balance';
+import { formatBalanceLabeled } from '../../utils/balance';
 import GroupIncomeReport from './GroupIncomeReport';
 import GroupCashDepositReport from './GroupCashDepositReport';
 import UserCashDepositReport from './UserCashDepositReport';
@@ -141,7 +141,7 @@ export default function ReportsTab({ user, clients, groups, onOpenClient, onOpen
             <thead><tr className="bg-slate-800/50 text-slate-400 uppercase"><th className="p-3">Client</th><th className="p-3">Agent</th><th className="p-3">Attended Sessions</th><th className="p-3">Last Poly</th><th className="p-3">Balance</th></tr></thead>
             <tbody className="divide-y divide-slate-800 text-sm">
               {agentReportData?.map(r => (
-                <tr key={r.clientid}><td className="p-3 font-medium text-white">{r.lastname}, {r.firstname}</td><td data-label="Agent" className="p-3 text-slate-300">{r.supervisingagent}</td><td data-label="Attended Sessions" className="p-3">{r.totalattended}</td><td data-label="Last Poly" className="p-3 text-slate-400">{r.lastpolydate ? new Date(r.lastpolydate).toLocaleDateString() : 'None'}</td><td data-label="Balance" className="p-3 font-semibold text-slate-200">{formatBalance(r.accountbalance)}</td></tr>
+                <tr key={r.clientid}><td className="p-3 font-medium text-white">{r.lastname}, {r.firstname}</td><td data-label="Agent" className="p-3 text-slate-300">{r.supervisingagent}</td><td data-label="Attended Sessions" className="p-3">{r.totalattended}</td><td data-label="Last Poly" className="p-3 text-slate-400">{r.lastpolydate ? new Date(r.lastpolydate).toLocaleDateString() : 'None'}</td><td data-label="Balance" className="p-3 font-semibold text-slate-200">{formatBalanceLabeled(r.accountbalance)}</td></tr>
               ))}
               {(!agentReportData || agentReportData.length === 0) && (
                 <tr><td colSpan={5} className="p-6 text-center text-slate-500 text-sm">{agentReportData ? 'No clients to report.' : 'Loading…'}</td></tr>
