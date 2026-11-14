@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { requireSession } = require('./lib/auth');
 const { polygrapherAccess } = require('./lib/polygrapherAccess');
+const { counselorAccess } = require('./lib/counselorAccess');
 const { deviceGate } = require('./lib/devices');
 
 // Browser pages allowed to call the API, comma-separated in CORS_ORIGINS (.env): the production site (5173) and the
@@ -24,6 +25,8 @@ app.use(deviceGate);
 app.use(requireSession);
 // Polygrapher accounts reach only their own part of the app (lib/polygrapherAccess.js)
 app.use(polygrapherAccess);
+// Counselor accounts reach only their part of the app (lib/counselorAccess.js)
+app.use(counselorAccess);
 
 // Mounted in the order the routes were originally declared, so matching is unchanged
 app.use(require('./routes/auth'));

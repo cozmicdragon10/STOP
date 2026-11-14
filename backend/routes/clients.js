@@ -81,6 +81,21 @@ router.get('/api/clients', async (req, res) => {
     }
 });
 
+// Clients the signed-in counselor covered a group session for in the last 30 days, with the latest date they covered
+router.get('/api/clients/covered-by-me', async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT Client AS clientId, MAX(Date) AS lastCovered FROM Attendance
+             WHERE LOWER(CoveredBy) = LOWER($1) AND Date >= CURRENT_DATE - 30
+             GROUP BY Client`,
+            [req.user?.employeeemail || '']
+        );
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // One client, for opening the account of a client who isn't in the current list (e.g. discharged)
 router.get('/api/clients/:id', async (req, res) => {
     try {
@@ -380,6 +395,10 @@ router.post('/api/clients/:id/notes', async (req, res) => {
         // Notes typed on the Case Notes tab are admin or therapist notes; the other categories are written by the system
         if (!['Admin', 'Therapist'].includes(category)) {
             return res.status(400).json({ error: 'Choose a note type: Admin Note or Therapist Note.' });
+        }
+        // Counselors write Therapist notes only; Admin notes are the office's
+        if (req.user?.role === 'Counselor' && category !== 'Therapist') {
+            return res.status(403).json({ error: 'Counselors can only write Therapist notes.' });
         }
         // A Counselor's note waits for a Business Administrator when the client hasn't attended this month
         // (their latest attendance of any kind is in an earlier month, or they have none). Role is from the session.

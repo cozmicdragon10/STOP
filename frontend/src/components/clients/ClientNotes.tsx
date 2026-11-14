@@ -290,7 +290,7 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
           <label className="flex items-center gap-2 text-xs text-slate-400">
             Note Type
             <select value={newNoteCategory} onChange={(e) => setNewNoteCategory(e.target.value)} className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-xs">
-              {NEW_NOTE_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              {(user.role === 'Counselor' ? NEW_NOTE_CATEGORIES.filter(c => c.value === 'Therapist') : NEW_NOTE_CATEGORIES).map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
             </select>
           </label>
           <textarea value={newNoteText} onChange={(e) => setNewNoteText(e.target.value)} placeholder="Type case note..." rows={3} autoFocus className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required />

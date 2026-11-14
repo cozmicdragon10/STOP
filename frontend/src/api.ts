@@ -450,6 +450,17 @@ export async function getGroups(): Promise<Group[]> {
     return jsonResponse(res, 'Failed to load groups.');
 }
 
+// A client a counselor covered a group session for in the last 30 days (the signed-in counselor's own covers)
+export interface CoveredClient {
+    clientid: number;
+    lastcovered: string;
+}
+
+export async function getCoveredByMe(): Promise<CoveredClient[]> {
+    const res = await apiFetch(`${API_BASE}/clients/covered-by-me`);
+    return jsonResponse(res, 'Failed to load the clients you covered.');
+}
+
 export async function getGroupClients(groupId: number): Promise<GroupRosterClient[]> {
     const res = await apiFetch(`${API_BASE}/groups/${groupId}/clients`);
     return jsonResponse(res, 'Could not load the group roster.');

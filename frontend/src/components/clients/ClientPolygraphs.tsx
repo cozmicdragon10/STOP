@@ -157,7 +157,7 @@ export default function ClientPolygraphs({
       </div>
 
       {/* Polygraphers don't book clients and aren't sent poly fee details, so they see only a booked appointment */}
-      {!bookedSlot ? role !== 'Polygrapher' && (
+      {!bookedSlot ? role !== 'Polygrapher' && role !== 'Counselor' && (
         <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl text-sm space-y-3">
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Schedule Polygraph</p>

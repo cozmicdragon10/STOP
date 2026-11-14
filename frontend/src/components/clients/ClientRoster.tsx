@@ -14,6 +14,8 @@ import {
   PROGRAM_STATUSES, EDITABLE_PROGRAM_STATUSES, PRETRIAL_PROGRAM_TYPES, SO_PROGRAM_TYPES, STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase,
   DEFAULT_CLIENT_FILTERS, SO_ATTENDANCE_LIMIT_MONTHS, isAttendanceOverdue, isIndividualGroup, GROUP_TYPES_BY_PROGRAM, idText, ID_TYPES } from '../../utils/clients';
 import type { ClientFilters } from '../../utils/clients';
+import type { ClientOwnership } from '../../utils/counselor';
+import type { CoveredClient } from '../../api';
 import { SO_PHASES, SO_TREATMENT_FEES, bipTreatmentFee } from '../../utils/soPhases';
 import { formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
 import { takesPolygraphs } from '../../utils/polygraph';
@@ -27,6 +29,10 @@ interface Props {
   directoryAgents: SupervisingAgent[];
   userEmail: string;
   onOpenClient: (client: any) => void;
+  // Counselors only: says whether a client is one of theirs, so the roster can start on their own clients
+  isMine?: (client: ClientOwnership) => boolean;
+  // Counselors only: clients they covered in the last 30 days, shown in their own section while "My clients" is on
+  covered?: CoveredClient[];
   // A client was added; programtype and groupid are what the form saved (App asks about a BIP intake)
   onCreated: (created: { clientId: number; name: string; programtype: string; groupid: string }) => void;
   onSuccess: (message: string) => void;
@@ -128,10 +134,12 @@ const ROSTER_CELLS: Record<SortKey, (c: any) => ReactNode> = {
 
 // The Client Roster tab: searchable, filterable client list and the New Client form. Clicking a row opens the
 // client's account (App's drawer).
-export default function ClientRoster({ clients, activeGroups, directoryAgents, userEmail, onOpenClient, onCreated, onSuccess, onError, headerActions, limited = false }: Props) {
+export default function ClientRoster({ clients, activeGroups, directoryAgents, userEmail, onOpenClient, onCreated, onSuccess, onError, headerActions, limited = false, isMine, covered }: Props) {
   // A Polygrapher's roster leaves out the balance (the server doesn't send it to them either)
   const columnKeys = limited ? LIMITED_ROSTER_COLUMN_KEYS : ROSTER_COLUMN_KEYS;
   const [clientSearch, setClientSearch] = useState('');
+  // Counselors start on their own clients (groups they lead, clients they assessed); the toggle shows everyone
+  const [mineOnly, setMineOnly] = useState(true);
   const [clientFilters, setClientFilters] = useState<ClientFilters>(DEFAULT_CLIENT_FILTERS);
   // Clients with the picked statuses; Status: All and the discharge statuses load discharged clients from the server
   const { clients: statusClients, loading: statusLoading, error: statusError } = useClientsByStatus(clients, clientFilters.status);
@@ -197,6 +205,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
   };
   const filteredClients = statusClients
     .filter(c => {
+      if (isMine && mineOnly && !isMine(c)) return false;
       if (clientSearchTerm && ![
         c.firstname, c.lastname, `${c.firstname} ${c.lastname}`, `${c.lastname}, ${c.firstname}`,
         idText(c), c.supervisingagent, c.groupname, c.programtype, c.phase, c.programstatus
@@ -239,6 +248,16 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
   // Column sorting: clicking a header sorts by it ascending, clicking again flips the direction
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'name', dir: 1 });
   const toggleSort = (key: SortKey) => setSort(s => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
+  // Counselors' "Covered recently" section: clients they covered in the last 30 days that aren't already theirs. Its own list,
+  // so it never mixes into the main roster (only shown while "My clients" is on).
+  const coveredSection = isMine && mineOnly && covered
+    ? covered.flatMap(r => {
+      const c = clients.find(x => Number(x.clientid) === Number(r.clientid));
+      if (!c || isMine(c)) return [];
+      if (clientSearchTerm && !`${c.lastname}, ${c.firstname}`.toLowerCase().includes(clientSearchTerm)) return [];
+      return [{ client: c, lastcovered: String(r.lastcovered).slice(0, 10) }];
+    }).sort((a, b) => b.lastcovered.localeCompare(a.lastcovered))
+    : [];
   const sortedClients = [...filteredClients].sort((a, b) => {
     const va = SORT_VALUES[sort.key](a), vb = SORT_VALUES[sort.key](b);
     // Empty values go last in either direction
@@ -278,6 +297,16 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
           <div className="flex flex-wrap items-center gap-2 md:gap-3">
             {!limited && <button type="button" onClick={() => setShowNewClientForm(s => !s)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap">+ New Client</button>}
             {headerActions}
+            {isMine && (
+              <button
+                type="button"
+                onClick={() => setMineOnly(m => !m)}
+                aria-pressed={mineOnly}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap border ${mineOnly ? 'bg-blue-600/20 border-blue-500/40 text-blue-200' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+              >
+                {mineOnly ? 'My clients' : 'All clients'}
+              </button>
+            )}
             <input
               type="search"
               value={clientSearch}
@@ -525,6 +554,26 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
             <button type="submit" disabled={saving} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded text-xs font-semibold">Add Client</button>
           </div>
         </form>
+      )}
+      {coveredSection.length > 0 && (
+        <section aria-label="Covered recently" className="border-b border-slate-800 bg-amber-500/5 px-4 py-3 md:px-5 space-y-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-amber-300">
+            Covered recently <span className="normal-case font-normal text-slate-400">· your covers in the last 30 days, not in your groups</span>
+          </h3>
+          <ul className="grid gap-1 md:grid-cols-2">
+            {coveredSection.map(({ client: c, lastcovered }) => {
+              const [y, m, d] = lastcovered.split('-').map(Number);
+              return (
+                <li key={c.clientid}>
+                  <button type="button" onClick={() => onOpenClient(c)} className="w-full text-left flex items-baseline justify-between gap-3 text-sm rounded px-2 py-1.5 hover:bg-slate-800/60">
+                    <span className="text-white truncate">{c.lastname}, {c.firstname}</span>
+                    <span className="shrink-0 text-xs text-slate-400">covered {new Date(y, m - 1, d).toLocaleDateString()}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       )}
       {/* Phones: one card per client, always showing the fields that matter most at a glance */}
       <ul className="md:hidden divide-y divide-slate-800">

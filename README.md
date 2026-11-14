@@ -217,8 +217,15 @@ The backend provides REST API endpoints for:
     change goes on the client's change log; `backend/lib/moneyFields.js`). Anyone may save the price list's treatment
     fee for a client's program and phase.
   - **Office Admin:** every tab; edits group details and creates groups (with Business Administrators).
-  - **Counselor:** clients, attendance, assessments, call-ins, groups (read-only details), polygraphs, Cash Deposits
-    report, agents, forms.
+  - **Counselor:** every client (with a "My clients" toggle that starts on), check-in and payments taken in the field,
+    edit client information, Therapist case notes only (Admin notes are the office's), attachments (view and upload),
+    polygraph schedule and results on the account (view only), groups (read-only details), agents (read-only), Cash
+    Deposits (their own cash, and marking it dropped off), and a My Day home screen (today's groups and their clients not in this month; no money shown). The roster's
+    "My clients" view also lists clients they covered in the last 30 days in their own "Covered recently" section
+    (`GET /api/clients/covered-by-me`, from `Attendance.CoveredBy`). They can't adjust or refund
+    payments, add manual charges, set overrides, book or cancel polygraphs, or see the change log. A server allowlist
+    enforces this (`backend/lib/counselorAccess.js`). A counselor's note for a client with no attendance this month
+    waits for a Business Administrator's approval.
   - **Polygrapher:** the Polygraphs tab (open, cancel and reschedule slots, record results), Forms (read-only), and a
     limited Client Roster: a client's personal, contact and program information, polygraph history, and documents
     (view and upload). No balances, fees, notes, payments or edits; enforced in `backend/lib/polygrapherAccess.js`.

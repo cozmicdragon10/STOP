@@ -15,9 +15,9 @@ import {
   deleteClient,
   getClientDeletable,
   getEmployees, fetchClientFeeOverride, fetchPolyFeeOverride,
-  getOpenGroups, deleteOpenGroup, getClosedGroups, getSupervisingAgents
+  getOpenGroups, deleteOpenGroup, getClosedGroups, getSupervisingAgents, getCoveredByMe
 } from './api';
-import type { CardBlock, ClientNote, ClosedGroupSession, DeviceState, OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
+import type { CardBlock, CoveredClient, ClientNote, ClosedGroupSession, DeviceState, OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
 import DeviceAccess from './components/device/DeviceAccess';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
@@ -32,6 +32,8 @@ import GroupsTab from './components/groups/GroupsTab';
 import AdminTab from './components/admin/AdminTab';
 import DevTab from './components/dev/DevTab';
 import SettingsTab from './components/settings/SettingsTab';
+import MyDay from './components/home/MyDay';
+import { isMyClient, myGroupIds } from './utils/counselor';
 import FormsTab from './components/forms/FormsTab';
 import PolySlotForm from './components/polygraph/PolySlotForm';
 import PolyResults from './components/polygraph/PolyResults';
@@ -89,6 +91,16 @@ export default function App() {
   };
   const [passwordInput, setPasswordInput] = useState('');
   const [activeTab, setActiveTab] = useState('home');
+  // Counselors: the clients they covered in the last 30 days, shown in their own section of the roster. Reloaded when a tab is opened.
+  const [coveredByMe, setCoveredByMe] = useState<CoveredClient[]>([]);
+  useEffect(() => {
+    if (user?.role !== 'Counselor') return;
+    let cancelled = false;
+    getCoveredByMe()
+      .then(rows => { if (!cancelled) setCoveredByMe(rows); })
+      .catch(() => { if (!cancelled) setCoveredByMe([]); });
+    return () => { cancelled = true; };
+  }, [user?.role, user?.employeeemail, activeTab]);
   const [clients, setClients] = useState<any[]>([]);
   const [groups, setGroups] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -768,6 +780,9 @@ export default function App() {
 
   // Role Permissions
   const role = user.role;
+  // Counselors: the groups they lead, which decide "my clients" on the roster and My Day
+  const isCounselor = role === 'Counselor';
+  const counselorGroupIds = isCounselor ? myGroupIds(groups, user.displayname) : null;
   const isAllowed = (tab: string) => {
     // Everyone has their own Settings (appearance and layout)
     if (tab === 'settings') return true;
@@ -930,6 +945,15 @@ export default function App() {
         {/* CLIENT DIRECTORY TAB */}
         {activeTab === 'home' && (
           <div className="space-y-6">
+            {isCounselor && (
+              <MyDay
+                displayName={user.displayname}
+                groups={groups}
+                clients={clients}
+                onOpenAttendance={() => setActiveTab('attendance')}
+                onOpenClient={(clientId) => openClientById(clientId)}
+              />
+            )}
             <div>
               <h2 className="text-2xl font-bold text-white">Welcome, {user.displayname}</h2>
               <p className="text-sm text-slate-400 mt-1">Here's a quick overview. Choose a section below to get started.</p>
@@ -985,6 +1009,8 @@ export default function App() {
           <div className={activeTab === 'clients' ? '' : 'hidden'}>
             <ClientRoster
               limited={role === 'Polygrapher'}
+              isMine={counselorGroupIds ? (c) => isMyClient(c, counselorGroupIds, user.displayname) : undefined}
+              covered={counselorGroupIds ? coveredByMe : undefined}
               clients={clients}
               activeGroups={activeGroups}
               directoryAgents={directoryAgents}
@@ -1340,7 +1366,7 @@ export default function App() {
                   clientId={selectedClientDetail.clientid}
                   userEmail={user.employeeemail}
                   canDelete={role === 'Business Administrator'}
-                  canRename={role !== 'Polygrapher'}
+                  canRename={role !== 'Polygrapher' && !isCounselor}
                   onSuccess={setSuccessMsg}
                 />
               )}
@@ -1649,9 +1675,9 @@ export default function App() {
                 </button>
               )}
               <div className="max-md:order-first w-full md:w-auto flex bg-slate-950 p-1 rounded-lg border border-slate-800 md:shrink-0">
-                <button onClick={() => setPolySubTab('admin')} className={`flex-1 md:flex-none px-3 py-1.5 rounded text-xs font-semibold ${polySubTab === 'admin' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Poly Admin</button>
+                {!isCounselor && <button onClick={() => setPolySubTab('admin')} className={`flex-1 md:flex-none px-3 py-1.5 rounded text-xs font-semibold ${polySubTab === 'admin' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Poly Admin</button>}
                 <button onClick={() => setPolySubTab('schedule')} className={`flex-1 md:flex-none px-3 py-1.5 rounded text-xs font-semibold ${polySubTab === 'schedule' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Poly Schedule</button>
-                <button onClick={() => setPolySubTab('results')} className={`flex-1 md:flex-none px-3 py-1.5 rounded text-xs font-semibold ${polySubTab === 'results' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Poly Results</button>
+                {!isCounselor && <button onClick={() => setPolySubTab('results')} className={`flex-1 md:flex-none px-3 py-1.5 rounded text-xs font-semibold ${polySubTab === 'results' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Poly Results</button>}
               </div>
               </div>
             </div>
