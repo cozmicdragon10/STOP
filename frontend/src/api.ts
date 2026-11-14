@@ -10,7 +10,7 @@ const API_BASE = import.meta.env.DEV ? `https://${globalThis.location?.hostname 
 // The login session token. Held in memory only, so reloading the page logs out (as before sessions existed).
 // It is kept on the page's global object rather than in this module, so a copy of this module loaded by a live code
 // update (while someone stays logged in) still sends the same token.
-interface SessionHolder { token: string | null; onEnded: (() => void) | null }
+interface SessionHolder { token: string | null; onEnded: (() => void) | null; onDeviceBlocked?: (() => void) | null }
 const session: SessionHolder = ((globalThis as { __stopSession?: SessionHolder }).__stopSession ??= { token: null, onEnded: null });
 
 // Called when the server refuses the token (expired, logged out elsewhere, or account deactivated)
@@ -18,14 +18,27 @@ export function setSessionEndedHandler(handler: (() => void) | null) {
     session.onEnded = handler;
 }
 
-// fetch with the session token attached. Every API call except login goes through this.
+// Called when the server refuses this device (its approval was removed while someone was using it)
+export function setDeviceBlockedHandler(handler: (() => void) | null) {
+    session.onDeviceBlocked = handler;
+}
+
+// fetch with the session token attached. Every API call except login goes through this. credentials: 'include' sends
+// the device cookie (backend/lib/devices.js), which the dev server needs because its API is on another port.
 async function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
     if (session.token) headers.set('Authorization', `Bearer ${session.token}`);
-    const res = await fetch(url, { ...init, headers });
+    const res = await fetch(url, { ...init, headers, credentials: 'include' });
     if (res.status === 401 && session.token) {
         session.token = null;
         session.onEnded?.();
+    }
+    if (res.status === 403) {
+        const body = await res.clone().json().catch(() => null) as { code?: string } | null;
+        if (body?.code === 'device') {
+            session.token = null;
+            session.onDeviceBlocked?.();
+        }
     }
     return res;
 }
@@ -288,11 +301,78 @@ export async function loginUser(email: string, password: string): Promise<LoginR
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
+        credentials: 'include',
     });
-    const data = await res.json() as LoginReply;
+    const data = await res.json() as LoginReply & { code?: string };
+    if (res.status === 403 && data.code === 'device') session.onDeviceBlocked?.();
     if (data.success && data.token) session.token = data.token;
     return data;
 }
+
+// --- Device approval (backend/lib/devices.js). These work before the device is approved. ---
+export type DeviceState = 'none' | 'pending' | 'approved' | 'denied' | 'revoked' | 'expired';
+
+async function devicePost(path: string, body: unknown, fallback: string): Promise<{ state: DeviceState }> {
+    const res = await fetch(`${API_BASE}/devices/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        credentials: 'include',
+    });
+    return jsonResponse(res, fallback);
+}
+
+export async function getDeviceStatus(): Promise<DeviceState> {
+    const res = await fetch(`${API_BASE}/devices/status`, { credentials: 'include' });
+    return (await jsonResponse<{ state: DeviceState }>(res, 'Could not check this device.')).state;
+}
+
+export const requestDeviceAccess = (request: { name: string; email: string; note: string }) =>
+    devicePost('request', request, 'Could not send the request.');
+
+export const redeemSetupCode = (code: string) => devicePost('redeem', { code }, 'Could not use that setup code.');
+
+// A device as the DEV tab shows it
+export interface DeviceRow {
+    deviceId: number;
+    status: DeviceState;
+    name: string;
+    requestName: string | null;
+    requestEmail: string | null;
+    requestRole: string | null;
+    requestNote: string | null;
+    userAgent: string | null;
+    firstIp: string | null;
+    lastIp: string | null;
+    lastSeenOn: string | null;
+    requestedOn: string;
+    expiresOn: string | null;
+    decidedOn: string | null;
+    decidedBy: string | null;
+    approvalMemo: string | null;
+    current: boolean;
+}
+
+export async function getDevices(): Promise<DeviceRow[]> {
+    return jsonResponse(await apiFetch(`${API_BASE}/devices`), 'Failed to load the devices.');
+}
+
+async function deviceAction(deviceId: number, action: string, body: unknown, fallback: string) {
+    const res = await apiFetch(`${API_BASE}/devices/${deviceId}/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    return jsonResponse<{ success: true }>(res, fallback);
+}
+
+export const approveDevice = (deviceId: number, memo: string, name?: string) =>
+    deviceAction(deviceId, 'approve', { memo, name }, 'Failed to approve the device.');
+export const denyDevice = (deviceId: number, memo: string) =>
+    deviceAction(deviceId, 'deny', { memo }, 'Failed to deny the request.');
+export const revokeDevice = (deviceId: number) => deviceAction(deviceId, 'revoke', {}, 'Failed to remove the device.');
+export const renameDevice = (deviceId: number, name: string) =>
+    deviceAction(deviceId, 'rename', { name }, 'Failed to rename the device.');
 
 export async function logoutUser() {
     if (!session.token) return;

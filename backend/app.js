@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { requireSession } = require('./lib/auth');
 const { polygrapherAccess } = require('./lib/polygrapherAccess');
+const { deviceGate } = require('./lib/devices');
 
 // Browser pages allowed to call the API, comma-separated in CORS_ORIGINS (.env): the production site (5173) and the
 // Vite dev server (5174)
@@ -14,9 +15,12 @@ const app = express();
 // (Cached copies from before logins existed came back as bare 304s with no data.)
 app.set('etag', false);
 app.use((req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
-app.use(cors({ origin: CORS_ORIGINS }));
+// credentials: the device cookie is sent with API calls from the dev server (5174) to the local backend (5100)
+app.use(cors({ origin: CORS_ORIGINS, credentials: true }));
 app.use(express.json());
-// Everything below needs a logged-in session, except POST /api/auth/login
+// Only an approved device gets past this (lib/devices.js). Device requests themselves are the exception.
+app.use(deviceGate);
+// Everything below needs a logged-in session, except POST /api/auth/login and the device requests
 app.use(requireSession);
 // Polygrapher accounts reach only their own part of the app (lib/polygrapherAccess.js)
 app.use(polygrapherAccess);
@@ -40,5 +44,6 @@ app.use(require('./routes/admin'));
 app.use(require('./routes/agents'));
 app.use(require('./routes/documents'));
 app.use(require('./routes/dev'));
+app.use(require('./routes/devices'));
 
 module.exports = app;

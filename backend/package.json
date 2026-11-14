@@ -7,6 +7,7 @@
     "start": "set \"APP_ENV=dev\"&& set \"PORT=5100\"&& set \"FRONTEND_PORT=5180\"&& node server.js",
     "migrate": "node migrate.js",
     "migrate:status": "node migrate.js --status",
+    "devices:bootstrap": "node scripts/bootstrap-device.js",
     "test": "node --test"
   },
   "keywords": [],

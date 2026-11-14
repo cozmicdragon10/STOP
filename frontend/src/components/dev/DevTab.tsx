@@ -4,6 +4,7 @@ import { getDevInfo } from '../../api';
 import type { DevInfo } from '../../api';
 import DatabaseSync from './DatabaseSync';
 import ActiveSessions from './ActiveSessions';
+import DeviceApprovals from './DeviceApprovals';
 
 // How long the server has been up, e.g. "2d 3h 14m"
 const uptimeText = (seconds: number) => {
@@ -81,6 +82,7 @@ export default function DevTab() {
             <h3 className="font-semibold text-white mb-3">Active Accounts</h3>
             {info.activeAccountsByRole.map(r => <Row key={r.role} label={r.role} value={r.n} />)}
           </section>
+          <DeviceApprovals />
           <ActiveSessions />
           <DatabaseSync />
         </div>

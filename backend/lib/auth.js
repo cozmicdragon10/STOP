@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { pool } = require('../db');
 const { effectiveRole, isDevRole } = require('./roles');
+const { isPublicDevicePath } = require('./devices');
 
 const SESSION_HOURS = Number(process.env.SESSION_HOURS) || 12;
 const ADMIN_ROLES = ['Office Admin', 'Business Administrator'];
@@ -49,7 +50,7 @@ const sessionUser = (row) => ({ ...row, accountrole: row.role, role: effectiveRo
 
 // Every API route except login needs a valid session. Sets req.user to the employee (email, display name, role).
 const requireSession = async (req, res, next) => {
-    if (req.path === '/api/auth/login') return next();
+    if (req.path === '/api/auth/login' || isPublicDevicePath(req.path)) return next();
     const token = bearerToken(req);
     if (!token) return res.status(401).json({ error: 'Please log in.' });
     try {

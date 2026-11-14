@@ -6,7 +6,7 @@ import {
   Paperclip, UserCheck, ClipboardList, SlidersHorizontal, Lock, Palette, Code2
 } from 'lucide-react';
 import {
-  loginUser, logoutUser, setSessionEndedHandler, getClient, getClients, getGroups, getProgramFees,
+  loginUser, logoutUser, setSessionEndedHandler, setDeviceBlockedHandler, getDeviceStatus, getClient, getClients, getGroups, getProgramFees,
   getPolygraphSlots,
   deletePolygraphSlot,
   getClientAttendance, getClientFinancials,
@@ -16,7 +16,8 @@ import {
   getEmployees, fetchClientFeeOverride, fetchPolyFeeOverride,
   getOpenGroups, deleteOpenGroup, getClosedGroups, getSupervisingAgents
 } from './api';
-import type { CardBlock, ClientNote, ClosedGroupSession, OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
+import type { CardBlock, ClientNote, ClosedGroupSession, DeviceState, OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
+import DeviceAccess from './components/device/DeviceAccess';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import { balanceWord, formatBalance, formatBalanceLabeled, toDisplayBalance } from './utils/balance';
@@ -240,6 +241,26 @@ export default function App() {
     });
     return () => setSessionEndedHandler(null);
   }, []);
+
+  // This browser must be an approved device before the login appears (backend/lib/devices.js). 'checking' until the
+  // server answers; 'unreachable' when it can't be reached.
+  const [deviceState, setDeviceState] = useState<DeviceState | 'checking' | 'unreachable'>('checking');
+  const checkDevice = useCallback(() => {
+    setDeviceState('checking');
+    getDeviceStatus().then(setDeviceState).catch(() => setDeviceState('unreachable'));
+  }, []);
+  useEffect(() => {
+    getDeviceStatus().then(setDeviceState).catch(() => setDeviceState('unreachable'));
+  }, []);
+  // The server refused this device mid-use (its approval was removed): sign out and show why
+  useEffect(() => {
+    setDeviceBlockedHandler(() => {
+      setUser(null);
+      setLeavePrompt(null);
+      checkDevice();
+    });
+    return () => setDeviceBlockedHandler(null);
+  }, [checkDevice]);
 
   const handleLogout = async () => {
     await logoutUser();
@@ -665,6 +686,19 @@ export default function App() {
     const timer = setTimeout(() => setHighlightedSlotId(null), 4000);
     return () => clearTimeout(timer);
   }, [highlightedSlotId, activeTab]);
+
+  if (deviceState === 'checking') {
+    return <div className="min-h-dvh bg-slate-900 flex items-center justify-center p-4 text-slate-400 text-sm">Checking this device…</div>;
+  }
+  if (deviceState === 'unreachable') {
+    return (
+      <div className="min-h-dvh bg-slate-900 flex flex-col items-center justify-center gap-3 p-4 text-sm">
+        <p className="text-red-400 flex items-center gap-2"><AlertCircle size={18} /> Could not reach the STOP server.</p>
+        <button type="button" onClick={checkDevice} className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-lg">Try again</button>
+      </div>
+    );
+  }
+  if (deviceState !== 'approved') return <DeviceAccess state={deviceState} onState={setDeviceState} />;
 
   if (!user) {
     return (

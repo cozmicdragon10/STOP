@@ -11,17 +11,19 @@ before(() => {
 });
 after(() => server.close());
 
-test('API calls without a session are refused', async () => {
+// Without an approved device cookie the device gate answers first (403, code 'device'), so no session check runs
+test('API calls without an approved device are refused', async () => {
     for (const [method, path] of [['GET', '/api/clients'], ['GET', '/api/admin/logs'], ['POST', '/api/admin/employees'],
         ['DELETE', '/api/groups/1'], ['POST', '/api/auth/logout'], ['GET', '/api/does-not-exist']]) {
         const res = await fetch(base + path, { method });
-        assert.equal(res.status, 401, `${method} ${path}`);
+        assert.equal(res.status, 403, `${method} ${path}`);
+        assert.equal((await res.json()).code, 'device', `${method} ${path}`);
     }
 });
 
 test('a malformed Authorization header is refused', async () => {
     const res = await fetch(`${base}/api/clients`, { headers: { Authorization: 'Basic abc' } });
-    assert.equal(res.status, 401);
+    assert.equal(res.status, 403);
 });
 
 test('only the frontend origin may call the API from a browser', async () => {

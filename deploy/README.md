@@ -33,6 +33,16 @@ again works. When the task was installed with `-AtBoot`, run these as administra
   as `server.log.old` once it passes 10 MB.
 - `site\builds\` holds the last 5 builds, and `site\current.txt` names the live one.
 
+## Approved devices
+
+Only approved devices can use STOP (see `docs/device-approval-plan.md`). Every other browser sees a request-access form.
+Requests, approved devices, IPs and memos are in the DEV tab.
+
+The first time, after the update that adds devices, set up the owner's device from PowerShell in `backend\`:
+`npm run devices:bootstrap -- "<device name>"`. It prints a setup code valid for 30 minutes. On that device, open STOP,
+choose **I have a setup code**, and enter it. If the code expires first, run the script again for a new one. Once a
+device has used a code, the script refuses; other devices request access in the app.
+
 ## Developing
 
 `npm run dev` in `frontend/` runs on **5174** (`https://localhost:5174`), beside the live site. It talks to the same
