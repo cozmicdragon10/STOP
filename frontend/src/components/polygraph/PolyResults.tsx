@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { CheckCircle2, RotateCcw } from 'lucide-react';
 import { deletePolygraphSlot, submitPolygraphResult } from '../../api';
 import { POLY_INCENTIVE_OVERRIDE_RESULTS, cancelReservationHint, cancelReservationLabel } from '../../utils/polygraph';
 import { formatDisplayTime, getLocalDateString } from '../../utils/dates';
-import { scrollToStackedPanel } from '../../utils/layout';
 
 export interface AssignedPolySlot {
   slotid: number;
@@ -42,11 +41,6 @@ const RESULT_TYPES: [string, string][] = [
 export default function PolyResults({ slots, role, userEmail, examinerName, onCancelReservation, onRecorded, onSuccess, onError }: Props) {
   // Kept by id, so the form closes on its own once the slot is cancelled, deleted, or filtered out
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  // The form opens under the whole appointment list, which on a phone is well off screen
-  const resultsFormRef = useRef<HTMLFormElement>(null);
-  useEffect(() => {
-    if (selectedId !== null) scrollToStackedPanel(resultsFormRef.current);
-  }, [selectedId]);
   const selected = slots.find(s => s.slotid === selectedId) ?? null;
   const [resResultType, setResResultType] = useState('No Deception Indicated');
   // Incentive program continuation on an Inconclusive or No Opinion result: unchecked and locked unless a Business Administrator overrides
@@ -135,9 +129,10 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
       )}
 
       {selected && (
-        <form ref={resultsFormRef} onSubmit={handleSubmit} className="bg-slate-950 border border-blue-500/40 p-4 md:p-6 rounded-xl space-y-4 max-w-2xl mt-6 scroll-mt-4">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="poly-results-title" onClick={() => !saving && setSelectedId(null)}>
+        <form onSubmit={handleSubmit} onClick={e => e.stopPropagation()} className="bg-slate-900 border border-blue-500/40 p-4 md:p-6 rounded-xl space-y-4 w-full max-w-2xl max-h-full overflow-y-auto">
           <div className="border-b border-slate-800 pb-3 flex flex-wrap justify-between items-center gap-x-3">
-            <h4 className="font-bold text-white">Record Results for {selected.assignedClientName}</h4>
+            <h4 id="poly-results-title" className="font-bold text-white">Record Results for {selected.assignedClientName}</h4>
             <span className="text-xs text-slate-400">{selected.type} Exam</span>
           </div>
 
@@ -187,7 +182,7 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
             </button>
             <button
               type="button"
-              onClick={() => onCancelReservation(selected.slotid)}
+              onClick={() => { setSelectedId(null); onCancelReservation(selected.slotid); }}
               title={cancelReservationHint(selected)}
               className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-600/40 px-4 py-2.5 rounded-lg text-sm font-semibold flex items-center gap-1.5 transition">
               <RotateCcw size={15} /> {cancelReservationLabel(selected)}
@@ -197,6 +192,7 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
             </button>
           </div>
         </form>
+        </div>
       )}
     </div>
   );
