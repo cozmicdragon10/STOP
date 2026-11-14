@@ -7,15 +7,57 @@ import type { BipCheckInBlock } from './utils/bip';
 // frontend/.env.development, matching `npm start` in backend/). The live API on 5000 is not used by the dev server.
 const API_BASE = import.meta.env.DEV ? `https://${globalThis.location?.hostname || 'localhost'}:${String(import.meta.env.VITE_API_PORT || '5100')}/api` : '/api';
 
-// The login session token. Held in memory only, so reloading the page logs out (as before sessions existed).
-// It is kept on the page's global object rather than in this module, so a copy of this module loaded by a live code
-// update (while someone stays logged in) still sends the same token.
-interface SessionHolder { token: string | null; onEnded: (() => void) | null; onDeviceBlocked?: (() => void) | null }
-const session: SessionHolder = ((globalThis as { __stopSession?: SessionHolder }).__stopSession ??= { token: null, onEnded: null });
+// The login session token. Saved in the browser's storage, so refreshing keeps you logged in and every window and tab
+// of the browser shares one login; logging out in one logs out all. The server ends the session 12 hours after login or
+// after 2 hours without activity (backend/lib/auth.js). The holder is kept on the page's global object rather than in
+// this module, so a copy of this module loaded by a live code update still sends the same token.
+const SESSION_KEY = 'stop.session';
+interface SessionHolder {
+    token: string | null;
+    onEnded: (() => void) | null;
+    onDeviceBlocked?: (() => void) | null;
+    onStarted?: (() => void) | null;
+    listening?: boolean;
+}
+// Storage can be blocked (private window, site data cleared); the login then lasts until the page reloads
+const readSavedToken = (): string | null => {
+    try { return localStorage.getItem(SESSION_KEY); } catch { return null; }
+};
+const session: SessionHolder = ((globalThis as { __stopSession?: SessionHolder }).__stopSession ??= { token: readSavedToken(), onEnded: null });
+
+const setToken = (token: string | null) => {
+    session.token = token;
+    try {
+        if (token) localStorage.setItem(SESSION_KEY, token);
+        else localStorage.removeItem(SESSION_KEY);
+    } catch { /* storage blocked: this window still works */ }
+};
+
+// Another window logged in or out: follow it
+if (!session.listening && typeof window !== 'undefined') {
+    session.listening = true;
+    window.addEventListener('storage', (e) => {
+        if (e.key !== SESSION_KEY && e.key !== null) return;
+        const saved = readSavedToken();
+        if (saved === session.token) return;
+        const hadToken = session.token !== null;
+        session.token = saved;
+        if (saved) session.onStarted?.();
+        else if (hadToken) session.onEnded?.();
+    });
+}
+
+// True when this browser has a saved login to restore (checked with getCurrentUser)
+export const hasSavedSession = () => session.token !== null;
 
 // Called when the server refuses the token (expired, logged out elsewhere, or account deactivated)
 export function setSessionEndedHandler(handler: (() => void) | null) {
     session.onEnded = handler;
+}
+
+// Called when another window of this browser logs in
+export function setSessionStartedHandler(handler: (() => void) | null) {
+    session.onStarted = handler;
 }
 
 // Called when the server refuses this device (its approval was removed while someone was using it)
@@ -25,18 +67,20 @@ export function setDeviceBlockedHandler(handler: (() => void) | null) {
 
 // fetch with the session token attached. Every API call except login goes through this. credentials: 'include' sends
 // the device cookie (backend/lib/devices.js), which the dev server needs because its API is on another port.
-async function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+// background: a timed refresh nobody asked for, which must not count as activity (X-Background, backend/lib/auth.js).
+async function apiFetch(url: string, init: RequestInit = {}, { background = false } = {}): Promise<Response> {
     const headers = new Headers(init.headers);
     if (session.token) headers.set('Authorization', `Bearer ${session.token}`);
+    if (background) headers.set('X-Background', '1');
     const res = await fetch(url, { ...init, headers, credentials: 'include' });
     if (res.status === 401 && session.token) {
-        session.token = null;
+        setToken(null);
         session.onEnded?.();
     }
     if (res.status === 403) {
         const body = await res.clone().json().catch(() => null) as { code?: string } | null;
         if (body?.code === 'device') {
-            session.token = null;
+            setToken(null);
             session.onDeviceBlocked?.();
         }
     }
@@ -305,8 +349,16 @@ export async function loginUser(email: string, password: string): Promise<LoginR
     });
     const data = await res.json() as LoginReply & { code?: string };
     if (res.status === 403 && data.code === 'device') session.onDeviceBlocked?.();
-    if (data.success && data.token) session.token = data.token;
+    if (data.success && data.token) setToken(data.token);
     return data;
+}
+
+// The employee for the saved login, or null when there is none or it has ended (12 hours, or 2 hours idle)
+export async function getCurrentUser(): Promise<Employee | null> {
+    if (!session.token) return null;
+    const res = await apiFetch(`${API_BASE}/auth/me`);
+    if (res.status === 401 || res.status === 403) return null;
+    return (await jsonResponse<{ user: Employee }>(res, 'Could not restore the login.')).user;
 }
 
 // --- Device approval (backend/lib/devices.js). These work before the device is approved. ---
@@ -375,7 +427,7 @@ export const renameDevice = (deviceId: number, name: string) =>
 export async function logoutUser() {
     if (!session.token) return;
     await apiFetch(`${API_BASE}/auth/logout`, { method: 'POST' }).catch(() => {});
-    session.token = null;
+    setToken(null);
 }
 
 // Without options, current clients only (not discharged). status: 'all', 'discharged' (any discharge status), or one
@@ -1207,8 +1259,9 @@ export async function getPolySummary(clientId: number): Promise<PolySummary> {
     return jsonResponse(res, 'Failed to load the polygraph dates.');
 }
 
-export async function getPolygraphSlots(): Promise<PolygraphSlot[]> {
-    const res = await apiFetch(`${API_BASE}/polygraphs/slots`);
+// background: the Polygraphs tab's timed refresh, which doesn't count as activity
+export async function getPolygraphSlots({ background = false } = {}): Promise<PolygraphSlot[]> {
+    const res = await apiFetch(`${API_BASE}/polygraphs/slots`, {}, { background });
     return jsonResponse(res, 'Failed to load polygraph slots.');
 }
 
@@ -1594,6 +1647,10 @@ export interface DevSession {
     role: string | null;
     createdOn: string;
     expiresOn: string;
+    lastActiveOn: string;
+    // The approved device the login came from; null for logins from before devices were tracked
+    deviceName: string | null;
+    deviceUserAgent: string | null;
     current: boolean;
 }
 

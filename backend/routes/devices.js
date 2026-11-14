@@ -187,6 +187,8 @@ router.post('/api/devices/:id/revoke', requireDev, async (req, res) => {
             return res.status(400).json({ error: 'That is the device you are using. Remove it from another approved device.' });
         }
         await pool.query("UPDATE Devices SET Status = 'revoked' WHERE DeviceId = $1", [id]);
+        // Its logins end too (the gate already refuses them; this clears them from the Active Sessions list)
+        await pool.query('DELETE FROM Sessions WHERE DeviceId = $1', [id]);
         await logAction(req.user.employeeemail, 'Device Removed', `${row.name} can no longer use STOP.`, 'Admin');
         res.json({ success: true });
     } catch (err) {

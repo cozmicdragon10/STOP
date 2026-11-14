@@ -188,9 +188,15 @@ The backend provides REST API endpoints for:
 
 ## Security
 
+- **Approved devices:** only a browser approved in the DEV tab can reach the login or the API (`backend/lib/devices.js`,
+  `docs/device-approval-plan.md`, setup and recovery in `deploy/README.md`).
 - **Logins:** `POST /api/auth/login` returns a session token that the frontend sends as `Authorization: Bearer <token>`
-  on every other request. Sessions last `SESSION_HOURS` (default 12), and only a hash of the token is stored
-  (`Sessions` table). Logging out, changing an employee's password, or deactivating them ends their sessions.
+  on every other request. The browser saves it, so refreshing keeps you logged in and every window of that browser
+  shares the login; logging out in one window logs out all of them. A session ends `SESSION_HOURS` (default 12) after
+  login or after `SESSION_IDLE_MINUTES` (default 120) without activity, whichever is first; the Polygraphs tab's timed
+  refresh is sent with `X-Background: 1` and doesn't count as activity. Only a hash of the token is stored (`Sessions`
+  table, with the device it came from). Logging out, changing an employee's password, deactivating them, or removing
+  their device ends their sessions.
 - **Identity:** the server takes the acting employee from the session, never from the request. Fields such as `user`,
   `createdBy`, `updatedBy`, `assignedBy`, `removedBy`, `?user=` and the `X-User` header are overwritten with the session's email
   (`backend/lib/auth.js`).

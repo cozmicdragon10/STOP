@@ -5,7 +5,15 @@ const { pool } = require('../db');
 const { effectiveRole, isDevRole } = require('./roles');
 const { isPublicDevicePath } = require('./devices');
 
+// A session ends SESSION_HOURS after login, or after SESSION_IDLE_MINUTES without activity, whichever comes first
 const SESSION_HOURS = Number(process.env.SESSION_HOURS) || 12;
+const SESSION_IDLE_MINUTES = Number(process.env.SESSION_IDLE_MINUTES) || 120;
+// SQL for "this session (alias s) has not ended", with the idle limit as the given parameter number
+const sessionLiveSql = (param) => `s.ExpiresOn > NOW() AND s.LastActiveOn > NOW() - make_interval(mins => $${param})`;
+
+// Requests the screens make on their own (a timed refresh) send X-Background: 1, so an open, unattended window doesn't
+// keep a session alive. Everything else counts as activity.
+const countsAsActivity = (req) => req.get('X-Background') !== '1';
 const ADMIN_ROLES = ['Office Admin', 'Business Administrator'];
 
 // Request fields the frontend fills with the logged-in employee's email. requireSession overwrites them with the
@@ -15,14 +23,18 @@ const IDENTITY_BODY_FIELDS = ['user', 'createdBy', 'updatedBy', 'assignedBy', 'r
 
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
-const createSession = async (email) => {
+// deviceId: the approved device the login came from (req.device, set by the device gate), shown in the DEV tab
+const createSession = async (email, deviceId = null) => {
     const token = crypto.randomBytes(32).toString('base64url');
     await pool.query(
-        `INSERT INTO Sessions (TokenHash, EmployeeEmail, ExpiresOn) VALUES ($1, $2, NOW() + make_interval(hours => $3))`,
-        [hashToken(token), email, SESSION_HOURS]
+        `INSERT INTO Sessions (TokenHash, EmployeeEmail, ExpiresOn, DeviceId) VALUES ($1, $2, NOW() + make_interval(hours => $3), $4)`,
+        [hashToken(token), email, SESSION_HOURS, deviceId]
     );
-    // Expired sessions are only ever read to be refused; clear them out as new ones are made
-    await pool.query('DELETE FROM Sessions WHERE ExpiresOn < NOW()');
+    // Ended sessions are only ever read to be refused; clear them out as new ones are made
+    await pool.query(
+        'DELETE FROM Sessions WHERE ExpiresOn < NOW() OR LastActiveOn < NOW() - make_interval(mins => $1)',
+        [SESSION_IDLE_MINUTES]
+    );
     return token;
 };
 
@@ -55,13 +67,18 @@ const requireSession = async (req, res, next) => {
     if (!token) return res.status(401).json({ error: 'Please log in.' });
     try {
         const result = await pool.query(
-            `SELECT e.EmployeeEmail, e.DisplayName, e.Role
+            `SELECT e.EmployeeEmail, e.DisplayName, e.Role, s.LastActiveOn < NOW() - INTERVAL '1 minute' AS stale
              FROM Sessions s JOIN EmployeeRoles e ON e.EmployeeEmail = s.EmployeeEmail
-             WHERE s.TokenHash = $1 AND s.ExpiresOn > NOW() AND e.Active = TRUE`,
-            [hashToken(token)]
+             WHERE s.TokenHash = $1 AND ${sessionLiveSql(2)} AND e.Active = TRUE`,
+            [hashToken(token), SESSION_IDLE_MINUTES]
         );
         if (result.rows.length === 0) return res.status(401).json({ error: 'Your session has ended. Please log in again.' });
-        req.user = sessionUser(result.rows[0]);
+        // Recorded at most once a minute, so most requests don't write
+        if (result.rows[0].stale && countsAsActivity(req)) {
+            await pool.query('UPDATE Sessions SET LastActiveOn = NOW() WHERE TokenHash = $1', [hashToken(token)]);
+        }
+        const { stale, ...employee } = result.rows[0];
+        req.user = sessionUser(employee);
         stampIdentity(req, req.user.employeeemail);
         next();
     } catch (err) {
@@ -102,6 +119,7 @@ const recordLoginFailure = (email) => {
 const clearLoginFailures = (email) => loginFailures.delete(loginKey(email));
 
 module.exports = {
-    ADMIN_ROLES, LOGIN_LOCK_MINUTES, createSession, bearerToken, hashToken, endSession, endSessionsFor,stampIdentity,
+    ADMIN_ROLES, LOGIN_LOCK_MINUTES, SESSION_HOURS, SESSION_IDLE_MINUTES, sessionLiveSql, countsAsActivity,
+    createSession, bearerToken, hashToken, endSession, endSessionsFor, stampIdentity,
     requireSession, requireRole, requireDev, sessionUser, loginLocked, recordLoginFailure, clearLoginFailures,
 };

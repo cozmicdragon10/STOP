@@ -24,11 +24,24 @@ router.post('/api/auth/login', async (req, res) => {
             return res.status(403).json({ error: 'Email or password is incorrect, or the account is inactive.' });
         }
         clearLoginFailures(email);
-        const token = await createSession(row.employeeemail);
+        const token = await createSession(row.employeeemail, req.device?.id ?? null);
         await logAction(email, 'User Login', 'User logged in successfully', 'Login');
         // Never send the password hash to the browser
         const { passwordhash, ...user } = row;
         res.json({ success: true, user: sessionUser(user), token });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// The logged-in employee, the same shape login returns. A browser with a saved session uses this on page load, so
+// refreshing or opening another window doesn't need a new login.
+router.get('/api/auth/me', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [req.user.employeeemail]);
+        if (result.rows.length === 0) return res.status(401).json({ error: 'Your session has ended. Please log in again.' });
+        const { passwordhash, ...user } = result.rows[0];
+        res.json({ user: sessionUser(user) });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

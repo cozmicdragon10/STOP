@@ -2,7 +2,8 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const app = require('../app');
-const { requireRole, stampIdentity } = require('../lib/auth');
+const { requireRole, stampIdentity, countsAsActivity, sessionLiveSql, SESSION_HOURS, SESSION_IDLE_MINUTES } = require('../lib/auth');
+const { isAllowed } = require('../lib/polygrapherAccess');
 
 let server, base;
 before(() => {
@@ -63,6 +64,25 @@ test('identity fields are not added where the request had none', () => {
     stampIdentity(req, 'counselor@example.com');
     assert.deepEqual(req.body, { comments: 'only' });
     assert.deepEqual(req.query, {});
+});
+
+test('a session ends 12 hours after login or after 2 hours without activity', () => {
+    assert.equal(SESSION_HOURS, 12);
+    assert.equal(SESSION_IDLE_MINUTES, 120);
+    const sql = sessionLiveSql(2);
+    assert.match(sql, /ExpiresOn > NOW\(\)/);
+    assert.match(sql, /LastActiveOn > NOW\(\) - make_interval\(mins => \$2\)/);
+});
+
+test('timed refreshes marked X-Background do not count as activity; everything else does', () => {
+    const req = (header) => ({ get: (name) => (name === 'X-Background' ? header : undefined) });
+    assert.equal(countsAsActivity(req(undefined)), true);
+    assert.equal(countsAsActivity(req('1')), false);
+    assert.equal(countsAsActivity(req('0')), true);
+});
+
+test('every account, Polygraphers included, can restore a saved login', () => {
+    assert.equal(isAllowed('GET', '/api/auth/me'), true);
 });
 
 test('requireRole checks the session role', () => {

@@ -2,7 +2,7 @@
 const express = require('express');
 const os = require('os');
 const { pool, logAction } = require('../db');
-const { requireDev, bearerToken, hashToken } = require('../lib/auth');
+const { requireDev, bearerToken, hashToken, sessionLiveSql, SESSION_IDLE_MINUTES } = require('../lib/auth');
 const dbSync = require('../lib/dbSync');
 
 const router = express.Router();
@@ -13,7 +13,7 @@ router.get('/api/dev/info', requireDev, async (req, res) => {
             pool.query(`SELECT current_database() AS name, version() AS version,
                                pg_size_pretty(pg_database_size(current_database())) AS size, NOW() AS now`),
             pool.query('SELECT Name, AppliedOn FROM SchemaMigrations ORDER BY Name DESC'),
-            pool.query('SELECT COUNT(*)::int AS n FROM Sessions WHERE ExpiresOn > NOW()'),
+            pool.query(`SELECT COUNT(*)::int AS n FROM Sessions s WHERE ${sessionLiveSql(1)}`, [SESSION_IDLE_MINUTES]),
             pool.query('SELECT Role, COUNT(*)::int AS n FROM EmployeeRoles WHERE Active = TRUE GROUP BY Role ORDER BY Role'),
         ]);
         res.json({
@@ -35,16 +35,20 @@ router.get('/api/dev/info', requireDev, async (req, res) => {
     }
 });
 
-// Logins that have not expired, newest first. Only the hash is stored, so a session is named by its hash; current
-// marks the session making the request.
+// Logins that have not ended (12 hours after login, or 2 hours without activity), newest first. Only the hash is
+// stored, so a session is named by its hash; current marks the session making the request.
 router.get('/api/dev/sessions', requireDev, async (req, res) => {
     try {
         const current = hashToken(bearerToken(req));
         const result = await pool.query(
-            `SELECT s.TokenHash, s.EmployeeEmail, e.DisplayName, e.Role, s.CreatedOn, s.ExpiresOn
-             FROM Sessions s LEFT JOIN EmployeeRoles e ON LOWER(e.EmployeeEmail) = LOWER(s.EmployeeEmail)
-             WHERE s.ExpiresOn > NOW()
-             ORDER BY s.CreatedOn DESC`
+            `SELECT s.TokenHash, s.EmployeeEmail, e.DisplayName, e.Role, s.CreatedOn, s.ExpiresOn, s.LastActiveOn,
+                    d.Name AS DeviceName, d.UserAgent AS DeviceUserAgent
+             FROM Sessions s
+             LEFT JOIN EmployeeRoles e ON LOWER(e.EmployeeEmail) = LOWER(s.EmployeeEmail)
+             LEFT JOIN Devices d ON d.DeviceId = s.DeviceId
+             WHERE ${sessionLiveSql(1)}
+             ORDER BY s.LastActiveOn DESC`,
+            [SESSION_IDLE_MINUTES]
         );
         res.json(result.rows.map(r => ({
             sessionHash: r.tokenhash.trim(),
@@ -53,6 +57,9 @@ router.get('/api/dev/sessions', requireDev, async (req, res) => {
             role: r.role ?? null,
             createdOn: r.createdon,
             expiresOn: r.expireson,
+            lastActiveOn: r.lastactiveon,
+            deviceName: r.devicename ?? null,
+            deviceUserAgent: r.deviceuseragent ?? null,
             current: r.tokenhash.trim() === current,
         })));
     } catch (err) {

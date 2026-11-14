@@ -6,7 +6,8 @@ import {
   Paperclip, UserCheck, ClipboardList, SlidersHorizontal, Lock, Palette, Code2
 } from 'lucide-react';
 import {
-  loginUser, logoutUser, setSessionEndedHandler, setDeviceBlockedHandler, getDeviceStatus, getClient, getClients, getGroups, getProgramFees,
+  loginUser, logoutUser, setSessionEndedHandler, setSessionStartedHandler, setDeviceBlockedHandler, getDeviceStatus,
+  getCurrentUser, hasSavedSession, getClient, getClients, getGroups, getProgramFees,
   getPolygraphSlots,
   deletePolygraphSlot,
   getClientAttendance, getClientFinancials,
@@ -232,7 +233,8 @@ export default function App() {
   // Supervising agent directory, suggested in the client forms' agent field
   const [directoryAgents, setDirectoryAgents] = useState<SupervisingAgent[]>([]);
 
-  // The server refused the session (expired after 12 hours, or the account was changed): back to the login screen
+  // The server refused the session (12 hours after login, 2 hours without activity, logged out in another window, or
+  // the account was changed): back to the login screen
   useEffect(() => {
     setSessionEndedHandler(() => {
       setUser(null);
@@ -261,6 +263,8 @@ export default function App() {
     });
     return () => setDeviceBlockedHandler(null);
   }, [checkDevice]);
+  // Whether a saved login is being restored; see restoreLogin below
+  const [restoring, setRestoring] = useState(hasSavedSession);
 
   const handleLogout = async () => {
     await logoutUser();
@@ -322,13 +326,36 @@ export default function App() {
     }
   };
 
+  // The login is saved in the browser (api.ts), so a refresh or a new window logs straight in once the device is
+  // approved. 'restoring' hides the login screen while the server is asked who the saved login belongs to.
+  const restoreLogin = () => getCurrentUser()
+    .then(saved => {
+      if (!saved) return;
+      setUser(saved);
+      setError('');
+      loadDashboardData();
+    })
+    .catch(() => { /* the login screen shows; logging in works as usual */ });
+  const restoreLoginRef = useRef(restoreLogin);
+  useEffect(() => { restoreLoginRef.current = restoreLogin; });
+  useEffect(() => {
+    if (deviceState !== 'approved') return;
+    restoreLoginRef.current().finally(() => setRestoring(false));
+  }, [deviceState]);
+  // Another window of this browser logged in: follow it
+  useEffect(() => {
+    setSessionStartedHandler(() => { restoreLoginRef.current(); });
+    return () => setSessionStartedHandler(null);
+  }, []);
+
   // While the Polygraphs tab is open, refresh slots every minute so open slots whose time has passed
   // (deleted by the server when slots are listed) drop off the schedule
   useEffect(() => {
     if (activeTab !== 'polygraph') return;
     const timer = setInterval(async () => {
       try {
-        const freshSlots = await getPolygraphSlots();
+        // background: an open, unattended Polygraphs tab must not keep the session from ending after 2 idle hours
+        const freshSlots = await getPolygraphSlots({ background: true });
         if (Array.isArray(freshSlots)) setPolySlots(freshSlots);
       } catch (err) {
         console.error('Failed to refresh polygraph slots', err);
@@ -699,6 +726,9 @@ export default function App() {
     );
   }
   if (deviceState !== 'approved') return <DeviceAccess state={deviceState} onState={setDeviceState} />;
+  if (!user && restoring) {
+    return <div className="min-h-dvh bg-slate-900 flex items-center justify-center p-4 text-slate-400 text-sm">Signing you in…</div>;
+  }
 
   if (!user) {
     return (
@@ -869,7 +899,7 @@ export default function App() {
             <p className="text-sm font-medium text-white">{user.displayname}</p>
             <span className="text-xs bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/20 font-semibold">{user.isdev ? 'DEV' : user.role}</span>
           </div>
-          <button onClick={handleLogout} className="bg-slate-800 hover:bg-slate-700 p-2 rounded-lg text-slate-400 hover:text-white transition"><LogOut size={18} /></button>
+          <button onClick={handleLogout} aria-label="Log out" title="Log out" className="bg-slate-800 hover:bg-slate-700 p-2 rounded-lg text-slate-400 hover:text-white transition"><LogOut size={18} /></button>
         </div>
       </header>
 

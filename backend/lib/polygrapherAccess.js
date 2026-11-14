@@ -4,6 +4,7 @@
 // server, whatever the screen shows.
 const ALLOWED = [
     ['POST', /^\/api\/auth\/logout$/],
+    ['GET', /^\/api\/auth\/me$/],
     // Shared lists the app loads at sign-in
     ['GET', /^\/api\/clients$/],
     ['GET', /^\/api\/groups$/],

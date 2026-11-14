@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { endDevSession, getDevSessions } from '../../api';
 import type { DevSession } from '../../api';
+import { describeUserAgent } from '../../utils/deviceAccess';
 
 // "13 Nov 2026, 2:05 PM" style, in the browser's time zone
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
-// Logins that have not expired (DEV only; the server checks). Ending one signs that login out on its next request.
+// Logins that have not ended (DEV only; the server checks). A login ends 12 hours after it starts ("Ends by") or after
+// 2 hours without activity, whichever is first. Ending one signs that login out on its next request.
 export default function ActiveSessions() {
   const [sessions, setSessions] = useState<DevSession[] | null>(null);
   const [error, setError] = useState('');
@@ -59,9 +61,11 @@ export default function ActiveSessions() {
             <thead>
               <tr className="text-left text-slate-400 border-b border-slate-800">
                 <th className="py-2 pr-3 font-medium">Employee</th>
+                <th className="py-2 pr-3 font-medium">Device</th>
                 <th className="py-2 pr-3 font-medium">Role</th>
                 <th className="py-2 pr-3 font-medium">Logged in</th>
-                <th className="py-2 pr-3 font-medium">Expires</th>
+                <th className="py-2 pr-3 font-medium">Last active</th>
+                <th className="py-2 pr-3 font-medium">Ends by</th>
                 <th className="py-2 font-medium text-right">&nbsp;</th>
               </tr>
             </thead>
@@ -72,8 +76,17 @@ export default function ActiveSessions() {
                     <div>{s.displayName || s.email}</div>
                     <div className="text-slate-500 break-all">{s.email}</div>
                   </td>
+                  <td className="py-2 pr-3 text-slate-300">
+                    {s.deviceName ? (
+                      <>
+                        <div>{s.deviceName}</div>
+                        <div className="text-slate-500">{describeUserAgent(s.deviceUserAgent)}</div>
+                      </>
+                    ) : <span className="text-slate-500">Unknown</span>}
+                  </td>
                   <td className="py-2 pr-3 text-slate-300">{s.role ?? '-'}</td>
                   <td className="py-2 pr-3 text-slate-300 whitespace-nowrap">{when(s.createdOn)}</td>
+                  <td className="py-2 pr-3 text-slate-300 whitespace-nowrap">{when(s.lastActiveOn)}</td>
                   <td className="py-2 pr-3 text-slate-300 whitespace-nowrap">{when(s.expiresOn)}</td>
                   <td className="py-2 text-right whitespace-nowrap">
                     {s.current ? (
