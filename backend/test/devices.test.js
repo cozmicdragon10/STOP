@@ -24,11 +24,11 @@ test('owner text is trimmed and limited; names are required where asked', () => 
     assert.match(devices.cleanText('x'.repeat(501), 500).error, /500/);
 });
 
-test('the caps: 2 pending per address, 2 per email, 20 overall', () => {
-    assert.equal(devices.capReason({ pendingFromIp: 0, pendingForEmail: 0, pendingTotal: 0 }), null);
-    assert.equal(devices.capReason({ pendingFromIp: 2, pendingForEmail: 0, pendingTotal: 2 }), 'ip');
-    assert.equal(devices.capReason({ pendingFromIp: 1, pendingForEmail: 2, pendingTotal: 2 }), 'email');
-    assert.equal(devices.capReason({ pendingFromIp: 1, pendingForEmail: 1, pendingTotal: 20 }), 'total');
+test('the caps: 2 pending per email, 20 overall', () => {
+    assert.equal(devices.capReason({ pendingForEmail: 0, pendingTotal: 0 }), null);
+    assert.equal(devices.capReason({ pendingForEmail: 1, pendingTotal: 19 }), null);
+    assert.equal(devices.capReason({ pendingForEmail: 2, pendingTotal: 2 }), 'email');
+    assert.equal(devices.capReason({ pendingForEmail: 1, pendingTotal: 20 }), 'total');
 });
 
 test('wrong attempts lock an address for the lockout window, then the lock clears', () => {

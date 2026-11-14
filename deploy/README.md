@@ -36,12 +36,21 @@ again works. When the task was installed with `-AtBoot`, run these as administra
 ## Approved devices
 
 Only approved devices can use STOP (see `docs/device-approval-plan.md`). Every other browser sees a request-access form.
-Requests, approved devices, IPs and memos are in the DEV tab.
+Requests, approved devices and memos are in the DEV tab.
 
 The first time, after the update that adds devices, set up the owner's device from PowerShell in `backend\`:
 `npm run devices:bootstrap -- "<device name>"`. It prints a setup code valid for 30 minutes. On that device, open STOP,
 choose **I have a setup code**, and enter it. If the code expires first, run the script again for a new one. Once a
 device has used a code, the script refuses; other devices request access in the app.
+
+Keep at least two approved devices (for example your PC and your phone), so losing one doesn't lock you out of the DEV
+tab. A device loses its approval if its browser's cookies or site data are cleared, or if you use a different browser,
+a private window, or another Windows user.
+
+**Locked out** (no approved device can get in): at the server, in `backend\`, run
+`npm run devices:bootstrap -- --recover "<device name>"`. It prints a new setup code (30 minutes, one use) even though
+other devices are approved, and records the recovery in the audit log. Enter the code on the device as above. Then, in
+the DEV tab, remove any approved devices that are lost or no longer used.
 
 ## Developing
 

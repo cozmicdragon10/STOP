@@ -50,14 +50,12 @@ router.post('/api/devices/request', async (req, res) => {
         devices.clearFailures(key);
 
         const counts = await pool.query(
-            `SELECT COUNT(*) FILTER (WHERE FirstIp = $1)::int AS fromip,
-                    COUNT(*) FILTER (WHERE LOWER(RequestEmail) = $2)::int AS foremail,
+            `SELECT COUNT(*) FILTER (WHERE LOWER(RequestEmail) = $1)::int AS foremail,
                     COUNT(*)::int AS total
              FROM Devices WHERE Status = 'pending'`,
-            [ip, email]
+            [email]
         );
         const reason = devices.capReason({
-            pendingFromIp: counts.rows[0].fromip,
             pendingForEmail: counts.rows[0].foremail,
             pendingTotal: counts.rows[0].total,
         });
@@ -71,12 +69,12 @@ router.post('/api/devices/request', async (req, res) => {
         const userAgent = String(req.get('User-Agent') || '').slice(0, 300);
         await pool.query(
             `INSERT INTO Devices (TokenHash, Status, Name, RequestName, RequestEmail, RequestRole, RequestNote, UserAgent,
-                                  FirstIp, LastIp, LastSeenOn, RequestedOn, ExpiresOn)
-             VALUES ($1, 'pending', $2, $2, $3, $4, $5, $6, $7, $7, NOW(), NOW(), NOW() + make_interval(hours => $8))`,
-            [devices.hashToken(token), name, email, account.rows[0].role, note || null, userAgent, ip, devices.PENDING_HOURS]
+                                  LastSeenOn, RequestedOn, ExpiresOn)
+             VALUES ($1, 'pending', $2, $2, $3, $4, $5, $6, NOW(), NOW(), NOW() + make_interval(hours => $7))`,
+            [devices.hashToken(token), name, email, account.rows[0].role, note || null, userAgent, devices.PENDING_HOURS]
         );
         devices.setDeviceCookie(res, token);
-        await logAction(email, 'Device Requested', `Access requested by ${name} from ${ip}${note ? `: ${note}` : ''}`, 'Login');
+        await logAction(email, 'Device Requested', `Access requested by ${name}${note ? `: ${note}` : ''}`, 'Login');
         res.json({ state: 'pending' });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -94,11 +92,10 @@ router.post('/api/devices/redeem', async (req, res) => {
         const userAgent = String(req.get('User-Agent') || '').slice(0, 300);
         const result = code.length === 10
             ? await pool.query(
-                `UPDATE Devices SET TokenHash = $2, SetupCodeHash = NULL, SetupCodeExpiresOn = NULL, LastSeenOn = NOW(), LastIp = $3,
-                                    FirstIp = COALESCE(FirstIp, $3), UserAgent = $4
+                `UPDATE Devices SET TokenHash = $2, SetupCodeHash = NULL, SetupCodeExpiresOn = NULL, LastSeenOn = NOW(), UserAgent = $3
                  WHERE SetupCodeHash = $1 AND SetupCodeExpiresOn > NOW() AND Status = 'approved'
                  RETURNING DeviceId`,
-                [devices.hashToken(code), devices.hashToken(token), ip, userAgent]
+                [devices.hashToken(code), devices.hashToken(token), userAgent]
             )
             : { rowCount: 0 };
         if (!result.rowCount) {
@@ -107,7 +104,7 @@ router.post('/api/devices/redeem', async (req, res) => {
         }
         devices.clearFailures(key);
         devices.setDeviceCookie(res, token);
-        await logAction('device setup', 'Device Setup', `Device ${result.rows[0].deviceid} set up with a setup code from ${ip}`, 'Login');
+        await logAction('device setup', 'Device Setup', `Device ${result.rows[0].deviceid} set up with a setup code`, 'Login');
         res.json({ state: 'approved' });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -119,7 +116,7 @@ router.get('/api/devices', requireDev, async (req, res) => {
     try {
         await devices.expirePending();
         const result = await pool.query(
-            `SELECT DeviceId, Status, Name, RequestName, RequestEmail, RequestRole, RequestNote, UserAgent, FirstIp, LastIp,
+            `SELECT DeviceId, Status, Name, RequestName, RequestEmail, RequestRole, RequestNote, UserAgent,
                     LastSeenOn, RequestedOn, ExpiresOn, DecidedOn, DecidedBy, ApprovalMemo, TokenHash
              FROM Devices
              ORDER BY CASE Status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END, RequestedOn DESC
@@ -135,8 +132,6 @@ router.get('/api/devices', requireDev, async (req, res) => {
             requestRole: r.requestrole,
             requestNote: r.requestnote,
             userAgent: r.useragent,
-            firstIp: r.firstip,
-            lastIp: r.lastip,
             lastSeenOn: r.lastseenon,
             requestedOn: r.requestedon,
             expiresOn: r.expireson,
@@ -163,13 +158,13 @@ const decide = (status, verb) => async (req, res) => {
             `UPDATE Devices
              SET Status = $2, DecidedOn = NOW(), DecidedBy = $3, ApprovalMemo = $4, Name = COALESCE($5, Name), ExpiresOn = NULL
              WHERE DeviceId = $1 AND Status = 'pending'
-             RETURNING Name, RequestEmail, FirstIp`,
+             RETURNING Name, RequestEmail`,
             [id, status, req.user.employeeemail, memo.value, name.value]
         );
         if (result.rowCount === 0) return res.status(404).json({ error: 'That request is no longer waiting for review.' });
         const d = result.rows[0];
         await logAction(req.user.employeeemail, `Device ${verb}`,
-            `${d.name} (${d.requestemail}, from ${d.firstip})${memo.value ? `. Memo: ${memo.value}` : ''}`, 'Admin');
+            `${d.name} (${d.requestemail})${memo.value ? `. Memo: ${memo.value}` : ''}`, 'Admin');
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });

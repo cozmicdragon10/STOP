@@ -15,6 +15,12 @@ Status: built and tested on the dev server and `stop_dev` (2026-11-14). Not depl
   whenever the device is used (at most hourly).
 - **Removing a device** blocks it on its very next request, even mid-session. The device you are using can't remove
   itself.
+- **No IP addresses (2026-11-14, migration 068):** the owner doesn't need them, so they are not stored or shown, and the
+  per-address request cap is gone. The caps are 2 pending per employee email and 20 overall. The wrong-attempt lockouts
+  still key on the connection's address, in memory only. Where the draft below mentions IPs, this replaces it.
+- **Recovery:** `npm run devices:bootstrap -- --recover "<name>"` at the server issues a setup code even when other
+  devices are approved, for when no approved device can get in. It is logged as "Device Recovery". Keep at least two
+  approved devices so this is rarely needed.
 - **Not built yet:** the email alert for new requests (no email sending exists in the app) and the 60-day inactivity flag.
 
 ## Goal

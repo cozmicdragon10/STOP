@@ -342,8 +342,6 @@ export interface DeviceRow {
     requestRole: string | null;
     requestNote: string | null;
     userAgent: string | null;
-    firstIp: string | null;
-    lastIp: string | null;
     lastSeenOn: string | null;
     requestedOn: string;
     expiresOn: string | null;

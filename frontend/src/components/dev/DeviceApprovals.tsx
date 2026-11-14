@@ -28,9 +28,8 @@ function PendingRequest({ device, busy, onDecide }: {
           <div>Expires {when(device.expiresOn)}</div>
         </div>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-slate-300">
-        <div><span className="text-slate-500">IP:</span> {device.firstIp || '-'}</div>
-        <div><span className="text-slate-500">Browser:</span> <span title={device.userAgent ?? ''}>{describeUserAgent(device.userAgent)}</span></div>
+      <div className="text-slate-300">
+        <span className="text-slate-500">Browser:</span> <span title={device.userAgent ?? ''}>{describeUserAgent(device.userAgent)}</span>
       </div>
       <div className="bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 whitespace-pre-wrap break-words">
         {device.requestNote || <span className="text-slate-500">No note.</span>}
@@ -144,7 +143,6 @@ export default function DeviceApprovals() {
                 <tr className="text-left text-slate-400 border-b border-slate-800">
                   <th className="py-2 pr-3 font-medium">Device</th>
                   <th className="py-2 pr-3 font-medium">Requested by</th>
-                  <th className="py-2 pr-3 font-medium">Last IP</th>
                   <th className="py-2 pr-3 font-medium">Last seen</th>
                   <th className="py-2 pr-3 font-medium">Approval memo</th>
                   <th className="py-2 font-medium text-right">&nbsp;</th>
@@ -171,10 +169,6 @@ export default function DeviceApprovals() {
                       <div className="text-slate-500" title={d.userAgent ?? ''}>{describeUserAgent(d.userAgent)}{d.current ? ' · this device' : ''}</div>
                     </td>
                     <td className="py-2 pr-3 text-slate-300 break-all">{d.requestEmail || d.requestName || '-'}</td>
-                    <td className="py-2 pr-3 text-slate-300 whitespace-nowrap">
-                      <div>{d.lastIp || '-'}</div>
-                      {d.firstIp && d.firstIp !== d.lastIp && <div className="text-slate-500">first {d.firstIp}</div>}
-                    </td>
                     <td className="py-2 pr-3 text-slate-300 whitespace-nowrap">{when(d.lastSeenOn)}</td>
                     <td className="py-2 pr-3 text-slate-300 whitespace-pre-wrap break-words max-w-[16rem]">
                       {d.approvalMemo || <span className="text-slate-500">-</span>}
@@ -210,7 +204,6 @@ export default function DeviceApprovals() {
                     <th className="py-2 pr-3 font-medium">Status</th>
                     <th className="py-2 pr-3 font-medium">Device</th>
                     <th className="py-2 pr-3 font-medium">Email</th>
-                    <th className="py-2 pr-3 font-medium">IP</th>
                     <th className="py-2 pr-3 font-medium">Requested</th>
                     <th className="py-2 font-medium">Memo</th>
                   </tr>
@@ -221,7 +214,6 @@ export default function DeviceApprovals() {
                       <td className="py-2 pr-3">{STATUS_LABEL[d.status] ?? d.status}</td>
                       <td className="py-2 pr-3">{d.name}<div className="text-slate-500">{describeUserAgent(d.userAgent)}</div></td>
                       <td className="py-2 pr-3 break-all">{d.requestEmail || '-'}</td>
-                      <td className="py-2 pr-3 whitespace-nowrap">{d.lastIp || d.firstIp || '-'}</td>
                       <td className="py-2 pr-3 whitespace-nowrap">{when(d.requestedOn)}</td>
                       <td className="py-2 whitespace-pre-wrap break-words">{d.approvalMemo || d.requestNote || '-'}</td>
                     </tr>

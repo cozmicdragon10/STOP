@@ -11,7 +11,6 @@ const PENDING_HOURS = 24;          // a request nobody acts on is marked expired
 const NAME_MAX = 80;
 const NOTE_MAX = 300;
 const MEMO_MAX = 500;
-const CAP_PER_IP = 2;              // pending requests from one address
 const CAP_PER_EMAIL = 2;           // pending requests for one employee email
 const CAP_TOTAL = 20;              // pending requests overall, a backstop
 const LOCK_MAX_FAILURES = 5;       // wrong emails or setup codes from one address
@@ -28,8 +27,8 @@ const isPublicDevicePath = (path) => DEVICE_PUBLIC_PATHS.includes(path);
 const hashToken = (token) => crypto.createHash('sha256').update(String(token)).digest('hex');
 const newToken = () => crypto.randomBytes(32).toString('base64url');
 
-// The address the request came from, without the IPv4-in-IPv6 prefix. Express only reads a proxy's address when the
-// app is set to trust one (none is in front of it today).
+// The address the request came from, without the IPv4-in-IPv6 prefix. Used only in memory, to key the wrong-attempt
+// lockouts; addresses are never stored or shown.
 const clientAddress = (req) => String(req.ip || req.socket?.remoteAddress || 'unknown').replace(/^::ffff:/, '');
 
 // The device token from the Cookie header, or null
@@ -96,9 +95,8 @@ const cleanText = (value, max, { required = false } = {}) => {
     return { value: text || null };
 };
 
-// Which cap, if any, stops a new request: 'ip', 'email', 'total', or null when it may go ahead
-const capReason = ({ pendingFromIp, pendingForEmail, pendingTotal }) => {
-    if (pendingFromIp >= CAP_PER_IP) return 'ip';
+// Which cap, if any, stops a new request: 'email', 'total', or null when it may go ahead
+const capReason = ({ pendingForEmail, pendingTotal }) => {
     if (pendingForEmail >= CAP_PER_EMAIL) return 'email';
     if (pendingTotal >= CAP_TOTAL) return 'total';
     return null;
@@ -116,7 +114,7 @@ const normalizeSetupCode = (code) => String(code ?? '').toUpperCase().replace(/[
 const deviceByToken = async (token) => {
     if (!token) return null;
     const result = await pool.query(
-        'SELECT DeviceId, Status, Name, LastSeenOn, LastIp, TokenHash FROM Devices WHERE TokenHash = $1',
+        'SELECT DeviceId, Status, Name, LastSeenOn, TokenHash FROM Devices WHERE TokenHash = $1',
         [hashToken(token)]
     );
     return result.rows[0] ?? null;
@@ -139,14 +137,13 @@ const deviceGate = async (req, res, next) => {
         const token = deviceToken(req);
         const device = await deviceByToken(token);
         if (!device || device.status !== 'approved') return refuse();
-        const ip = clientAddress(req);
         const stale = !device.lastseenon || Date.now() - new Date(device.lastseenon).getTime() > LAST_SEEN_EVERY_MS;
-        if (stale || device.lastip !== ip) {
-            await pool.query('UPDATE Devices SET LastSeenOn = NOW(), LastIp = $2 WHERE DeviceId = $1', [device.deviceid, ip]);
+        if (stale) {
+            await pool.query('UPDATE Devices SET LastSeenOn = NOW() WHERE DeviceId = $1', [device.deviceid]);
+            // Approval never expires, but browsers drop a cookie after at most 400 days; renewing it on use (at most
+            // hourly) keeps a device that is in use approved for good
+            setDeviceCookie(res, token);
         }
-        // Approval never expires, but browsers drop a cookie after at most 400 days; renewing it on use (at most hourly)
-        // keeps a device that is in use approved for good
-        if (stale) setDeviceCookie(res, token);
         req.device = { id: device.deviceid, name: device.name };
         next();
     } catch (err) {
@@ -154,27 +151,31 @@ const deviceGate = async (req, res, next) => {
     }
 };
 
-// Creates the first approved device, with a one-time setup code to enter in its browser. Refused once any approved
-// device is in use (has a token), so later devices go through the request flow. A first device whose code was never
-// used (say it expired) is replaced, so running this again gives a fresh code instead of locking everyone out.
-const createFirstDevice = async (name) => {
-    const inUse = await pool.query("SELECT COUNT(*)::int AS n FROM Devices WHERE Status = 'approved' AND TokenHash IS NOT NULL");
-    if (inUse.rows[0].n > 0) {
-        throw new Error('A device is already approved. Other devices must request access in the app.');
+// Creates an approved device with a one-time setup code to enter in its browser. Without `recover` it is refused once
+// any approved device is in use (has a token), so later devices go through the request flow. With `recover` it works
+// anyway: the way back in when every approved device has lost its cookie. Only someone at the server can run it.
+// A device whose code was never used (say it expired) is replaced, so running this again gives a fresh code.
+const createFirstDevice = async (name, { recover = false } = {}) => {
+    if (!recover) {
+        const inUse = await pool.query("SELECT COUNT(*)::int AS n FROM Devices WHERE Status = 'approved' AND TokenHash IS NOT NULL");
+        if (inUse.rows[0].n > 0) {
+            throw new Error('A device is already approved. Other devices must request access in the app. '
+                + 'If no approved device can get in any more, run this again with --recover.');
+        }
     }
     await pool.query("DELETE FROM Devices WHERE Status = 'approved' AND TokenHash IS NULL");
     const code = newSetupCode();
+    const memo = recover ? 'Recovery device, set up from the server console' : 'First device, set up from the server console';
     await pool.query(
         `INSERT INTO Devices (Status, Name, RequestName, DecidedOn, DecidedBy, ApprovalMemo, RequestedOn, SetupCodeHash, SetupCodeExpiresOn)
-         VALUES ('approved', $1, $1, NOW(), 'server console', 'First device, set up from the server console', NOW(),
-                 $2, NOW() + make_interval(mins => $3))`,
-        [name, hashToken(normalizeSetupCode(code)), SETUP_CODE_MINUTES]
+         VALUES ('approved', $1, $1, NOW(), 'server console', $2, NOW(), $3, NOW() + make_interval(mins => $4))`,
+        [name, memo, hashToken(normalizeSetupCode(code)), SETUP_CODE_MINUTES]
     );
     return { code };
 };
 
 module.exports = {
-    COOKIE, PENDING_HOURS, NAME_MAX, NOTE_MAX, MEMO_MAX, CAP_PER_IP, CAP_PER_EMAIL, CAP_TOTAL, LOCK_MAX_FAILURES,
+    COOKIE, PENDING_HOURS, NAME_MAX, NOTE_MAX, MEMO_MAX, CAP_PER_EMAIL, CAP_TOTAL, LOCK_MAX_FAILURES,
     LOCK_MINUTES, DEVICE_PUBLIC_PATHS, isPublicDevicePath, hashToken, newToken, clientAddress, deviceToken,
     setDeviceCookie, lockKey, locked, recordFailure, clearFailures, lockMessage, validateRequest, cleanText, capReason,
     newSetupCode, normalizeSetupCode, deviceByToken, expirePending, deviceGate, createFirstDevice,
