@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LogOut, Menu, X } from 'lucide-react';
+import { Lock, LogOut, Menu, X } from 'lucide-react';
 import BarTabs from './BarTabs';
 import type { NavItem } from './BarTabs';
 
@@ -66,6 +66,7 @@ export default function MainNav({ items, activeTab, onSelect, user, onLogout }: 
                 >
                   <item.icon size={18} />
                   <span className="min-w-0">{item.label}</span>
+                  {item.locked && <Lock size={14} aria-label="Locked while privacy view is on" className="ml-auto shrink-0 text-amber-300" />}
                 </button>
               ))}
             </div>

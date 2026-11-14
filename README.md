@@ -220,7 +220,8 @@ The backend provides REST API endpoints for:
   - **Counselor:** every client (with a "My clients" toggle that starts on), check-in and payments taken in the field,
     edit client information, Therapist case notes only (Admin notes are the office's), attachments (view and upload),
     polygraph schedule and results on the account (view only), groups (read-only details), agents (read-only), Cash
-    Deposits (their own cash, and marking it dropped off), and a My Day home screen (today's groups and their clients not in this month; no money shown). The roster's
+    Deposits (their own cash, and marking it dropped off), and a My Day home screen: a month calendar (closed, open and upcoming scheduled groups, with a month selector) and the
+    sessions they opened, closed or covered that month (`GET /api/my-sessions`). No client or money figures there. The roster's
     "My clients" view also lists clients they covered in the last 30 days in their own "Covered recently" section
     (`GET /api/clients/covered-by-me`, from `Attendance.CoveredBy`). They can't adjust or refund
     payments, add manual charges, set overrides, book or cancel polygraphs, or see the change log. A server allowlist

@@ -1,10 +1,11 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
 import { 
-  Users, ClipboardCheck, ShieldCheck, LogOut, AlertCircle, X, FileText, 
+  Users, ClipboardCheck, ShieldCheck, Shield, LogOut, AlertCircle, X, FileText,
   DollarSign, Calendar, Activity, PhoneCall, ShieldAlert, 
   Layers, BarChart3, Settings, Trash2, RotateCcw, Home, History,
   Paperclip, UserCheck, ClipboardList, SlidersHorizontal, Lock, Palette, Code2
 } from 'lucide-react';
+import { isTabLockedByPrivacy, readPrivacyOn, writePrivacyOn } from './utils/privacy';
 import {
   loginUser, logoutUser, setSessionEndedHandler, setSessionStartedHandler, setDeviceBlockedHandler, getDeviceStatus,
   getCurrentUser, hasSavedSession, getClient, getClients, getGroups, getProgramFees,
@@ -91,6 +92,22 @@ export default function App() {
   };
   const [passwordInput, setPasswordInput] = useState('');
   const [activeTab, setActiveTab] = useState('home');
+  // Privacy view: the shield at the top left. Remembered on this computer; locks Reports, Admin and DEV while on
+  const [privacyOn, setPrivacyOn] = useState(readPrivacyOn);
+  useEffect(() => { writePrivacyOn(privacyOn); }, [privacyOn]);
+  // Turning privacy on moves off a locked tab. Every other way into a tab goes through openTab, which refuses locked ones.
+  const togglePrivacy = () => {
+    const next = !privacyOn;
+    setPrivacyOn(next);
+    if (isTabLockedByPrivacy(activeTab, next)) setActiveTab('home');
+  };
+  const openTab = (tab: string) => {
+    if (isTabLockedByPrivacy(tab, privacyOn)) {
+      setError('Privacy view is on, so this section is locked. Click the shield to turn it off.');
+      return;
+    }
+    setActiveTab(tab);
+  };
   // Counselors: the clients they covered in the last 30 days, shown in their own section of the roster. Reloaded when a tab is opened.
   const [coveredByMe, setCoveredByMe] = useState<CoveredClient[]>([]);
   useEffect(() => {
@@ -812,7 +829,8 @@ export default function App() {
     { tab: 'settings', icon: Palette, label: 'Settings' },
     { tab: 'admin', icon: Settings, label: 'Admin' },
     { tab: 'dev', icon: Code2, label: 'DEV' },
-  ].filter(item => item.tab === 'home' || isAllowed(item.tab));
+  ].filter(item => item.tab === 'home' || isAllowed(item.tab))
+    .map(item => ({ ...item, locked: isTabLockedByPrivacy(item.tab, privacyOn) }));
 
   const getExaminerDisplayName = (email: string) =>
     employees.find(e => e.employeeemail === email)?.displayname || email;
@@ -903,7 +921,16 @@ export default function App() {
       {/* Top Header Navigation */}
       <header className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 md:px-6 md:py-4 flex justify-between items-center gap-4">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="bg-blue-600/20 border border-blue-500/30 p-1.5 md:p-2 rounded-lg text-blue-400 shrink-0"><ShieldCheck size={24} /></div>
+          <button
+            type="button"
+            onClick={togglePrivacy}
+            aria-pressed={privacyOn}
+            aria-label={privacyOn ? 'Privacy view is on. Turn it off' : 'Turn on privacy view'}
+            title={privacyOn ? 'Privacy view on: click to turn off' : 'Privacy view: hides balances and locks Reports, Admin and DEV while clients are around'}
+            className={`p-1.5 md:p-2 rounded-lg border shrink-0 transition ${privacyOn ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300' : 'bg-blue-600/20 border-blue-500/30 text-blue-400 hover:bg-blue-600/30'}`}
+          >
+            {privacyOn ? <ShieldCheck size={24} /> : <Shield size={24} />}
+          </button>
           <div className="min-w-0">
             <h1 className="font-bold text-base md:text-lg text-white truncate">STOP Software Suite</h1>
             <p className="text-xs text-slate-400 truncate">Chandler & Associates — {user.location}</p>
@@ -919,7 +946,7 @@ export default function App() {
       </header>
 
       {/* Main Navigation */}
-      <MainNav items={navItems} activeTab={activeTab} onSelect={setActiveTab} user={user} onLogout={handleLogout} />
+      <MainNav items={navItems} activeTab={activeTab} onSelect={openTab} user={user} onLogout={handleLogout} />
 
       {/* Main Content Area */}
       {/* Bottom padding keeps the end of each page clear of the tab bar when it sits at the bottom */}
@@ -949,9 +976,7 @@ export default function App() {
               <MyDay
                 displayName={user.displayname}
                 groups={groups}
-                clients={clients}
                 onOpenAttendance={() => setActiveTab('attendance')}
-                onOpenClient={(clientId) => openClientById(clientId)}
               />
             )}
             <div>
@@ -960,20 +985,25 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-                <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Active Clients</p>
-                <p className="text-3xl font-bold text-white mt-2">{homeCounts.active}</p>
-                <p className="text-xs text-slate-500 mt-1">{homeCounts.inactive} more not discharged but inactive</p>
-              </div>
+              {/* Counselors and Office Admins don't see the client counts here; Business Administrators do */}
+              {!['Counselor', 'Office Admin'].includes(role) && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+                  <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Active Clients</p>
+                  <p className="text-3xl font-bold text-white mt-2">{homeCounts.active}</p>
+                  <p className="text-xs text-slate-500 mt-1">{homeCounts.inactive} more not discharged but inactive</p>
+                </div>
+              )}
               <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
                 <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Active Groups</p>
                 <p className="text-3xl font-bold text-white mt-2">{activeGroups.length}</p>
               </div>
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-                <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Active Clients Without a Group</p>
-                <p className={`text-3xl font-bold mt-2 ${homeCounts.needGroup > 0 ? 'text-amber-400' : 'text-white'}`}>{homeCounts.needGroup}</p>
-                <p className="text-xs text-slate-500 mt-1">In a program that attends groups (not Poly Only)</p>
-              </div>
+              {!['Counselor', 'Office Admin'].includes(role) && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+                  <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Active Clients Without a Group</p>
+                  <p className={`text-3xl font-bold mt-2 ${homeCounts.needGroup > 0 ? 'text-amber-400' : 'text-white'}`}>{homeCounts.needGroup}</p>
+                  <p className="text-xs text-slate-500 mt-1">In a program that attends groups (not Poly Only)</p>
+                </div>
+              )}
             </div>
 
             <div>
@@ -991,7 +1021,7 @@ export default function App() {
                   { tab: 'admin', icon: Settings, label: 'Admin', description: 'Employees, roles, prices, and system logs.' },
                   { tab: 'settings', icon: Palette, label: 'Settings', description: 'Your colors, fonts, and layout.' },
                 ].filter(s => isAllowed(s.tab)).map(s => (
-                  <button key={s.tab} onClick={() => setActiveTab(s.tab)} className="text-left bg-slate-900 hover:bg-slate-800/70 border border-slate-800 hover:border-slate-700 rounded-xl p-5 transition">
+                  <button key={s.tab} onClick={() => openTab(s.tab)} className="text-left bg-slate-900 hover:bg-slate-800/70 border border-slate-800 hover:border-slate-700 rounded-xl p-5 transition">
                     <div className="flex items-center gap-2 text-blue-400">
                       <s.icon size={18} />
                       <span className="font-semibold text-white">{s.label}</span>
@@ -1009,6 +1039,7 @@ export default function App() {
           <div className={activeTab === 'clients' ? '' : 'hidden'}>
             <ClientRoster
               limited={role === 'Polygrapher'}
+              privacy={privacyOn}
               isMine={counselorGroupIds ? (c) => isMyClient(c, counselorGroupIds, user.displayname) : undefined}
               covered={counselorGroupIds ? coveredByMe : undefined}
               clients={clients}

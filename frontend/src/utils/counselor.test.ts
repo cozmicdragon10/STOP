@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clientsNotAttendedThisMonth, groupsMeetingOn, isMyClient, myGroupIds, weekdayName } from './counselor';
+import { clientsNotAttendedThisMonth, groupsMeetingOn, isMyClient, monthGrid, myGroupIds, scheduledDatesIn, shiftMonth, weekdayName } from './counselor';
 
 const groups = [
   { groupid: 1, groupname: 'Tuesday Men', counselor: 'Ana Ruiz', schedule: 'Tuesdays @ 6:00 PM', active: true },
@@ -20,6 +20,28 @@ describe('my groups', () => {
 
   it('names the weekday of a date', () => {
     expect(weekdayName(new Date(2026, 10, 12))).toBe('Thursday');
+  });
+});
+
+describe('calendar', () => {
+  it('lays a month out in weeks starting Sunday, with blank cells around it', () => {
+    const cells = monthGrid('2026-11');
+    expect(cells.length % 7).toBe(0);
+    expect(cells[new Date(2026, 10, 1).getDay()]).toBe('2026-11-01');
+    expect(cells.filter(Boolean)).toHaveLength(30);
+  });
+
+  it('moves between months across a year', () => {
+    expect(shiftMonth('2026-11', 1)).toBe('2026-12');
+    expect(shiftMonth('2026-01', -1)).toBe('2025-12');
+  });
+
+  it('puts my scheduled groups on their days from today on', () => {
+    const byDay = scheduledDatesIn(groups, 'Ana Ruiz', '2026-11', '2026-11-10');
+    // Ana leads a Tuesday group and a Thursday group (the Thursday one is inactive, so it's skipped)
+    expect([...byDay.keys()]).toEqual(['2026-11-10', '2026-11-12', '2026-11-17', '2026-11-19', '2026-11-24', '2026-11-26']);
+    expect(byDay.get('2026-11-12')?.map(g => g.groupname)).toEqual(['Thursday Men']);
+    expect(byDay.get('2026-11-11')).toBeUndefined();
   });
 });
 

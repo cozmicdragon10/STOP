@@ -46,6 +46,7 @@ const ALLOWED = [
     ['PUT', /^\/api\/open-groups$/],
     ['DELETE', /^\/api\/open-groups\/\d+$/],
     ['GET', /^\/api\/closed-groups$/],
+    ['GET', /^\/api\/my-sessions$/],
     ['POST', /^\/api\/attendance$/],
     ['POST', /^\/api\/attendance\/batch$/],
     ['GET', /^\/api\/individual-sessions\/(open|closed)$/],

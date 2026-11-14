@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { ComponentType } from 'react';
+import { Lock } from 'lucide-react';
 
 export interface NavItem {
   tab: string;
@@ -7,6 +8,8 @@ export interface NavItem {
   // Fits the bar on a narrow phone; the full label is the button's tooltip and is used in the phone menu
   shortLabel?: string;
   icon: ComponentType<{ size?: number }>;
+  // Visible but can't be opened right now (privacy view); shows a lock
+  locked?: boolean;
 }
 
 interface Props {
@@ -39,10 +42,13 @@ export default function BarTabs({ items, activeTab, onSelect, className = '' }: 
           type="button"
           onClick={() => onSelect(item.tab)}
           aria-current={activeTab === item.tab ? 'page' : undefined}
-          title={item.label}
-          className={`shrink-0 w-[4.75rem] md:w-auto md:flex-1 md:min-w-0 flex flex-col items-center gap-1 py-2 text-[0.6875rem] md:text-[0.625rem] lg:text-xs font-medium transition ${activeTab === item.tab ? 'text-blue-400' : 'text-slate-400 hover:text-slate-200'}`}
+          title={item.locked ? `${item.label} (locked while privacy view is on)` : item.label}
+          className={`shrink-0 w-[4.75rem] md:w-auto md:flex-1 md:min-w-0 flex flex-col items-center gap-1 py-2 text-[0.6875rem] md:text-[0.625rem] lg:text-xs font-medium transition ${activeTab === item.tab ? 'text-blue-400' : 'text-slate-400 hover:text-slate-200'} ${item.locked ? 'opacity-60' : ''}`}
         >
-          <item.icon size={20} />
+          <span className="relative">
+            <item.icon size={20} />
+            {item.locked && <Lock size={11} aria-hidden="true" className="absolute -top-1 -right-1.5 text-amber-300" />}
+          </span>
           <span className="truncate max-w-full px-1 md:px-0">{item.shortLabel ?? item.label}</span>
         </button>
       ))}

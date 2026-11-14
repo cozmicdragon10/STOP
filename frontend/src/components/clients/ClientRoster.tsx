@@ -18,6 +18,7 @@ import type { ClientOwnership } from '../../utils/counselor';
 import type { CoveredClient } from '../../api';
 import { SO_PHASES, SO_TREATMENT_FEES, bipTreatmentFee } from '../../utils/soPhases';
 import { formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
+import { privacyRosterView } from '../../utils/privacy';
 import { takesPolygraphs } from '../../utils/polygraph';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client and group rows are untyped throughout App */
@@ -41,6 +42,8 @@ interface Props {
   headerActions?: ReactNode;
   // A Polygrapher's roster: no balances and no New Client
   limited?: boolean;
+  // Privacy view (see utils/privacy.ts): no balances, nothing listed until a search, then one client
+  privacy?: boolean;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -134,7 +137,7 @@ const ROSTER_CELLS: Record<SortKey, (c: any) => ReactNode> = {
 
 // The Client Roster tab: searchable, filterable client list and the New Client form. Clicking a row opens the
 // client's account (App's drawer).
-export default function ClientRoster({ clients, activeGroups, directoryAgents, userEmail, onOpenClient, onCreated, onSuccess, onError, headerActions, limited = false, isMine, covered }: Props) {
+export default function ClientRoster({ clients, activeGroups, directoryAgents, userEmail, onOpenClient, onCreated, onSuccess, onError, headerActions, limited = false, privacy = false, isMine, covered }: Props) {
   // A Polygrapher's roster leaves out the balance (the server doesn't send it to them either)
   const columnKeys = limited ? LIMITED_ROSTER_COLUMN_KEYS : ROSTER_COLUMN_KEYS;
   const [clientSearch, setClientSearch] = useState('');
@@ -244,13 +247,15 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
 
   // Which columns show and in what order, saved in this browser
   const columns = useColumnLayout(limited ? 'clientRosterColumnsLimited' : 'clientRosterColumns', columnKeys, ['name'], ROSTER_DEFAULT_HIDDEN);
+  // Privacy view leaves the balance column out, whatever the Columns setting says
+  const shownKeys = privacy ? columns.visibleKeys.filter(key => key !== 'balance') : columns.visibleKeys;
 
   // Column sorting: clicking a header sorts by it ascending, clicking again flips the direction
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'name', dir: 1 });
   const toggleSort = (key: SortKey) => setSort(s => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
   // Counselors' "Covered recently" section: clients they covered in the last 30 days that aren't already theirs. Its own list,
   // so it never mixes into the main roster (only shown while "My clients" is on).
-  const coveredSection = isMine && mineOnly && covered
+  const coveredSection = isMine && mineOnly && covered && !privacy
     ? covered.flatMap(r => {
       const c = clients.find(x => Number(x.clientid) === Number(r.clientid));
       if (!c || isMine(c)) return [];
@@ -266,7 +271,16 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
     return diff * sort.dir || byName(a, b);
   });
   // 50 clients per page; a new search, filter, or sort starts again on page 1
-  const pager = usePagination(sortedClients, JSON.stringify([clientSearchTerm, clientFilters, sort]));
+  // Privacy view: nothing until a search, then only the first matching client; the other matches are counted, not listed
+  const privacyView = privacy ? privacyRosterView(sortedClients, clientSearchTerm) : null;
+  const rosterClients = privacyView ? privacyView.shown : sortedClients;
+  const privacyEmptyText = privacyView && privacyView.shown.length === 0
+    ? (clientSearchTerm ? 'No client matches that search.' : 'Privacy view is on. Search for one client to see their details.')
+    : null;
+  const privacyMoreText = privacyView && privacyView.more > 0
+    ? `${privacyView.more} more client${privacyView.more === 1 ? ' matches' : 's match'} this search. Type more of the name to narrow it to one.`
+    : null;
+  const pager = usePagination(rosterClients, JSON.stringify([clientSearchTerm, clientFilters, sort, privacy]));
   const sortHeader = (key: SortKey, label: string) => {
     const Icon = sort.key !== key ? ArrowUpDown : sort.dir === 1 ? ArrowUp : ArrowDown;
     return (
@@ -575,6 +589,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
           </ul>
         </section>
       )}
+      {privacyMoreText && <p className="px-4 py-2 text-xs text-amber-300 border-b border-slate-800">{privacyMoreText}</p>}
       {/* Phones: one card per client, always showing the fields that matter most at a glance */}
       <ul className="md:hidden divide-y divide-slate-800">
         {pager.pageItems.map((c) => {
@@ -599,7 +614,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                 <button type="button" onClick={() => onOpenClient(c)} className="flex-1 min-w-0 text-left p-4 space-y-1.5">
                   <span className="flex items-baseline justify-between gap-3">
                     <span className="font-medium text-white truncate">{c.lastname}, {c.firstname}</span>
-                    {!limited && <span className={`shrink-0 text-sm font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalanceLabeled(c.accountbalance)}</span>}
+                    {!limited && !privacy && <span className={`shrink-0 text-sm font-semibold ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalanceLabeled(c.accountbalance)}</span>}
                   </span>
                   <span className="flex flex-wrap items-center gap-1.5 text-xs">
                     <span className="bg-blue-500/10 border border-blue-500/20 text-blue-400 px-2 py-0.5 rounded font-semibold">{c.programtype || 'State SO'}</span>
@@ -619,9 +634,9 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
             </li>
           );
         })}
-        {filteredClients.length === 0 && (
+        {(privacyView ? rosterClients.length === 0 : filteredClients.length === 0) && (
           <li className={`p-6 text-center text-sm ${statusError ? 'text-red-400' : 'text-slate-500'}`}>
-            {statusError || (statusLoading ? 'Loading discharged clients…' : 'No clients match your filters.')}
+            {privacyEmptyText || statusError || (statusLoading ? 'Loading discharged clients…' : 'No clients match your filters.')}
           </li>
         )}
       </ul>
@@ -630,7 +645,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
           <thead>
             <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
               {hideMode && <th className="p-3 w-px"><span className="sr-only">Hide</span></th>}
-              {columns.visibleKeys.map(key => sortHeader(key, ROSTER_COLUMN_LABELS[key]))}
+              {shownKeys.map(key => sortHeader(key, ROSTER_COLUMN_LABELS[key]))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800 text-sm">
@@ -657,15 +672,15 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                   </td>
                 )}
                 {hidden
-                  ? <td colSpan={columns.visibleKeys.length} className="p-3" aria-label="Hidden client" />
-                  : columns.visibleKeys.map(key => <Fragment key={key}>{ROSTER_CELLS[key](c)}</Fragment>)}
+                  ? <td colSpan={shownKeys.length} className="p-3" aria-label="Hidden client" />
+                  : shownKeys.map(key => <Fragment key={key}>{ROSTER_CELLS[key](c)}</Fragment>)}
               </tr>
               );
             })}
-            {filteredClients.length === 0 && (
+            {(privacyView ? rosterClients.length === 0 : filteredClients.length === 0) && (
               <tr>
-                <td colSpan={columns.visibleKeys.length + (hideMode ? 1 : 0)} className={`p-6 text-center text-sm ${statusError ? 'text-red-400' : 'text-slate-500'}`}>
-                  {statusError || (statusLoading ? 'Loading discharged clients…' : 'No clients match your filters.')}
+                <td colSpan={shownKeys.length + (hideMode ? 1 : 0)} className={`p-6 text-center text-sm ${statusError ? 'text-red-400' : 'text-slate-500'}`}>
+                  {privacyEmptyText || statusError || (statusLoading ? 'Loading discharged clients…' : 'No clients match your filters.')}
                 </td>
               </tr>
             )}

@@ -461,6 +461,32 @@ export async function getCoveredByMe(): Promise<CoveredClient[]> {
     return jsonResponse(res, 'Failed to load the clients you covered.');
 }
 
+// The signed-in employee's group sessions in one month ("YYYY-MM"): closed ones and open sheets, with what they did
+export interface MyClosedSession {
+    groupid: number;
+    groupname: string;
+    sessiondate: string;
+    sessionnumber: number;
+    clients: number;
+    openedbyme: boolean;
+    closedbyme: boolean;
+    coveredforme: boolean;
+}
+
+export interface MyOpenSession {
+    groupid: number;
+    groupname: string;
+    sessiondate: string;
+    sessionnumber: number;
+    openedbyme: boolean;
+    coveredforme: boolean;
+}
+
+export async function getMySessions(month: string): Promise<{ closed: MyClosedSession[]; open: MyOpenSession[] }> {
+    const res = await apiFetch(`${API_BASE}/my-sessions?month=${encodeURIComponent(month)}`);
+    return jsonResponse(res, 'Failed to load your sessions for this month.');
+}
+
 export async function getGroupClients(groupId: number): Promise<GroupRosterClient[]> {
     const res = await apiFetch(`${API_BASE}/groups/${groupId}/clients`);
     return jsonResponse(res, 'Could not load the group roster.');
