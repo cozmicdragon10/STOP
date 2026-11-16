@@ -162,7 +162,15 @@ export const idText = (c: { docnumber?: string | null; doctype?: string | null }
 };
 export const individualSessionFee = (client: { programtype?: string | null; copay?: number | string | null }, individualPrice: number) =>
   FEDERAL_PROGRAM_TYPES.includes(client.programtype || '') ? Number(client.copay || 0) : individualPrice;
-export const individualPriceFrom = (types: { sessiontypeid: number; category: string; name: string; fee: number | string; active: boolean }[]): number | null => {
+// A federal client's group fee is their Copay (nothing when blank), never the treatment fee: Fed Drug Test clients pay
+// it at every drug test, Federal SO clients on their first group attendance of the month. null for everyone else.
+// Mirrors federalGroupFee in backend/lib/attendance.js.
+export const federalGroupFee = (programType: string | null | undefined, copay: number | string | null | undefined, attendedThisMonth: boolean): number | null => {
+  if (programType === 'Fed Drug Test') return Number(copay || 0);
+  if (programType === 'Federal SO') return attendedThisMonth ? 0 : Number(copay || 0);
+  return null;
+};
+export const individualPriceFrom =(types: { sessiontypeid: number; category: string; name: string; fee: number | string; active: boolean }[]): number | null => {
   const active = types.filter(t => t.category === 'Individual' && t.active)
     .sort((a, b) => Number(b.name === 'Individual') - Number(a.name === 'Individual') || a.sessiontypeid - b.sessiontypeid);
   return active.length ? Number(active[0].fee) : null;

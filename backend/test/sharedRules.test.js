@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 const { pathToFileURL } = require('url');
-const { isMonthlyFeeClient, feePeriodMonths, FIRST_CHECKIN_MAX_OWED } = require('../lib/attendance');
+const { isMonthlyFeeClient, feePeriodMonths, FIRST_CHECKIN_MAX_OWED, checkInPaymentRule, minimumCheckInPayment, federalGroupFee } = require('../lib/attendance');
 const { bipCheckInBlockMessage } = require('../lib/sql');
 const { POLY_VOUCHER_MAX_BY_PHASE } = require('../lib/poly');
 
@@ -13,6 +13,35 @@ const frontend = (file) => import(pathToFileURL(path.join(__dirname, '..', '..',
 test('first check-in of the month allows the same amount owed', async () => {
     const { FIRST_CHECKIN_MAX_OWED: browser } = await frontend('balance.ts');
     assert.equal(FIRST_CHECKIN_MAX_OWED, browser);
+});
+
+const PROGRAMS = ['State SO', 'Voluntary SO', 'Federal SO', 'Fed Drug Test', 'Chaperon', 'BIP', 'Poly Only', null];
+
+test('check-in payment rules and minimum payments match', async () => {
+    const browser = await frontend('balance.ts');
+    for (const p of PROGRAMS) {
+        const rule = checkInPaymentRule(p);
+        assert.equal(rule, browser.checkInPaymentRule(p), `rule for ${p}`);
+        for (const balance of [-20, 0, 0.01, 50, '75.50']) {
+            for (const fee of [0, 40, 180]) {
+                for (const attended of [false, true]) {
+                    assert.equal(minimumCheckInPayment(rule, balance, fee, attended), browser.minimumCheckInPayment(rule, balance, fee, attended),
+                        `${p} balance ${balance} fee ${fee} attended ${attended}`);
+                }
+            }
+        }
+    }
+});
+
+test('federal clients are charged the same copay', async () => {
+    const browser = await frontend('clients.ts');
+    for (const p of PROGRAMS) {
+        for (const copay of [null, '', 0, '15.00', 25]) {
+            for (const attended of [false, true]) {
+                assert.equal(federalGroupFee(p, copay, attended), browser.federalGroupFee(p, copay, attended), `${p} copay ${copay} attended ${attended}`);
+            }
+        }
+    }
 });
 
 test('monthly treatment fee applies to the same programs and phases', async () => {

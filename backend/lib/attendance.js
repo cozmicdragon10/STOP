@@ -27,9 +27,35 @@ const chargedWithinMonths = async (db, client, date, months) => {
     return r.rows[0]?.day ?? null;
 };
 
-// A client's first group check-in of a calendar month needs a balance of -$180.00 or better, i.e. owing at most this much
-// (stored sign: positive = owes) after any payment taken at check-in. BIP clients are exempt. Mirrors FIRST_CHECKIN_MAX_OWED in frontend/src/utils/balance.ts.
-const FIRST_CHECKIN_MAX_OWED = 180;
+// A client's first group check-in of a calendar month needs a balance of $0.00 or better, i.e. owing at most this much
+// (stored sign: positive = owes) after any payment taken at check-in. Mirrors FIRST_CHECKIN_MAX_OWED in frontend/src/utils/balance.ts.
+const FIRST_CHECKIN_MAX_OWED = 0;
+
+// Which payment rule a client's group check-in follows (mirrors checkInPaymentRule in frontend/src/utils/balance.ts):
+//   'none'  BIP, Federal SO and Fed Drug Test (drug test) clients: no balance requirement
+//   'each'  Chaperon clients: every attendance is paid the day of it, so the balance after check-in, today's fee
+//           included, must be $0.00 or better
+//   'first' everyone else: the first group check-in of the month needs the balance before today's fee at $0.00 or better
+const NO_CHECKIN_LIMIT_PROGRAMS = ['BIP', 'Federal SO', 'Fed Drug Test'];
+const PAY_EACH_VISIT_PROGRAMS = ['Chaperon'];
+const checkInPaymentRule = (programType) =>
+    NO_CHECKIN_LIMIT_PROGRAMS.includes(programType) ? 'none' : PAY_EACH_VISIT_PROGRAMS.includes(programType) ? 'each' : 'first';
+// The smallest payment that lets a group check-in through, from the balance before it (stored sign: positive = owes)
+// and today's fee; 0 when nothing has to be paid. Mirrors minimumCheckInPayment in frontend/src/utils/balance.ts.
+const minimumCheckInPayment = (rule, balance, fee, attendedThisMonth) => {
+    const owed = rule === 'each' ? Number(balance || 0) + Number(fee || 0)
+        : rule === 'first' && !attendedThisMonth ? Number(balance || 0) : -Infinity;
+    return Math.max(0, Math.round((owed - FIRST_CHECKIN_MAX_OWED) * 100) / 100);
+};
+
+// A federal client's group fee is their Copay (nothing when blank), never the treatment fee: Fed Drug Test clients pay
+// it at every drug test, Federal SO clients on their first group attendance of the month. null for everyone else.
+// Mirrors federalGroupFee in frontend/src/utils/clients.ts.
+const federalGroupFee = (programType, copay, attendedThisMonth) => {
+    if (programType === 'Fed Drug Test') return Number(copay || 0);
+    if (programType === 'Federal SO') return attendedThisMonth ? 0 : Number(copay || 0);
+    return null;
+};
 
 // awardNdiVoucher: when set (closing an SO group), a client charged the group fee whose most recent
 // polygraph earns vouchers (POLY_VOUCHER_EARNING_RESULTS, or kept in the incentive by override) earns one poly fee voucher, up to their full set (polyVoucherMax).
@@ -39,7 +65,22 @@ const FIRST_CHECKIN_MAX_OWED = 180;
 // sessionTypeId and provider: the price list entry and the counselor of an individual session (Attendance.SessionTypeId, Provider)
 const recordAttendance = async (db, { client, group, date, sessionNumber, paid, groupFee, accountPaid, paymentMethod, voucherUsed, type, comments, createdBy, awardNdiVoucher, feeType = 'Group Fee', paymentComments = '', sessionTypeId = null, provider = null }) => {
     const isIndividualSession = INDIVIDUAL_SESSION_TYPES.includes(type);
-    const clientRes = await db.query('SELECT AccountBalance, ProgramType, Phase, FirstName, LastName, TreatmentFee FROM Clients WHERE ClientId = $1 FOR UPDATE', [client]);
+    // Money must be real amounts: a payment that isn't a number would skip the first check-in limit and leave the balance NaN
+    for (const [label, value] of [['payment', accountPaid], ['fee', groupFee]]) {
+        const n = Number(value ?? 0);
+        if (!Number.isFinite(n) || n < 0) throw Object.assign(new Error(`The ${label} must be an amount of $0.00 or more.`), { status: 400 });
+    }
+    // The type has to match where the check-in happens, so a group check-in can't be passed off as an assessment or
+    // individual session (which skip the first check-in limit) and a group check-in always has its group: assessments
+    // have no group, individual sessions are either standalone or in a counselor's INDIVIDUAL group, and every other
+    // check-in is in a group.
+    if (type === 'Assessment' && group) throw Object.assign(new Error('An assessment is not checked in to a group.'), { status: 400 });
+    if (!isIndividualSession && !group) throw Object.assign(new Error('A group check-in needs its group.'), { status: 400 });
+    if (type === 'Individual' && group) {
+        const g = await db.query('SELECT UPPER(TRIM(ProgramType)) AS t FROM Groups WHERE GroupId = $1', [group]);
+        if (g.rows[0]?.t !== 'INDIVIDUAL') throw Object.assign(new Error('Only an INDIVIDUAL group records individual sessions.'), { status: 400 });
+    }
+    const clientRes = await db.query('SELECT AccountBalance, ProgramType, Phase, FirstName, LastName, TreatmentFee, Copay FROM Clients WHERE ClientId = $1 FOR UPDATE', [client]);
     if (clientRes.rows.length === 0) {
         throw new Error(`Client ${client} not found.`);
     }
@@ -75,22 +116,12 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         )).rows.length > 0
         : false;
 
-    // First group check-in of the calendar month: after any payment taken now, the client may owe at most FIRST_CHECKIN_MAX_OWED.
-    // BIP clients are exempt.
-    if (group && !isIndividualSession && clientRes.rows[0].programtype !== 'BIP') {
-        const owedAfterPayment = oldBalance - Number(accountPaid || 0);
-        if (!attendedThatMonth && owedAfterPayment > FIRST_CHECKIN_MAX_OWED) {
-            const { lastname, firstname } = clientRes.rows[0];
-            throw new Error(`${lastname}, ${firstname} must pay their existing balance before their first group check-in of the month: `
-                + `the balance must be -$${FIRST_CHECKIN_MAX_OWED.toFixed(2)} or better (pay at least $${(owedAfterPayment - FIRST_CHECKIN_MAX_OWED).toFixed(2)} more).`);
-        }
-    }
-
     // A group check-in's fee is worked out here from the account, by the same rules as the check-in screen (clientFee in
     // frontend/src/hooks/useGroupCheckIn.ts), so a screen that's out of date or a session on an earlier date can't charge
     // the wrong fee: a monthly-fee client who already attended a group in the session's month, or a Phase 3 or 4 client
-    // charged in the period before the session date, pays nothing; otherwise a fee override covering the session date,
-    // or the treatment fee. Assessments and individual sessions keep the fee they were priced at.
+    // charged in the period before the session date, pays nothing; federal clients pay their copay (federalGroupFee);
+    // otherwise a fee override covering the session date, or the treatment fee. Assessments and individual sessions keep
+    // the fee they were priced at.
     let feeNum = Number(groupFee || 0);
     let feeReason = null;
     if (group && !isIndividualSession) {
@@ -98,7 +129,14 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         const monthly = isMonthlyFeeClient(clientRes.rows[0]);
         const periodMonths = feePeriodMonths(clientRes.rows[0]);
         const chargedOn = periodMonths ? await chargedWithinMonths(db, client, sessionDate, periodMonths) : null;
-        if (monthly && attendedThatMonth) {
+        const { programtype, copay } = clientRes.rows[0];
+        const federalFee = federalGroupFee(programtype, copay, attendedThatMonth);
+        if (federalFee !== null) {
+            feeNum = federalFee;
+            feeReason = programtype === 'Federal SO' && attendedThatMonth ? `copay already charged for ${monthName}`
+                : federalFee > 0 ? (programtype === 'Federal SO' ? `copay, first group attendance of ${monthName}` : 'copay for each drug test')
+                    : 'no copay on the account';
+        } else if (monthly && attendedThatMonth) {
             feeNum = 0;
             feeReason = `already charged for ${monthName}`;
         } else if (chargedOn) {
@@ -122,6 +160,18 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
             }
         }
         feeNum = Math.round(feeNum * 100) / 100;
+
+        // The check-in's payment rule (checkInPaymentRule): Chaperon attendances are paid the day of them, and other
+        // clients' first group check-in of the month needs the balance at FIRST_CHECKIN_MAX_OWED or better
+        const rule = checkInPaymentRule(programtype);
+        const short = Math.round((minimumCheckInPayment(rule, oldBalance, feeNum, attendedThatMonth) - Number(accountPaid || 0)) * 100) / 100;
+        if (short > 0) {
+            const { lastname, firstname } = clientRes.rows[0];
+            const limit = `${FIRST_CHECKIN_MAX_OWED > 0 ? '-' : ''}$${FIRST_CHECKIN_MAX_OWED.toFixed(2)}`;
+            throw new Error(rule === 'each'
+                ? `${lastname}, ${firstname}'s chaperon attendance must be paid the day of it: the balance after check-in, including today's fee, must be ${limit} or better (pay at least $${short.toFixed(2)} more).`
+                : `${lastname}, ${firstname} must pay their existing balance before their first group check-in of the month: the balance must be ${limit} or better (pay at least $${short.toFixed(2)} more).`);
+        }
     }
     const paidNum = Number(accountPaid || 0);
     const newBalance = oldBalance - paidNum + feeNum;
@@ -212,4 +262,7 @@ const individualPrice = async (db) => {
     return r.rows[0] ? { sessionTypeId: r.rows[0].sessiontypeid, fee: Number(r.rows[0].fee) } : null;
 };
 
-module.exports = { isMonthlyFeeClient, feePeriodMonths, chargedWithinMonths, FIRST_CHECKIN_MAX_OWED, recordAttendance, individualPrice };
+module.exports = {
+    isMonthlyFeeClient, feePeriodMonths, chargedWithinMonths, FIRST_CHECKIN_MAX_OWED, checkInPaymentRule, minimumCheckInPayment, federalGroupFee,
+    recordAttendance, individualPrice,
+};

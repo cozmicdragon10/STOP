@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { clientFee, feeAlreadyCharged, type ClientRecord, type PaymentMethod, type PaymentTerms } from '../../hooks/useGroupCheckIn';
 import { submitAccountPayment } from '../../api';
-import { FIRST_CHECKIN_MAX_OWED, formatBalance, formatBalanceLabeled } from '../../utils/balance';
+import { FIRST_CHECKIN_MAX_OWED, checkInPaymentRule, formatBalance, formatBalanceLabeled, minimumCheckInPayment } from '../../utils/balance';
 import { feePeriodMonths } from '../../utils/soPhases';
-import { FEDERAL_PROGRAM_TYPES, individualSessionFee, idText } from '../../utils/clients';
+import { FEDERAL_PROGRAM_TYPES, federalGroupFee, individualSessionFee, idText } from '../../utils/clients';
 import { printReceipt, type Receipt } from '../../utils/receipt';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import CardPaymentFields from '../payments/CardPaymentFields';
@@ -36,6 +36,11 @@ const PAYMENT_METHODS: PaymentMethod[] = ['Cash', 'Credit Card'];
 
 // Explains the fee line: where it comes from, or why nothing is charged
 const feeLabel = (c: ClientRecord, fee: number): string => {
+  if (federalGroupFee(c.programtype, c.copay, Boolean(c.attendedthismonth)) !== null) {
+    if (fee > 0) return c.programtype === 'Federal SO' ? 'Copay (first group of the month)' : 'Copay (each drug test)';
+    return c.programtype === 'Federal SO' && c.attendedthismonth && Number(c.copay || 0) > 0
+      ? 'Copay already charged this month (nothing charged)' : 'No copay on account (nothing charged)';
+  }
   if (fee > 0) return 'Treatment fee (from account)';
   if (feeAlreadyCharged(c)) {
     const months = feePeriodMonths(c.programtype, c.phase);
@@ -43,20 +48,14 @@ const feeLabel = (c: ClientRecord, fee: number): string => {
   }
   return 'No treatment fee on account (nothing charged)';
 };
-// How much a client still has to pay before their first check-in of the month is allowed (0 when they may check in).
-// Balances are in the stored sign (positive = owes); a processed card payment is already in the balance. BIP clients are exempt.
-// A card amount counts only once the card is processed.
-const amountStillOwedToCheckIn = (c: ClientRecord, row: Row): number => {
-  if (c.attendedthismonth || c.programtype === 'BIP') return 0;
-  const cashNow = row.paymentMethod === 'Cash' ? (parsePayment(row) ?? 0) : 0;
-  const balance = row.receipt ? row.receipt.newBalance : Number(c.accountbalance || 0) - cashNow;
-  return Math.max(0, Math.round((balance - FIRST_CHECKIN_MAX_OWED) * 100) / 100);
-};
-
-// The smallest payment that lets the client's first check-in of the month through (0 when no payment is required)
-const minimumCheckInPayment = (c: ClientRecord): number => {
-  if (c.attendedthismonth || c.programtype === 'BIP') return 0;
-  return Math.max(0, Math.round((Number(c.accountbalance || 0) - FIRST_CHECKIN_MAX_OWED) * 100) / 100);
+// How much a client still has to pay before the check-in is allowed (0 when they may check in), by their payment rule
+// (checkInPaymentRule): Chaperon attendances are paid the day of them, others need the balance paid on their first group
+// check-in of the month, and BIP and federal clients have no requirement. Balances are in the stored sign (positive = owes);
+// a processed card payment is already in the balance. A card amount counts only once the card is processed.
+const amountStillOwedToCheckIn = (c: ClientRecord, row: Row, fee: number): number => {
+  const cashNow = row.paymentMethod === 'Cash' && !row.receipt ? (parsePayment(row) ?? 0) : 0;
+  const balance = row.receipt ? row.receipt.newBalance : Number(c.accountbalance || 0);
+  return Math.max(0, Math.round((minimumCheckInPayment(checkInPaymentRule(c.programtype), balance, fee, Boolean(c.attendedthismonth)) - cashNow) * 100) / 100);
 };
 
 const inputClass ='w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm';
@@ -129,7 +128,7 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
     return (!row.receipt && parsePayment(row) === null) || cardNotProcessed(row);
   });
   // Clients whose balance is too far behind for their first check-in of the month
-  const blocked = individual ? [] : clients.filter(c => amountStillOwedToCheckIn(c, rows[c.clientid]) > 0);
+  const blocked = individual ? [] : clients.filter(c => amountStillOwedToCheckIn(c, rows[c.clientid], clientFee(c)) > 0);
 
   const confirm = () => {
     if (invalid || blocked.length > 0) return;
@@ -162,8 +161,9 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
   const fee = individual ? individualSessionFee(c, individualFee) : clientFee(c);
   const federalCopay = individual && FEDERAL_PROGRAM_TYPES.includes(c.programtype || '');
   const afterCheckIn = baseBalance + fee - (locked ? 0 : paymentNow);
-  const stillOwed = individual ? 0 : amountStillOwedToCheckIn(c, row);
-  const minimumPayment = individual ? 0 : minimumCheckInPayment(c);
+  const rule = checkInPaymentRule(c.programtype);
+  const stillOwed = individual ? 0 : amountStillOwedToCheckIn(c, row, fee);
+  const minimumPayment = individual ? 0 : minimumCheckInPayment(rule, c.accountbalance, fee, Boolean(c.attendedthismonth));
   const cardPending = cardNotProcessed(row);
   const canContinue = rowValid && stillOwed === 0 && !cardPending && !row.processing;
 
@@ -199,8 +199,12 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
             )}
             {stillOwed > 0 && (
               <div className="mb-3 bg-red-500/10 border border-red-500/40 rounded-lg p-3 text-xs text-red-300">
-                This is {c.firstname}'s first group check-in this month. The client must pay their existing balance down to{' '}
-                {formatBalance(FIRST_CHECKIN_MAX_OWED)} or better to be checked in. A payment of at least <strong>${minimumPayment.toFixed(2)}</strong> is
+                {rule === 'each'
+                  ? <>Chaperon attendance is paid the day of it. The balance after check-in, including today's fee, must be{' '}
+                    {formatBalance(FIRST_CHECKIN_MAX_OWED)} or better.</>
+                  : <>This is {c.firstname}'s first group check-in this month. The client must pay their existing balance down to{' '}
+                    {formatBalance(FIRST_CHECKIN_MAX_OWED)} or better to be checked in.</>}
+                {' '}A payment of at least <strong>${minimumPayment.toFixed(2)}</strong> is
                 required{row.paymentMethod === 'Credit Card' ? ', and the card must be processed before check-in' : ''}.
               </div>
             )}

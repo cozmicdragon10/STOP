@@ -14,26 +14,6 @@ const router = express.Router();
 // SO group program types, as stored on Groups
 const SO_GROUP_TYPES = ['SO', 'FED SO'];
 
-router.post('/api/attendance', async (req, res) => {
-    const clientDb = await pool.connect();
-    try {
-        await clientDb.query('BEGIN');
-        // Federal SO group sessions use units, which only the group check-in (batch) handles
-        if (req.body.group) {
-            const unitClient = await clientDb.query('SELECT 1 FROM Clients WHERE ClientId = $1 AND ProgramType = ANY($2::text[])', [req.body.client, UNIT_PROGRAMS]);
-            if (unitClient.rows.length) throw Object.assign(new Error('Federal SO clients are checked in through group check-in, which uses their units.'), { status: 400 });
-        }
-        const { attendanceId, newBalance } = await recordAttendance(clientDb, req.body);
-        await clientDb.query('COMMIT');
-        res.status(201).json({ success: true, attendanceId, newBalance });
-    } catch (error) {
-        await clientDb.query('ROLLBACK');
-        res.status(error.status || 500).json({ error: error.message });
-    } finally {
-        clientDb.release();
-    }
-});
-
 // Sessions of a group on a date (YYYY-MM-DD), or from `from` through `date` when given, oldest first. Closed sessions list
 // the ids of the clients who attended; open ones (saved with Finish Check-In, not yet closed) have no attendance yet and
 // are listed so their numbers aren't reused. A client cannot be checked in to the same session twice, but can attend a
@@ -66,7 +46,9 @@ router.get('/api/groups/:groupId/sessions', async (req, res) => {
 
 // Group check-in: every client on the session sheet is saved in one transaction
 router.post('/api/attendance/batch', async (req, res) => {
-    const { group, date, sessionNumber, type, createdBy, coveredBy, entries } = req.body;
+    // The check-in type comes from the kind of group (below), never from the request: a group sent as "Individual" or
+    // "Assessment" would skip the first check-in limit and the group fee rules
+    const { group, date, sessionNumber, createdBy, coveredBy, entries } = req.body;
     const sessionNum = Number(sessionNumber) > 0 ? Math.floor(Number(sessionNumber)) : 1;
 
     if (!Array.isArray(entries) || entries.length === 0) {
@@ -143,7 +125,7 @@ router.post('/api/attendance/batch', async (req, res) => {
         const results = [];
         for (const entry of entries) {
             const { attendanceId, newBalance, polyVoucherAwarded, feeCharged, feeReason } = await recordAttendance(clientDb, {
-                ...entry, group, date, sessionNumber: sessionNum, type: individual ? 'Individual' : (type || 'Group'), createdBy, paid: true, awardNdiVoucher: isSoGroup,
+                ...entry, group, date, sessionNumber: sessionNum, type: individual ? 'Individual' : 'Group', createdBy, paid: true, awardNdiVoucher: isSoGroup,
                 ...(individual ? {
                     groupFee: copays.has(Number(entry.client)) ? copays.get(Number(entry.client)) : individual.fee,
                     feeType: copays.has(Number(entry.client)) ? 'Individual Copay' : 'Individual Fee', sessionTypeId: individual.sessionTypeId,

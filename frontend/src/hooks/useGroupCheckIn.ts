@@ -6,7 +6,7 @@ import { isMonthlyFeeClient } from '../utils/soPhases';
 import { bipCheckInBlockMessage } from '../utils/bip';
 import type { BipCheckInBlock } from '../utils/bip';
 import { drugTestedOn, needsDuration, outOfUnits, unitCodeFor, unitCodeLabel } from '../utils/federalUnits';
-import { individualSessionFee } from '../utils/clients';
+import { federalGroupFee, individualSessionFee } from '../utils/clients';
 
 export interface ClientRecord {
   clientid: number;
@@ -110,8 +110,11 @@ export const feeAlreadyCharged = (client: ClientRecord): boolean =>
   client.feealreadycharged ?? (isMonthlyFeeClient(client.programtype, client.phase) && Boolean(client.attendedthismonth));
 
 // Each client is charged the treatment fee on their own account. A client with no fee set is charged nothing.
-// State SO Phase 1 clients are charged only on their first attendance of the month.
+// State SO Phase 1 clients are charged only on their first attendance of the month. Federal clients pay their copay
+// instead (federalGroupFee).
 export const clientFee = (client: ClientRecord): number => {
+  const federal = federalGroupFee(client.programtype, client.copay, Boolean(client.attendedthismonth));
+  if (federal !== null) return federal;
   if (feeAlreadyCharged(client)) return 0;
   if (client.activefeeoverride !== null && client.activefeeoverride !== undefined) return Number(client.activefeeoverride) || 0;
   return Number(client.treatmentfee) || 0;
