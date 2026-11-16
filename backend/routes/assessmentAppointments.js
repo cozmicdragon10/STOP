@@ -3,7 +3,7 @@ const { pool, logAction } = require('../db');
 const { todayLocal } = require('../lib/dates');
 const { logClientChange } = require('../lib/changeLog');
 const { YMD } = require('../lib/sql');
-const { slotProblem, appointmentProblem, ownsSlot, repeatDates } = require('../lib/assessmentAppointments');
+const { slotProblem, appointmentProblem, locationProblem, ownsSlot, repeatDates } = require('../lib/assessmentAppointments');
 
 const router = express.Router();
 
@@ -11,7 +11,7 @@ const router = express.Router();
 // (Scheduled); either can be rescheduled or cancelled. Anyone who can open the Assessments tab can do these, but a
 // counselor only changes times assigned to themselves. Identity (createdBy, updatedBy, ...) is stamped by requireSession.
 const APPOINTMENT_COLUMNS = `a.AppointmentId, a.ClientId, c.FirstName, c.LastName, c.ProgramType, c.DOCNumber, c.DocType,
-    a.Assessor, to_char(a.ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(a.ApptTime, 'HH24:MI') AS ApptTime, a.Notes, a.Status, a.CreatedBy`;
+    a.Assessor, to_char(a.ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(a.ApptTime, 'HH24:MI') AS ApptTime, a.Location, a.Notes, a.Status, a.CreatedBy`;
 const APPOINTMENT_FROM = 'AssessmentAppointments a LEFT JOIN Clients c ON c.ClientId = a.ClientId';
 
 const counselorActive = async (db, name) => !!(await db.query(
@@ -21,7 +21,7 @@ const clientActive = async (db, clientId) => !!(await db.query(
 
 // The appointment as stored (for ownership, status and the change log), or null
 const loadAppointment = async (db, id) => (await db.query(
-    `SELECT AppointmentId, ClientId, Assessor, to_char(ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(ApptTime, 'HH24:MI') AS ApptTime, Status
+    `SELECT AppointmentId, ClientId, Assessor, to_char(ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(ApptTime, 'HH24:MI') AS ApptTime, Location, Status
      FROM AssessmentAppointments WHERE AppointmentId = $1`, [id])).rows[0] ?? null;
 
 const note = (value) => String(value || '').trim() || null;
@@ -45,7 +45,7 @@ router.get('/api/assessment-appointments', async (req, res) => {
 
 // Inserts one time per date (Open, or Scheduled when clientId is given) in one transaction, leaving out dates when the
 // counselor already has an open or scheduled time at that hour. Returns { created, skipped }, each a list of dates.
-const createTimes = async ({ clientId, assessor, dates, time, notes, createdBy }) => {
+const createTimes = async ({ clientId, assessor, dates, time, location, notes, createdBy }) => {
     const db = await pool.connect();
     try {
         await db.query('BEGIN');
@@ -56,9 +56,9 @@ const createTimes = async ({ clientId, assessor, dates, time, notes, createdBy }
         const created = dates.filter(d => !taken.has(d));
         for (const day of created) {
             await db.query(
-                `INSERT INTO AssessmentAppointments (ClientId, Assessor, ApptDate, ApptTime, Notes, Status, CreatedBy)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                [clientId ?? null, assessor, day, time, note(notes), clientId ? 'Scheduled' : 'Open', createdBy || null]);
+                `INSERT INTO AssessmentAppointments (ClientId, Assessor, ApptDate, ApptTime, Location, Notes, Status, CreatedBy)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [clientId ?? null, assessor, day, time, location, note(notes), clientId ? 'Scheduled' : 'Open', createdBy || null]);
         }
         await db.query('COMMIT');
         return { created, skipped: dates.filter(d => taken.has(d)) };
@@ -77,16 +77,16 @@ const allTakenMessage = (who, time, count) =>
 // until open the same time on each date through until.
 router.post('/api/assessment-appointments/slots', async (req, res) => {
     try {
-        const { assessor, date, time, notes, repeat, until, createdBy } = req.body;
+        const { assessor, date, time, location, notes, repeat, until, createdBy } = req.body;
         const who = String(assessor || '').trim();
-        const problem = slotProblem({ date, time, today: todayLocal(), assessorActive: await counselorActive(pool, who) });
+        const problem = slotProblem({ date, time, today: todayLocal(), assessorActive: await counselorActive(pool, who) }) || locationProblem(location);
         if (problem) return res.status(400).json({ error: problem });
         const { dates, error } = repeatDates(date, repeat, until);
         if (error) return res.status(400).json({ error });
         if (!ownsSlot(req.user, who)) return res.status(403).json({ error: 'Counselors can only open availability for themselves.' });
-        const { created, skipped } = await createTimes({ assessor: who, dates, time, notes, createdBy });
+        const { created, skipped } = await createTimes({ assessor: who, dates, time, location: location.trim(), notes, createdBy });
         if (!created.length) return res.status(400).json({ error: allTakenMessage(who, time, dates.length) });
-        await logAction(createdBy, 'Assessment Availability Opened', `${who} at ${time}: ${spanText(created)}`);
+        await logAction(createdBy, 'Assessment Availability Opened', `${who} at ${time}, ${location.trim()}: ${spanText(created)}`);
         res.status(201).json({ success: true, created: created.length, skipped });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -97,21 +97,21 @@ router.post('/api/assessment-appointments/slots', async (req, res) => {
 // Administrator). Repeats like open availability.
 router.post('/api/assessment-appointments', async (req, res) => {
     try {
-        const { clientId, assessor, date, time, notes, repeat, until, createdBy } = req.body;
+        const { clientId, assessor, date, time, location, notes, repeat, until, createdBy } = req.body;
         const who = String(assessor || '').trim();
         const problem = appointmentProblem({
             date, time, today: todayLocal(),
             clientActive: await clientActive(pool, clientId),
             assessorActive: await counselorActive(pool, who),
-        });
+        }) || locationProblem(location);
         if (problem) return res.status(400).json({ error: problem });
         const { dates, error } = repeatDates(date, repeat, until);
         if (error) return res.status(400).json({ error });
         if (!ownsSlot(req.user, who)) return res.status(403).json({ error: 'Counselors can only schedule their own assessments.' });
-        const { created, skipped } = await createTimes({ clientId, assessor: who, dates, time, notes, createdBy });
+        const { created, skipped } = await createTimes({ clientId, assessor: who, dates, time, location: location.trim(), notes, createdBy });
         if (!created.length) return res.status(400).json({ error: allTakenMessage(who, time, dates.length) });
-        await logClientChange(pool, { clientId, changedBy: createdBy, changeType: 'Assessment Scheduled', newValue: `${spanText(created)} at ${time}`, details: `Assessor: ${who}` });
-        await logAction(createdBy, 'Assessment Scheduled', `Client ID ${clientId} with ${who} at ${time}: ${spanText(created)}`);
+        await logClientChange(pool, { clientId, changedBy: createdBy, changeType: 'Assessment Scheduled', newValue: `${spanText(created)} at ${time}`, details: `Assessor: ${who}, ${location.trim()}` });
+        await logAction(createdBy, 'Assessment Scheduled', `Client ID ${clientId} with ${who} at ${time}, ${location.trim()}: ${spanText(created)}`);
         res.status(201).json({ success: true, created: created.length, skipped });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -182,8 +182,9 @@ router.post('/api/assessment-appointments/:id/unassign', async (req, res) => {
 router.put('/api/assessment-appointments/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { assessor, date, time, notes, updatedBy } = req.body;
+        const { assessor, date, time, location, notes, updatedBy } = req.body;
         const who = String(assessor || '').trim();
+        const place = String(location ?? '').trim();
         const before = await loadAppointment(pool, id);
         if (!before) return res.status(404).json({ error: 'Assessment not found.' });
         if (before.status === 'Cancelled') return res.status(400).json({ error: 'This assessment was cancelled. Open a new time instead.' });
@@ -193,17 +194,18 @@ router.put('/api/assessment-appointments/:id', async (req, res) => {
         const problem = before.status === 'Open'
             ? slotProblem({ date, time, today: todayLocal(), assessorActive: await counselorActive(pool, who) })
             : appointmentProblem({ date, time, today: todayLocal(), clientActive: await clientActive(pool, before.clientid), assessorActive: await counselorActive(pool, who) });
-        if (problem) return res.status(400).json({ error: problem });
+        const problemOrPlace = problem || locationProblem(place);
+        if (problemOrPlace) return res.status(400).json({ error: problemOrPlace });
         await pool.query(
-            'UPDATE AssessmentAppointments SET Assessor = $1, ApptDate = $2, ApptTime = $3, Notes = $4 WHERE AppointmentId = $5',
-            [who, date, time, note(notes), id]);
+            'UPDATE AssessmentAppointments SET Assessor = $1, ApptDate = $2, ApptTime = $3, Location = $4, Notes = $5 WHERE AppointmentId = $6',
+            [who, date, time, place, note(notes), id]);
         const oldWhen = `${before.apptdate} ${before.appttime}`;
         const newWhen = `${date} ${time}`;
-        if (oldWhen !== newWhen || before.assessor !== who) {
+        if (oldWhen !== newWhen || before.assessor !== who || (before.location || '') !== place) {
             if (before.clientid) {
-                await logClientChange(pool, { clientId: before.clientid, changedBy: updatedBy, changeType: 'Assessment Rescheduled', oldValue: oldWhen, newValue: newWhen, details: `Assessor: ${who}` });
+                await logClientChange(pool, { clientId: before.clientid, changedBy: updatedBy, changeType: 'Assessment Rescheduled', oldValue: `${oldWhen}${before.location ? `, ${before.location}` : ''}`, newValue: `${newWhen}, ${place}`, details: `Assessor: ${who}` });
             }
-            await logAction(updatedBy, 'Assessment Rescheduled', `Appointment ${id}: ${oldWhen} to ${newWhen} with ${who}`);
+            await logAction(updatedBy, 'Assessment Rescheduled', `Appointment ${id}: ${oldWhen} to ${newWhen}, ${place}, with ${who}`);
         }
         res.json({ success: true });
     } catch (err) {

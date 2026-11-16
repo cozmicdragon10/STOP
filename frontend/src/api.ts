@@ -482,7 +482,18 @@ export interface MyOpenSession {
     coveredforme: boolean;
 }
 
-export async function getMySessions(month: string): Promise<{ closed: MyClosedSession[]; open: MyOpenSession[] }> {
+// One of the counselor's own assessment times (Assessments calendar): open availability, or a scheduled client
+export interface MyAssessment {
+    appointmentid: number;
+    apptdate: string;
+    appttime: string;
+    location: string | null;
+    status: 'Open' | 'Scheduled';
+    firstname: string | null;
+    lastname: string | null;
+}
+
+export async function getMySessions(month: string): Promise<{ closed: MyClosedSession[]; open: MyOpenSession[]; assessments: MyAssessment[] }> {
     const res = await apiFetch(`${API_BASE}/my-sessions?month=${encodeURIComponent(month)}`);
     return jsonResponse(res, 'Failed to load your sessions for this month.');
 }
@@ -2119,6 +2130,8 @@ export interface AssessmentAppointment {
     assessor: string;
     apptdate: string;
     appttime: string;
+    // Blank on times opened before locations were added
+    location: string | null;
     notes: string | null;
     status: 'Open' | 'Scheduled' | 'Cancelled';
     createdby: string | null;
@@ -2141,12 +2154,12 @@ export type AssessmentRepeat = 'none' | 'weekdays' | 'weekly' | 'biweekly';
 export interface AssessmentCreateResult { success: true; created: number; skipped: string[] }
 
 // Open availability: a time with no client yet, on each repeat date
-export async function openAssessmentSlot(data: { assessor: string; date: string; time: string; notes: string; repeat: AssessmentRepeat; until: string }): Promise<AssessmentCreateResult> {
+export async function openAssessmentSlot(data: { assessor: string; date: string; time: string; location: string; notes: string; repeat: AssessmentRepeat; until: string }): Promise<AssessmentCreateResult> {
     const res = await sendJson(`${API_BASE}/assessment-appointments/slots`, { ...data, createdBy: '' });
     return jsonResponse(res, 'Failed to open the time.');
 }
 
-export async function createAssessmentAppointment(data: { clientId: number; assessor: string; date: string; time: string; notes: string; repeat: AssessmentRepeat; until: string }): Promise<AssessmentCreateResult> {
+export async function createAssessmentAppointment(data: { clientId: number; assessor: string; date: string; time: string; location: string; notes: string; repeat: AssessmentRepeat; until: string }): Promise<AssessmentCreateResult> {
     const res = await sendJson(`${API_BASE}/assessment-appointments`, { ...data, createdBy: '' });
     return jsonResponse(res, 'Failed to schedule the assessment.');
 }
@@ -2167,7 +2180,7 @@ export async function unassignAssessmentSlot(id: number): Promise<{ success: tru
     return jsonResponse(res, 'Failed to take the client off this time.');
 }
 
-export async function updateAssessmentAppointment(id: number, data: { assessor: string; date: string; time: string; notes: string }): Promise<{ success: true }> {
+export async function updateAssessmentAppointment(id: number, data: { assessor: string; date: string; time: string; location: string; notes: string }): Promise<{ success: true }> {
     const res = await sendJson(`${API_BASE}/assessment-appointments/${id}`, { ...data, updatedBy: '' }, 'PUT');
     return jsonResponse(res, 'Failed to reschedule the assessment.');
 }

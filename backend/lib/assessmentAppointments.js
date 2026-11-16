@@ -21,6 +21,16 @@ const appointmentProblem = (args) => {
     return null;
 };
 
+// Where the assessment is held: required when a time is opened, scheduled or changed (times from before locations were
+// added have none, and can still be assigned)
+const LOCATION_MAX = 150;
+const locationProblem = (location) => {
+    const place = String(location ?? '').trim();
+    if (!place) return 'Enter the location.';
+    if (place.length > LOCATION_MAX) return `Keep the location under ${LOCATION_MAX} characters.`;
+    return null;
+};
+
 // A counselor only opens and changes their own times; Office and Business Administrators change any
 const ownsSlot = (user, assessor) => user?.role !== 'Counselor' || String(user.displayname || '').trim() === String(assessor || '').trim();
 
@@ -51,4 +61,4 @@ const repeatDates = (start, repeat, until) => {
     return { dates };
 };
 
-module.exports = { slotProblem, appointmentProblem, ownsSlot, repeatDates, REPEATS, MAX_REPEATS };
+module.exports = { slotProblem, appointmentProblem, locationProblem, ownsSlot, repeatDates, REPEATS, MAX_REPEATS };

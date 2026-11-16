@@ -65,3 +65,13 @@ test('repeats need a sensible end date and a limit', () => {
     assert.match(repeatDates('2026-12-01', 'monthly', '2027-01-01').error, /how often/);
     assert.match(repeatDates('2026-12-01', 'weekdays', '2027-12-31').error, new RegExp(`more than ${MAX_REPEATS}`));
 });
+
+const { locationProblem } = require('../lib/assessmentAppointments');
+
+test('a new or changed time needs a location', () => {
+    assert.equal(locationProblem('Oklahoma City Office'), null);
+    assert.match(locationProblem(''), /Enter the location/);
+    assert.match(locationProblem('   '), /Enter the location/);
+    assert.match(locationProblem(undefined), /Enter the location/);
+    assert.match(locationProblem('x'.repeat(151)), /under 150/);
+});

@@ -42,7 +42,11 @@ const longDay = (ymd: string) => new Date(`${ymd}T00:00:00`).toLocaleDateString(
 
 // open: a counselor's availability (no client); schedule: a client at a new time; edit: reschedule an existing time
 type FormMode = 'open' | 'schedule' | 'edit';
-interface FormState { clientId: string; assessor: string; date: string; time: string; notes: string; repeat: AssessmentRepeat; until: string }
+interface FormState { clientId: string; assessor: string; date: string; time: string; location: string; notes: string; repeat: AssessmentRepeat; until: string }
+// The last location used, so a new time starts there (remembered per browser)
+const LOCATION_KEY = 'stop.assessmentCalendar.location';
+const lastLocation = () => { try { return localStorage.getItem(LOCATION_KEY) || ''; } catch { return ''; } };
+const rememberLocation = (place: string) => { try { localStorage.setItem(LOCATION_KEY, place); } catch { /* just not remembered */ } };
 const REPEAT_CHOICES: [AssessmentRepeat, string][] = [
   ['none', 'Does not repeat'],
   ['weekdays', 'Every weekday (Mon to Fri)'],
@@ -79,7 +83,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
   };
   const [mode, setMode] = useState<FormMode | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<FormState>({ clientId: '', assessor: '', date: today, time: '', notes: '', repeat: 'none', until: '' });
+  const [form, setForm] = useState<FormState>({ clientId: '', assessor: '', date: today, time: '', location: '', notes: '', repeat: 'none', until: '' });
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   // The client picked on each open time's card, by appointment id
@@ -121,13 +125,13 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
     setMode(next);
     setEditingId(null);
     const assessor = isCounselor ? me : assessorFilter;
-    setForm({ clientId: '', assessor: counselors.includes(assessor) ? assessor : '', date: day >= today ? day : today, time: '', notes: '', repeat: 'none', until: '' });
+    setForm({ clientId: '', assessor: counselors.includes(assessor) ? assessor : '', date: day >= today ? day : today, time: '', location: lastLocation(), notes: '', repeat: 'none', until: '' });
     setFormError('');
   };
   const startEdit = (a: AssessmentAppointment) => {
     setMode('edit');
     setEditingId(a.appointmentid);
-    setForm({ clientId: a.clientid ? String(a.clientid) : '', assessor: a.assessor, date: a.apptdate, time: a.appttime, notes: a.notes || '', repeat: 'none', until: '' });
+    setForm({ clientId: a.clientid ? String(a.clientid) : '', assessor: a.assessor, date: a.apptdate, time: a.appttime, location: a.location || '', notes: a.notes || '', repeat: 'none', until: '' });
     setFormError('');
   };
   const closeForm = () => { setMode(null); setEditingId(null); setFormError(''); };
@@ -144,12 +148,13 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
     if (!form.assessor) return setFormError('Choose the counselor.');
     if (!form.date) return setFormError('Enter the date.');
     if (!form.time) return setFormError('Enter the time.');
+    if (!form.location.trim()) return setFormError('Enter the location.');
     const repeats = mode !== 'edit' && form.repeat !== 'none';
     if (repeats && !form.until) return setFormError('Enter the date the repeats end.');
     if (repeats && form.until < form.date) return setFormError('The repeat end date is before the first date.');
     setSaving(true);
     try {
-      const details = { assessor: form.assessor, date: form.date, time: form.time, notes: form.notes };
+      const details = { assessor: form.assessor, date: form.date, time: form.time, location: form.location.trim(), notes: form.notes };
       const repeat = { repeat: repeats ? form.repeat : 'none' as AssessmentRepeat, until: repeats ? form.until : '' };
       if (mode === 'open') {
         const result = await openAssessmentSlot({ ...details, ...repeat });
@@ -161,6 +166,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
         await updateAssessmentAppointment(editingId, details);
         onSuccess('Assessment time changed.');
       }
+      rememberLocation(form.location.trim());
       closeForm();
       setPickedDay(form.date);
       if (form.date.slice(0, 7) !== month) setMonth(form.date.slice(0, 7));
@@ -215,6 +221,8 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
   };
 
   const editing = editingId !== null ? appointments.find(a => a.appointmentid === editingId) : undefined;
+  // Locations already used this month, offered as suggestions in the Location box
+  const knownLocations = Array.from(new Set(appointments.map(a => (a.location || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
   const smallButton = 'px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border transition';
 
   const renderCard = (a: AssessmentAppointment) => {
@@ -226,7 +234,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
           <div className="min-w-0">
             <p className="font-semibold text-white">{isOpen ? 'Open for assessment' : `${a.lastname}, ${a.firstname}`}</p>
             <p className="text-xs text-slate-400 mt-0.5">
-              {formatDisplayTime(a.appttime)}<span className="text-slate-600"> · </span>Assessor: {a.assessor}
+              {formatDisplayTime(a.appttime)}<span className="text-slate-600"> · </span>{a.location || 'No location set'}<span className="text-slate-600"> · </span>Assessor: {a.assessor}
               {!isOpen && a.programtype && <><span className="text-slate-600"> · </span>{a.programtype}</>}
             </p>
             {a.notes && <p className="text-xs text-slate-500 mt-1">{a.notes}</p>}
@@ -341,6 +349,13 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
             <div>
               <label className="block text-xs text-slate-400 uppercase mb-1">Time</label>
               <input type="time" value={form.time} onChange={e => set({ time: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
+            </div>
+            <div className="md:col-span-2">
+              <label htmlFor="assessment-location" className="block text-xs text-slate-400 uppercase mb-1">Location</label>
+              <input id="assessment-location" type="text" list="assessment-locations" maxLength={150} value={form.location} onChange={e => set({ location: e.target.value })} placeholder="Office or town, e.g. Oklahoma City Office" className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm placeholder-slate-500" />
+              <datalist id="assessment-locations">
+                {knownLocations.map(place => <option key={place} value={place} />)}
+              </datalist>
             </div>
             <div className="md:col-span-2">
               <label className="block text-xs text-slate-400 uppercase mb-1">Notes <span className="normal-case text-slate-500">(optional)</span></label>
