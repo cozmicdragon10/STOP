@@ -3,7 +3,7 @@ import {
   Users, ClipboardCheck, ShieldCheck, Shield, LogOut, AlertCircle, X, FileText,
   DollarSign, Calendar, Activity, PhoneCall, ShieldAlert, 
   Layers, BarChart3, Settings, Trash2, RotateCcw, Home, History,
-  Paperclip, UserCheck, ClipboardList, SlidersHorizontal, Lock, Palette, Code2
+  Paperclip, UserCheck, ClipboardList, SlidersHorizontal, Lock, Palette, Code2, CalendarDays
 } from 'lucide-react';
 import { isTabLockedByPrivacy, readPrivacyOn, writePrivacyOn } from './utils/privacy';
 import {
@@ -34,6 +34,7 @@ import AdminTab from './components/admin/AdminTab';
 import DevTab from './components/dev/DevTab';
 import SettingsTab from './components/settings/SettingsTab';
 import MyDay from './components/home/MyDay';
+import CalendarsTab from './components/home/CalendarsTab';
 import { isMyClient, myGroupIds } from './utils/counselor';
 import FormsTab from './components/forms/FormsTab';
 import PolySlotForm from './components/polygraph/PolySlotForm';
@@ -824,6 +825,8 @@ export default function App() {
     { tab: 'sessions', icon: ClipboardList, label: 'Assessments', shortLabel: 'Assessments' },
     { tab: 'callin', icon: PhoneCall, label: 'Call-In Log', shortLabel: 'Call-In' },
     { tab: 'groups', icon: Layers, label: 'Groups' },
+    // Every counselor's calendar; office roles only (isAllowed: Business Administrators, Office Admins, and DEV as a Business Administrator)
+    { tab: 'calendars', icon: CalendarDays, label: 'Calendars' },
     { tab: 'polygraph', icon: ShieldAlert, label: 'Polygraphs' },
     { tab: 'reports', icon: BarChart3, label: 'Reports' },
     { tab: 'agents', icon: UserCheck, label: 'Supervising Agents', shortLabel: 'Agents' },
@@ -1666,6 +1669,11 @@ export default function App() {
             onGroupsChanged={loadDashboardData}
             onOpenClient={openClientLogs}
           />
+        )}
+
+        {/* CALENDARS TAB: any counselor's month (office roles) */}
+        {activeTab === 'calendars' && isAllowed('calendars') && (
+          <CalendarsTab employees={employees} groups={groups} />
         )}
 
         {/* TESTING MODULE TAB */}

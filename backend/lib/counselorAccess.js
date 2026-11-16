@@ -41,6 +41,11 @@ const ALLOWED = [
     ['GET', /^\/api\/groups$/],
     ['GET', /^\/api\/groups\/\d+\/(clients|sessions)$/],
     ['POST', /^\/api\/groups\/\d+\/assign$/],
+    // My Day: cancel or reschedule one upcoming meeting of a group they lead, or undo that (routes/groupScheduleChanges.js
+    // checks they lead the group)
+    ['GET', /^\/api\/group-schedule-changes$/],
+    ['POST', /^\/api\/groups\/\d+\/schedule-changes$/],
+    ['DELETE', /^\/api\/group-schedule-changes\/\d+$/],
     // Check-in, sessions and payments taken in the field
     ['GET', /^\/api\/open-groups$/],
     ['PUT', /^\/api\/open-groups$/],

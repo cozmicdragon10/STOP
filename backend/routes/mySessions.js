@@ -4,14 +4,31 @@ const { pool } = require('../db');
 const router = express.Router();
 const MONTH = /^\d{4}-\d{2}$/;
 
+// Office roles (and DEV, read as Business Administrator) can see any counselor's calendar on the Calendars tab
+const CALENDAR_VIEWER_ROLES = ['Business Administrator', 'Office Admin'];
+
 // The signed-in employee's group sessions for one month (YYYY-MM): closed sessions they opened, closed, or were covered
 // for (the office can close a session on a counselor's behalf), and open sheets they opened or are covering. Only flags
 // are sent back, not other employees' names. Upcoming scheduled groups are worked out on the client from each schedule.
+// ?counselor=<display name> gives that counselor's instead (Calendars tab; office roles only).
 router.get('/api/my-sessions', async (req, res) => {
     try {
         const month = String(req.query.month || '');
         if (!MONTH.test(month)) return res.status(400).json({ error: 'A month (YYYY-MM) is required.' });
-        const me = req.user?.employeeemail || '';
+        let me = req.user?.employeeemail || '';
+        let myName = req.user?.displayname || '';
+        const counselor = String(req.query.counselor || '').trim();
+        if (counselor) {
+            if (!CALENDAR_VIEWER_ROLES.includes(req.user?.role)) {
+                return res.status(403).json({ error: 'Only Business Administrators and Office Admins can view other counselors\' calendars.' });
+            }
+            const employee = (await pool.query(
+                "SELECT EmployeeEmail, DisplayName FROM EmployeeRoles WHERE LOWER(TRIM(DisplayName)) = LOWER($1) AND Role = 'Counselor' ORDER BY Active DESC LIMIT 1",
+                [counselor])).rows[0];
+            if (!employee) return res.status(404).json({ error: `No counselor named ${counselor}.` });
+            me = employee.employeeemail;
+            myName = employee.displayname;
+        }
         const firstDay = `${month}-01`;
         const closed = await pool.query(
             `SELECT a."Group" AS groupid, g.GroupName AS groupname, to_char(a.Date, 'YYYY-MM-DD') AS sessiondate,
@@ -48,7 +65,7 @@ router.get('/api/my-sessions', async (req, res) => {
              WHERE LOWER(TRIM(a.Assessor)) = LOWER(TRIM($1)) AND a.Status IN ('Open', 'Scheduled')
                AND date_trunc('month', a.ApptDate) = date_trunc('month', $2::date)
              ORDER BY a.ApptDate, a.ApptTime`,
-            [req.user?.displayname || '', firstDay]
+            [myName, firstDay]
         );
         res.json({ closed: closed.rows, open: open.rows, assessments: assessments.rows });
     } catch (err) {

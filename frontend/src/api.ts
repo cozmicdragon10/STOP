@@ -482,6 +482,43 @@ export interface MyOpenSession {
     coveredforme: boolean;
 }
 
+// One cancelled or rescheduled meeting of a group (My Day). newdate/newtime (HH:MM) are set for a reschedule; notes is
+// how many clients got a Group Cancel or Group Reschedule case note.
+export interface GroupScheduleChange {
+    changeid: number;
+    groupid: number;
+    groupname: string;
+    originaldate: string;
+    action: 'Cancelled' | 'Rescheduled';
+    newdate: string | null;
+    newtime: string | null;
+    reason: string | null;
+    createdby: string | null;
+    notes: number;
+}
+
+// Changes whose original or new date is in the month (YYYY-MM)
+export async function getGroupScheduleChanges(month: string): Promise<GroupScheduleChange[]> {
+    const res = await apiFetch(`${API_BASE}/group-schedule-changes?month=${encodeURIComponent(month)}`);
+    return jsonResponse(res, 'Failed to load group schedule changes.');
+}
+
+// Cancel or reschedule one upcoming meeting; every active client in the group gets a case note
+export async function changeGroupMeeting(groupId: number | string, data: { originalDate: string; action: 'Cancelled' | 'Rescheduled'; newDate?: string; newTime?: string; reason: string }): Promise<{ success: true; changeId: number; notes: number }> {
+    const res = await apiFetch(`${API_BASE}/groups/${groupId}/schedule-changes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, createdBy: '' }),
+    });
+    return jsonResponse(res, 'Failed to change the meeting.');
+}
+
+// Undo a cancel or reschedule; its case notes are removed
+export async function undoGroupScheduleChange(changeId: number): Promise<{ success: true; notesRemoved: number }> {
+    const res = await apiFetch(`${API_BASE}/group-schedule-changes/${changeId}`, { method: 'DELETE' });
+    return jsonResponse(res, 'Failed to undo the change.');
+}
+
 // One of the counselor's own assessment times (Assessments calendar): open availability, or a scheduled client
 export interface MyAssessment {
     appointmentid: number;
@@ -493,8 +530,9 @@ export interface MyAssessment {
     lastname: string | null;
 }
 
-export async function getMySessions(month: string): Promise<{ closed: MyClosedSession[]; open: MyOpenSession[]; assessments: MyAssessment[] }> {
-    const res = await apiFetch(`${API_BASE}/my-sessions?month=${encodeURIComponent(month)}`);
+// counselor (a display name): another counselor's month, for the Calendars tab (office roles only)
+export async function getMySessions(month: string, counselor?: string): Promise<{ closed: MyClosedSession[]; open: MyOpenSession[]; assessments: MyAssessment[] }> {
+    const res = await apiFetch(`${API_BASE}/my-sessions?month=${encodeURIComponent(month)}${counselor ? `&counselor=${encodeURIComponent(counselor)}` : ''}`);
     return jsonResponse(res, 'Failed to load your sessions for this month.');
 }
 

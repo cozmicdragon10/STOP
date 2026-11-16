@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { getMySessions } from '../../api';
-import type { MyAssessment, MyClosedSession, MyOpenSession } from '../../api';
-import { dayKey, monthGrid, monthOfDate, scheduledDatesIn, shiftMonth } from '../../utils/counselor';
+import { getGroupScheduleChanges, getMySessions } from '../../api';
+import type { GroupScheduleChange, MyAssessment, MyClosedSession, MyOpenSession } from '../../api';
+import { dayKey, monthGrid, monthOfDate, myGroupIds, scheduledDatesIn, shiftMonth } from '../../utils/counselor';
 import { formatDisplayTime } from '../../utils/dates';
+import { parseSchedule } from '../../utils/schedule';
+import GroupMeetingPanel, { type Meeting } from './GroupMeetingPanel';
 
 interface GroupRow {
   groupid: number | string;
@@ -16,27 +18,38 @@ interface GroupRow {
 interface Props {
   displayName: string;
   groups: GroupRow[];
-  onOpenAttendance: () => void;
+  onOpenAttendance?: () => void;
+  // The Calendars tab: an office user looking at this counselor's calendar instead of their own
+  viewing?: boolean;
 }
 
 // A day's chip: a group session (closed, open, or coming up), or one of the counselor's assessment times (open
 // availability, or a client booked)
+// An upcoming meeting of a group the counselor leads carries `meeting`, so its chip opens the cancel/reschedule panel.
 interface DayItem {
   key: string;
-  kind: 'closed' | 'open' | 'scheduled' | 'assessOpen' | 'assessBooked';
+  kind: 'closed' | 'open' | 'scheduled' | 'cancelled' | 'moved' | 'assessOpen' | 'assessBooked';
   label: string;
   title: string;
+  meeting?: Meeting;
 }
 
 const KIND_STYLE: Record<DayItem['kind'], string> = {
   closed: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200',
   open: 'bg-amber-500/15 border-amber-500/40 text-amber-200',
   scheduled: 'bg-transparent border-dashed border-blue-400/60 text-blue-200',
+  cancelled: 'bg-rose-500/10 border-rose-500/40 text-rose-300 line-through',
+  moved: 'bg-transparent border-dashed border-rose-400/50 text-rose-300',
   assessOpen: 'bg-transparent border-dashed border-violet-400/60 text-violet-200',
   assessBooked: 'bg-violet-500/20 border-violet-500/50 text-violet-100',
 };
 const KIND_LABEL: Record<DayItem['kind'], string> = {
-  closed: 'Closed', open: 'Open', scheduled: 'Scheduled', assessOpen: 'Open assessment time', assessBooked: 'Assessment',
+  closed: 'Closed', open: 'Open', scheduled: 'Scheduled', cancelled: 'Cancelled', moved: 'Moved',
+  assessOpen: 'Open assessment time', assessBooked: 'Assessment',
+};
+const shortDate = (ymd: string) => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 const assessmentClient = (a: MyAssessment) => (a.status === 'Scheduled' ? `${a.lastname ?? ''}, ${a.firstname ?? ''}` : 'Open');
 const assessmentPlace = (a: MyAssessment) => a.location || 'No location set';
@@ -44,13 +57,14 @@ const MAX_CHIPS = 3;
 const WEEKDAY_HEADINGS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // "Closed by you", "Closed on your behalf", etc., from what the server says about the session
-const closedTags = (s: MyClosedSession) => [
-  s.openedbyme && 'You opened',
-  s.closedbyme ? 'You closed' : s.coveredforme && 'Closed on your behalf',
+// you: the counselor is reading their own calendar; otherwise the tags describe the counselor being viewed
+const closedTags = (s: MyClosedSession, you: boolean) => [
+  s.openedbyme && (you ? 'You opened' : 'Opened'),
+  s.closedbyme ? (you ? 'You closed' : 'Closed') : s.coveredforme && (you ? 'Closed on your behalf' : 'Closed on their behalf'),
 ].filter(Boolean) as string[];
-const openTags = (s: MyOpenSession) => [
-  s.openedbyme && 'You opened',
-  s.coveredforme && "You're covering",
+const openTags = (s: MyOpenSession, you: boolean) => [
+  s.openedbyme && (you ? 'You opened' : 'Opened'),
+  s.coveredforme && (you ? "You're covering" : 'Covering'),
 ].filter(Boolean) as string[];
 
 const longDate = (ymd: string) => {
@@ -60,19 +74,42 @@ const longDate = (ymd: string) => {
 
 // The counselor's home screen: a calendar of their groups for the month (closed, open, and what's coming up), and the
 // sessions they opened, closed, or covered that month. No client or money figures here.
-export default function MyDay({ displayName, groups, onOpenAttendance }: Props) {
+export default function MyDay({ displayName, groups, onOpenAttendance, viewing = false }: Props) {
   const todayKey = dayKey(new Date());
   const [month, setMonth] = useState(monthOfDate(new Date()));
   const [sessions, setSessions] = useState<{ closed: MyClosedSession[]; open: MyOpenSession[]; assessments: MyAssessment[] } | null>(null);
   const [error, setError] = useState('');
+  // Cancelled and rescheduled meetings this month; reloaded after a change (changesKey)
+  const [changes, setChanges] = useState<GroupScheduleChange[]>([]);
+  const [changesKey, setChangesKey] = useState(0);
+  const [selected, setSelected] = useState<Meeting | null>(null);
+  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     let cancelled = false;
-    getMySessions(month)
+    getMySessions(month, viewing ? displayName : undefined)
       .then(rows => { if (!cancelled) { setSessions(rows); setError(''); } })
-      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load your sessions.'); });
+      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load the sessions.'); });
     return () => { cancelled = true; };
-  }, [month]);
+  }, [month, viewing, displayName]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getGroupScheduleChanges(month)
+      .then(rows => { if (!cancelled) setChanges(rows); })
+      .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load group changes.'); });
+    return () => { cancelled = true; };
+  }, [month, changesKey]);
+
+  // Only the groups this counselor leads; keyed "groupid|original date"
+  const mine = myGroupIds(groups, displayName);
+  const myChanges = changes.filter(c => mine.has(String(c.groupid)));
+  const changeFor = new Map(myChanges.map(c => [`${c.groupid}|${c.originaldate}`, c]));
+  const groupById = new Map(groups.map(g => [String(g.groupid), g]));
+  const meetingOf = (groupid: number | string, groupname: string, date: string, change?: GroupScheduleChange): Meeting => {
+    const g = groupById.get(String(groupid));
+    return { groupid, groupname, date, time: parseSchedule(g?.schedule || '').time, clients: g?.clientcount ?? null, change };
+  };
 
   // Calendar entries by day: sessions from the server, then the upcoming scheduled groups that haven't happened yet
   const byDay = new Map<string, DayItem[]>();
@@ -87,11 +124,27 @@ export default function MyDay({ displayName, groups, onOpenAttendance }: Props) 
     taken.add(`${s.sessiondate}|${s.groupid}`);
     add(s.sessiondate, groupItem(`o${s.groupid}-${s.sessiondate}-${s.sessionnumber}`, 'open', s.groupname));
   }
+  // Upcoming meetings: click to cancel or reschedule; a changed one shows as Cancelled, or Moved with its new date
   for (const [day, meets] of scheduledDatesIn(groups, displayName, month, todayKey)) {
     for (const g of meets) {
       if (taken.has(`${day}|${g.groupid}`)) continue;
-      add(day, groupItem(`s${g.groupid}-${day}`, 'scheduled', g.groupname || ''));
+      const name = g.groupname || '';
+      const change = changeFor.get(`${g.groupid}|${day}`);
+      const meeting = meetingOf(g.groupid, name, day, change);
+      if (!change) add(day, { ...groupItem(`s${g.groupid}-${day}`, 'scheduled', name), meeting });
+      else if (change.action === 'Cancelled') add(day, { key: `x${change.changeid}`, kind: 'cancelled', label: name, title: `Cancelled: ${name}`, meeting });
+      else add(day, { key: `m${change.changeid}`, kind: 'moved', label: `${name} → ${shortDate(change.newdate || '')}`, title: `Moved to ${shortDate(change.newdate || '')} at ${formatDisplayTime(change.newtime || '')}: ${name}`, meeting });
     }
+  }
+  // Where a rescheduled meeting moved to (its original date may be in another month)
+  for (const c of myChanges) {
+    if (c.action !== 'Rescheduled' || !c.newdate || !c.newdate.startsWith(month)) continue;
+    const time = formatDisplayTime(c.newtime || '');
+    add(c.newdate, {
+      key: `r${c.changeid}`, kind: 'scheduled', label: `${time} ${c.groupname}`,
+      title: `Rescheduled from ${shortDate(c.originaldate)}: ${c.groupname} at ${time}`,
+      meeting: meetingOf(c.groupid, c.groupname, c.originaldate, c),
+    });
   }
   // Assessment times, in time order; the chip shows the time and location, the hover text the client too
   for (const a of sessions?.assessments ?? []) {
@@ -107,20 +160,26 @@ export default function MyDay({ displayName, groups, onOpenAttendance }: Props) 
   const assessments = sessions?.assessments ?? [];
 
   const listed = [
-    ...(sessions?.closed ?? []).map(s => ({ day: s.sessiondate, kind: 'closed' as const, groupname: s.groupname, tags: closedTags(s), clients: s.clients })),
-    ...(sessions?.open ?? []).map(s => ({ day: s.sessiondate, kind: 'open' as const, groupname: s.groupname, tags: openTags(s), clients: null })),
+    ...(sessions?.closed ?? []).map(s => ({ day: s.sessiondate, kind: 'closed' as const, groupname: s.groupname, tags: closedTags(s, !viewing), clients: s.clients })),
+    ...(sessions?.open ?? []).map(s => ({ day: s.sessiondate, kind: 'open' as const, groupname: s.groupname, tags: openTags(s, !viewing), clients: null })),
   ].sort((a, b) => a.day.localeCompare(b.day) || a.groupname.localeCompare(b.groupname));
 
   const isCurrentMonth = month === monthOfDate(new Date());
 
   return (
-    <section aria-label="My Day" className="space-y-4">
+    <section aria-label={viewing ? `${displayName}'s calendar` : 'My Day'} className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-white">My Day</h3>
-          <p className="text-xs text-slate-400">Your groups and assessment times for the month: what you opened, closed, or covered, and what's coming up.</p>
+          <h3 className="text-lg font-semibold text-white">{viewing ? `${displayName}'s Calendar` : 'My Day'}</h3>
+          <p className="text-xs text-slate-400">
+            {viewing
+              ? `${displayName}'s groups and assessment times for the month: what they opened, closed, or covered, and what's coming up.`
+              : "Your groups and assessment times for the month: what you opened, closed, or covered, and what's coming up."}
+          </p>
         </div>
-        <button type="button" onClick={onOpenAttendance} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded text-xs font-semibold">Open Attendance & Sign-In</button>
+        {onOpenAttendance && (
+          <button type="button" onClick={onOpenAttendance} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded text-xs font-semibold">Open Attendance & Sign-In</button>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -152,11 +211,20 @@ export default function MyDay({ displayName, groups, onOpenAttendance }: Props) 
             return (
               <div key={day} className={`min-h-24 rounded-lg border p-1.5 space-y-1 ${isToday ? 'border-blue-500/60 bg-blue-500/5' : 'border-slate-800 bg-slate-950/40'}`}>
                 <p className={`text-xs ${isToday ? 'text-blue-300 font-semibold' : 'text-slate-400'}`}>{Number(day.slice(8))}</p>
-                {items.slice(0, MAX_CHIPS).map(item => (
+                {items.slice(0, MAX_CHIPS).map(item => (item.meeting ? (
+                  <button
+                    key={item.key}
+                    type="button"
+                    title={`${item.title} (click to ${item.meeting.change ? 'see or undo the change' : 'cancel or reschedule'})`}
+                    onClick={() => { setSelected(item.meeting!); setNotice(''); }}
+                    className={`block w-full text-left text-[11px] leading-tight border rounded px-1 py-0.5 truncate hover:brightness-125 ${KIND_STYLE[item.kind]}`}>
+                    {item.label}
+                  </button>
+                ) : (
                   <p key={item.key} title={item.title} className={`text-[11px] leading-tight border rounded px-1 py-0.5 truncate ${KIND_STYLE[item.kind]}`}>
                     {item.label}
                   </p>
-                ))}
+                )))}
                 {items.length > MAX_CHIPS && <p className="text-[11px] text-slate-500">+{items.length - MAX_CHIPS} more</p>}
               </div>
             );
@@ -166,10 +234,24 @@ export default function MyDay({ displayName, groups, onOpenAttendance }: Props) 
           <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-emerald-500/40 bg-emerald-500/15" /> Closed</span>
           <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-amber-500/40 bg-amber-500/15" /> Still open</span>
           <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-dashed border-blue-400/60" /> Scheduled, coming up</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-rose-500/40 bg-rose-500/10" /> Cancelled</span>
+          <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-dashed border-rose-400/50" /> Moved to another day</span>
           <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-violet-500/50 bg-violet-500/20" /> Assessment with a client</span>
           <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-dashed border-violet-400/60" /> Open assessment time</span>
         </div>
+        <p className="text-[11px] text-slate-500 mt-2">Click an upcoming group to cancel or reschedule that meeting. Its clients get a case note.</p>
       </div>
+
+      {notice && <p role="status" className="text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">{notice}</p>}
+      {selected && (
+        <GroupMeetingPanel
+          key={`${selected.groupid}-${selected.date}-${selected.change?.changeid ?? 'new'}`}
+          meeting={selected}
+          today={todayKey}
+          onClose={() => setSelected(null)}
+          onChanged={(message) => { setNotice(message); setSelected(null); setChangesKey(k => k + 1); }}
+        />
+      )}
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
         <p className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-400 border-b border-slate-800">
@@ -196,7 +278,7 @@ export default function MyDay({ displayName, groups, onOpenAttendance }: Props) 
           Sessions this month {sessions ? `(${listed.length})` : ''}
         </p>
         {!sessions && !error && <p className="p-4 text-sm text-slate-500">Loading…</p>}
-        {sessions && listed.length === 0 && <p className="p-4 text-sm text-slate-500">No sessions you opened, closed, or covered this month.</p>}
+        {sessions && listed.length === 0 && <p className="p-4 text-sm text-slate-500">No sessions {viewing ? 'they' : 'you'} opened, closed, or covered this month.</p>}
         <ul className="divide-y divide-slate-800">
           {listed.map(row => (
             <li key={`${row.kind}-${row.day}-${row.groupname}`} className="px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">

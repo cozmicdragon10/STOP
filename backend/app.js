@@ -36,6 +36,7 @@ app.use(require('./routes/groups'));
 app.use(require('./routes/attendance'));
 app.use(require('./routes/openGroups'));
 app.use(require('./routes/mySessions'));
+app.use(require('./routes/groupScheduleChanges'));
 app.use(require('./routes/sessions'));
 app.use(require('./routes/assessmentAppointments'));
 app.use(require('./routes/programFees'));

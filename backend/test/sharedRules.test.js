@@ -75,3 +75,11 @@ test('call-in reasons match', async () => {
     const server = JSON.parse(/CALL_IN_REASONS = (\[[^\]]*\])/.exec(source)[1].replace(/'/g, '"'));
     assert.deepEqual(server, browser);
 });
+
+test('group schedules are read the same way', async () => {
+    const { parseSchedule: browser } = await frontend('schedule.ts');
+    const { parseSchedule: server } = require('../lib/groupSchedule');
+    for (const s of ['Thursdays @ 5:00 PM', 'monday@ 9:30 am', 'Saturday @ 12:00 PM', 'By Appointment', '', 'Fridays 5 PM', 'Sundays @ 7:05 pm']) {
+        assert.deepEqual(server(s), browser(s), s);
+    }
+});
