@@ -75,3 +75,19 @@ test('a new or changed time needs a location', () => {
     assert.match(locationProblem(undefined), /Enter the location/);
     assert.match(locationProblem('x'.repeat(151)), /under 150/);
 });
+
+const { moveProblem } = require('../lib/assessmentAppointments');
+
+test('rescheduling moves a client only into the same counselor\'s upcoming open time', () => {
+    const from = { appointmentid: 1, status: 'Scheduled', assessor: 'Alicia Martinez', apptdate: '2026-11-30' };
+    const to = { appointmentid: 2, status: 'Open', assessor: 'alicia martinez ', apptdate: '2026-12-02' };
+    const today = '2026-11-16';
+    assert.equal(moveProblem({ from, to, today }), null);
+    assert.match(moveProblem({ from: { ...from, status: 'Open' }, to, today }), /with a client/);
+    assert.match(moveProblem({ from, to: { ...to, status: 'Scheduled' }, today }), /open times/);
+    assert.match(moveProblem({ from, to: { ...to, status: 'Cancelled' }, today }), /open times/);
+    assert.match(moveProblem({ from, to: { ...to, appointmentid: 1 }, today }), /different time/);
+    assert.match(moveProblem({ from, to: { ...to, assessor: 'Monte Blake' }, today }), /Alicia Martinez's open times/);
+    assert.match(moveProblem({ from, to: { ...to, apptdate: '2026-11-15' }, today }), /already passed/);
+    assert.match(moveProblem({ from, to: undefined, today }), /open times/);
+});

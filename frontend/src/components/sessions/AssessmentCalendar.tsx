@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CalendarClock, CalendarPlus, ChevronLeft, ChevronRight, List, RotateCcw, UserPlus, XCircle } from 'lucide-react';
 import ClientPicker from '../ClientPicker';
+import AssessmentTimePanel from '../home/AssessmentTimePanel';
 import { formatDisplayTime, getLocalDateString } from '../../utils/dates';
 import {
   assignAssessmentSlot, cancelAssessmentAppointment, cancelOpenAssessmentTimes, createAssessmentAppointment, getAssessmentAppointments,
@@ -88,6 +89,8 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
   const [saving, setSaving] = useState(false);
   // The client picked on each open time's card, by appointment id
   const [assignPick, setAssignPick] = useState<Record<number, string>>({});
+  // A client's assessment being rescheduled: it moves only into one of the counselor's open times (a pop-up)
+  const [moving, setMoving] = useState<AssessmentAppointment | null>(null);
 
   const [year, monthNumber] = month.split('-').map(Number);
   const daysInMonth = new Date(year, monthNumber, 0).getDate();
@@ -261,7 +264,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
               </div>
             )}
             <div className="flex flex-wrap gap-2 md:ml-auto">
-              <button type="button" onClick={() => startEdit(a)} className={`${smallButton} bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border-blue-600/40`}>
+              <button type="button" onClick={() => (isOpen ? startEdit(a) : setMoving(a))} className={`${smallButton} bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border-blue-600/40`}>
                 <CalendarClock size={13} /> Reschedule
               </button>
               {!isOpen && (
@@ -283,6 +286,16 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl space-y-4">
+      {moving && (
+        <AssessmentTimePanel
+          key={moving.appointmentid}
+          appt={moving}
+          clients={clients}
+          today={today}
+          onClose={() => setMoving(null)}
+          onChanged={(message) => { onSuccess(message); setMoving(null); reload(); }}
+        />
+      )}
       <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3 border-b border-slate-800 pb-4">
         <div>
           <h2 className="text-lg font-bold text-white">Assessment Calendar</h2>

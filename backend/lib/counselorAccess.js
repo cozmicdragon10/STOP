@@ -62,7 +62,7 @@ const ALLOWED = [
     // counselor to their own times)
     ['GET', /^\/api\/assessment-appointments$/],
     ['POST', /^\/api\/assessment-appointments(\/slots|\/cancel-open)?$/],
-    ['POST', /^\/api\/assessment-appointments\/\d+\/(assign|unassign|cancel)$/],
+    ['POST', /^\/api\/assessment-appointments\/\d+\/(assign|unassign|cancel|move)$/],
     ['PUT', /^\/api\/assessment-appointments\/\d+$/],
     ['POST', /^\/api\/financials\/payment$/],
     ['POST', /^\/api\/callin\/(client|group)$/],

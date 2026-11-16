@@ -31,6 +31,18 @@ const locationProblem = (location) => {
     return null;
 };
 
+// Rescheduling a client's assessment moves them into one of the same counselor's open times (from today on); their old
+// time opens up again. The first problem with that move, or null.
+const sameName = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+const moveProblem = ({ from, to, today }) => {
+    if (!from || from.status !== 'Scheduled') return 'Only an assessment with a client can be rescheduled.';
+    if (!to || to.status !== 'Open') return 'Choose one of the open times. That time already has a client or was cancelled.';
+    if (String(from.appointmentid) === String(to.appointmentid)) return 'Choose a different time.';
+    if (!sameName(from.assessor, to.assessor)) return `Choose one of ${from.assessor}'s open times.`;
+    if (to.apptdate < today) return 'That open time has already passed.';
+    return null;
+};
+
 // A counselor only opens and changes their own times; Office and Business Administrators change any
 const ownsSlot = (user, assessor) => user?.role !== 'Counselor' || String(user.displayname || '').trim() === String(assessor || '').trim();
 
@@ -61,4 +73,4 @@ const repeatDates = (start, repeat, until) => {
     return { dates };
 };
 
-module.exports = { slotProblem, appointmentProblem, locationProblem, ownsSlot, repeatDates, REPEATS, MAX_REPEATS };
+module.exports = { slotProblem, appointmentProblem, locationProblem, moveProblem, ownsSlot, repeatDates, REPEATS, MAX_REPEATS };

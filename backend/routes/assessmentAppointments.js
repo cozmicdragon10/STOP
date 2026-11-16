@@ -3,7 +3,7 @@ const { pool, logAction } = require('../db');
 const { todayLocal } = require('../lib/dates');
 const { logClientChange } = require('../lib/changeLog');
 const { YMD } = require('../lib/sql');
-const { slotProblem, appointmentProblem, locationProblem, ownsSlot, repeatDates } = require('../lib/assessmentAppointments');
+const { slotProblem, appointmentProblem, locationProblem, moveProblem, ownsSlot, repeatDates } = require('../lib/assessmentAppointments');
 
 const router = express.Router();
 
@@ -191,6 +191,12 @@ router.put('/api/assessment-appointments/:id', async (req, res) => {
         if (!ownsSlot(req.user, before.assessor) || !ownsSlot(req.user, who)) {
             return res.status(403).json({ error: 'Counselors can only change their own times.' });
         }
+        // A client's assessment is rescheduled only into one of the counselor's open times (POST .../move); here its
+        // location and note can still change
+        if (before.status === 'Scheduled'
+            && (date !== before.apptdate || time !== before.appttime || who.toLowerCase() !== String(before.assessor).trim().toLowerCase())) {
+            return res.status(400).json({ error: `To reschedule, move the client to one of ${before.assessor}'s open times.` });
+        }
         const problem = before.status === 'Open'
             ? slotProblem({ date, time, today: todayLocal(), assessorActive: await counselorActive(pool, who) })
             : appointmentProblem({ date, time, today: todayLocal(), clientActive: await clientActive(pool, before.clientid), assessorActive: await counselorActive(pool, who) });
@@ -210,6 +216,44 @@ router.put('/api/assessment-appointments/:id', async (req, res) => {
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// Reschedule a client's assessment: move the client into one of the same counselor's open times ({ toId }). The client's
+// old time opens up again. Both rows are locked so two people can't take the same open time.
+router.post('/api/assessment-appointments/:id/move', async (req, res) => {
+    const db = await pool.connect();
+    try {
+        const { id } = req.params;
+        const { toId, updatedBy } = req.body;
+        await db.query('BEGIN');
+        const rows = (await db.query(
+            `SELECT AppointmentId, ClientId, Assessor, to_char(ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(ApptTime, 'HH24:MI') AS ApptTime,
+                    Location, Notes, Status
+             FROM AssessmentAppointments WHERE AppointmentId = ANY($1::int[]) ORDER BY AppointmentId FOR UPDATE`,
+            [[Number(id), Number(toId)].filter(Number.isInteger)])).rows;
+        const from = rows.find(r => String(r.appointmentid) === String(id));
+        const to = rows.find(r => String(r.appointmentid) === String(toId));
+        if (!from) { await db.query('ROLLBACK'); return res.status(404).json({ error: 'Assessment not found.' }); }
+        if (!ownsSlot(req.user, from.assessor)) { await db.query('ROLLBACK'); return res.status(403).json({ error: 'Counselors can only change their own times.' }); }
+        const problem = moveProblem({ from, to, today: todayLocal() });
+        if (problem) { await db.query('ROLLBACK'); return res.status(400).json({ error: problem }); }
+        // The client (and the assessment's note, unless the open time has its own) go to the open time; the old time reopens
+        await db.query(
+            `UPDATE AssessmentAppointments SET ClientId = $1, Status = 'Scheduled', Notes = COALESCE(Notes, $2) WHERE AppointmentId = $3`,
+            [from.clientid, from.notes, to.appointmentid]);
+        await db.query(`UPDATE AssessmentAppointments SET ClientId = NULL, Status = 'Open' WHERE AppointmentId = $1`, [from.appointmentid]);
+        const oldWhen = `${from.apptdate} ${from.appttime}${from.location ? `, ${from.location}` : ''}`;
+        const newWhen = `${to.apptdate} ${to.appttime}${to.location ? `, ${to.location}` : ''}`;
+        await logClientChange(db, { clientId: from.clientid, changedBy: updatedBy, changeType: 'Assessment Rescheduled', oldValue: oldWhen, newValue: newWhen, details: `Assessor: ${from.assessor}` });
+        await db.query('COMMIT');
+        await logAction(updatedBy, 'Assessment Rescheduled', `Client ID ${from.clientid}: ${oldWhen} to ${newWhen} with ${from.assessor}`);
+        res.json({ success: true, appointmentId: to.appointmentid });
+    } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
+        res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
     }
 });
 

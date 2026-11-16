@@ -2226,6 +2226,12 @@ export async function updateAssessmentAppointment(id: number, data: { assessor: 
     return jsonResponse(res, 'Failed to reschedule the assessment.');
 }
 
+// Reschedule a client's assessment into one of the same counselor's open times (toId); the old time opens up again
+export async function moveAssessmentAppointment(id: number, toId: number): Promise<{ success: true; appointmentId: number }> {
+    const res = await sendJson(`${API_BASE}/assessment-appointments/${id}/move`, { toId, updatedBy: '' });
+    return jsonResponse(res, 'Failed to reschedule the assessment.');
+}
+
 export async function cancelAssessmentAppointment(id: number): Promise<{ success: true }> {
     const res = await sendJson(`${API_BASE}/assessment-appointments/${id}/cancel`, { cancelledBy: '' });
     return jsonResponse(res, 'Failed to cancel the assessment.');
