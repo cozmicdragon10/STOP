@@ -62,6 +62,10 @@ const displayTime = (hhmm) => {
 const unassignNoteText = ({ date, time, assessor, location, reason }) =>
     `Taken off the assessment with ${assessor} on ${longDate(date)} at ${displayTime(time)}${location ? ` (${location})` : ''}. Reason: ${String(reason).trim()}`;
 
+// The comments on the open session a scheduled time creates
+const openSessionComment = ({ time, location }) =>
+    `From the Assessment Calendar: ${displayTime(time)}${String(location || '').trim() ? `, ${String(location).trim()}` : ''}.`;
+
 // A counselor only opens and changes their own times; Office and Business Administrators change any
 const ownsSlot = (user, assessor) => user?.role !== 'Counselor' || String(user.displayname || '').trim() === String(assessor || '').trim();
 
@@ -94,5 +98,5 @@ const repeatDates = (start, repeat, until) => {
 
 module.exports = {
     slotProblem, appointmentProblem, locationProblem, moveProblem, ownsSlot, repeatDates, REPEATS, MAX_REPEATS,
-    unassignReasonProblem, unassignNoteText,
+    unassignReasonProblem, unassignNoteText, openSessionComment,
 };

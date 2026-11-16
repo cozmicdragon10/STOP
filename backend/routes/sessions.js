@@ -92,8 +92,8 @@ router.get('/api/clients/:id/progress', async (req, res) => {
             [id]
         );
         const open = await pool.query(
-            `SELECT o.OpenSessionId, st.Name, to_char(o.SessionDate, 'YYYY-MM-DD') AS Date, o.Provider, o.Fee, o.CreatedBy
-             FROM OpenIndividualSessions o JOIN SessionTypes st ON st.SessionTypeId = o.SessionTypeId
+            `SELECT o.OpenSessionId, COALESCE(st.Name, 'Assessment (type not chosen yet)') AS Name, to_char(o.SessionDate, 'YYYY-MM-DD') AS Date, o.Provider, o.Fee, o.CreatedBy
+             FROM OpenIndividualSessions o LEFT JOIN SessionTypes st ON st.SessionTypeId = o.SessionTypeId
              WHERE o.ClientId = $1 AND o.Category = 'Assessment' ORDER BY o.SessionDate DESC`,
             [id]
         );
@@ -240,7 +240,8 @@ const canSeeIndividualSession = (viewer, row) => {
 const OPEN_INDIVIDUAL_COLUMNS = `o.OpenSessionId, o.ClientId, c.FirstName, c.LastName, c.DOCNumber, c.DocType, c.ProgramType, o.Category, o.SessionTypeId,
     st.Name AS SessionTypeName, to_char(o.SessionDate, 'YYYY-MM-DD') AS SessionDate, o.Fee, o.Payment, o.PaymentMethod,
     o.Provider, o.Comments, o.PaymentComments, o.PaidOnOpen, o.CreatedBy, o.UpdatedOn`;
-const OPEN_INDIVIDUAL_FROM = `OpenIndividualSessions o JOIN Clients c ON c.ClientId = o.ClientId JOIN SessionTypes st ON st.SessionTypeId = o.SessionTypeId`;
+// An open assessment from the Assessment Calendar has no type until it's reviewed (migration 076)
+const OPEN_INDIVIDUAL_FROM = `OpenIndividualSessions o JOIN Clients c ON c.ClientId = o.ClientId LEFT JOIN SessionTypes st ON st.SessionTypeId = o.SessionTypeId`;
 
 router.get('/api/individual-sessions/open', async (req, res) => {
     try {

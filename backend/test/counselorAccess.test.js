@@ -27,6 +27,12 @@ test('a Counselor cannot correct money, set overrides, or delete', () => {
     }
 });
 
+test('a Counselor opens their own assessment times but cannot cancel all open times', () => {
+    assert.ok(isCounselorAllowed('POST', '/api/assessment-appointments/slots'));
+    assert.ok(isCounselorAllowed('POST', '/api/assessment-appointments'));
+    assert.ok(!isCounselorAllowed('POST', '/api/assessment-appointments/cancel-open'));
+});
+
 test('a Counselor cannot book, open, reschedule, cancel or record polygraphs', () => {
     for (const [m, p] of [['POST', '/api/polygraphs/slots'], ['POST', '/api/polygraphs/slots/3/assign'],
         ['POST', '/api/polygraphs/slots/3/open'], ['POST', '/api/polygraphs/slots/3/reschedule'],

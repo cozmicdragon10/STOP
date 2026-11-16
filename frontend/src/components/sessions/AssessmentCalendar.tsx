@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CalendarClock, CalendarPlus, ChevronLeft, ChevronRight, List, RotateCcw, UserPlus, XCircle } from 'lucide-react';
+import { CalendarClock, CalendarPlus, ChevronLeft, ChevronRight, ClipboardPlus, RotateCcw, UserPlus, XCircle } from 'lucide-react';
 import ClientPicker from '../ClientPicker';
 import AssessmentTimePanel from '../home/AssessmentTimePanel';
 import PopupDialog from '../home/PopupDialog';
@@ -26,7 +26,8 @@ interface Props {
   // Active counselors who can be the assessor
   counselors: string[];
   user: { employeeemail: string; displayname?: string; role?: string };
-  onBack: () => void;
+  // Start an assessment now, without a scheduled time (the session form)
+  onNewAssessment: () => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
 }
@@ -67,7 +68,7 @@ const createdText = (verb: string, result: AssessmentCreateResult) => {
 // The Assessments calendar, like the polygraph schedule: counselors open times they're available, and a client is
 // assigned to an open time (or scheduled at a new time in one step). Counselors open and change only their own times;
 // Office and Business Administrators manage everyone's. Cancelled times stay on record and are left off the calendar.
-export default function AssessmentCalendar({ clients, counselors, user, onBack, onSuccess, onError }: Props) {
+export default function AssessmentCalendar({ clients, counselors, user, onNewAssessment, onSuccess, onError }: Props) {
   const today = getLocalDateString();
   const isCounselor = user.role === 'Counselor';
   const me = user.displayname || '';
@@ -225,16 +226,32 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
   };
 
   // Whose open times the bulk cancel clears: a counselor's own, else the counselor picked in the filter
-  const bulkTarget = isCounselor ? (counselors.includes(me) ? me : '') : assessorFilter;
-  const cancelAllOpen = async () => {
+  // Cancelling all of a counselor's open times: Business Administrators only (DEV signs in as one; the server checks too),
+  // with two warnings. Step 1 shows how many open times would go; step 2 asks for CANCEL ALL to be typed.
+  const canCancelAll = user.role === 'Business Administrator';
+  const bulkTarget = canCancelAll ? assessorFilter : '';
+  const [bulk, setBulk] = useState<{ who: string; step: 1 | 2; times: AssessmentAppointment[] | null; typed: string; error: string; saving: boolean } | null>(null);
+  const startCancelAll = () => {
     if (!bulkTarget) return;
-    if (!window.confirm(`Cancel ALL of ${bulkTarget}'s open assessment times from today on? Times that already have a client are not changed.`)) return;
+    const who = bulkTarget;
+    setBulk({ who, step: 1, times: null, typed: '', error: '', saving: false });
+    // Every open time from today on (up to 2 years out), so the warning gives the real count
+    const [y, m, d] = today.split('-').map(Number);
+    const until = getLocalDateString(new Date(y + 2, m - 1, d));
+    getAssessmentAppointments(today, until)
+      .then(rows => setBulk(b => b && b.who === who ? { ...b, times: rows.filter(r => r.status === 'Open' && r.assessor === who) } : b))
+      .catch(err => setBulk(b => b && { ...b, times: [], error: errorText(err, 'Could not load the open times.') }));
+  };
+  const confirmCancelAll = async () => {
+    if (!bulk || bulk.saving || bulk.typed.trim().toUpperCase() !== 'CANCEL ALL') return;
+    setBulk({ ...bulk, saving: true, error: '' });
     try {
-      const { cancelled } = await cancelOpenAssessmentTimes(bulkTarget);
-      onSuccess(cancelled ? `Cancelled ${cancelled} open time${cancelled === 1 ? '' : 's'} for ${bulkTarget}.` : `${bulkTarget} has no open times from today on.`);
+      const { cancelled } = await cancelOpenAssessmentTimes(bulk.who);
+      onSuccess(cancelled ? `Cancelled ${cancelled} open time${cancelled === 1 ? '' : 's'} for ${bulk.who}.` : `${bulk.who} has no open times from today on.`);
+      setBulk(null);
       reload();
     } catch (err) {
-      onError(errorText(err, 'Failed to cancel the open times.'));
+      setBulk(b => b && { ...b, saving: false, error: errorText(err, 'Failed to cancel the open times.') });
     }
   };
 
@@ -311,6 +328,69 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
           onChanged={(message) => { onSuccess(message); setMoving(null); reload(); }}
         />
       )}
+      {bulk && (
+        <PopupDialog
+          title={bulk.step === 1 ? `Cancel all open times for ${bulk.who}?` : 'Are you sure?'}
+          subtitle={bulk.step === 1 ? 'Step 1 of 2' : 'Step 2 of 2: this cannot be undone'}
+          busy={bulk.saving}
+          onClose={() => setBulk(null)}>
+          <div className="space-y-3">
+            {bulk.times === null ? (
+              <p className="text-sm text-slate-400">Counting {bulk.who}'s open times...</p>
+            ) : bulk.step === 1 ? (
+              <>
+                <div className="bg-rose-500/10 border border-rose-500/30 rounded-lg p-3 text-sm text-rose-200 space-y-1">
+                  <p className="font-semibold">
+                    {bulk.times.length === 0
+                      ? `${bulk.who} has no open times from today on.`
+                      : `This cancels ${bulk.times.length} open time${bulk.times.length === 1 ? '' : 's'} for ${bulk.who}, from today on.`}
+                  </p>
+                  <p className="text-xs text-rose-300/80">Clients can no longer be assigned to them. Times that already have a client are not changed.</p>
+                </div>
+                {bulk.times.length > 0 && (
+                  <ul className="max-h-40 overflow-y-auto text-xs text-slate-300 bg-slate-950 border border-slate-800 rounded-lg divide-y divide-slate-800">
+                    {bulk.times.map(t => (
+                      <li key={t.appointmentid} className="px-3 py-1.5 flex justify-between gap-3">
+                        <span>{longDay(t.apptdate)} at {formatDisplayTime(t.appttime)}</span>
+                        <span className="text-slate-500 truncate">{t.location || 'No location set'}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-slate-300">
+                  {bulk.times.length} open time{bulk.times.length === 1 ? '' : 's'} for <span className="font-semibold text-white">{bulk.who}</span> will be cancelled.
+                  To confirm, type <span className="font-mono font-semibold text-rose-300">CANCEL ALL</span> below.
+                </p>
+                <input
+                  type="text"
+                  autoFocus
+                  value={bulk.typed}
+                  onChange={e => setBulk({ ...bulk, typed: e.target.value, error: '' })}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); confirmCancelAll(); } }}
+                  placeholder="CANCEL ALL"
+                  aria-label="Type CANCEL ALL to confirm"
+                  className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm font-mono placeholder-slate-600" />
+              </>
+            )}
+            {bulk.error && <p className="text-xs text-red-400">{bulk.error}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setBulk(null)} disabled={bulk.saving} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-1.5 rounded text-xs font-semibold">Keep the times</button>
+              {bulk.step === 1 ? (
+                <button type="button" onClick={() => setBulk({ ...bulk, step: 2 })} disabled={!bulk.times?.length}
+                  className="bg-rose-700 hover:bg-rose-600 disabled:opacity-50 text-white px-4 py-1.5 rounded text-xs font-semibold">Continue</button>
+              ) : (
+                <button type="button" onClick={confirmCancelAll} disabled={bulk.saving || bulk.typed.trim().toUpperCase() !== 'CANCEL ALL'}
+                  className="bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white px-4 py-1.5 rounded text-xs font-semibold">
+                  {bulk.saving ? 'Cancelling...' : `Cancel ${bulk.times?.length ?? 0} Open Time${bulk.times?.length === 1 ? '' : 's'}`}
+                </button>
+              )}
+            </div>
+          </div>
+        </PopupDialog>
+      )}
       {unassigning && (
         <PopupDialog
           title={`Unassign ${unassigning.appt.firstname} ${unassigning.appt.lastname}`}
@@ -344,7 +424,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
       <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3 border-b border-slate-800 pb-4">
         <div>
           <h2 className="text-lg font-bold text-white">Assessment Calendar</h2>
-          <p className="text-xs text-slate-400 mt-0.5">Counselors open times they are available; clients are assigned to open times. Closing an assessment still happens on the Sessions view.</p>
+          <p className="text-xs text-slate-400 mt-0.5">Counselors open times they are available; a client assigned to a time gets an open session for that date, closed from Open Sessions.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => startForm('open', pickedDay || today)} className={`${smallButton} bg-blue-600 hover:bg-blue-500 text-white border-blue-600`}>
@@ -353,8 +433,8 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
           <button type="button" onClick={() => startForm('schedule', pickedDay || today)} className={`${smallButton} bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700`}>
             <UserPlus size={14} /> Schedule Client
           </button>
-          <button type="button" onClick={onBack} className={`${smallButton} bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700`}>
-            <List size={14} /> Back to Sessions
+          <button type="button" onClick={onNewAssessment} title="Start an assessment now, without a scheduled time" className={`${smallButton} bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-700`}>
+            <ClipboardPlus size={14} /> New Assessment
           </button>
         </div>
       </div>
@@ -365,13 +445,13 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
           <option value="">All counselors</option>
           {counselors.map(name => <option key={name} value={name}>{name}</option>)}
         </select>
-        {bulkTarget ? (
-          <button type="button" onClick={cancelAllOpen} className={`${smallButton} bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-800/60 sm:ml-auto justify-center`}>
+        {canCancelAll && (bulkTarget ? (
+          <button type="button" onClick={startCancelAll} className={`${smallButton} bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-800/60 sm:ml-auto justify-center`}>
             <XCircle size={13} /> Cancel all open times for {bulkTarget}
           </button>
         ) : (
           <span className="text-xs text-slate-500 sm:ml-auto">Pick a counselor to cancel all of their open times.</span>
-        )}
+        ))}
       </div>
 
       {loadError && <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{loadError}</p>}

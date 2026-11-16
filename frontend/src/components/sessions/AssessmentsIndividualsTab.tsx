@@ -86,6 +86,7 @@ const SO_CLIENT_TYPES = ['State SO', 'Federal SO', 'Voluntary SO'];
 
 const money = (n: number) => `$${n.toFixed(2)}`;
 const cents = (n: number) => Math.round(n * 100) / 100;
+const errorMessage = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 const formatDay = (ymd: string) => (ymd === todayLocal() ? 'Today' : new Date(`${ymd}T00:00:00`).toLocaleDateString());
 
 // Assessments and individual sessions: one client per session, saved as open and then closed like a group check-in.
@@ -113,8 +114,9 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const [listError, setListError] = useState('');
   const [expandedClosed, setExpandedClosed] = useState<number | null>(null);
   // Waiting for Assessment list: one assessor's clients, or everyone's ('')
-  // Sessions (this screen) or the Assessment Calendar for scheduling future assessments
-  const [view, setView] = useState<'sessions' | 'calendar'>('sessions');
+  // The tab shows the Assessment Calendar; the session form replaces it while an open session is being edited or closed,
+  // or a new on-the-fly assessment (no scheduled time) is being entered (composing)
+  const [composing, setComposing] = useState(false);
   const [waitingFor, setWaitingFor] = useState(() => {
     try { return localStorage.getItem('waitingForAssessor') || ''; } catch { return ''; }
   });
@@ -133,8 +135,8 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
       setOpenSessions(open);
       setClosedSessions(closed);
       setListError('');
-    } catch (err: any) {
-      setListError(err.message || 'Failed to load sessions.');
+    } catch (err) {
+      setListError(errorMessage(err, 'Failed to load sessions.'));
     }
   }, [user.employeeemail]);
 
@@ -267,9 +269,9 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
     setFormError('');
     try {
       await action();
-    } catch (err: any) {
+    } catch (err) {
       // Shown in the form, which keeps what was entered so it can be retried
-      setFormError(err.message || 'Something went wrong.');
+      setFormError(errorMessage(err, 'Something went wrong.'));
     } finally {
       setSaving(false);
     }
@@ -304,8 +306,8 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
       setForm(f => (f.clientId === String(client.clientid) ? { ...f, receipt } : f));
       onSuccess(`${method} payment processed for ${client.firstname} ${client.lastname}.`);
       onSaved?.();
-    } catch (err: any) {
-      setFormError(err.message || 'Payment could not be processed.');
+    } catch (err) {
+      setFormError(errorMessage(err, 'Payment could not be processed.'));
     } finally {
       setSaving(false);
     }
@@ -320,6 +322,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
       : form.receipt ? `The ${form.receipt.method.toLowerCase()} payment is on the account; the fee has not been charged yet.` : 'Nothing has been charged yet.'}`);
     setForm(blankForm(form.category));
     setReviewing(false);
+    setComposing(false);
     setPanelTab('open');
     loadLists();
     if (paidNow) onSaved?.();
@@ -360,32 +363,52 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
     onSuccess(`${needsChecks ? `${sessionType!.name} completed` : `${form.category} closed`} for ${client!.lastname}, ${client!.firstname}. New balance ${formatBalance(res.newBalance)}.`);
     setForm(blankForm(form.category));
     setReviewing(false);
+    setComposing(false);
     resetChecks();
     loadLists();
     onSaved?.();
   });
 
+  // Back to the calendar, dropping what's on the form (an open session stays open as it was last saved)
+  const backToCalendar = () => {
+    setForm(blankForm(form.category));
+    setReviewing(false);
+    setComposing(false);
+    setFormError('');
+    resetChecks();
+  };
+  // A new assessment without a scheduled time
+  const startNewAssessment = () => {
+    setForm(blankForm('Assessment'));
+    setReviewing(false);
+    setFormError('');
+    resetChecks();
+    setComposing(true);
+  };
+
   const resume = (o: OpenIndividualSession) => {
+    // An assessment from the Assessment Calendar has no type yet: it opens for editing so the type (and fee) is picked
+    const typed = o.sessiontypeid !== null;
     setForm({
-      openSessionId: o.opensessionid, category: o.category, clientId: String(o.clientid), sessionTypeId: String(o.sessiontypeid),
-      date: o.sessiondate, fee: Number(o.fee).toFixed(2), payment: Number(o.payment) > 0 ? Number(o.payment).toFixed(2) : '',
+      openSessionId: o.opensessionid, category: o.category, clientId: String(o.clientid), sessionTypeId: typed ? String(o.sessiontypeid) : '',
+      date: o.sessiondate, fee: typed ? Number(o.fee).toFixed(2) : '', payment: Number(o.payment) > 0 ? Number(o.payment).toFixed(2) : '',
       paymentMethod: o.paymentmethod || 'Cash', provider: o.provider || '', comments: o.comments || '', paymentComments: o.paymentcomments || '',
       card: emptyCardBilling, receipt: null, paidOnOpen: Number(o.paidonopen || 0),
     });
-    setFormError('');
+    setFormError(typed ? '' : `Choose the ${o.category === 'Assessment' ? 'assessment' : 'session'} type, then review to close it.`);
     resetChecks();
-    setReviewing(true);
+    setReviewing(typed);
   };
 
   const discard = async (o: OpenIndividualSession) => {
     if (!window.confirm(`Discard the open ${o.category.toLowerCase()} for ${o.lastname}, ${o.firstname}? The fee was not charged, so nothing is undone. Any payment already taken stays on the account.`)) return;
     try {
       await deleteOpenIndividualSession(o.opensessionid, user.employeeemail);
-      if (form.openSessionId === o.opensessionid) { setForm(blankForm(form.category)); setReviewing(false); }
+      if (form.openSessionId === o.opensessionid) { setForm(blankForm(form.category)); setReviewing(false); setComposing(false); }
       onSuccess(`Open ${o.category.toLowerCase()} for ${o.lastname}, ${o.firstname} discarded.`);
       loadLists();
-    } catch (err: any) {
-      onError(err.message || 'Failed to discard the session.');
+    } catch (err) {
+      onError(errorMessage(err, 'Failed to discard the session.'));
     }
   };
 
@@ -459,29 +482,35 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
     </div>
   );
 
-  if (view === 'calendar') {
-    return (
-      <AssessmentCalendar
-        clients={clients}
-        counselors={providers}
-        user={user}
-        onBack={() => setView('sessions')}
-        onSuccess={onSuccess}
-        onError={onError}
-      />
-    );
-  }
+  const showForm = composing || reviewing || form.openSessionId !== null;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {!showForm ? (
+        <div className="lg:col-span-2">
+          <AssessmentCalendar
+            clients={clients}
+            counselors={providers}
+            user={user}
+            onNewAssessment={startNewAssessment}
+            // Assigning or changing a time adds, moves or removes an open session
+            onSuccess={(message) => { onSuccess(message); loadLists(); }}
+            onError={onError}
+          />
+        </div>
+      ) : (
       <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl">
         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 md:gap-4 mb-4 md:mb-6 border-b border-slate-800 pb-4">
           <div>
-            <h2 className="text-lg font-bold text-white">Assessments</h2>
-            <p className="text-xs text-slate-400 mt-0.5">One client per session. Save it as open, then review and close it to record the attendance, fee, and payment.</p>
+            <h2 className="text-lg font-bold text-white">{form.openSessionId ? `Open ${form.category}` : `New ${form.category}`}</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {form.openSessionId
+                ? 'Save to keep it open, or review and close it to record the attendance, fee, and payment.'
+                : 'For an assessment without a scheduled time. Save it as open, or review and close it now.'}
+            </p>
           </div>
-          <button type="button" onClick={() => setView('calendar')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-950 border border-slate-800 text-slate-300 hover:text-white shrink-0">
-            <CalendarDays size={14} /> Calendar
+          <button type="button" onClick={backToCalendar} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-950 border border-slate-800 text-slate-300 hover:text-white disabled:opacity-50 shrink-0">
+            <CalendarDays size={14} /> Back to Calendar
           </button>
           {/* Only while an old Individual session is open; with one choice there's nothing to switch */}
           {shownCategories.length > 1 && (
@@ -752,6 +781,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
           </div>
         )}
       </div>
+      )}
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl">
         <div className="flex items-center justify-between gap-2 mb-1">
@@ -793,7 +823,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                     <div className="flex justify-between items-start gap-2">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-white truncate">{o.lastname}, {o.firstname}</p>
-                        <p className="text-xs text-slate-300 truncate">{o.category} · {o.sessiontypename}</p>
+                        <p className="text-xs text-slate-300 truncate">{o.category} · {o.sessiontypename ?? <span className="text-amber-300">Type not chosen yet</span>}</p>
                         {Number(o.paidonopen) > 0 && <p className="text-xs text-emerald-400">Paid {money(Number(o.paidonopen))}</p>}
                         <p className={`text-xs ${o.sessiondate === todayLocal() ? 'text-slate-400' : 'text-amber-400'}`}>{formatDay(o.sessiondate)}{o.provider ? ` · ${o.provider}` : ''}</p>
                         <p className="text-[0.6875rem] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${employeeLabel(o.createdby)}` : ''}</p>

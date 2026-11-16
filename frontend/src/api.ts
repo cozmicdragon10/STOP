@@ -1089,8 +1089,9 @@ export interface OpenIndividualSession {
     doctype?: string | null;
     programtype: string | null;
     category: IndividualCategory;
-    sessiontypeid: number;
-    sessiontypename: string;
+    // null for an assessment opened from the Assessment Calendar until its type is chosen
+    sessiontypeid: number | null;
+    sessiontypename: string | null;
     sessiondate: string;
     fee: string | number;
     payment: string | number;

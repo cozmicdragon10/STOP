@@ -109,3 +109,10 @@ test('the unassign note says which time and why', () => {
         unassignNoteText({ date: '2026-12-01', time: '09:05', assessor: 'Bo Lee', location: null, reason: 'No ride' }),
         'Taken off the assessment with Bo Lee on Tuesday, December 1, 2026 at 9:05 AM. Reason: No ride');
 });
+
+const { openSessionComment } = require('../lib/assessmentAppointments');
+
+test('the open session from a scheduled time gives its time and place', () => {
+    assert.equal(openSessionComment({ time: '13:02', location: ' Shawnee ' }), 'From the Assessment Calendar: 1:02 PM, Shawnee.');
+    assert.equal(openSessionComment({ time: '09:00', location: null }), 'From the Assessment Calendar: 9:00 AM.');
+});

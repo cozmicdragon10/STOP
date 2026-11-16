@@ -3,8 +3,10 @@ const { pool, logAction } = require('../db');
 const { todayLocal } = require('../lib/dates');
 const { logClientChange } = require('../lib/changeLog');
 const { YMD } = require('../lib/sql');
+const { requireRole } = require('../lib/auth');
 const {
     slotProblem, appointmentProblem, locationProblem, moveProblem, ownsSlot, repeatDates, unassignReasonProblem, unassignNoteText,
+    openSessionComment,
 } = require('../lib/assessmentAppointments');
 
 const router = express.Router();
@@ -27,6 +29,18 @@ const loadAppointment = async (db, id) => (await db.query(
      FROM AssessmentAppointments WHERE AppointmentId = $1`, [id])).rows[0] ?? null;
 
 const note = (value) => String(value || '').trim() || null;
+
+// A client on a time gets an open Assessment session for that date with the assessor as its counselor, shown under Open
+// Sessions on the Assessments tab. Its type (and fee) is chosen when it's reviewed and closed.
+const openSessionForTime = (db, { appointmentId, clientId, date, time, location, assessor, createdBy }) => db.query(
+    `INSERT INTO OpenIndividualSessions (ClientId, Category, SessionTypeId, SessionDate, Fee, Payment, Provider, Comments, CreatedBy, AssessmentAppointmentId)
+     VALUES ($1, 'Assessment', NULL, $2, 0, 0, $3, $4, $5, $6)`,
+    [clientId, date, assessor, openSessionComment({ time, location }), createdBy || null, appointmentId]);
+// The client is off the time: its open session goes too, unless money was already applied on it (then it stays, unlinked)
+const releaseOpenSession = async (db, appointmentId) => {
+    await db.query('DELETE FROM OpenIndividualSessions WHERE AssessmentAppointmentId = $1 AND PaidOnOpen = 0', [appointmentId]);
+    await db.query('UPDATE OpenIndividualSessions SET AssessmentAppointmentId = NULL WHERE AssessmentAppointmentId = $1', [appointmentId]);
+};
 
 // Appointments and open times from one date through another (YYYY-MM-DD), oldest first, cancelled ones included
 router.get('/api/assessment-appointments', async (req, res) => {
@@ -57,10 +71,11 @@ const createTimes = async ({ clientId, assessor, dates, time, location, notes, c
             [assessor, time, dates])).rows.map(r => r.day));
         const created = dates.filter(d => !taken.has(d));
         for (const day of created) {
-            await db.query(
+            const appointmentId = (await db.query(
                 `INSERT INTO AssessmentAppointments (ClientId, Assessor, ApptDate, ApptTime, Location, Notes, Status, CreatedBy)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-                [clientId ?? null, assessor, day, time, location, note(notes), clientId ? 'Scheduled' : 'Open', createdBy || null]);
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING AppointmentId`,
+                [clientId ?? null, assessor, day, time, location, note(notes), clientId ? 'Scheduled' : 'Open', createdBy || null])).rows[0].appointmentid;
+            if (clientId) await openSessionForTime(db, { appointmentId, clientId, date: day, time, location, assessor, createdBy });
         }
         await db.query('COMMIT');
         return { created, skipped: dates.filter(d => taken.has(d)) };
@@ -120,13 +135,13 @@ router.post('/api/assessment-appointments', async (req, res) => {
     }
 });
 
-// Cancel every open (unassigned) time a counselor has from today on. Times with a client are left alone.
-router.post('/api/assessment-appointments/cancel-open', async (req, res) => {
+// Cancel every open (unassigned) time a counselor has from today on. Times with a client are left alone. Business
+// Administrators only (DEV acts as one).
+router.post('/api/assessment-appointments/cancel-open', requireRole('Business Administrator'), async (req, res) => {
     try {
         const { assessor, cancelledBy } = req.body;
         const who = String(assessor || '').trim();
         if (!who) return res.status(400).json({ error: 'Choose the counselor.' });
-        if (!ownsSlot(req.user, who)) return res.status(403).json({ error: 'Counselors can only cancel their own open times.' });
         const result = await pool.query(
             `UPDATE AssessmentAppointments SET Status = 'Cancelled'
              WHERE Assessor = $1 AND Status = 'Open' AND ApptDate >= $2 RETURNING AppointmentId`,
@@ -138,32 +153,41 @@ router.post('/api/assessment-appointments/cancel-open', async (req, res) => {
     }
 });
 
-// Assign a client to an open time
+// Assign a client to an open time. The client also gets an open Assessment session for that date.
 router.post('/api/assessment-appointments/:id/assign', async (req, res) => {
+    const db = await pool.connect();
     try {
         const { id } = req.params;
         const { clientId, notes, assignedBy } = req.body;
-        const row = await loadAppointment(pool, id);
-        if (!row) return res.status(404).json({ error: 'Assessment not found.' });
-        if (row.status !== 'Open') return res.status(400).json({ error: 'That time already has a client or was cancelled.' });
-        if (!ownsSlot(req.user, row.assessor)) return res.status(403).json({ error: 'Counselors can only assign their own times.' });
+        await db.query('BEGIN');
+        const row = (await db.query(
+            `SELECT AppointmentId, ClientId, Assessor, to_char(ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(ApptTime, 'HH24:MI') AS ApptTime, Location, Status
+             FROM AssessmentAppointments WHERE AppointmentId = $1 FOR UPDATE`, [id])).rows[0];
+        const refuse = async (status, error) => { await db.query('ROLLBACK'); return res.status(status).json({ error }); };
+        if (!row) return refuse(404, 'Assessment not found.');
+        if (row.status !== 'Open') return refuse(400, 'That time already has a client or was cancelled.');
+        if (!ownsSlot(req.user, row.assessor)) return refuse(403, 'Counselors can only assign their own times.');
         const problem = appointmentProblem({
             date: row.apptdate, time: row.appttime, today: todayLocal(),
-            clientActive: await clientActive(pool, clientId), assessorActive: true,
+            clientActive: await clientActive(db, clientId), assessorActive: true,
         });
-        if (problem) return res.status(400).json({ error: problem });
-        await pool.query(
+        if (problem) return refuse(400, problem);
+        await db.query(
             `UPDATE AssessmentAppointments SET ClientId = $1, Status = 'Scheduled', Notes = COALESCE($2, Notes) WHERE AppointmentId = $3`,
             [clientId, note(notes), id]);
-        await logClientChange(pool, { clientId, changedBy: assignedBy, changeType: 'Assessment Scheduled', newValue: `${row.apptdate} ${row.appttime}`, details: `Assessor: ${row.assessor}` });
+        await openSessionForTime(db, { appointmentId: row.appointmentid, clientId, date: row.apptdate, time: row.appttime, location: row.location, assessor: row.assessor, createdBy: assignedBy });
+        await logClientChange(db, { clientId, changedBy: assignedBy, changeType: 'Assessment Scheduled', newValue: `${row.apptdate} ${row.appttime}`, details: `Assessor: ${row.assessor}` });
+        await db.query('COMMIT');
         await logAction(assignedBy, 'Assessment Scheduled', `Client ID ${clientId}: ${row.apptdate} ${row.appttime} with ${row.assessor}`);
         res.json({ success: true });
     } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
         res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
     }
 });
 
-// Take a client off a time, which goes back to open availability
 // Take the client off a scheduled time (it opens up again). The reason goes in an Assessment case note on their account.
 router.post('/api/assessment-appointments/:id/unassign', async (req, res) => {
     const db = await pool.connect();
@@ -179,6 +203,7 @@ router.post('/api/assessment-appointments/:id/unassign', async (req, res) => {
         if (!row || row.status !== 'Scheduled') { await db.query('ROLLBACK'); return res.status(400).json({ error: 'No client is assigned to that time.' }); }
         if (!ownsSlot(req.user, row.assessor)) { await db.query('ROLLBACK'); return res.status(403).json({ error: 'Counselors can only change their own times.' }); }
         await db.query(`UPDATE AssessmentAppointments SET ClientId = NULL, Status = 'Open' WHERE AppointmentId = $1`, [id]);
+        await releaseOpenSession(db, id);
         const comments = unassignNoteText({ date: row.apptdate, time: row.appttime, assessor: row.assessor, location: row.location, reason });
         // A system note: no approval needed
         await db.query(
@@ -261,6 +286,13 @@ router.post('/api/assessment-appointments/:id/move', async (req, res) => {
             `UPDATE AssessmentAppointments SET ClientId = $1, Status = 'Scheduled', Notes = COALESCE(Notes, $2) WHERE AppointmentId = $3`,
             [from.clientid, from.notes, to.appointmentid]);
         await db.query(`UPDATE AssessmentAppointments SET ClientId = NULL, Status = 'Open' WHERE AppointmentId = $1`, [from.appointmentid]);
+        // The open session follows the client to the new date (or is made, for a time scheduled before sessions were linked)
+        const followed = await db.query(
+            'UPDATE OpenIndividualSessions SET SessionDate = $1, Comments = $2, AssessmentAppointmentId = $3 WHERE AssessmentAppointmentId = $4',
+            [to.apptdate, openSessionComment({ time: to.appttime, location: to.location }), to.appointmentid, from.appointmentid]);
+        if (!followed.rowCount) {
+            await openSessionForTime(db, { appointmentId: to.appointmentid, clientId: from.clientid, date: to.apptdate, time: to.appttime, location: to.location, assessor: to.assessor, createdBy: updatedBy });
+        }
         const oldWhen = `${from.apptdate} ${from.appttime}${from.location ? `, ${from.location}` : ''}`;
         const newWhen = `${to.apptdate} ${to.appttime}${to.location ? `, ${to.location}` : ''}`;
         await logClientChange(db, { clientId: from.clientid, changedBy: updatedBy, changeType: 'Assessment Rescheduled', oldValue: oldWhen, newValue: newWhen, details: `Assessor: ${from.assessor}` });
@@ -284,6 +316,7 @@ router.post('/api/assessment-appointments/:id/cancel', async (req, res) => {
         if (!row || row.status === 'Cancelled') return res.status(404).json({ error: 'No open or scheduled assessment with that id.' });
         if (!ownsSlot(req.user, row.assessor)) return res.status(403).json({ error: 'Counselors can only cancel their own times.' });
         await pool.query(`UPDATE AssessmentAppointments SET Status = 'Cancelled' WHERE AppointmentId = $1`, [id]);
+        if (row.clientid) await releaseOpenSession(pool, id);
         if (row.clientid) {
             await logClientChange(pool, { clientId: row.clientid, changedBy: cancelledBy, changeType: 'Assessment Cancelled', oldValue: `${row.apptdate} ${row.appttime}` });
         }
