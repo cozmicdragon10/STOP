@@ -35,7 +35,7 @@ import DevTab from './components/dev/DevTab';
 import SettingsTab from './components/settings/SettingsTab';
 import MyDay from './components/home/MyDay';
 import CalendarsTab from './components/home/CalendarsTab';
-import { isMyClient, myGroupIds } from './utils/counselor';
+import { groupByCounselor, isMyClient, myGroupIds } from './utils/counselor';
 import FormsTab from './components/forms/FormsTab';
 import PolySlotForm from './components/polygraph/PolySlotForm';
 import PolyResults from './components/polygraph/PolyResults';
@@ -802,6 +802,19 @@ export default function App() {
 
   // Role Permissions
   const role = user.role;
+  // Open and Closed Groups lists: Business Administrators (DEV signs in as one) and Office Admins see them split by
+  // counselor under a heading with the count; everyone else sees one list
+  const groupListsByCounselor = role === 'Business Administrator' || role === 'Office Admin';
+  const counselorSections = <T,>(items: T[], counselorOf: (item: T) => string | null | undefined, render: (item: T) => React.ReactNode) =>
+    !groupListsByCounselor ? items.map(render) : groupByCounselor(items, counselorOf).map(section => (
+      <li key={`counselor-${section.counselor}`} className="space-y-2">
+        <p className="flex justify-between gap-2 pt-1 text-[0.6875rem] font-semibold uppercase tracking-wide text-slate-400 border-b border-slate-800 pb-1">
+          <span className="truncate">{section.counselor}</span>
+          <span className="text-slate-500 shrink-0">{section.items.length}</span>
+        </p>
+        <ul className="space-y-2">{section.items.map(render)}</ul>
+      </li>
+    ));
   // Counselors: the groups they lead, which decide "my clients" on the roster and My Day
   const isCounselor = role === 'Counselor';
   const counselorGroupIds = isCounselor ? myGroupIds(groups, user.displayname) : null;
@@ -1531,7 +1544,7 @@ export default function App() {
                       <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">No closed groups.</p>
                     ) : (
                       <ul className="space-y-2 max-h-[32rem] overflow-y-auto pr-1">
-                        {closedGroups.map(c => {
+                        {counselorSections(closedGroups, c => c.counselor, c => {
                           const key = `${c.groupid}-${c.sessiondate}-${c.sessionnumber}`;
                           const expanded = expandedClosedGroup === key;
                           const collected = c.entries.reduce((sum, e) => sum + Number(e.accountPaid || 0), 0);
@@ -1590,7 +1603,7 @@ export default function App() {
                   <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">No open groups.</p>
                 ) : (
                   <ul className="space-y-2">
-                    {openGroups.map(o => (
+                    {counselorSections(openGroups, o => groups.find(g => g.groupid === o.groupid)?.counselor, o => (
                       <li key={o.opensessionid} className="bg-slate-950 border border-slate-800 rounded-lg p-3">
                         <div className="flex justify-between items-start gap-2">
                           <div className="min-w-0">

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessmentPickList, clientsNotAttendedThisMonth, groupsMeetingOn, isMyClient, monthGrid, myGroupIds, scheduledDatesIn, shiftMonth, weekdayName } from './counselor';
+import { assessmentPickList, clientsNotAttendedThisMonth, groupByCounselor, groupsMeetingOn, isMyClient, monthGrid, myGroupIds, scheduledDatesIn, shiftMonth, weekdayName } from './counselor';
 
 const groups = [
   { groupid: 1, groupname: 'Tuesday Men', counselor: 'Ana Ruiz', schedule: 'Tuesdays @ 6:00 PM', active: true },
@@ -87,5 +87,16 @@ describe('assessment pick list', () => {
 
   it('tags no one when no assessor is chosen', () => {
     expect(assessmentPickList(clients, '').every(c => !c.tag)).toBe(true);
+  });
+});
+
+describe('group by counselor', () => {
+  it('splits by counselor A to Z, ignoring case and spaces, with no counselor last and order kept', () => {
+    const items = [
+      { id: 1, c: 'Bo Lee' }, { id: 2, c: null }, { id: 3, c: 'ana ruiz' }, { id: 4, c: ' Bo  Lee ' }, { id: 5, c: 'Ana Ruiz' },
+    ];
+    const sections = groupByCounselor(items, i => i.c);
+    expect(sections.map(s => s.counselor)).toEqual(['ana ruiz', 'Bo Lee', 'No counselor']);
+    expect(sections.map(s => s.items.map(i => i.id))).toEqual([[3, 5], [1, 4], [2]]);
   });
 });

@@ -43,6 +43,22 @@ export const assessmentPickList = <T extends { programstatus?: string | null; as
   ];
 };
 
+// Items split by counselor name (ignoring case and extra spaces), counselors A to Z with "No counselor" last; each
+// counselor's items keep the order given
+export const NO_COUNSELOR = 'No counselor';
+export const groupByCounselor = <T>(items: T[], counselorOf: (item: T) => string | null | undefined) => {
+  const sections = new Map<string, { counselor: string; items: T[] }>();
+  for (const item of items) {
+    const name = (counselorOf(item) || '').trim().replace(/\s+/g, ' ');
+    const key = name.toLowerCase();
+    if (!sections.has(key)) sections.set(key, { counselor: name || NO_COUNSELOR, items: [] });
+    sections.get(key)!.items.push(item);
+  }
+  return [...sections.entries()]
+    .sort(([a, x], [b, y]) => (a === '' ? 1 : b === '' ? -1 : x.counselor.localeCompare(y.counselor)))
+    .map(([, section]) => section);
+};
+
 // Groups I lead that meet on the given weekday (schedules read like "Thursdays @ 7:00 PM"), by name
 export const groupsMeetingOn = <T extends { groupname?: string | null; counselor?: string | null; schedule?: string | null; active?: boolean | null }>(
   groups: T[],
