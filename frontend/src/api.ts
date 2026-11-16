@@ -2135,15 +2135,26 @@ export async function getAssessmentAppointments(from: string, to: string): Promi
     return jsonResponse(res, 'Failed to load assessments.');
 }
 
-// Open availability: a time with no client yet
-export async function openAssessmentSlot(data: { assessor: string; date: string; time: string; notes: string }): Promise<{ success: true; appointmentId: number }> {
+// How a new time repeats (until is the last date, YYYY-MM-DD). Mirrors REPEATS in backend/lib/assessmentAppointments.js.
+export type AssessmentRepeat = 'none' | 'weekdays' | 'weekly' | 'biweekly';
+// created: how many times were made; skipped: dates left out because the counselor already had that time
+export interface AssessmentCreateResult { success: true; created: number; skipped: string[] }
+
+// Open availability: a time with no client yet, on each repeat date
+export async function openAssessmentSlot(data: { assessor: string; date: string; time: string; notes: string; repeat: AssessmentRepeat; until: string }): Promise<AssessmentCreateResult> {
     const res = await sendJson(`${API_BASE}/assessment-appointments/slots`, { ...data, createdBy: '' });
     return jsonResponse(res, 'Failed to open the time.');
 }
 
-export async function createAssessmentAppointment(data: { clientId: number; assessor: string; date: string; time: string; notes: string }): Promise<{ success: true; appointmentId: number }> {
+export async function createAssessmentAppointment(data: { clientId: number; assessor: string; date: string; time: string; notes: string; repeat: AssessmentRepeat; until: string }): Promise<AssessmentCreateResult> {
     const res = await sendJson(`${API_BASE}/assessment-appointments`, { ...data, createdBy: '' });
     return jsonResponse(res, 'Failed to schedule the assessment.');
+}
+
+// Cancels every open (unassigned) time the counselor has from today on; times with a client stay
+export async function cancelOpenAssessmentTimes(assessor: string): Promise<{ success: true; cancelled: number }> {
+    const res = await sendJson(`${API_BASE}/assessment-appointments/cancel-open`, { assessor, cancelledBy: '' });
+    return jsonResponse(res, 'Failed to cancel the open times.');
 }
 
 export async function assignAssessmentSlot(id: number, data: { clientId: number; notes: string }): Promise<{ success: true }> {

@@ -3,8 +3,9 @@ import { CalendarClock, CalendarPlus, ChevronLeft, ChevronRight, List, RotateCcw
 import ClientPicker from '../ClientPicker';
 import { formatDisplayTime, getLocalDateString } from '../../utils/dates';
 import {
-  assignAssessmentSlot, cancelAssessmentAppointment, createAssessmentAppointment, getAssessmentAppointments, openAssessmentSlot,
-  unassignAssessmentSlot, updateAssessmentAppointment, type AssessmentAppointment,
+  assignAssessmentSlot, cancelAssessmentAppointment, cancelOpenAssessmentTimes, createAssessmentAppointment, getAssessmentAppointments,
+  openAssessmentSlot, unassignAssessmentSlot, updateAssessmentAppointment,
+  type AssessmentAppointment, type AssessmentCreateResult, type AssessmentRepeat,
 } from '../../api';
 
 interface CalendarClient {
@@ -41,7 +42,20 @@ const longDay = (ymd: string) => new Date(`${ymd}T00:00:00`).toLocaleDateString(
 
 // open: a counselor's availability (no client); schedule: a client at a new time; edit: reschedule an existing time
 type FormMode = 'open' | 'schedule' | 'edit';
-interface FormState { clientId: string; assessor: string; date: string; time: string; notes: string }
+interface FormState { clientId: string; assessor: string; date: string; time: string; notes: string; repeat: AssessmentRepeat; until: string }
+const REPEAT_CHOICES: [AssessmentRepeat, string][] = [
+  ['none', 'Does not repeat'],
+  ['weekdays', 'Every weekday (Mon to Fri)'],
+  ['weekly', 'Every week on this day'],
+  ['biweekly', 'Every 2 weeks on this day'],
+];
+// "Opened 4 times." plus the dates left out because the counselor already had that time
+const createdText = (verb: string, result: AssessmentCreateResult) => {
+  const made = `${verb} ${result.created} time${result.created === 1 ? '' : 's'}.`;
+  if (!result.skipped.length) return made;
+  const skipped = result.skipped.map(d => new Date(`${d}T00:00:00`).toLocaleDateString()).join(', ');
+  return `${made} Skipped ${result.skipped.length} already taken: ${skipped}.`;
+};
 
 // The Assessments calendar, like the polygraph schedule: counselors open times they're available, and a client is
 // assigned to an open time (or scheduled at a new time in one step). Counselors open and change only their own times;
@@ -65,7 +79,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
   };
   const [mode, setMode] = useState<FormMode | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<FormState>({ clientId: '', assessor: '', date: today, time: '', notes: '' });
+  const [form, setForm] = useState<FormState>({ clientId: '', assessor: '', date: today, time: '', notes: '', repeat: 'none', until: '' });
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   // The client picked on each open time's card, by appointment id
@@ -107,13 +121,13 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
     setMode(next);
     setEditingId(null);
     const assessor = isCounselor ? me : assessorFilter;
-    setForm({ clientId: '', assessor: counselors.includes(assessor) ? assessor : '', date: day >= today ? day : today, time: '', notes: '' });
+    setForm({ clientId: '', assessor: counselors.includes(assessor) ? assessor : '', date: day >= today ? day : today, time: '', notes: '', repeat: 'none', until: '' });
     setFormError('');
   };
   const startEdit = (a: AssessmentAppointment) => {
     setMode('edit');
     setEditingId(a.appointmentid);
-    setForm({ clientId: a.clientid ? String(a.clientid) : '', assessor: a.assessor, date: a.apptdate, time: a.appttime, notes: a.notes || '' });
+    setForm({ clientId: a.clientid ? String(a.clientid) : '', assessor: a.assessor, date: a.apptdate, time: a.appttime, notes: a.notes || '', repeat: 'none', until: '' });
     setFormError('');
   };
   const closeForm = () => { setMode(null); setEditingId(null); setFormError(''); };
@@ -130,15 +144,19 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
     if (!form.assessor) return setFormError('Choose the counselor.');
     if (!form.date) return setFormError('Enter the date.');
     if (!form.time) return setFormError('Enter the time.');
+    const repeats = mode !== 'edit' && form.repeat !== 'none';
+    if (repeats && !form.until) return setFormError('Enter the date the repeats end.');
+    if (repeats && form.until < form.date) return setFormError('The repeat end date is before the first date.');
     setSaving(true);
     try {
       const details = { assessor: form.assessor, date: form.date, time: form.time, notes: form.notes };
+      const repeat = { repeat: repeats ? form.repeat : 'none' as AssessmentRepeat, until: repeats ? form.until : '' };
       if (mode === 'open') {
-        await openAssessmentSlot(details);
-        onSuccess(`Opened ${formatDisplayTime(form.time)} on ${longDay(form.date)} for assessments.`);
+        const result = await openAssessmentSlot({ ...details, ...repeat });
+        onSuccess(repeats ? createdText('Opened', result) : `Opened ${formatDisplayTime(form.time)} on ${longDay(form.date)} for assessments.`);
       } else if (mode === 'schedule') {
-        await createAssessmentAppointment({ ...details, clientId: Number(form.clientId) });
-        onSuccess('Assessment scheduled.');
+        const result = await createAssessmentAppointment({ ...details, ...repeat, clientId: Number(form.clientId) });
+        onSuccess(repeats ? createdText('Scheduled', result) : 'Assessment scheduled.');
       } else if (editingId !== null) {
         await updateAssessmentAppointment(editingId, details);
         onSuccess('Assessment time changed.');
@@ -180,6 +198,20 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
     const what = a.status === 'Open' ? `the open time with ${a.assessor}` : `the assessment for ${a.firstname} ${a.lastname}`;
     if (!window.confirm(`Cancel ${what} on ${longDay(a.apptdate)} at ${formatDisplayTime(a.appttime)}?`)) return;
     act(() => cancelAssessmentAppointment(a.appointmentid), a.status === 'Open' ? 'Open time removed.' : 'Assessment cancelled.');
+  };
+
+  // Whose open times the bulk cancel clears: a counselor's own, else the counselor picked in the filter
+  const bulkTarget = isCounselor ? (counselors.includes(me) ? me : '') : assessorFilter;
+  const cancelAllOpen = async () => {
+    if (!bulkTarget) return;
+    if (!window.confirm(`Cancel ALL of ${bulkTarget}'s open assessment times from today on? Times that already have a client are not changed.`)) return;
+    try {
+      const { cancelled } = await cancelOpenAssessmentTimes(bulkTarget);
+      onSuccess(cancelled ? `Cancelled ${cancelled} open time${cancelled === 1 ? '' : 's'} for ${bulkTarget}.` : `${bulkTarget} has no open times from today on.`);
+      reload();
+    } catch (err) {
+      onError(errorText(err, 'Failed to cancel the open times.'));
+    }
   };
 
   const editing = editingId !== null ? appointments.find(a => a.appointmentid === editingId) : undefined;
@@ -267,6 +299,13 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
           <option value="">All counselors</option>
           {counselors.map(name => <option key={name} value={name}>{name}</option>)}
         </select>
+        {bulkTarget ? (
+          <button type="button" onClick={cancelAllOpen} className={`${smallButton} bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border-rose-800/60 sm:ml-auto justify-center`}>
+            <XCircle size={13} /> Cancel all open times for {bulkTarget}
+          </button>
+        ) : (
+          <span className="text-xs text-slate-500 sm:ml-auto">Pick a counselor to cancel all of their open times.</span>
+        )}
       </div>
 
       {loadError && <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{loadError}</p>}
@@ -307,7 +346,26 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
               <label className="block text-xs text-slate-400 uppercase mb-1">Notes <span className="normal-case text-slate-500">(optional)</span></label>
               <input type="text" value={form.notes} onChange={e => set({ notes: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
             </div>
+            {mode !== 'edit' && (
+              <>
+                <div>
+                  <label className="block text-xs text-slate-400 uppercase mb-1">Repeat</label>
+                  <select value={form.repeat} onChange={e => set({ repeat: e.target.value as AssessmentRepeat })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm">
+                    {REPEAT_CHOICES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </div>
+                {form.repeat !== 'none' && (
+                  <div>
+                    <label className="block text-xs text-slate-400 uppercase mb-1">Repeat Until</label>
+                    <input type="date" min={form.date || today} value={form.until} onChange={e => set({ until: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
+                  </div>
+                )}
+              </>
+            )}
           </div>
+          {mode !== 'edit' && form.repeat !== 'none' && (
+            <p className="text-xs text-slate-500">Each repeat is its own time on the calendar. Dates when this counselor already has a time at this hour are skipped. Up to 100 times at once.</p>
+          )}
           {isCounselor && !counselors.includes(me) && <p className="text-xs text-amber-400">Your account isn't an active counselor, so you can't open assessment times.</p>}
           {formError && <p className="text-xs text-red-400">{formError}</p>}
           <div className="flex justify-end gap-2">

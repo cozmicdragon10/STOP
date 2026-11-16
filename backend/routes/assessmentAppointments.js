@@ -3,7 +3,7 @@ const { pool, logAction } = require('../db');
 const { todayLocal } = require('../lib/dates');
 const { logClientChange } = require('../lib/changeLog');
 const { YMD } = require('../lib/sql');
-const { slotProblem, appointmentProblem, ownsSlot } = require('../lib/assessmentAppointments');
+const { slotProblem, appointmentProblem, ownsSlot, repeatDates } = require('../lib/assessmentAppointments');
 
 const router = express.Router();
 
@@ -43,29 +43,61 @@ router.get('/api/assessment-appointments', async (req, res) => {
     }
 });
 
-// Open availability: a time with no client, for a counselor to assign later
+// Inserts one time per date (Open, or Scheduled when clientId is given) in one transaction, leaving out dates when the
+// counselor already has an open or scheduled time at that hour. Returns { created, skipped }, each a list of dates.
+const createTimes = async ({ clientId, assessor, dates, time, notes, createdBy }) => {
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        const taken = new Set((await db.query(
+            `SELECT to_char(ApptDate, 'YYYY-MM-DD') AS day FROM AssessmentAppointments
+             WHERE Assessor = $1 AND ApptTime = $2 AND ApptDate = ANY($3::date[]) AND Status <> 'Cancelled'`,
+            [assessor, time, dates])).rows.map(r => r.day));
+        const created = dates.filter(d => !taken.has(d));
+        for (const day of created) {
+            await db.query(
+                `INSERT INTO AssessmentAppointments (ClientId, Assessor, ApptDate, ApptTime, Notes, Status, CreatedBy)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                [clientId ?? null, assessor, day, time, note(notes), clientId ? 'Scheduled' : 'Open', createdBy || null]);
+        }
+        await db.query('COMMIT');
+        return { created, skipped: dates.filter(d => taken.has(d)) };
+    } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        db.release();
+    }
+};
+const spanText = (dates) => (dates.length === 1 ? dates[0] : `${dates.length} dates, ${dates[0]} to ${dates[dates.length - 1]}`);
+const allTakenMessage = (who, time, count) =>
+    `${who} already has a time at ${time} ${count === 1 ? 'on that date' : 'on each of those dates'}.`;
+
+// Open availability: a time with no client, for a counselor to assign later. repeat (weekdays, weekly, biweekly) and
+// until open the same time on each date through until.
 router.post('/api/assessment-appointments/slots', async (req, res) => {
     try {
-        const { assessor, date, time, notes, createdBy } = req.body;
+        const { assessor, date, time, notes, repeat, until, createdBy } = req.body;
         const who = String(assessor || '').trim();
         const problem = slotProblem({ date, time, today: todayLocal(), assessorActive: await counselorActive(pool, who) });
         if (problem) return res.status(400).json({ error: problem });
+        const { dates, error } = repeatDates(date, repeat, until);
+        if (error) return res.status(400).json({ error });
         if (!ownsSlot(req.user, who)) return res.status(403).json({ error: 'Counselors can only open availability for themselves.' });
-        const inserted = await pool.query(
-            `INSERT INTO AssessmentAppointments (ClientId, Assessor, ApptDate, ApptTime, Notes, Status, CreatedBy)
-             VALUES (NULL, $1, $2, $3, $4, 'Open', $5) RETURNING AppointmentId`,
-            [who, date, time, note(notes), createdBy || null]);
-        await logAction(createdBy, 'Assessment Availability Opened', `${who}: ${date} ${time}`);
-        res.status(201).json({ success: true, appointmentId: inserted.rows[0].appointmentid });
+        const { created, skipped } = await createTimes({ assessor: who, dates, time, notes, createdBy });
+        if (!created.length) return res.status(400).json({ error: allTakenMessage(who, time, dates.length) });
+        await logAction(createdBy, 'Assessment Availability Opened', `${who} at ${time}: ${spanText(created)}`);
+        res.status(201).json({ success: true, created: created.length, skipped });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-// Schedule a client for a new time in one step (the counselor's own, or any counselor's for an Office or Business Administrator)
+// Schedule a client at a new time in one step (the counselor's own, or any counselor's for an Office or Business
+// Administrator). Repeats like open availability.
 router.post('/api/assessment-appointments', async (req, res) => {
     try {
-        const { clientId, assessor, date, time, notes, createdBy } = req.body;
+        const { clientId, assessor, date, time, notes, repeat, until, createdBy } = req.body;
         const who = String(assessor || '').trim();
         const problem = appointmentProblem({
             date, time, today: todayLocal(),
@@ -73,14 +105,32 @@ router.post('/api/assessment-appointments', async (req, res) => {
             assessorActive: await counselorActive(pool, who),
         });
         if (problem) return res.status(400).json({ error: problem });
+        const { dates, error } = repeatDates(date, repeat, until);
+        if (error) return res.status(400).json({ error });
         if (!ownsSlot(req.user, who)) return res.status(403).json({ error: 'Counselors can only schedule their own assessments.' });
-        const inserted = await pool.query(
-            `INSERT INTO AssessmentAppointments (ClientId, Assessor, ApptDate, ApptTime, Notes, Status, CreatedBy)
-             VALUES ($1, $2, $3, $4, $5, 'Scheduled', $6) RETURNING AppointmentId`,
-            [clientId, who, date, time, note(notes), createdBy || null]);
-        await logClientChange(pool, { clientId, changedBy: createdBy, changeType: 'Assessment Scheduled', newValue: `${date} ${time}`, details: `Assessor: ${who}` });
-        await logAction(createdBy, 'Assessment Scheduled', `Client ID ${clientId}: ${date} ${time} with ${who}`);
-        res.status(201).json({ success: true, appointmentId: inserted.rows[0].appointmentid });
+        const { created, skipped } = await createTimes({ clientId, assessor: who, dates, time, notes, createdBy });
+        if (!created.length) return res.status(400).json({ error: allTakenMessage(who, time, dates.length) });
+        await logClientChange(pool, { clientId, changedBy: createdBy, changeType: 'Assessment Scheduled', newValue: `${spanText(created)} at ${time}`, details: `Assessor: ${who}` });
+        await logAction(createdBy, 'Assessment Scheduled', `Client ID ${clientId} with ${who} at ${time}: ${spanText(created)}`);
+        res.status(201).json({ success: true, created: created.length, skipped });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Cancel every open (unassigned) time a counselor has from today on. Times with a client are left alone.
+router.post('/api/assessment-appointments/cancel-open', async (req, res) => {
+    try {
+        const { assessor, cancelledBy } = req.body;
+        const who = String(assessor || '').trim();
+        if (!who) return res.status(400).json({ error: 'Choose the counselor.' });
+        if (!ownsSlot(req.user, who)) return res.status(403).json({ error: 'Counselors can only cancel their own open times.' });
+        const result = await pool.query(
+            `UPDATE AssessmentAppointments SET Status = 'Cancelled'
+             WHERE Assessor = $1 AND Status = 'Open' AND ApptDate >= $2 RETURNING AppointmentId`,
+            [who, todayLocal()]);
+        if (result.rowCount) await logAction(cancelledBy, 'Assessment Open Times Cancelled', `${who}: ${result.rowCount} open time(s) from ${todayLocal()} on`);
+        res.json({ success: true, cancelled: result.rowCount });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

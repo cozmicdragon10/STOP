@@ -24,4 +24,31 @@ const appointmentProblem = (args) => {
 // A counselor only opens and changes their own times; Office and Business Administrators change any
 const ownsSlot = (user, assessor) => user?.role !== 'Counselor' || String(user.displayname || '').trim() === String(assessor || '').trim();
 
-module.exports = { slotProblem, appointmentProblem, ownsSlot };
+// How a new time can repeat: weekdays (Monday to Friday), weekly, or every 2 weeks, up to an end date
+const REPEATS = ['none', 'weekdays', 'weekly', 'biweekly'];
+const MAX_REPEATS = 100;
+const STEP_DAYS = { weekdays: 1, weekly: 7, biweekly: 14 };
+const addDays = (ymd, days) => {
+    const d = new Date(`${ymd}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+};
+const weekday = (ymd) => new Date(`${ymd}T00:00:00Z`).getUTCDay();
+
+// The dates a new time falls on, from start through until: { dates } or { error }. No repeat gives just the start date.
+const repeatDates = (start, repeat, until) => {
+    if (!repeat || repeat === 'none') return { dates: [start] };
+    if (!REPEATS.includes(repeat)) return { error: 'Choose how often it repeats.' };
+    if (!YMD.test(String(until || ''))) return { error: 'Enter the date the repeats end.' };
+    if (until < start) return { error: 'The repeat end date is before the first date.' };
+    const dates = [];
+    for (let d = start; d <= until; d = addDays(d, STEP_DAYS[repeat])) {
+        if (repeat === 'weekdays' && (weekday(d) === 0 || weekday(d) === 6)) continue;
+        dates.push(d);
+        if (dates.length > MAX_REPEATS) return { error: `That repeats more than ${MAX_REPEATS} times. Pick an earlier end date.` };
+    }
+    if (!dates.length) return { error: 'No weekdays fall between those dates.' };
+    return { dates };
+};
+
+module.exports = { slotProblem, appointmentProblem, ownsSlot, repeatDates, REPEATS, MAX_REPEATS };

@@ -56,7 +56,7 @@ const ALLOWED = [
     // Assessment calendar: open their own times and schedule clients in them (routes/assessmentAppointments.js keeps a
     // counselor to their own times)
     ['GET', /^\/api\/assessment-appointments$/],
-    ['POST', /^\/api\/assessment-appointments(\/slots)?$/],
+    ['POST', /^\/api\/assessment-appointments(\/slots|\/cancel-open)?$/],
     ['POST', /^\/api\/assessment-appointments\/\d+\/(assign|unassign|cancel)$/],
     ['PUT', /^\/api\/assessment-appointments\/\d+$/],
     ['POST', /^\/api\/financials\/payment$/],
