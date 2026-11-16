@@ -981,6 +981,7 @@ export default function App() {
               <MyDay
                 displayName={user.displayname}
                 groups={groups}
+                clients={clients}
                 onOpenAttendance={() => setActiveTab('attendance')}
               />
             )}
@@ -1673,7 +1674,7 @@ export default function App() {
 
         {/* CALENDARS TAB: any counselor's month (office roles) */}
         {activeTab === 'calendars' && isAllowed('calendars') && (
-          <CalendarsTab employees={employees} groups={groups} />
+          <CalendarsTab employees={employees} groups={groups} clients={clients} />
         )}
 
         {/* TESTING MODULE TAB */}

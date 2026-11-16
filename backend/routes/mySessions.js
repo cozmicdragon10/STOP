@@ -60,7 +60,8 @@ router.get('/api/my-sessions', async (req, res) => {
         // Their own assessment times this month from the Assessments calendar: open availability and scheduled clients
         const assessments = await pool.query(
             `SELECT a.AppointmentId AS appointmentid, to_char(a.ApptDate, 'YYYY-MM-DD') AS apptdate, to_char(a.ApptTime, 'HH24:MI') AS appttime,
-                    a.Location AS location, a.Status AS status, c.FirstName AS firstname, c.LastName AS lastname
+                    a.Location AS location, a.Status AS status, a.Assessor AS assessor, a.Notes AS notes,
+                    c.FirstName AS firstname, c.LastName AS lastname
              FROM AssessmentAppointments a LEFT JOIN Clients c ON c.ClientId = a.ClientId
              WHERE LOWER(TRIM(a.Assessor)) = LOWER(TRIM($1)) AND a.Status IN ('Open', 'Scheduled')
                AND date_trunc('month', a.ApptDate) = date_trunc('month', $2::date)

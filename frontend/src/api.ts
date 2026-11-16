@@ -526,6 +526,9 @@ export interface MyAssessment {
     appttime: string;
     location: string | null;
     status: 'Open' | 'Scheduled';
+    // As stored, so a reschedule from My Day keeps the same counselor and note
+    assessor: string;
+    notes: string | null;
     firstname: string | null;
     lastname: string | null;
 }

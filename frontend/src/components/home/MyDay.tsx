@@ -5,6 +5,7 @@ import { dayKey, monthGrid, monthOfDate, myGroupIds, scheduledDatesIn, shiftMont
 import { formatDisplayTime } from '../../utils/dates';
 import { parseSchedule } from '../../utils/schedule';
 import GroupMeetingPanel, { type Meeting } from './GroupMeetingPanel';
+import AssessmentTimePanel, { type PanelClient } from './AssessmentTimePanel';
 
 interface GroupRow {
   groupid: number | string;
@@ -21,6 +22,8 @@ interface Props {
   onOpenAttendance?: () => void;
   // The Calendars tab: an office user looking at this counselor's calendar instead of their own
   viewing?: boolean;
+  // Clients who can be assigned to an open assessment time (active ones are offered)
+  clients?: PanelClient[];
 }
 
 // A day's chip: a group session (closed, open, or coming up), or one of the counselor's assessment times (open
@@ -36,6 +39,8 @@ interface DayItem {
   detail: string;
   sort: string;
   meeting?: Meeting;
+  // An assessment time from today on: assign a client (open), or cancel or reschedule (scheduled)
+  appt?: MyAssessment;
 }
 // '5:00 PM' -> '17:00', for sorting a day's list by time
 const to24h = (time: string) => {
@@ -84,7 +89,7 @@ const longDate = (ymd: string) => {
 
 // The counselor's home screen: a calendar of their groups for the month (closed, open, and what's coming up), and the
 // sessions they opened, closed, or covered that month. No client or money figures here.
-export default function MyDay({ displayName, groups, onOpenAttendance, viewing = false }: Props) {
+export default function MyDay({ displayName, groups, onOpenAttendance, viewing = false, clients = [] }: Props) {
   const todayKey = dayKey(new Date());
   const [month, setMonth] = useState(monthOfDate(new Date()));
   const [sessions, setSessions] = useState<{ closed: MyClosedSession[]; open: MyOpenSession[]; assessments: MyAssessment[] } | null>(null);
@@ -96,6 +101,9 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
   const [notice, setNotice] = useState('');
   // The day clicked on the calendar; its full list shows under the calendar. Defaults to today in the current month.
   const [pickedDay, setPickedDay] = useState<string | null>(null);
+  // The assessment time being assigned, rescheduled or cancelled; sessionsKey reloads the month after a change
+  const [selectedAppt, setSelectedAppt] = useState<MyAssessment | null>(null);
+  const [sessionsKey, setSessionsKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,7 +111,10 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
       .then(rows => { if (!cancelled) { setSessions(rows); setError(''); } })
       .catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load the sessions.'); });
     return () => { cancelled = true; };
-  }, [month, viewing, displayName]);
+  }, [month, viewing, displayName, sessionsKey]);
+  // One panel at a time: a group meeting or an assessment time
+  const openMeeting = (meeting: Meeting) => { setSelectedAppt(null); setSelected(meeting); };
+  const openAppt = (appt: MyAssessment) => { setSelected(null); setSelectedAppt(appt); };
 
   useEffect(() => {
     let cancelled = false;
@@ -186,6 +197,8 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
       name: a.status === 'Scheduled' ? `Assessment: ${assessmentClient(a)}` : 'Open assessment time',
       detail: `${time} · ${assessmentPlace(a)}`,
       sort: a.appttime,
+      // Past times can't be assigned or moved (the server refuses earlier dates)
+      appt: a.apptdate >= todayKey ? a : undefined,
     });
   }
   // The picked day (if it's in this month), else today when looking at the current month
@@ -259,12 +272,12 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
                 onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pickDay(day); } }}
                 className={`min-h-24 rounded-lg border p-1.5 space-y-1 cursor-pointer transition hover:border-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${picked ? 'border-blue-400 bg-blue-500/10 ring-1 ring-blue-400/60' : isToday ? 'border-blue-500/60 bg-blue-500/5' : 'border-slate-800 bg-slate-950/40'}`}>
                 <p className={`text-xs ${isToday ? 'text-blue-300 font-semibold' : 'text-slate-400'}`}>{Number(day.slice(8))}</p>
-                {items.slice(0, MAX_CHIPS).map(item => (item.meeting ? (
+                {items.slice(0, MAX_CHIPS).map(item => (item.meeting || item.appt ? (
                   <button
                     key={item.key}
                     type="button"
-                    title={`${item.title} (click to ${item.meeting.change ? 'see or undo the change' : 'cancel or reschedule'})`}
-                    onClick={e => { e.stopPropagation(); pickDay(day); setSelected(item.meeting!); }}
+                    title={`${item.title} (click to ${item.appt ? (item.appt.status === 'Open' ? 'assign a client' : 'cancel or reschedule') : item.meeting!.change ? 'see or undo the change' : 'cancel or reschedule'})`}
+                    onClick={e => { e.stopPropagation(); pickDay(day); if (item.appt) openAppt(item.appt); else openMeeting(item.meeting!); }}
                     className={`block w-full text-left text-[11px] leading-tight border rounded px-1 py-0.5 truncate hover:brightness-125 ${KIND_STYLE[item.kind]}`}>
                     {item.label}
                   </button>
@@ -313,8 +326,13 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
                     </span>
                   </span>
                   {item.meeting && (
-                    <button type="button" onClick={() => setSelected(item.meeting!)} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs font-semibold">
+                    <button type="button" onClick={() => openMeeting(item.meeting!)} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs font-semibold">
                       {item.meeting.change ? 'See change / Undo' : 'Cancel or Reschedule'}
+                    </button>
+                  )}
+                  {item.appt && (
+                    <button type="button" onClick={() => openAppt(item.appt!)} className={`px-3 py-1.5 rounded text-xs font-semibold border ${item.appt.status === 'Open' ? 'bg-blue-600 hover:bg-blue-500 border-blue-600 text-white' : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'}`}>
+                      {item.appt.status === 'Open' ? 'Assign Client' : 'Cancel or Reschedule'}
                     </button>
                   )}
                 </li>
@@ -332,6 +350,16 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
           today={todayKey}
           onClose={() => setSelected(null)}
           onChanged={(message) => { setNotice(message); setSelected(null); setChangesKey(k => k + 1); }}
+        />
+      )}
+      {selectedAppt && (
+        <AssessmentTimePanel
+          key={selectedAppt.appointmentid}
+          appt={selectedAppt}
+          clients={clients}
+          today={todayKey}
+          onClose={() => setSelectedAppt(null)}
+          onChanged={(message) => { setNotice(message); setSelectedAppt(null); setSessionsKey(k => k + 1); }}
         />
       )}
 

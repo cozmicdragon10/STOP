@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import MyDay from './MyDay';
+import type { PanelClient } from './AssessmentTimePanel';
 
 interface GroupRow {
   groupid: number | string;
@@ -14,6 +15,7 @@ interface GroupRow {
 interface Props {
   employees: { displayname?: string | null; role?: string | null; active?: boolean | null }[];
   groups: GroupRow[];
+  clients: PanelClient[];
 }
 
 const PICK_KEY = 'stop.calendars.counselor';
@@ -21,7 +23,7 @@ const PICK_KEY = 'stop.calendars.counselor';
 // The Calendars tab (Business Administrators, Office Admins and DEV): any counselor's calendar, the same one they see
 // as My Day: their groups (held, open, coming up, cancelled or moved) and their assessment times. Office users can
 // cancel or reschedule a counselor's upcoming meetings from here too.
-export default function CalendarsTab({ employees, groups }: Props) {
+export default function CalendarsTab({ employees, groups, clients }: Props) {
   const counselors = Array.from(new Set(employees
     .filter(e => e.active !== false && e.role === 'Counselor' && e.displayname)
     .map(e => e.displayname as string))).sort((a, b) => a.localeCompare(b));
@@ -58,7 +60,7 @@ export default function CalendarsTab({ employees, groups }: Props) {
         </div>
       </div>
       {counselor ? (
-        <MyDay key={counselor} displayName={counselor} groups={groups} viewing />
+        <MyDay key={counselor} displayName={counselor} groups={groups} clients={clients} viewing />
       ) : (
         <p className="text-sm text-slate-500">There are no active counselors to show.</p>
       )}
