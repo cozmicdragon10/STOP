@@ -25,7 +25,7 @@ const ALLOWED = [
     ['PUT', /^\/api\/clients\/\d+\/no-poly-required$/],
     ['POST', /^\/api\/clients\/\d+\/bus-pass$/],
     ['POST', /^\/api\/clients\/\d+\/activate$/],
-    ['GET', /^\/api\/clients\/\d+\/(attendance|financials|notes|polygraphs|poly-summary|progress|bip-intake|fee-override|poly-fee-override)$/],
+    ['GET', /^\/api\/clients\/\d+\/(attendance|group-cancellations|financials|notes|polygraphs|poly-summary|progress|bip-intake|fee-override|poly-fee-override)$/],
     ['POST', /^\/api\/clients\/\d+\/outside-bip-assessments$/],
     ['DELETE', /^\/api\/outside-bip-assessments\/\d+$/],
     ['GET', /^\/api\/transactions\/\d+$/],

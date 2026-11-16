@@ -357,6 +357,25 @@ router.get('/api/clients/:id/attendance', async (req, res) => {
     }
 });
 
+// Group meetings cancelled while the client was in the group (they got its Group Cancel note), so the Attendance tab can
+// show why there's no check-in that week. These aren't attendance: no fee, no count toward the program.
+router.get('/api/clients/:id/group-cancellations', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const result = await pool.query(
+            `SELECT DISTINCT s.ChangeId AS changeid, to_char(s.OriginalDate, 'YYYY-MM-DD') AS date, g.GroupName AS groupname,
+                    g.Schedule AS groupschedule, s.Reason AS reason, s.CreatedBy AS createdby
+             FROM Notes n JOIN GroupScheduleChanges s ON s.ChangeId = n.ScheduleChangeId JOIN Groups g ON g.GroupId = s.GroupId
+             WHERE n.Client = $1 AND s.Action = 'Cancelled'
+             ORDER BY date DESC`,
+            [id]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 router.get('/api/clients/:id/financials', async (req, res) => {
     try {
         const { id } = req.params;

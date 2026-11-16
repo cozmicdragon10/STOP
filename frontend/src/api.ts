@@ -1823,6 +1823,20 @@ export async function getClientAttendance(clientId: number): Promise<ClientAtten
     return jsonResponse(res, 'Failed to load attendance.');
 }
 
+// Group meetings cancelled while the client was in the group, newest first (shown on the Attendance tab; not attendance)
+export interface GroupCancellation {
+    changeid: number;
+    date: string; // YYYY-MM-DD
+    groupname: string;
+    groupschedule: string | null;
+    reason: string | null;
+    createdby: string | null;
+}
+export async function getClientGroupCancellations(clientId: number): Promise<GroupCancellation[]> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/group-cancellations`);
+    return jsonResponse(res, 'Failed to load cancelled groups.');
+}
+
 // Newest first
 export async function getClientFinancials(clientId: number): Promise<FinancialTransaction[]> {
     const res = await apiFetch(`${API_BASE}/clients/${clientId}/financials`);

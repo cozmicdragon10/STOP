@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useUnsavedForm } from '../../hooks/useUnsavedForm';
-import { Printer, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { CalendarDays, CalendarX, List, Printer, SlidersHorizontal, Trash2 } from 'lucide-react';
+import ClientAttendanceCalendar from './ClientAttendanceCalendar';
 import { printAttendanceReceipt } from '../../utils/receipt';
-import { deleteAttendance, getClient, getClientAttendance, getClientFinancials } from '../../api';
+import { deleteAttendance, getClient, getClientAttendance, getClientFinancials, getClientGroupCancellations, type GroupCancellation } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
 import MonthHeader from './MonthHeader';
 import { EMPTY_ATTENDANCE_FILTERS, groupByMonth, sortedUnique, toggleInSet } from '../../utils/filters';
@@ -65,6 +66,8 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
   };
   const [filters, setFilters] = useState(EMPTY_ATTENDANCE_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
+  // List (by month, with fees and balances) or a month calendar
+  const [view, setView] = useState<'list' | 'calendar'>('list');
   // Months (YYYY-MM) the user has collapsed
   const [collapsedMonths, setCollapsedMonths] = useState<Set<string>>(() => new Set());
   // Session being deleted, with the reason typed so far
@@ -101,8 +104,29 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
     }
   };
 
+  // Group meetings cancelled while the client was in the group: shown among the sessions so a missing week is explained.
+  // Kept with the client they were loaded for, so another client's never show while the next ones load.
+  const [cancelled, setCancelled] = useState<{ clientId: number; rows: GroupCancellation[] }>({ clientId: 0, rows: [] });
+  useEffect(() => {
+    let current = true;
+    getClientGroupCancellations(clientId)
+      .then(rows => { if (current) setCancelled({ clientId, rows }); })
+      // The sessions still show without them
+      .catch(() => {});
+    return () => { current = false; };
+  }, [clientId]);
+  const cancellations = cancelled.clientId === clientId ? cancelled.rows : [];
+
   const search = filters.search.trim().toLowerCase();
-  const shown = attendance.filter(a => {
+  // Rows of either kind; a cancellation's date is read as local midnight (a bare YYYY-MM-DD would be read as UTC)
+  /* eslint-disable @typescript-eslint/no-explicit-any -- attendance rows are untyped throughout App */
+  const rows: any[] = [
+    ...attendance,
+    ...cancellations.map(c => ({ ...c, cancellation: true, type: 'Group Cancelled', date: `${c.date}T00:00:00`, comments: c.reason })),
+  ];
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+  const shown = rows.filter(a => {
+    if (a.cancellation && filters.payment) return false;
     const day = localYmd(a.date);
     const paid = Number(a.accountpaid || 0) > 0;
     if (filters.group && (a.groupname || 'Group Session') !== filters.group) return false;
@@ -119,6 +143,8 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
   });
   // Filters set but hidden are counted on the button so they aren't forgotten
   const activeFilterCount = [filters.search.trim(), filters.group, filters.type, filters.payment, filters.from, filters.to].filter(Boolean).length;
+  const shownSessions = shown.filter(a => !a.cancellation).length;
+  const shownCancelled = shown.length - shownSessions;
 
   return (
     <div className="space-y-3">
@@ -134,8 +160,22 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
             <span className="bg-blue-600 text-white rounded-full px-1.5 text-[0.625rem] leading-4">{activeFilterCount}</span>
           )}
         </button>
+        <div className="flex rounded-lg border border-slate-700 overflow-hidden text-xs font-semibold" role="group" aria-label="Attendance view">
+          {([['list', 'List', List], ['calendar', 'Calendar', CalendarDays]] as const).map(([key, label, Icon]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setView(key)}
+              aria-pressed={view === key}
+              className={`px-3 py-1.5 flex items-center gap-1.5 ${view === key ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:text-white'}`}
+            >
+              <Icon size={13} /> {label}
+            </button>
+          ))}
+        </div>
         <span className="ml-auto text-xs text-slate-500">
-          {shown.length === attendance.length ? `${attendance.length} sessions` : `Showing ${shown.length} of ${attendance.length}`}
+          {shownSessions === attendance.length ? `${attendance.length} sessions` : `Showing ${shownSessions} of ${attendance.length}`}
+          {shownCancelled > 0 && ` · ${shownCancelled} group${shownCancelled === 1 ? '' : 's'} cancelled`}
         </span>
       </div>
       {showFilters && (
@@ -144,8 +184,8 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
           onSearch={v => setFilters(f => ({ ...f, search: v }))}
           searchPlaceholder="Group, type, or comments..."
           selects={[
-            { label: 'Group', value: filters.group, onChange: v => setFilters(f => ({ ...f, group: v })), allLabel: 'All Groups', options: sortedUnique(attendance.map(a => a.groupname || 'Group Session')) },
-            { label: 'Type', value: filters.type, onChange: v => setFilters(f => ({ ...f, type: v })), allLabel: 'All Types', options: sortedUnique(attendance.map(a => a.type)) },
+            { label: 'Group', value: filters.group, onChange: v => setFilters(f => ({ ...f, group: v })), allLabel: 'All Groups', options: sortedUnique(rows.map(a => a.groupname || 'Group Session')) },
+            { label: 'Type', value: filters.type, onChange: v => setFilters(f => ({ ...f, type: v })), allLabel: 'All Types', options: sortedUnique(rows.map(a => a.type)) },
             { label: 'Payment', value: filters.payment, onChange: v => setFilters(f => ({ ...f, payment: v })), allLabel: 'All', options: ['Paid', 'No Payment'] },
           ]}
           from={filters.from}
@@ -159,15 +199,17 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
             { value: 'oldest', label: 'Oldest First' },
           ]}
           shown={shown.length}
-          total={attendance.length}
+          total={rows.length}
           onClear={() => setFilters(f => ({ ...EMPTY_ATTENDANCE_FILTERS, sort: f.sort }))}
         />
       )}
-      {shown.length === 0 && attendance.length > 0 && (
+      {shown.length === 0 && rows.length > 0 && (
         <p className="text-center text-slate-500 text-sm py-4">No attendance matches these filters.</p>
       )}
-      {groupByMonth(shown, filters.sort).map(month => {
-        const totals = month.rows.reduce((t, att) => {
+      {view === 'calendar' && <ClientAttendanceCalendar key={clientId} rows={shown} />}
+      {view === 'list' && groupByMonth(shown, filters.sort).map(month => {
+        const sessions = month.rows.filter(att => !att.cancellation);
+        const totals = sessions.reduce((t, att) => {
           const c = attendanceBalanceChange(att);
           return { fee: t.fee + c.fee, paid: t.paid + c.paid, change: t.change + (c.after - c.before) };
         }, { fee: 0, paid: 0, change: 0 });
@@ -175,12 +217,35 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
         const collapsed = collapsedMonths.has(month.key);
         return (
           <div key={month.key} className="space-y-2">
-            <MonthHeader label={month.label} count={month.rows.length} noun="session" collapsed={collapsed} onToggle={() => setCollapsedMonths(prev => toggleInSet(prev, month.key))}>
+            <MonthHeader label={month.label} count={sessions.length} noun="session" collapsed={collapsed} onToggle={() => setCollapsedMonths(prev => toggleInSet(prev, month.key))}>
               <span className="text-slate-500">Fees <span className="text-red-400 font-semibold">{signedMoney(totals.fee)}</span></span>
               <span className="text-slate-500">Paid <span className="text-emerald-400 font-semibold">{signedMoney(totals.paid)}</span></span>
               <span className="text-slate-500">Change <span className={`font-semibold ${monthChange > 0 ? 'text-emerald-400' : monthChange < 0 ? 'text-red-400' : 'text-slate-400'}`}>{monthChange > 0 ? '+' : ''}{signedMoney(monthChange)}</span></span>
             </MonthHeader>
             {!collapsed && month.rows.map(att => {
+              // A cancelled group meeting: why there's no check-in that week (no fee, payment or balance)
+              if (att.cancellation) return (
+                <div key={`cancel-${att.changeid}`} className="bg-amber-500/5 border border-amber-500/30 px-4 py-2.5 rounded-xl text-sm">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <div className="shrink-0 w-16 border-r border-slate-800 pr-4">
+                      <p className="font-bold text-white leading-tight">{formatLogMonthDay(att.date)}</p>
+                      <p className="text-[0.6875rem] text-slate-500">{formatLogYear(att.date)}</p>
+                    </div>
+                    <div className="flex-1 min-w-[10rem]">
+                      <p className="font-semibold text-white truncate">
+                        {att.groupname}
+                        {att.groupschedule && <span className="ml-2 text-xs font-normal text-slate-400">{att.groupschedule}</span>}
+                      </p>
+                      <p className="text-xs text-slate-400 truncate" title={att.reason || undefined}>
+                        No meeting this week{att.reason ? `: ${att.reason}` : ''}
+                      </p>
+                    </div>
+                    <span className="shrink-0 inline-flex items-center gap-1.5 bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-1 rounded-lg text-xs font-semibold">
+                      <CalendarX size={13} /> Group Cancelled
+                    </span>
+                  </div>
+                </div>
+              );
               // One compact row per session: date, group, then fee, paid, and the balance before → after
               const c = attendanceBalanceChange(att);
               const change = Math.round((c.after - c.before) * 100) / 100;
