@@ -14,6 +14,8 @@ const groupEditors = requireRole('Business Administrator', 'Office Admin');
 // An INDIVIDUAL group (a counselor's individual sessions) takes clients of any program; SO clients keep it in
 // Clients.IndividualGroupId, apart from their regular group.
 const SO_PROGRAM_TYPES = ['State SO', 'Federal SO', 'Voluntary SO'];
+// POLY groups (Polys East, Polys North) take Poly Only clients and don't take attendance (routes/attendance.js)
+const POLY_GROUP_TYPE = 'POLY';
 const GROUP_TYPES_BY_PROGRAM = {
     'State SO': ['SO', 'FED SO'],
     'Federal SO': ['SO', 'FED SO'],
@@ -21,6 +23,7 @@ const GROUP_TYPES_BY_PROGRAM = {
     'BIP': ['BIP', 'INDIVIDUAL'],
     'Fed Drug Test': ['DRUG TEST', 'INDIVIDUAL'],
     'Chaperon': ['CHAPERON', 'FED CHAPERON', 'INDIVIDUAL'],
+    'Poly Only': [POLY_GROUP_TYPE],
 };
 
 router.get('/api/groups', async (req, res) => {

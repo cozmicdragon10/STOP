@@ -103,6 +103,10 @@ router.post('/api/attendance/batch', async (req, res) => {
         }
         const groupRes = await clientDb.query('SELECT ProgramType, Counselor FROM Groups WHERE GroupId = $1', [group]);
         const groupType = String(groupRes.rows[0]?.programtype || '').trim().toUpperCase();
+        // Polys groups don't take attendance: their clients are polygraphed, not checked in
+        if (groupType === 'POLY') {
+            throw Object.assign(new Error('Polys groups do not take attendance. Their clients are scheduled for polygraphs instead.'), { status: 400 });
+        }
         const isSoGroup = SO_GROUP_TYPES.includes(groupType);
         // A counselor's INDIVIDUAL group records Individual sessions: charged the Admin Individual price (not the treatment
         // fee or its monthly rules), with the group's counselor as the provider. BIP clients don't have individual sessions.

@@ -5,7 +5,7 @@ import ScheduleSelect from '../ScheduleSelect';
 import { BY_APPOINTMENT } from '../../utils/schedule';
 import { DEFAULT_GROUP_FILTERS } from '../../utils/filters';
 import { formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
-import { OBSERVER_ROLES, allowsByAppointment, clientFitsGroup, formatPhase, groupLeadLabel, isChaperonGroup, isDrugTestGroup, idText } from '../../utils/clients';
+import { OBSERVER_ROLES, POLY_GROUP_TYPE, allowsByAppointment, clientFitsGroup, formatPhase, groupLeadLabel, isChaperonGroup, isDrugTestGroup, isPolyGroup, idText } from '../../utils/clients';
 import { toLocalDay } from '../../utils/dates';
 
 interface DirectoryGroup {
@@ -70,13 +70,14 @@ const denormalizeLocation = (loc: string) => (loc === 'OKC' ? 'Oklahoma City' : 
 
 const emptyNewGroup = { groupName: '', location: '', counselor: '', programType: '', schedule: '', address: '' };
 
-// The directory's sub-tabs. BIP, DRUG TEST, chaperon (CHAPERON and FED CHAPERON) and INDIVIDUAL groups have their own; SO,
-// FED SO and anything else are under SO. Individual groups take clients of any program (clientProgram '').
+// The directory's sub-tabs. BIP, DRUG TEST, chaperon (CHAPERON and FED CHAPERON), POLY and INDIVIDUAL groups have their own;
+// SO, FED SO and anything else are under SO. Individual groups take clients of any program (clientProgram '').
 const GROUP_SECTIONS = [
   { key: 'SO', label: 'SO', newGroupType: 'SO', clientProgram: 'SO' },
   { key: 'BIP', label: 'BIP', newGroupType: 'BIP', clientProgram: 'BIP' },
   { key: 'DRUG TEST', label: 'Drug Test', newGroupType: 'DRUG TEST', clientProgram: 'Fed Drug Test' },
   { key: 'CHAPERON', label: 'Chaperon', newGroupType: 'CHAPERON', clientProgram: 'Chaperon' },
+  { key: 'POLY', label: 'Polys', newGroupType: POLY_GROUP_TYPE, clientProgram: 'Poly Only' },
   { key: 'INDIVIDUAL', label: 'Individual', newGroupType: 'INDIVIDUAL', clientProgram: '' },
 ] as const;
 type GroupSection = typeof GROUP_SECTIONS[number]['key'];
@@ -88,6 +89,7 @@ const withNewGroupDefaults = (g: typeof emptyNewGroup, section: GroupSection) =>
 const groupSection = (g: { programtype?: string | null }): GroupSection => {
   const type = (g.programtype || '').trim().toUpperCase();
   if (isChaperonGroup(type)) return 'CHAPERON';
+  if (isPolyGroup(type)) return 'POLY';
   return type === 'BIP' || type === 'DRUG TEST' || type === 'INDIVIDUAL' ? type : 'SO';
 };
 

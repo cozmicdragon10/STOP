@@ -77,7 +77,7 @@ const PHASE_MAP = {
 };
 
 // Group program types each client program may join (mirrors GROUP_TYPES_BY_PROGRAM in the frontend)
-const GROUP_TYPES_BY_PROGRAM = { 'State SO': ['SO', 'FED SO'], 'Federal SO': ['SO', 'FED SO'], 'BIP': ['BIP'], 'Fed Drug Test': ['DRUG TEST'], 'Chaperon': ['CHAPERON', 'FED CHAPERON'] };
+const GROUP_TYPES_BY_PROGRAM = { 'State SO': ['SO', 'FED SO'], 'Federal SO': ['SO', 'FED SO'], 'BIP': ['BIP'], 'Fed Drug Test': ['DRUG TEST'], 'Chaperon': ['CHAPERON', 'FED CHAPERON'], 'Poly Only': ['POLY'] };
 
 // Splits one record into fields; quoted fields may hold commas, doubled quotes and line breaks
 const parseFields = (record) => {

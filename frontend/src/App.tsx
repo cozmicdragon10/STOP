@@ -66,7 +66,7 @@ import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividu
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
 import { UnsavedFormsContext } from './hooks/useUnsavedForm';
-import { DISCHARGE_STATUSES, GROUP_TYPES_BY_PROGRAM, idText } from './utils/clients';
+import { DISCHARGE_STATUSES, GROUP_TYPES_BY_PROGRAM, idText, isPolyGroup } from './utils/clients';
 import { scrollToStackedPanel } from './utils/layout';
 import { polygraphHistoryText, polygraphNotice, slotStart, slotSummary, takesPolygraphs } from './utils/polygraph';
 
@@ -243,8 +243,10 @@ export default function App() {
 
   // Inactive groups stay in the directory but are hidden from every picker for new assignments and sessions
   const activeGroups = groups.filter(g => g.active !== false);
+  // Polys groups take no attendance, so the Attendance tab's group search leaves them out
+  const attendanceGroups = activeGroups.filter(g => !isPolyGroup(g.programtype));
   // Home page counts. The client list holds everyone not discharged; "without a group" is active clients whose program
-  // attends groups (GROUP_TYPES_BY_PROGRAM, so not Poly Only) with neither a regular nor an individual group.
+  // has group types (GROUP_TYPES_BY_PROGRAM) with neither a regular nor an individual group.
   const homeCounts = (() => {
     const active = clients.filter(c => c.programstatus === 'Active');
     return {
@@ -1001,7 +1003,7 @@ export default function App() {
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
                   <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Active Clients Without a Group</p>
                   <p className={`text-3xl font-bold mt-2 ${homeCounts.needGroup > 0 ? 'text-amber-400' : 'text-white'}`}>{homeCounts.needGroup}</p>
-                  <p className="text-xs text-slate-500 mt-1">In a program that attends groups (not Poly Only)</p>
+                  <p className="text-xs text-slate-500 mt-1">Active clients in a program with groups (Poly Only clients belong in a Polys group)</p>
                 </div>
               )}
             </div>
@@ -1446,7 +1448,7 @@ export default function App() {
               {/* Stays mounted while another mode is showing so a check-in in progress isn't lost */}
               <div className={!isAccountOnly && !(isCustomCharge && role === 'Business Administrator') ? '' : 'hidden'}>
                 <GroupCheckInWorkflow
-                  groups={activeGroups}
+                  groups={attendanceGroups}
                   clients={clients}
                   createdBy={user.employeeemail}
                   canPickCover={role === 'Business Administrator' || role === 'Office Admin'}
@@ -1645,7 +1647,7 @@ export default function App() {
         {activeTab === 'callin' && (
           <CallInTab
             clients={clients}
-            groups={activeGroups}
+            groups={attendanceGroups}
             user={user}
             onLogged={(message) => { setSuccessMsg(message); loadDashboardData(); }}
           />

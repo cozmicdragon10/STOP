@@ -167,6 +167,7 @@ export const individualPriceFrom = (types: { sessiontypeid: number; category: st
     .sort((a, b) => Number(b.name === 'Individual') - Number(a.name === 'Individual') || a.sessiontypeid - b.sessiontypeid);
   return active.length ? Number(active[0].fee) : null;
 };
+export const POLY_GROUP_TYPE = 'POLY';
 // Group program types offered for each client program type's Group field. Programs not listed see every group. SO
 // clients pick their individual group in a separate Individual Group field (individualgroupid) instead.
 export const GROUP_TYPES_BY_PROGRAM: Record<string, string[]> = {
@@ -176,16 +177,20 @@ export const GROUP_TYPES_BY_PROGRAM: Record<string, string[]> = {
   'BIP': ['BIP', INDIVIDUAL_GROUP_TYPE],
   'Fed Drug Test': ['DRUG TEST', INDIVIDUAL_GROUP_TYPE],
   'Chaperon': ['CHAPERON', 'FED CHAPERON', INDIVIDUAL_GROUP_TYPE],
+  'Poly Only': [POLY_GROUP_TYPE],
 };
+// Polys groups (Polys East, Polys North) take Poly Only clients only. They don't take attendance: they're left out of the
+// Attendance tab's group search. Mirrors POLY_GROUP_TYPE in backend/routes/groups.js.
+export const isPolyGroup = (groupProgram?: string | null) => (groupProgram || '').trim().toUpperCase() === POLY_GROUP_TYPE;
 // Drug-test groups are run by an observer, who is an Office Admin or Business Administrator, instead of a counselor.
 // The observer is kept in the group's Counselor field.
 export const isDrugTestGroup = (groupProgram?: string | null) => (groupProgram || '').trim().toUpperCase() === 'DRUG TEST';
 // Chaperon classes: CHAPERON groups, and FED CHAPERON groups for federal (USPO-billed) chaperon clients
 export const CHAPERON_GROUP_TYPES = ['CHAPERON', 'FED CHAPERON'];
 export const isChaperonGroup = (groupProgram?: string | null) => CHAPERON_GROUP_TYPES.includes((groupProgram || '').trim().toUpperCase());
-// Drug-test groups, chaperon classes and individual groups meet when booked, so their schedule can be By Appointment
+// Drug-test groups, chaperon classes, polys groups and individual groups meet when booked, so their schedule can be By Appointment
 export const allowsByAppointment = (groupProgram?: string | null) =>
-  isDrugTestGroup(groupProgram) || isChaperonGroup(groupProgram) || isIndividualGroup(groupProgram);
+  isDrugTestGroup(groupProgram) || isChaperonGroup(groupProgram) || isPolyGroup(groupProgram) || isIndividualGroup(groupProgram);
 export const groupLeadLabel = (groupProgram?: string | null) => (isDrugTestGroup(groupProgram) ? 'Observer' : 'Counselor');
 // DEV accounts act as Business Administrators (backend lib/roles.js)
 export const OBSERVER_ROLES = ['Office Admin', 'Business Administrator', 'DEV'];

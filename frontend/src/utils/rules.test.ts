@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allowsByAppointment, clientFitsGroup, formatPhase, isAttendanceOverdue } from './clients';
+import { allowsByAppointment, clientFitsGroup, formatPhase, isAttendanceOverdue, isPolyGroup } from './clients';
 import { caseNoteLabel, parseGroupCallInNote } from './notes';
 import { currentReportFor, reportTabsFor } from './reports';
 import { SCHEDULE_TIMES, formatSchedule, isByAppointment, parseSchedule } from './schedule';
@@ -13,6 +13,20 @@ describe('client rules', () => {
     expect(clientFitsGroup('Chaperon', 'SO')).toBe(false);
     expect(clientFitsGroup('State SO', 'CHAPERON')).toBe(false);
     expect(clientFitsGroup('Federal SO', 'FED CHAPERON')).toBe(false);
+  });
+
+  it('puts Poly Only clients only in polys groups', () => {
+    expect(clientFitsGroup('Poly Only', 'POLY')).toBe(true);
+    expect(clientFitsGroup('Poly Only', 'SO')).toBe(false);
+    expect(clientFitsGroup('Poly Only', 'INDIVIDUAL')).toBe(true);
+    expect(clientFitsGroup('State SO', 'POLY')).toBe(false);
+    expect(clientFitsGroup('Federal SO', 'POLY')).toBe(false);
+  });
+
+  it('lets polys groups meet By Appointment', () => {
+    expect(allowsByAppointment('POLY')).toBe(true);
+    expect(isPolyGroup('poly')).toBe(true);
+    expect(isPolyGroup('SO')).toBe(false);
   });
 
   it('puts clients of any program in an individual group', () => {
