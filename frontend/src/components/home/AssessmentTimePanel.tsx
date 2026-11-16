@@ -7,12 +7,15 @@ import {
   type AssessmentAppointment, type MyAssessment,
 } from '../../api';
 import { formatDisplayTime } from '../../utils/dates';
+import { assessmentPickList } from '../../utils/counselor';
 
 export interface PanelClient {
   clientid: number;
   firstname: string;
   lastname: string;
   programstatus?: string | null;
+  // The counselor the client is waiting to be assessed by
+  assessor?: string | null;
   docnumber?: string | null;
   doctype?: string | null;
 }
@@ -56,9 +59,8 @@ export default function AssessmentTimePanel({ appt, clients, today, onClose, onC
   const [saving, setSaving] = useState(false);
   const client = `${appt.lastname ?? ''}, ${appt.firstname ?? ''}`;
   const when = `${longDate(appt.apptdate)} at ${formatDisplayTime(appt.appttime)}`;
-  const pickerClients = clients
-    .filter(c => (c.programstatus || '') === 'Active')
-    .map(c => ({ clientid: c.clientid, firstname: c.firstname, lastname: c.lastname, docnumber: c.docnumber, doctype: c.doctype }));
+  // Clients waiting to be assessed by this counselor come first
+  const pickerClients = assessmentPickList(clients, appt.assessor);
 
   useEffect(() => {
     if (isOpen) return;

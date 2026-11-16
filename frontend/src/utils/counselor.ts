@@ -32,6 +32,17 @@ export const isMyClient = (client: ClientOwnership, groupIds: Set<string>, displ
   return inMyGroup(client.groupid) || inMyGroup(client.individualgroupid) || sameName(client.assessor, displayName);
 };
 
+// Clients to offer for an assessment time with this assessor: active clients only, those waiting to be assessed by them
+// (Clients.Assessor) first and tagged, then everyone else, each part in the order given
+export const assessmentPickList = <T extends { programstatus?: string | null; assessor?: string | null }>(clients: T[], assessor: string) => {
+  const active = clients.filter(c => (c.programstatus || '') === 'Active');
+  const waiting = active.filter(c => sameName(c.assessor, assessor));
+  return [
+    ...waiting.map(c => ({ ...c, tag: 'Waiting for assessment' })),
+    ...active.filter(c => !sameName(c.assessor, assessor)).map(c => ({ ...c, tag: undefined })),
+  ];
+};
+
 // Groups I lead that meet on the given weekday (schedules read like "Thursdays @ 7:00 PM"), by name
 export const groupsMeetingOn = <T extends { groupname?: string | null; counselor?: string | null; schedule?: string | null; active?: boolean | null }>(
   groups: T[],

@@ -7,6 +7,8 @@ interface PickerClient {
   lastname: string;
   docnumber?: string | null;
   doctype?: string | null;
+  // A short label shown beside the name, like "Waiting for assessment"
+  tag?: string;
 }
 
 interface Props {
@@ -97,7 +99,10 @@ export default function ClientPicker({ clients, value, onChange, placeholder = '
               onMouseEnter={() => setHighlight(i)}
               className={`px-3 py-1.5 cursor-pointer text-xs flex justify-between gap-3 ${i === highlight ? 'bg-blue-500/15 text-white' : 'text-slate-300'}`}
             >
-              <span className="truncate">{labelFor(c)}</span>
+              <span className="truncate">
+                {labelFor(c)}
+                {c.tag && <span className="ml-2 text-[0.625rem] font-semibold uppercase tracking-wide bg-amber-500/15 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded">{c.tag}</span>}
+              </span>
               {c.docnumber && <span className="text-slate-500 font-mono shrink-0">{idText(c)}</span>}
             </li>
           ))}

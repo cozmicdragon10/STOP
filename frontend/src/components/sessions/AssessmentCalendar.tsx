@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { CalendarClock, CalendarPlus, ChevronLeft, ChevronRight, List, RotateCcw, UserPlus, XCircle } from 'lucide-react';
 import ClientPicker from '../ClientPicker';
 import AssessmentTimePanel from '../home/AssessmentTimePanel';
+import PopupDialog from '../home/PopupDialog';
 import { formatDisplayTime, getLocalDateString } from '../../utils/dates';
+import { assessmentPickList } from '../../utils/counselor';
 import {
   assignAssessmentSlot, cancelAssessmentAppointment, cancelOpenAssessmentTimes, createAssessmentAppointment, getAssessmentAppointments,
   openAssessmentSlot, unassignAssessmentSlot, updateAssessmentAppointment,
@@ -115,9 +117,8 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
   const monthOpen = shown.filter(a => a.status === 'Open').length;
   const monthScheduled = shown.filter(a => a.status === 'Scheduled').length;
 
-  const pickerClients = clients
-    .filter(c => (c.programstatus || '') === 'Active')
-    .map(c => ({ clientid: c.clientid, firstname: c.firstname, lastname: c.lastname, docnumber: c.docnumber, doctype: c.doctype }));
+  // Active clients; those waiting to be assessed by the chosen counselor come first
+  const pickerClients = assessmentPickList(clients, form.assessor);
   const canChange = (a: { assessor: string }) => !isCounselor || a.assessor === me;
   // Counselors work on their own times; everyone else picks the counselor
   const assessorChoices = isCounselor ? counselors.filter(name => name === me) : counselors;
@@ -253,7 +254,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
                 <div className="flex-1">
                   <label className="block text-xs text-slate-400 uppercase mb-1">Assign Client</label>
                   <ClientPicker
-                    clients={pickerClients}
+                    clients={assessmentPickList(clients, a.assessor)}
                     value={assignPick[a.appointmentid] || ''}
                     onChange={(id) => setAssignPick(p => ({ ...p, [a.appointmentid]: id }))}
                     className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-xs placeholder-slate-500" />
@@ -332,60 +333,61 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
       {loadError && <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{loadError}</p>}
 
       {mode && (
-        <section className="bg-slate-950 border border-slate-700 rounded-xl p-4 space-y-3" aria-label="Assessment time">
-          <h4 className="text-sm font-semibold text-white">
-            {mode === 'open' ? 'Open Availability' : mode === 'schedule' ? 'Schedule a Client' : editing?.status === 'Open' ? 'Change Open Time' : 'Reschedule Assessment'}
-          </h4>
-          {mode === 'open' && <p className="text-xs text-slate-400">Opens a time with no client. A client can be assigned to it from the calendar.</p>}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <PopupDialog
+          title={mode === 'open' ? 'Open Availability' : mode === 'schedule' ? 'Schedule a Client' : editing?.status === 'Open' ? 'Change Open Time' : 'Reschedule Assessment'}
+          subtitle={mode === 'open' ? 'Opens a time with no client. A client can be assigned to it from the calendar.' : undefined}
+          busy={saving}
+          onClose={closeForm}>
+          <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {mode !== 'open' && (
               <div>
                 <label className="block text-xs text-slate-400 uppercase mb-1">Client</label>
                 {mode === 'schedule' ? (
-                  <ClientPicker clients={pickerClients} value={form.clientId} onChange={onClientChange} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm placeholder-slate-500" />
+                  <ClientPicker clients={pickerClients} value={form.clientId} onChange={onClientChange} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm placeholder-slate-500" />
                 ) : (
-                  <p className="bg-slate-900 border border-slate-800 rounded p-2 text-sm text-white">{editing?.clientid ? `${editing.lastname}, ${editing.firstname}` : 'Open (no client yet)'}</p>
+                  <p className="bg-slate-950 border border-slate-800 rounded p-2 text-sm text-white">{editing?.clientid ? `${editing.lastname}, ${editing.firstname}` : 'Open (no client yet)'}</p>
                 )}
               </div>
             )}
             <div>
               <label className="block text-xs text-slate-400 uppercase mb-1">Counselor</label>
-              <select value={form.assessor} onChange={e => set({ assessor: e.target.value })} disabled={isCounselor} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm disabled:opacity-80">
+              <select value={form.assessor} onChange={e => set({ assessor: e.target.value })} disabled={isCounselor} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm disabled:opacity-80">
                 <option value="">Select a counselor...</option>
                 {(assessorChoices.includes(form.assessor) || !form.assessor ? assessorChoices : [form.assessor, ...assessorChoices]).map(name => <option key={name} value={name}>{name}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-xs text-slate-400 uppercase mb-1">Date</label>
-              <input type="date" min={today} value={form.date} onChange={e => set({ date: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
+              <input type="date" min={today} value={form.date} onChange={e => set({ date: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" />
             </div>
             <div>
               <label className="block text-xs text-slate-400 uppercase mb-1">Time</label>
-              <input type="time" value={form.time} onChange={e => set({ time: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
+              <input type="time" value={form.time} onChange={e => set({ time: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" />
             </div>
             <div className="md:col-span-2">
               <label htmlFor="assessment-location" className="block text-xs text-slate-400 uppercase mb-1">Location</label>
-              <input id="assessment-location" type="text" list="assessment-locations" maxLength={150} value={form.location} onChange={e => set({ location: e.target.value })} placeholder="Office or town, e.g. Oklahoma City Office" className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm placeholder-slate-500" />
+              <input id="assessment-location" type="text" list="assessment-locations" maxLength={150} value={form.location} onChange={e => set({ location: e.target.value })} placeholder="Office or town, e.g. Oklahoma City Office" className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm placeholder-slate-500" />
               <datalist id="assessment-locations">
                 {knownLocations.map(place => <option key={place} value={place} />)}
               </datalist>
             </div>
             <div className="md:col-span-2">
               <label className="block text-xs text-slate-400 uppercase mb-1">Notes <span className="normal-case text-slate-500">(optional)</span></label>
-              <input type="text" value={form.notes} onChange={e => set({ notes: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
+              <input type="text" value={form.notes} onChange={e => set({ notes: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" />
             </div>
             {mode !== 'edit' && (
               <>
                 <div>
                   <label className="block text-xs text-slate-400 uppercase mb-1">Repeat</label>
-                  <select value={form.repeat} onChange={e => set({ repeat: e.target.value as AssessmentRepeat })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm">
+                  <select value={form.repeat} onChange={e => set({ repeat: e.target.value as AssessmentRepeat })} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm">
                     {REPEAT_CHOICES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </div>
                 {form.repeat !== 'none' && (
                   <div>
                     <label className="block text-xs text-slate-400 uppercase mb-1">Repeat Until</label>
-                    <input type="date" min={form.date || today} value={form.until} onChange={e => set({ until: e.target.value })} className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
+                    <input type="date" min={form.date || today} value={form.until} onChange={e => set({ until: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" />
                   </div>
                 )}
               </>
@@ -402,7 +404,8 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
               {saving ? 'Saving...' : mode === 'open' ? 'Open Time' : mode === 'schedule' ? 'Schedule' : 'Save Changes'}
             </button>
           </div>
-        </section>
+          </div>
+        </PopupDialog>
       )}
 
       <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 sm:p-4">

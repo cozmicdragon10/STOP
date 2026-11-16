@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { clientsNotAttendedThisMonth, groupsMeetingOn, isMyClient, monthGrid, myGroupIds, scheduledDatesIn, shiftMonth, weekdayName } from './counselor';
+import { assessmentPickList, clientsNotAttendedThisMonth, groupsMeetingOn, isMyClient, monthGrid, myGroupIds, scheduledDatesIn, shiftMonth, weekdayName } from './counselor';
 
 const groups = [
   { groupid: 1, groupname: 'Tuesday Men', counselor: 'Ana Ruiz', schedule: 'Tuesdays @ 6:00 PM', active: true },
@@ -67,5 +67,25 @@ describe('my clients', () => {
       { lastname: 'Cole', firstname: 'D', programstatus: 'Active', attendedthismonth: null },
     ]);
     expect(rows.map(r => r.lastname)).toEqual(['Cole', 'Zed']);
+  });
+});
+
+describe('assessment pick list', () => {
+  const clients = [
+    { clientid: 1, lastname: 'Adams', programstatus: 'Active', assessor: null },
+    { clientid: 2, lastname: 'Baker', programstatus: 'Active', assessor: 'Bo Lee' },
+    { clientid: 3, lastname: 'Cole', programstatus: 'Active', assessor: ' ana ruiz ' },
+    { clientid: 4, lastname: 'Dunn', programstatus: 'Discharged', assessor: 'Ana Ruiz' },
+    { clientid: 5, lastname: 'Evans', programstatus: 'Active', assessor: 'Ana Ruiz' },
+  ];
+
+  it('puts active clients waiting for this assessor first, tagged, then the rest in order', () => {
+    const list = assessmentPickList(clients, 'Ana Ruiz');
+    expect(list.map(c => c.clientid)).toEqual([3, 5, 1, 2]);
+    expect(list.map(c => c.tag)).toEqual(['Waiting for assessment', 'Waiting for assessment', undefined, undefined]);
+  });
+
+  it('tags no one when no assessor is chosen', () => {
+    expect(assessmentPickList(clients, '').every(c => !c.tag)).toBe(true);
   });
 });

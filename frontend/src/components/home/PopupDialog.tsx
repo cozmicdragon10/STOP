@@ -30,8 +30,9 @@ export default function PopupDialog({ title, subtitle, busy = false, onClose, ch
   }, []);
 
   return (
-    // z-[60]: above the client account panel (z-50), which a call-in dialog opens over
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4" onClick={() => { if (!busy) onClose(); }}>
+    // z-[60]: above the client account panel (z-50), which a call-in dialog opens over. A box taller than the window
+    // scrolls with the page (m-auto centers it when it fits) instead of being cut off.
+    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex overflow-y-auto z-[60] p-4" onClick={() => { if (!busy) onClose(); }}>
       <div
         ref={box}
         role="dialog"
@@ -39,7 +40,7 @@ export default function PopupDialog({ title, subtitle, busy = false, onClose, ch
         aria-labelledby={titleId}
         tabIndex={-1}
         onClick={e => e.stopPropagation()}
-        className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-4 focus:outline-none">
+        className="m-auto bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg p-5 space-y-4 focus:outline-none">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 id={titleId} className="text-lg font-bold text-white">{title}</h3>
