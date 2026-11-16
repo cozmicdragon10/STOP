@@ -28,7 +28,7 @@ import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
 import AccountPaymentForm from './components/payments/AccountPaymentForm';
 import CustomChargeForm from './components/payments/CustomChargeForm';
 import SupervisingAgentsTab from './components/agents/SupervisingAgentsTab';
-import CallInTab from './components/callin/CallInTab';
+import CallInDialog from './components/clients/CallInDialog';
 import GroupsTab from './components/groups/GroupsTab';
 import AdminTab from './components/admin/AdminTab';
 import DevTab from './components/dev/DevTab';
@@ -177,6 +177,8 @@ export default function App() {
   const [clientAttendance, setClientAttendance] = useState<any[]>([]);
   const [clientFinancials, setClientFinancials] = useState<any[]>([]);
   const [clientNotes, setClientNotes] = useState<any[]>([]);
+  // The Call-In dialog over the open account
+  const [showCallIn, setShowCallIn] = useState(false);
   const [clientPolygraphs, setClientPolygraphs] = useState<any[]>([]);
   // Client whose polygraphs are loaded, so the notice never uses the previous client's results
   const [clientPolygraphsFor, setClientPolygraphsFor] = useState<number | null>(null);
@@ -810,7 +812,7 @@ export default function App() {
     if (tab === 'dev') return user.isdev === true;
     if (role === 'Office Admin' || role === 'Business Administrator') return true;
     // Reports holds only the Cash Deposits report for them
-    if (role === 'Counselor') return ['clients', 'attendance', 'sessions', 'callin', 'polygraph', 'groups', 'reports', 'agents', 'forms'].includes(tab);
+    if (role === 'Counselor') return ['clients', 'attendance', 'sessions', 'polygraph', 'groups', 'reports', 'agents', 'forms'].includes(tab);
     // A limited Client Roster and account (see the server's lib/polygrapherAccess.js)
     if (role === 'Polygrapher') return ['clients', 'polygraph', 'forms'].includes(tab);
     // Unknown roles get no sections, rather than full access
@@ -823,7 +825,6 @@ export default function App() {
     { tab: 'clients', icon: Users, label: 'Client Roster', shortLabel: 'Clients' },
     { tab: 'attendance', icon: ClipboardCheck, label: 'Attendance & Sign-In', shortLabel: 'Attendance' },
     { tab: 'sessions', icon: ClipboardList, label: 'Assessments', shortLabel: 'Assessments' },
-    { tab: 'callin', icon: PhoneCall, label: 'Call-In Log', shortLabel: 'Call-In' },
     { tab: 'groups', icon: Layers, label: 'Groups' },
     // Every counselor's calendar; office roles only (isAllowed: Business Administrators, Office Admins, and DEV as a Business Administrator)
     { tab: 'calendars', icon: CalendarDays, label: 'Calendars' },
@@ -1019,7 +1020,6 @@ export default function App() {
                   { tab: 'clients', icon: Users, label: 'Client Roster', description: 'Search and manage client records, balances, and notes.' },
                   { tab: 'attendance', icon: ClipboardCheck, label: 'Attendance & Sign-In', description: 'Record group sessions and account payments.' },
                   { tab: 'sessions', icon: ClipboardList, label: 'Assessments', description: 'Record one-client assessments with payments. Individual sessions are checked in on the Attendance tab.' },
-                  { tab: 'callin', icon: PhoneCall, label: 'Call-In Log', description: 'Log client and group call-ins.' },
                   { tab: 'groups', icon: Layers, label: 'Groups', description: 'Manage group schedules, counselors, and rosters.' },
                   { tab: 'polygraph', icon: ShieldAlert, label: 'Polygraphs', description: 'Schedule polygraph slots and record results.' },
                   { tab: 'reports', icon: BarChart3, label: 'Reports', description: role === 'Counselor' ? 'Group cash deposits you hold.' : 'Agent, income, and deposit reports.' },
@@ -1115,6 +1115,21 @@ export default function App() {
         )}
 
         {/* CLIENT DETAILS DRAWER */}
+        {selectedClientDetail && showCallIn && (
+          <CallInDialog
+            clientId={selectedClientDetail.clientid}
+            clientName={`${selectedClientDetail.firstname} ${selectedClientDetail.lastname}`}
+            userEmail={user.employeeemail}
+            onClose={() => setShowCallIn(false)}
+            onLogged={async () => {
+              const clientid = selectedClientDetail.clientid;
+              setShowCallIn(false);
+              setSuccessMsg(`Call-in logged for ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}.`);
+              loadDashboardData();
+              setClientNotes(await getClientNotes(clientid));
+            }}
+          />
+        )}
         {selectedClientDetail && (
           <div
             className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex justify-end client-left:justify-start z-50"
@@ -1152,6 +1167,16 @@ export default function App() {
                 </div>
                 <div className="flex flex-wrap gap-2 md:shrink-0 max-md:pr-12">
                   <div ref={setAccountActionsSlot} className="contents" />
+                  {/* Client call-ins are logged here, on the account (the Call-In tab is gone) */}
+                  {role !== 'Polygrapher' && (
+                    <button
+                      type="button"
+                      onClick={() => setShowCallIn(true)}
+                      className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1"
+                    >
+                      <PhoneCall size={14} /> Call-In
+                    </button>
+                  )}
                   {role !== 'Polygrapher' && <button
                     type="button"
                     onClick={() => setShowClientPayment(true)}
@@ -1645,16 +1670,6 @@ export default function App() {
               onSaved={loadDashboardData}
             />
           </div>
-        )}
-
-        {/* CALL-IN MODULE TAB */}
-        {activeTab === 'callin' && (
-          <CallInTab
-            clients={clients}
-            groups={attendanceGroups}
-            user={user}
-            onLogged={(message) => { setSuccessMsg(message); loadDashboardData(); }}
-          />
         )}
 
         {/* GROUPS MODULE TAB */}

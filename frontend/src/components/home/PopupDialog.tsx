@@ -30,7 +30,8 @@ export default function PopupDialog({ title, subtitle, busy = false, onClose, ch
   }, []);
 
   return (
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => { if (!busy) onClose(); }}>
+    // z-[60]: above the client account panel (z-50), which a call-in dialog opens over
+    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-[60] p-4" onClick={() => { if (!busy) onClose(); }}>
       <div
         ref={box}
         role="dialog"
