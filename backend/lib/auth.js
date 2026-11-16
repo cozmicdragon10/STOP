@@ -19,7 +19,7 @@ const ADMIN_ROLES = ['Office Admin', 'Business Administrator'];
 // Request fields the frontend fills with the logged-in employee's email. requireSession overwrites them with the
 // session's email, so a request can't act as someone else by changing them. (coveredBy is not one: it names another
 // counselor on purpose, and lib/cashResponsibility.js checks who may set it.)
-const IDENTITY_BODY_FIELDS = ['user', 'createdBy', 'updatedBy', 'assignedBy', 'removedBy'];
+const IDENTITY_BODY_FIELDS = ['user', 'createdBy', 'updatedBy', 'assignedBy', 'removedBy', 'cancelledBy'];
 
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ClipboardList, Hourglass, Printer, Trash2 } from 'lucide-react';
+import { CalendarDays, ClipboardList, Hourglass, Printer, Trash2 } from 'lucide-react';
+import AssessmentCalendar from './AssessmentCalendar';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import {
   closeIndividualSession, deleteOpenIndividualSession, getBipIntake, getClosedIndividualSessions, getOpenIndividualSessions,
@@ -112,6 +113,8 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
   const [listError, setListError] = useState('');
   const [expandedClosed, setExpandedClosed] = useState<number | null>(null);
   // Waiting for Assessment list: one assessor's clients, or everyone's ('')
+  // Sessions (this screen) or the Assessment Calendar for scheduling future assessments
+  const [view, setView] = useState<'sessions' | 'calendar'>('sessions');
   const [waitingFor, setWaitingFor] = useState(() => {
     try { return localStorage.getItem('waitingForAssessor') || ''; } catch { return ''; }
   });
@@ -456,6 +459,19 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
     </div>
   );
 
+  if (view === 'calendar') {
+    return (
+      <AssessmentCalendar
+        clients={clients}
+        counselors={providers}
+        user={user}
+        onBack={() => setView('sessions')}
+        onSuccess={onSuccess}
+        onError={onError}
+      />
+    );
+  }
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl">
@@ -464,6 +480,9 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
             <h2 className="text-lg font-bold text-white">Assessments</h2>
             <p className="text-xs text-slate-400 mt-0.5">One client per session. Save it as open, then review and close it to record the attendance, fee, and payment.</p>
           </div>
+          <button type="button" onClick={() => setView('calendar')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-950 border border-slate-800 text-slate-300 hover:text-white shrink-0">
+            <CalendarDays size={14} /> Calendar
+          </button>
           {/* Only while an old Individual session is open; with one choice there's nothing to switch */}
           {shownCategories.length > 1 && (
           <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">

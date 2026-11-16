@@ -2106,3 +2106,62 @@ export async function deletePolyFeeOverride(clientId: number, user: string): Pro
     });
     return jsonResponse(res, 'Failed to remove the poly fee override.');
 }
+// The Assessments calendar. A counselor opens a time (status Open, no client); a client is assigned to it (Scheduled).
+// Dates are YYYY-MM-DD and times HH:MM. The identity fields sent blank (createdBy, ...) are filled in by the server.
+export interface AssessmentAppointment {
+    appointmentid: number;
+    clientid: number | null;
+    firstname: string | null;
+    lastname: string | null;
+    programtype: string | null;
+    docnumber: string | null;
+    doctype: string | null;
+    assessor: string;
+    apptdate: string;
+    appttime: string;
+    notes: string | null;
+    status: 'Open' | 'Scheduled' | 'Cancelled';
+    createdby: string | null;
+}
+
+const sendJson = (url: string, data: unknown, method = 'POST') => apiFetch(url, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+});
+
+export async function getAssessmentAppointments(from: string, to: string): Promise<AssessmentAppointment[]> {
+    const res = await apiFetch(`${API_BASE}/assessment-appointments?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    return jsonResponse(res, 'Failed to load assessments.');
+}
+
+// Open availability: a time with no client yet
+export async function openAssessmentSlot(data: { assessor: string; date: string; time: string; notes: string }): Promise<{ success: true; appointmentId: number }> {
+    const res = await sendJson(`${API_BASE}/assessment-appointments/slots`, { ...data, createdBy: '' });
+    return jsonResponse(res, 'Failed to open the time.');
+}
+
+export async function createAssessmentAppointment(data: { clientId: number; assessor: string; date: string; time: string; notes: string }): Promise<{ success: true; appointmentId: number }> {
+    const res = await sendJson(`${API_BASE}/assessment-appointments`, { ...data, createdBy: '' });
+    return jsonResponse(res, 'Failed to schedule the assessment.');
+}
+
+export async function assignAssessmentSlot(id: number, data: { clientId: number; notes: string }): Promise<{ success: true }> {
+    const res = await sendJson(`${API_BASE}/assessment-appointments/${id}/assign`, { ...data, assignedBy: '' });
+    return jsonResponse(res, 'Failed to assign the client.');
+}
+
+export async function unassignAssessmentSlot(id: number): Promise<{ success: true }> {
+    const res = await sendJson(`${API_BASE}/assessment-appointments/${id}/unassign`, { removedBy: '' });
+    return jsonResponse(res, 'Failed to take the client off this time.');
+}
+
+export async function updateAssessmentAppointment(id: number, data: { assessor: string; date: string; time: string; notes: string }): Promise<{ success: true }> {
+    const res = await sendJson(`${API_BASE}/assessment-appointments/${id}`, { ...data, updatedBy: '' }, 'PUT');
+    return jsonResponse(res, 'Failed to reschedule the assessment.');
+}
+
+export async function cancelAssessmentAppointment(id: number): Promise<{ success: true }> {
+    const res = await sendJson(`${API_BASE}/assessment-appointments/${id}/cancel`, { cancelledBy: '' });
+    return jsonResponse(res, 'Failed to cancel the assessment.');
+}
