@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { CalendarClock, CalendarX, RotateCcw, X } from 'lucide-react';
+import { CalendarClock, CalendarX, RotateCcw } from 'lucide-react';
+import PopupDialog from './PopupDialog';
 import { changeGroupMeeting, undoGroupScheduleChange, type GroupScheduleChange } from '../../api';
 import { formatDisplayTime } from '../../utils/dates';
 
@@ -83,14 +84,11 @@ export default function GroupMeetingPanel({ meeting, today, onClose, onChanged }
   };
 
   return (
-    <section aria-label={`${meeting.groupname} on ${longDate(meeting.date)}`} className="bg-slate-900 border border-slate-700 rounded-xl p-4 space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="text-sm font-semibold text-white">{meeting.groupname}</h4>
-          <p className="text-xs text-slate-400">{longDate(meeting.date)}{meeting.time ? ` at ${meeting.time}` : ''}</p>
-        </div>
-        <button type="button" onClick={onClose} aria-label="Close" className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800"><X size={16} /></button>
-      </div>
+    <PopupDialog
+      title={meeting.groupname}
+      subtitle={`${longDate(meeting.date)}${meeting.time ? ` at ${meeting.time}` : ''}`}
+      busy={saving}
+      onClose={onClose}>
 
       {change ? (
         <div className="space-y-3">
@@ -146,6 +144,6 @@ export default function GroupMeetingPanel({ meeting, today, onClose, onChanged }
         </div>
       )}
       {change && error && <p role="alert" className="text-xs text-rose-300">{error}</p>}
-    </section>
+    </PopupDialog>
   );
 }

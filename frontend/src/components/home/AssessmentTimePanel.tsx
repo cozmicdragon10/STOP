@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { CalendarClock, UserPlus, X, XCircle } from 'lucide-react';
+import { CalendarClock, UserPlus, XCircle } from 'lucide-react';
 import ClientPicker from '../ClientPicker';
+import PopupDialog from './PopupDialog';
 import { assignAssessmentSlot, cancelAssessmentAppointment, updateAssessmentAppointment, type MyAssessment } from '../../api';
 import { formatDisplayTime } from '../../utils/dates';
 
@@ -72,7 +73,7 @@ export default function AssessmentTimePanel({ appt, clients, today, onClose, onC
     run(() => cancelAssessmentAppointment(appt.appointmentid), `${client}'s assessment on ${when} was cancelled.`);
   };
 
-  const tabButton = (value: 'reschedule' | 'cancel', label: string, Icon: typeof X) => (
+  const tabButton = (value: 'reschedule' | 'cancel', label: string, Icon: typeof XCircle) => (
     <button key={value} type="button" onClick={() => { setMode(value); setError(''); }} aria-pressed={mode === value}
       className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold ${mode === value ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>
       <Icon size={13} /> {label}
@@ -80,14 +81,11 @@ export default function AssessmentTimePanel({ appt, clients, today, onClose, onC
   );
 
   return (
-    <section aria-label={isOpen ? 'Assign a client' : 'Cancel or reschedule the assessment'} className="bg-slate-900 border border-slate-700 rounded-xl p-4 space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="text-sm font-semibold text-white">{isOpen ? 'Open assessment time' : `Assessment: ${client}`}</h4>
-          <p className="text-xs text-slate-400">{when} · {appt.location || 'No location set'} · {appt.assessor}</p>
-        </div>
-        <button type="button" onClick={onClose} aria-label="Close" className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800"><X size={16} /></button>
-      </div>
+    <PopupDialog
+      title={isOpen ? 'Assign a Client' : `Assessment: ${client}`}
+      subtitle={`${when} · ${appt.location || 'No location set'} · ${appt.assessor}`}
+      busy={saving}
+      onClose={onClose}>
 
       {isOpen ? (
         <div className="flex flex-col sm:flex-row sm:items-end gap-2">
@@ -135,6 +133,6 @@ export default function AssessmentTimePanel({ appt, clients, today, onClose, onC
         </div>
       )}
       {error && <p role="alert" className="text-xs text-rose-300">{error}</p>}
-    </section>
+    </PopupDialog>
   );
 }
