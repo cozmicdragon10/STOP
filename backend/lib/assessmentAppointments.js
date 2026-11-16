@@ -43,6 +43,25 @@ const moveProblem = ({ from, to, today }) => {
     return null;
 };
 
+// Taking a client off a scheduled time needs a reason, which goes in an Assessment case note on their account
+const UNASSIGN_REASON_MAX = 1000;
+const unassignReasonProblem = (reason) => {
+    const text = String(reason ?? '').trim();
+    if (!text) return 'Enter the reason the client is being taken off this time.';
+    if (text.length > UNASSIGN_REASON_MAX) return `Keep the reason under ${UNASSIGN_REASON_MAX} characters.`;
+    return null;
+};
+// "Monday, November 30, 2026"
+const longDate = (ymd) => new Date(`${ymd}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+// "1:02 PM" from "13:02"
+const displayTime = (hhmm) => {
+    const [h, m] = String(hhmm || '').split(':').map(Number);
+    if (Number.isNaN(h) || Number.isNaN(m)) return String(hhmm || '');
+    return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+};
+const unassignNoteText = ({ date, time, assessor, location, reason }) =>
+    `Taken off the assessment with ${assessor} on ${longDate(date)} at ${displayTime(time)}${location ? ` (${location})` : ''}. Reason: ${String(reason).trim()}`;
+
 // A counselor only opens and changes their own times; Office and Business Administrators change any
 const ownsSlot = (user, assessor) => user?.role !== 'Counselor' || String(user.displayname || '').trim() === String(assessor || '').trim();
 
@@ -73,4 +92,7 @@ const repeatDates = (start, repeat, until) => {
     return { dates };
 };
 
-module.exports = { slotProblem, appointmentProblem, locationProblem, moveProblem, ownsSlot, repeatDates, REPEATS, MAX_REPEATS };
+module.exports = {
+    slotProblem, appointmentProblem, locationProblem, moveProblem, ownsSlot, repeatDates, REPEATS, MAX_REPEATS,
+    unassignReasonProblem, unassignNoteText,
+};

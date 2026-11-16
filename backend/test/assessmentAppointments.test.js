@@ -91,3 +91,21 @@ test('rescheduling moves a client only into the same counselor\'s upcoming open 
     assert.match(moveProblem({ from, to: { ...to, apptdate: '2026-11-15' }, today }), /already passed/);
     assert.match(moveProblem({ from, to: undefined, today }), /open times/);
 });
+
+const { unassignReasonProblem, unassignNoteText } = require('../lib/assessmentAppointments');
+
+test('taking a client off a time needs a reason', () => {
+    assert.match(unassignReasonProblem(''), /reason/);
+    assert.match(unassignReasonProblem('   '), /reason/);
+    assert.match(unassignReasonProblem('x'.repeat(1001)), /under 1000/);
+    assert.equal(unassignReasonProblem('Client asked to come another week'), null);
+});
+
+test('the unassign note says which time and why', () => {
+    assert.equal(
+        unassignNoteText({ date: '2026-11-30', time: '14:00', assessor: 'Alicia Martinez', location: 'Shawnee', reason: '  Client is in the hospital ' }),
+        'Taken off the assessment with Alicia Martinez on Monday, November 30, 2026 at 2:00 PM (Shawnee). Reason: Client is in the hospital');
+    assert.equal(
+        unassignNoteText({ date: '2026-12-01', time: '09:05', assessor: 'Bo Lee', location: null, reason: 'No ride' }),
+        'Taken off the assessment with Bo Lee on Tuesday, December 1, 2026 at 9:05 AM. Reason: No ride');
+});

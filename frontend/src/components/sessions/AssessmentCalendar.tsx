@@ -200,9 +200,23 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
     act(() => assignAssessmentSlot(a.appointmentid, { clientId: Number(clientId), notes: '' }), 'Client assigned to the assessment time.')
       .then(done => { if (done) setAssignPick(p => { const next = { ...p }; delete next[a.appointmentid]; return next; }); });
   };
-  const unassign = (a: AssessmentAppointment) => {
-    if (!window.confirm(`Take ${a.firstname} ${a.lastname} off this time? It goes back to open.`)) return;
-    act(() => unassignAssessmentSlot(a.appointmentid), 'The time is open again.');
+  // Taking a client off a time asks for the reason (a pop-up); it's saved as an Assessment note on their account
+  const [unassigning, setUnassigning] = useState<{ appt: AssessmentAppointment; reason: string; error: string; saving: boolean } | null>(null);
+  const unassign = (a: AssessmentAppointment) => setUnassigning({ appt: a, reason: '', error: '', saving: false });
+  const confirmUnassign = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!unassigning || unassigning.saving) return;
+    const reason = unassigning.reason.trim();
+    if (!reason) return setUnassigning({ ...unassigning, error: 'Enter the reason.' });
+    setUnassigning({ ...unassigning, saving: true, error: '' });
+    try {
+      await unassignAssessmentSlot(unassigning.appt.appointmentid, reason);
+      onSuccess(`${unassigning.appt.firstname} ${unassigning.appt.lastname} was taken off the time, and the reason was added to their case notes. The time is open again.`);
+      setUnassigning(null);
+      reload();
+    } catch (err) {
+      setUnassigning(u => u && { ...u, saving: false, error: errorText(err, 'Could not take the client off this time.') });
+    }
   };
   const cancel = (a: AssessmentAppointment) => {
     const what = a.status === 'Open' ? `the open time with ${a.assessor}` : `the assessment for ${a.firstname} ${a.lastname}`;
@@ -296,6 +310,36 @@ export default function AssessmentCalendar({ clients, counselors, user, onBack, 
           onClose={() => setMoving(null)}
           onChanged={(message) => { onSuccess(message); setMoving(null); reload(); }}
         />
+      )}
+      {unassigning && (
+        <PopupDialog
+          title={`Unassign ${unassigning.appt.firstname} ${unassigning.appt.lastname}`}
+          subtitle={`${longDay(unassigning.appt.apptdate)} at ${formatDisplayTime(unassigning.appt.appttime)} · ${unassigning.appt.location || 'No location set'} · ${unassigning.appt.assessor}`}
+          busy={unassigning.saving}
+          onClose={() => setUnassigning(null)}>
+          <form onSubmit={confirmUnassign} className="space-y-3">
+            <div>
+              <label htmlFor="unassign-reason" className="block text-xs text-slate-400 uppercase mb-1">Reason</label>
+              <textarea
+                id="unassign-reason"
+                rows={3}
+                maxLength={1000}
+                autoFocus
+                value={unassigning.reason}
+                onChange={e => setUnassigning({ ...unassigning, reason: e.target.value, error: '' })}
+                placeholder="Why is the client being taken off this time?"
+                className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm placeholder-slate-500" />
+            </div>
+            <p className="text-xs text-slate-400">The time goes back to open, and the reason is added to the client's case notes as an Assessment note.</p>
+            {unassigning.error && <p className="text-xs text-red-400">{unassigning.error}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setUnassigning(null)} disabled={unassigning.saving} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-1.5 rounded text-xs font-semibold">Close</button>
+              <button type="submit" disabled={unassigning.saving || !unassigning.reason.trim()} className="bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white px-4 py-1.5 rounded text-xs font-semibold">
+                {unassigning.saving ? 'Saving...' : 'Unassign'}
+              </button>
+            </div>
+          </form>
+        </PopupDialog>
       )}
       <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3 border-b border-slate-800 pb-4">
         <div>

@@ -3,7 +3,9 @@ const { pool, logAction } = require('../db');
 const { todayLocal } = require('../lib/dates');
 const { logClientChange } = require('../lib/changeLog');
 const { YMD } = require('../lib/sql');
-const { slotProblem, appointmentProblem, locationProblem, moveProblem, ownsSlot, repeatDates } = require('../lib/assessmentAppointments');
+const {
+    slotProblem, appointmentProblem, locationProblem, moveProblem, ownsSlot, repeatDates, unassignReasonProblem, unassignNoteText,
+} = require('../lib/assessmentAppointments');
 
 const router = express.Router();
 
@@ -162,19 +164,35 @@ router.post('/api/assessment-appointments/:id/assign', async (req, res) => {
 });
 
 // Take a client off a time, which goes back to open availability
+// Take the client off a scheduled time (it opens up again). The reason goes in an Assessment case note on their account.
 router.post('/api/assessment-appointments/:id/unassign', async (req, res) => {
+    const db = await pool.connect();
     try {
         const { id } = req.params;
-        const { removedBy: unassignedBy } = req.body;
-        const row = await loadAppointment(pool, id);
-        if (!row || row.status !== 'Scheduled') return res.status(400).json({ error: 'No client is assigned to that time.' });
-        if (!ownsSlot(req.user, row.assessor)) return res.status(403).json({ error: 'Counselors can only change their own times.' });
-        await pool.query(`UPDATE AssessmentAppointments SET ClientId = NULL, Status = 'Open' WHERE AppointmentId = $1`, [id]);
-        await logClientChange(pool, { clientId: row.clientid, changedBy: unassignedBy, changeType: 'Assessment Unassigned', oldValue: `${row.apptdate} ${row.appttime}` });
-        await logAction(unassignedBy, 'Assessment Unassigned', `Appointment ${id}: ${row.apptdate} ${row.appttime}`);
+        const { removedBy: unassignedBy, reason } = req.body;
+        const reasonProblem = unassignReasonProblem(reason);
+        if (reasonProblem) return res.status(400).json({ error: reasonProblem });
+        await db.query('BEGIN');
+        const row = (await db.query(
+            `SELECT AppointmentId, ClientId, Assessor, to_char(ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(ApptTime, 'HH24:MI') AS ApptTime, Location, Status
+             FROM AssessmentAppointments WHERE AppointmentId = $1 FOR UPDATE`, [id])).rows[0];
+        if (!row || row.status !== 'Scheduled') { await db.query('ROLLBACK'); return res.status(400).json({ error: 'No client is assigned to that time.' }); }
+        if (!ownsSlot(req.user, row.assessor)) { await db.query('ROLLBACK'); return res.status(403).json({ error: 'Counselors can only change their own times.' }); }
+        await db.query(`UPDATE AssessmentAppointments SET ClientId = NULL, Status = 'Open' WHERE AppointmentId = $1`, [id]);
+        const comments = unassignNoteText({ date: row.apptdate, time: row.appttime, assessor: row.assessor, location: row.location, reason });
+        // A system note: no approval needed
+        await db.query(
+            `INSERT INTO Notes (Client, Date, "User", Comments, Category, ApprovalStatus) VALUES ($1, NOW(), $2, $3, 'Assessment', NULL)`,
+            [row.clientid, unassignedBy, comments]);
+        await logClientChange(db, { clientId: row.clientid, changedBy: unassignedBy, changeType: 'Assessment Unassigned', oldValue: `${row.apptdate} ${row.appttime}`, details: comments });
+        await db.query('COMMIT');
+        await logAction(unassignedBy, 'Assessment Unassigned', `Appointment ${id}: ${row.apptdate} ${row.appttime}. ${String(reason).trim()}`);
         res.json({ success: true });
     } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
         res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
     }
 });
 

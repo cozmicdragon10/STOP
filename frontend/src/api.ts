@@ -2230,8 +2230,9 @@ export async function assignAssessmentSlot(id: number, data: { clientId: number;
     return jsonResponse(res, 'Failed to assign the client.');
 }
 
-export async function unassignAssessmentSlot(id: number): Promise<{ success: true }> {
-    const res = await sendJson(`${API_BASE}/assessment-appointments/${id}/unassign`, { removedBy: '' });
+// The reason goes in an Assessment case note on the client's account
+export async function unassignAssessmentSlot(id: number, reason: string): Promise<{ success: true }> {
+    const res = await sendJson(`${API_BASE}/assessment-appointments/${id}/unassign`, { removedBy: '', reason });
     return jsonResponse(res, 'Failed to take the client off this time.');
 }
 
