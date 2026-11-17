@@ -20,6 +20,7 @@ import { SO_PHASES, SO_TREATMENT_FEES, bipTreatmentFee } from '../../utils/soPha
 import { formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
 import { privacyRosterView } from '../../utils/privacy';
 import { takesPolygraphs } from '../../utils/polygraph';
+import { needsGroup } from '../../utils/home';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client and group rows are untyped throughout App */
 interface Props {
@@ -44,6 +45,8 @@ interface Props {
   limited?: boolean;
   // Privacy view (see utils/privacy.ts): no balances, nothing listed until a search, then one client
   privacy?: boolean;
+  // Filters to show, from a link elsewhere (the Home page's "Without a Group" count). A new seq applies them again.
+  filterRequest?: { filters: Partial<ClientFilters>; seq: number } | null;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -137,7 +140,7 @@ const ROSTER_CELLS: Record<SortKey, (c: any) => ReactNode> = {
 
 // The Client Roster tab: searchable, filterable client list and the New Client form. Clicking a row opens the
 // client's account (App's drawer).
-export default function ClientRoster({ clients, activeGroups, directoryAgents, userEmail, onOpenClient, onCreated, onSuccess, onError, headerActions, limited = false, privacy = false, isMine, covered }: Props) {
+export default function ClientRoster({ clients, activeGroups, directoryAgents, userEmail, onOpenClient, onCreated, onSuccess, onError, headerActions, limited = false, privacy = false, isMine, covered, filterRequest }: Props) {
   // A Polygrapher's roster leaves out the balance (the server doesn't send it to them either)
   const columnKeys = limited ? LIMITED_ROSTER_COLUMN_KEYS : ROSTER_COLUMN_KEYS;
   const [clientSearch, setClientSearch] = useState('');
@@ -154,6 +157,16 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
     try { localStorage.setItem('showClientFilters', String(!show)); } catch { /* storage unavailable */ }
     return !show;
   });
+  // A filter link from another page: start from the default filters plus the ones asked for, with the filter row open
+  // (for this visit only; the remembered choice is unchanged) and the search cleared, so the list is exactly those clients
+  const [appliedRequest, setAppliedRequest] = useState<number | undefined>(undefined);
+  if (filterRequest && filterRequest.seq !== appliedRequest) {
+    setAppliedRequest(filterRequest.seq);
+    setClientFilters({ ...DEFAULT_CLIENT_FILTERS, ...filterRequest.filters });
+    setClientSearch('');
+    setMineOnly(false);
+    setShowClientFilters(true);
+  }
   // Filters changed from the defaults, shown on the Filters button so hidden filters aren't forgotten
   const changedClientFilterCount = (Object.keys(DEFAULT_CLIENT_FILTERS) as (keyof ClientFilters)[])
     .filter(key => JSON.stringify(clientFilters[key]) !== JSON.stringify(DEFAULT_CLIENT_FILTERS[key])).length;
@@ -227,6 +240,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
       if (clientFilters.pretrial === 'yes' && pretrialValue(c) !== true) return false;
       if (clientFilters.pretrial === 'no' && pretrialValue(c) !== false) return false;
       if (clientFilters.docnumber && (textOrNull(c.docnumber) === null) !== (clientFilters.docnumber === 'missing')) return false;
+      if (clientFilters.needsgroup && !needsGroup(c)) return false;
 
       return true;
     });
@@ -412,6 +426,16 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
             <option value="">ID #: All</option>
             <option value="missing">No ID #</option>
             <option value="has">Has ID #</option>
+          </select>
+
+          {/* Active clients in a program with groups who have neither a regular nor an individual group */}
+          <select
+            value={clientFilters.needsgroup ? 'yes' : ''}
+            onChange={(e) => setClientFilters({ ...clientFilters, needsgroup: e.target.value === 'yes' })}
+            className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+          >
+            <option value="">Group: All</option>
+            <option value="yes">Needs a group</option>
           </select>
 
           {clientFilterActive && (

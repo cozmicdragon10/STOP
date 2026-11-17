@@ -5,14 +5,7 @@ import type { DevInfo } from '../../api';
 import DatabaseSync from './DatabaseSync';
 import ActiveSessions from './ActiveSessions';
 import DeviceApprovals from './DeviceApprovals';
-
-// How long the server has been up, e.g. "2d 3h 14m"
-const uptimeText = (seconds: number) => {
-  const d = Math.floor(seconds / 86400);
-  const h = Math.floor((seconds % 86400) / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return [d && `${d}d`, (d || h) && `${h}h`, `${m}m`].filter(Boolean).join(' ');
-};
+import { uptimeText } from '../../utils/dates';
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -71,6 +64,7 @@ export default function DevTab() {
             <Row label="Server time" value={new Date(info.database.now).toLocaleString()} />
             <Row label="Version" value={info.database.version.split(',')[0]} />
             <Row label="Migrations applied" value={info.database.migrationCount} />
+            <Row label="Migrations pending" value={info.database.pendingMigrations?.length ? info.database.pendingMigrations.join(', ') : 'None'} />
           </section>
           <section className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl">
             <h3 className="font-semibold text-white mb-3">Latest Migrations</h3>

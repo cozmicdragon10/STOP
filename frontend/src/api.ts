@@ -1818,7 +1818,7 @@ export async function getSystemLogs(): Promise<SystemLog[]> {
 // The DEV menu's server and database information; DEV accounts only, the server checks
 export interface DevInfo {
     server: { node: string; platform: string; hostname: string; uptimeSeconds: number; startedAt: string; memoryMb: number; environment: string };
-    database: { name: string; version: string; size: string; now: string; migrationCount: number; recentMigrations: { name: string; appliedon: string }[] };
+    database: { name: string; version: string; size: string; now: string; migrationCount: number; recentMigrations: { name: string; appliedon: string }[]; pendingMigrations?: string[] };
     activeSessions: number;
     activeAccountsByRole: { role: string; n: number }[];
 }

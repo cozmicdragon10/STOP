@@ -58,7 +58,7 @@ const runMigrations = async (pool) => {
     return pending;
 };
 
-module.exports = { runMigrations, pendingMigrations };
+module.exports = { runMigrations, pendingMigrations, migrationFiles };
 
 if (require.main === module) {
     const { pool } = require('./db');

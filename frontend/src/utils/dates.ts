@@ -100,3 +100,11 @@ export const ageFromBirthDate = (value: unknown, today = new Date()) => {
   const age = today.getFullYear() - born.getFullYear() - (hadBirthday ? 0 : 1);
   return age >= 0 ? age : null;
 };
+
+// How long the server has been up, e.g. "2d 3h 14m" (the DEV tab and the DEV strip on Home)
+export const uptimeText = (seconds: number) => {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return [d && `${d}d`, (d || h) && `${h}h`, `${m}m`].filter(Boolean).join(' ');
+};

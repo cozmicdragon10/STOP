@@ -4,6 +4,7 @@ const os = require('os');
 const { pool, logAction } = require('../db');
 const { requireDev, bearerToken, hashToken, sessionLiveSql, SESSION_IDLE_MINUTES } = require('../lib/auth');
 const dbSync = require('../lib/dbSync');
+const { migrationFiles } = require('../migrate');
 
 const router = express.Router();
 
@@ -16,6 +17,7 @@ router.get('/api/dev/info', requireDev, async (req, res) => {
             pool.query(`SELECT COUNT(*)::int AS n FROM Sessions s WHERE ${sessionLiveSql(1)}`, [SESSION_IDLE_MINUTES]),
             pool.query('SELECT Role, COUNT(*)::int AS n FROM EmployeeRoles WHERE Active = TRUE GROUP BY Role ORDER BY Role'),
         ]);
+        const applied = new Set(migrations.rows.map(r => r.name));
         res.json({
             server: {
                 node: process.version,
@@ -26,7 +28,13 @@ router.get('/api/dev/info', requireDev, async (req, res) => {
                 memoryMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
                 environment: process.env.NODE_ENV || 'not set',
             },
-            database: { ...db.rows[0], migrationCount: migrations.rows.length, recentMigrations: migrations.rows.slice(0, 10) },
+            database: {
+                ...db.rows[0],
+                migrationCount: migrations.rows.length,
+                recentMigrations: migrations.rows.slice(0, 10),
+                // Migration files not applied yet: added since the server started (they run on the next start)
+                pendingMigrations: migrationFiles().filter(f => !applied.has(f)),
+            },
             activeSessions: sessions.rows[0].n,
             activeAccountsByRole: employees.rows,
         });

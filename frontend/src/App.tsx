@@ -38,6 +38,11 @@ import AdminTab from './components/admin/AdminTab';
 import DevTab from './components/dev/DevTab';
 import SettingsTab from './components/settings/SettingsTab';
 import MyDay from './components/home/MyDay';
+import OfficeToday from './components/home/OfficeToday';
+import DevHealth from './components/home/DevHealth';
+import HomeCount from './components/home/HomeCount';
+import { needsGroup } from './utils/home';
+import type { ClientFilters } from './utils/clients';
 import CalendarsTab from './components/home/CalendarsTab';
 import { groupByCounselor, isMyClient, myGroupIds } from './utils/counselor';
 import FormsTab from './components/forms/FormsTab';
@@ -72,7 +77,7 @@ import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividu
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
 import { UnsavedFormsContext } from './hooks/useUnsavedForm';
-import { DISCHARGE_STATUSES, GROUP_TYPES_BY_PROGRAM, idText, isPolyGroup } from './utils/clients';
+import { DISCHARGE_STATUSES, idText, isPolyGroup } from './utils/clients';
 import { scrollToStackedPanel } from './utils/layout';
 import { polygraphHistoryText, polygraphNotice, slotStart, slotSummary, takesPolygraphs } from './utils/polygraph';
 import { errorMessage } from './utils/errors';
@@ -254,16 +259,22 @@ export default function App() {
   const activeGroups = groups.filter(g => g.active !== false);
   // Polys groups take no attendance, so the Attendance tab's group search leaves them out
   const attendanceGroups = activeGroups.filter(g => !isPolyGroup(g.programtype));
-  // Home page counts. The client list holds everyone not discharged; "without a group" is active clients whose program
-  // has group types (GROUP_TYPES_BY_PROGRAM) with neither a regular nor an individual group.
+  // Home page counts. The client list holds everyone not discharged; "without a group" is needsGroup (utils/home.ts),
+  // the same rule as the Client Roster's "Needs a group" filter the count opens.
   const homeCounts = (() => {
     const active = clients.filter(c => c.programstatus === 'Active');
     return {
       active: active.length,
       inactive: clients.length - active.length,
-      needGroup: active.filter(c => GROUP_TYPES_BY_PROGRAM[c.programtype || ''] && !c.groupid && !c.individualgroupid).length,
+      needGroup: active.filter(needsGroup).length,
     };
   })();
+  // Filters the Client Roster shows when opened from a Home count; seq makes the same link apply again
+  const [rosterFilterRequest, setRosterFilterRequest] = useState<{ filters: Partial<ClientFilters>; seq: number } | null>(null);
+  const openRosterWith = (filters: Partial<ClientFilters>) => {
+    setRosterFilterRequest(r => ({ filters, seq: (r?.seq ?? 0) + 1 }));
+    setActiveTab('clients');
+  };
 
   // Employee accounts: managed on the Admin tab, also used for examiner names and counselor pickers
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -825,6 +836,9 @@ export default function App() {
     ));
   // Counselors: the groups they lead, which decide "my clients" on the roster and My Day
   const isCounselor = role === 'Counselor';
+  // Home page: Business Administrators (isBusinessAdmin; DEV signs in as one) get the office's Today panel and case
+  // notes to approve; Counselors and Office Admins don't see the client counts
+  const showClientCounts = !['Counselor', 'Office Admin'].includes(role);
   const counselorGroupIds = isCounselor ? myGroupIds(groups, user.displayname) : null;
   const isAllowed = (tab: string) => {
     // Everyone has their own Settings (appearance and layout)
@@ -996,7 +1010,7 @@ export default function App() {
           </div>
         )}
 
-        {/* CLIENT DIRECTORY TAB */}
+        {/* HOME TAB */}
         {activeTab === 'home' && (
           <div className="space-y-6">
             {isCounselor && (
@@ -1012,48 +1026,80 @@ export default function App() {
               <p className="text-sm text-slate-400 mt-1">Here's a quick overview. Choose a section below to get started.</p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {/* Counselors and Office Admins don't see the client counts here; Business Administrators do */}
-              {!['Counselor', 'Office Admin'].includes(role) && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-                  <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Active Clients</p>
-                  <p className="text-3xl font-bold text-white mt-2">{homeCounts.active}</p>
-                  <p className="text-xs text-slate-500 mt-1">{homeCounts.inactive} more not discharged but inactive</p>
-                </div>
+            {/* DEV accounts: the server and database at a glance. Hidden in privacy view, which locks the DEV tab. */}
+            {user.isdev && !privacyOn && <DevHealth onOpenDev={() => openTab('dev')} />}
+
+            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${isBusinessAdmin ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
+              {/* Counselors and Office Admins don't see the client counts here; Business Administrators do. Each count
+                  opens the list behind it. */}
+              {showClientCounts && (
+                <HomeCount
+                  label="Active Clients"
+                  value={homeCounts.active}
+                  detail={`${homeCounts.inactive} more not discharged but inactive`}
+                  onClick={() => openRosterWith({})}
+                  title="Open the Client Roster"
+                />
               )}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-                <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Active Groups</p>
-                <p className="text-3xl font-bold text-white mt-2">{activeGroups.length}</p>
-              </div>
-              {!['Counselor', 'Office Admin'].includes(role) && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-                  <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Active Clients Without a Group</p>
-                  <p className={`text-3xl font-bold mt-2 ${homeCounts.needGroup > 0 ? 'text-amber-400' : 'text-white'}`}>{homeCounts.needGroup}</p>
-                  <p className="text-xs text-slate-500 mt-1">Active clients in a program with groups (Poly Only clients belong in a Polys group)</p>
+              <HomeCount
+                label="Active Groups"
+                value={activeGroups.length}
+                onClick={isAllowed('groups') ? () => openTab('groups') : undefined}
+                title="Open Groups"
+              />
+              {showClientCounts && (
+                <HomeCount
+                  label="Active Clients Without a Group"
+                  value={homeCounts.needGroup}
+                  warn={homeCounts.needGroup > 0}
+                  detail={homeCounts.needGroup > 0 ? 'Click to list them on the Client Roster' : 'Everyone who needs a group has one'}
+                  onClick={() => openRosterWith({ needsgroup: true })}
+                  title="List these clients on the Client Roster"
+                />
+              )}
+              {isBusinessAdmin && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col">
+                  <p className="text-xs uppercase tracking-wide text-slate-400 font-semibold">Case Notes to Approve</p>
+                  <p className="text-xs text-slate-500 mt-1 mb-3">Notes counselors wrote for clients who hadn't attended that month</p>
+                  <div className="mt-auto">
+                    <PendingNotesButton
+                      userEmail={user.employeeemail}
+                      refreshKey={pendingNotesKey}
+                      onOpenClient={openClientById}
+                      onChanged={refreshPendingNotes}
+                      onSuccess={setSuccessMsg}
+                    />
+                  </div>
                 </div>
               )}
             </div>
 
+            {/* Every counselor's groups and every examiner's polygraphs today (Business Administrators and DEV) */}
+            {isBusinessAdmin && (
+              <OfficeToday
+                groups={groups}
+                polySlots={polySlots}
+                examinerName={getExaminerDisplayName}
+                privacy={privacyOn}
+                onOpenAttendance={() => openTab('attendance')}
+                onOpenPolygraphs={() => openTab('polygraph')}
+              />
+            )}
+
+            {/* Shortcuts to every section this account can open, as in the tab bar; locked ones show a lock in privacy view */}
             <div>
               <h3 className="text-xs uppercase tracking-wide text-slate-400 font-semibold mb-3">Sections</h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {[
-                  { tab: 'clients', icon: Users, label: 'Client Roster', description: 'Search and manage client records, balances, and notes.' },
-                  { tab: 'attendance', icon: ClipboardCheck, label: 'Attendance & Sign-In', description: 'Record group sessions and account payments.' },
-                  { tab: 'sessions', icon: ClipboardList, label: 'Assessments', description: 'Record one-client assessments with payments. Individual sessions are checked in on the Attendance tab.' },
-                  { tab: 'groups', icon: Layers, label: 'Groups', description: 'Manage group schedules, counselors, and rosters.' },
-                  { tab: 'polygraph', icon: ShieldAlert, label: 'Polygraphs', description: 'Schedule polygraph slots and record results.' },
-                  { tab: 'reports', icon: BarChart3, label: 'Reports', description: role === 'Counselor' ? 'Group cash deposits you hold.' : 'Agent, income, and deposit reports.' },
-                  { tab: 'agents', icon: UserCheck, label: 'Supervising Agents', description: 'Probation officer contacts and their assigned clients.' },
-                  { tab: 'admin', icon: Settings, label: 'Admin', description: 'Employees, roles, prices, and system logs.' },
-                  { tab: 'settings', icon: Palette, label: 'Settings', description: 'Your colors, fonts, and layout.' },
-                ].filter(s => isAllowed(s.tab)).map(s => (
-                  <button key={s.tab} onClick={() => openTab(s.tab)} className="text-left bg-slate-900 hover:bg-slate-800/70 border border-slate-800 hover:border-slate-700 rounded-xl p-5 transition">
-                    <div className="flex items-center gap-2 text-blue-400">
-                      <s.icon size={18} />
-                      <span className="font-semibold text-white">{s.label}</span>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-2">{s.description}</p>
+              <div className="flex flex-wrap gap-2">
+                {navItems.filter(s => s.tab !== 'home').map(s => (
+                  <button
+                    key={s.tab}
+                    type="button"
+                    onClick={() => openTab(s.tab)}
+                    title={s.locked ? 'Locked while privacy view is on' : `Open ${s.label}`}
+                    className={`flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm transition ${s.locked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-800/70 hover:border-slate-700'}`}
+                  >
+                    <span className="text-blue-400">{s.locked ? <Lock size={16} /> : <s.icon size={16} />}</span>
+                    <span className="font-medium text-white">{s.label}</span>
                   </button>
                 ))}
               </div>
@@ -1067,6 +1113,7 @@ export default function App() {
             <ClientRoster
               limited={role === 'Polygrapher'}
               privacy={privacyOn}
+              filterRequest={rosterFilterRequest}
               isMine={counselorGroupIds ? (c) => isMyClient(c, counselorGroupIds, user.displayname) : undefined}
               covered={counselorGroupIds ? coveredByMe : undefined}
               clients={clients}
