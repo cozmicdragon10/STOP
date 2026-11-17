@@ -424,7 +424,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
       <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3 border-b border-slate-800 pb-4">
         <div>
           <h2 className="text-lg font-bold text-white">Assessment Calendar</h2>
-          <p className="text-xs text-slate-400 mt-0.5">Counselors open times they are available; a client assigned to a time gets an open session for that date, closed from Open Sessions.</p>
+          <p className="text-xs text-slate-400 mt-0.5">Counselors open times they are available; a client assigned to a time is listed under Scheduled, ready to begin when they pay.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => startForm('open', pickedDay || today)} className={`${smallButton} bg-blue-600 hover:bg-blue-500 text-white border-blue-600`}>

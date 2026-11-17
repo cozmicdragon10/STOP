@@ -962,7 +962,9 @@ export interface CompletedAssessment {
 }
 
 export interface OpenAssessment {
+    // The open session's id while Scheduled; the attendance id once In Progress
     opensessionid: number;
+    status: 'Scheduled' | 'In Progress';
     name: string;
     date: string;
     provider: string | null;
@@ -1121,8 +1123,106 @@ export interface ClosedIndividualSession {
     comments: string | null;
     paymentcomments: string | null;
     openedby: string | null;
+    // For an assessment: who completed it and when; for other sessions, who recorded them
     closedby: string | null;
     closedon: string | null;
+    begunby: string | null;
+    begunon: string | null;
+    notecount: number;
+}
+
+// An assessment begun (paid) and being worked on; the attendance row, dated the day it was begun
+export interface AssessmentInProgress {
+    attendanceid: number;
+    clientid: number;
+    firstname: string;
+    lastname: string;
+    docnumber: string | null;
+    doctype: string | null;
+    programtype: string | null;
+    sessiontypeid: number | null;
+    sessiontypename: string;
+    kind: SessionTypeKind;
+    beganon: string;
+    daysopen: number;
+    provider: string | null;
+    fee: string | number;
+    paid: string | number;
+    paymentmethod: string | null;
+    openedby: string | null;
+    begunby: string | null;
+    assessmentstatus: 'In Progress' | 'Completed';
+    notecount: number;
+    lastnoteon: string | null;
+}
+
+export interface AssessmentNote {
+    noteid: number;
+    date: string;
+    User: string | null;
+    comments: string;
+    editedby: string | null;
+    editedon: string | null;
+}
+
+export interface AssessmentDetail extends AssessmentInProgress {
+    notes: AssessmentNote[];
+}
+
+export interface BeginAssessmentPayload {
+    // The scheduled assessment being begun, or null to begin one on the spot
+    openSessionId: number | null;
+    client: number;
+    sessionTypeId: number;
+    // Used only for a Business Administrator; everyone else is charged the price list's
+    fee: number;
+    payment: number;
+    provider: string;
+    // The first note on the assessment (optional)
+    comments: string;
+    paymentComments: string;
+    // The payment for the fee and any past due balance was received
+    paymentConfirmed: boolean;
+    user: string;
+}
+
+// Takes the payment, charges the fee and records the attendance today, In Progress
+export async function beginAssessment(data: BeginAssessmentPayload): Promise<{ attendanceId: number; newBalance: string | number }> {
+    const res = await apiFetch(`${API_BASE}/assessments/begin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return jsonResponse(res, 'Failed to begin the assessment.');
+}
+
+export async function getAssessmentsInProgress(): Promise<AssessmentInProgress[]> {
+    const res = await apiFetch(`${API_BASE}/assessments/in-progress`);
+    return jsonResponse(res, 'Failed to load the assessments in progress.');
+}
+
+export async function getAssessment(attendanceId: number): Promise<AssessmentDetail> {
+    const res = await apiFetch(`${API_BASE}/assessments/${attendanceId}`);
+    return jsonResponse(res, 'Failed to load the assessment.');
+}
+
+export async function addAssessmentNote(attendanceId: number, comments: string, user: string): Promise<AssessmentNote> {
+    const res = await apiFetch(`${API_BASE}/assessments/${attendanceId}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comments, user }),
+    });
+    return jsonResponse(res, 'Failed to add the note.');
+}
+
+// paperworkCompleted: BIP intakes (intake paperwork) and reinstates (contract signed) need it; comments: an optional last note
+export async function completeAssessment(attendanceId: number, data: { paperworkCompleted: boolean; comments: string; user: string }): Promise<{ success: true }> {
+    const res = await apiFetch(`${API_BASE}/assessments/${attendanceId}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return jsonResponse(res, 'Failed to complete the assessment.');
 }
 
 // What the session form sends to save (open) or close a session

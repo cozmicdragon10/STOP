@@ -7,6 +7,9 @@ const { dateText, dollars, logClientChange } = require('../lib/changeLog');
 const { moneyText } = require('../lib/moneyFields');
 const { BIP_CHECKIN_BLOCK, INDIVIDUAL_SESSION_TYPES, NEEDS_OUR_INTAKE, YMD } = require('../lib/sql');
 const { staleFields, staleMessage } = require('../lib/editConflicts');
+const {
+    ASSESSMENT_WORK_ROLES, PAPERWORK_KINDS, beginPaymentProblem, completeProblem, noteProblem, paperworkLabel, worksOnAssessment,
+} = require('../lib/assessmentWork');
 
 const router = express.Router();
 
@@ -54,7 +57,7 @@ const lastBipIntake = async (db, clientId, onDate) => {
                      WHEN $2::date < x.Done + INTERVAL '1 year' THEN 'late' ELSE 'expired' END AS Window
          FROM (
              SELECT a.Date AS Done, st.Name FROM Attendance a JOIN SessionTypes st ON st.SessionTypeId = a.SessionTypeId
-             WHERE a.Client = $1 AND st.Kind = 'BIP Intake'
+             WHERE a.Client = $1 AND st.Kind = 'BIP Intake' AND a.AssessmentStatus IS DISTINCT FROM 'In Progress'
              UNION ALL
              SELECT o.AssessmentDate, o.AssessmentType || ' (' || o.ProviderName || ')' FROM OutsideBipAssessments o WHERE o.ClientId = $1
          ) x
@@ -67,7 +70,8 @@ const lastBipIntake = async (db, clientId, onDate) => {
 
 // The client's Progress tab: for BIP clients, why they can't be checked into group yet (block: 'intake', 'our-intake',
 // 'reinstate', or null) and their last discharge; every completed assessment (done here, or a BIP intake recorded from
-// another provider), newest first; and the assessments still open on the Assessments tab.
+// another provider), newest first; and the assessments still open on the Assessments tab: scheduled (not begun yet) and
+// In Progress (begun and paid, not completed yet).
 router.get('/api/clients/:id/progress', async (req, res) => {
     try {
         const { id } = req.params;
@@ -83,7 +87,7 @@ router.get('/api/clients/:id/progress', async (req, res) => {
                     to_char(a.Date, 'YYYY-MM-DD') AS Date, a.Provider, a.Comments AS Notes, a.CreatedBy AS RecordedBy,
                     a.GroupFee AS Fee, a.AccountPaid AS Paid, a.PaymentMethod
              FROM Attendance a LEFT JOIN SessionTypes st ON st.SessionTypeId = a.SessionTypeId
-             WHERE a.Client = $1 AND a.Type = 'Assessment'
+             WHERE a.Client = $1 AND a.Type = 'Assessment' AND a.AssessmentStatus IS DISTINCT FROM 'In Progress'
              UNION ALL
              SELECT 'outside', o.OutsideAssessmentId, o.AssessmentType, 'BIP Intake', to_char(o.AssessmentDate, 'YYYY-MM-DD'),
                     o.ProviderName, o.Notes, o.RecordedBy, NULL, NULL, NULL
@@ -92,9 +96,14 @@ router.get('/api/clients/:id/progress', async (req, res) => {
             [id]
         );
         const open = await pool.query(
-            `SELECT o.OpenSessionId, COALESCE(st.Name, 'Assessment (type not chosen yet)') AS Name, to_char(o.SessionDate, 'YYYY-MM-DD') AS Date, o.Provider, o.Fee, o.CreatedBy
+            `SELECT o.OpenSessionId, 'Scheduled' AS Status, COALESCE(st.Name, 'Assessment (type not chosen yet)') AS Name, to_char(o.SessionDate, 'YYYY-MM-DD') AS Date, o.Provider, o.Fee, o.CreatedBy
              FROM OpenIndividualSessions o LEFT JOIN SessionTypes st ON st.SessionTypeId = o.SessionTypeId
-             WHERE o.ClientId = $1 AND o.Category = 'Assessment' ORDER BY o.SessionDate DESC`,
+             WHERE o.ClientId = $1 AND o.Category = 'Assessment'
+             UNION ALL
+             SELECT a.AttendanceId, 'In Progress', COALESCE(st.Name, 'Assessment'), to_char(a.Date, 'YYYY-MM-DD'), a.Provider, a.GroupFee, a.CreatedBy
+             FROM Attendance a LEFT JOIN SessionTypes st ON st.SessionTypeId = a.SessionTypeId
+             WHERE a.Client = $1 AND a.Type = 'Assessment' AND a.AssessmentStatus = 'In Progress'
+             ORDER BY Date DESC`,
             [id]
         );
         const s = statusRes.rows[0];
@@ -261,7 +270,11 @@ router.get('/api/individual-sessions/closed', async (req, res) => {
         const result = await pool.query(
             `SELECT a.AttendanceId, a.Client AS ClientId, c.FirstName, c.LastName, a.Type AS Category, st.Name AS SessionTypeName,
                     to_char(a.Date, 'YYYY-MM-DD') AS SessionDate, a.GroupFee AS Fee, a.AccountPaid AS Payment, a.PaymentMethod, a.PaidOnOpen,
-                    a.Provider, a.Comments, COALESCE(a.OpenedBy, a.CreatedBy) AS OpenedBy, a.CreatedBy AS ClosedBy, a.CreatedOn AS ClosedOn,
+                    a.Provider, a.Comments, COALESCE(a.OpenedBy, a.CreatedBy) AS OpenedBy,
+                    -- An assessment closes when it is completed; other sessions when they were recorded
+                    COALESCE(a.CompletedBy, a.CreatedBy) AS ClosedBy, COALESCE(a.CompletedOn, a.CreatedOn) AS ClosedOn,
+                    a.CreatedBy AS BegunBy, a.CreatedOn AS BegunOn,
+                    (SELECT COUNT(*)::int FROM Notes n WHERE n.AttendanceId = a.AttendanceId) AS NoteCount,
                     -- What was typed as payment comments: the payment's ledger text without its standard opening sentence
                     (SELECT NULLIF(regexp_replace(f.Comments, '^Payment applied during .* session on \\d{4}-\\d{2}-\\d{2}\\.\\s*', ''), '')
                      FROM FinancialTransactions f WHERE f.AttendanceId = a.AttendanceId AND f.Type = 'Payment'
@@ -269,7 +282,7 @@ router.get('/api/individual-sessions/closed', async (req, res) => {
              FROM Attendance a
              JOIN Clients c ON c.ClientId = a.Client
              LEFT JOIN SessionTypes st ON st.SessionTypeId = a.SessionTypeId
-             WHERE a.Type IN ('Assessment', 'Individual')
+             WHERE a.Type IN ('Assessment', 'Individual') AND a.AssessmentStatus IS DISTINCT FROM 'In Progress'
                AND ($1::boolean OR LOWER(COALESCE(a.OpenedBy, a.CreatedBy)) = LOWER($2) OR LOWER(a.CreatedBy) = LOWER($2)
                     OR ($3 <> '' AND LOWER(TRIM(a.Provider)) = LOWER(TRIM($3))))
              ORDER BY a.Date DESC, a.CreatedOn DESC NULLS LAST
@@ -281,6 +294,12 @@ router.get('/api/individual-sessions/closed', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// A scheduled assessment keeps the price it was saved with (a Business Administrator may have changed it) while its type
+// stays the same; only a Business Administrator sets a different one. Returns the fee to use.
+const keptScheduledFee = (viewer, saved, s) => (
+    viewer?.role !== 'Business Administrator' && saved.sessiontypeid !== null && Number(saved.sessiontypeid) === s.sessionTypeId
+        ? Math.round(Number(saved.fee) * 100) / 100 : s.fee);
 
 const INDIVIDUAL_MOVED = 'Individual sessions are now checked in on the Attendance tab: pick the counselor\'s individual group.';
 
@@ -354,9 +373,10 @@ router.put('/api/individual-sessions/open', async (req, res) => {
         if (!openSessionId && s.category === 'Individual') return refuse(400, INDIVIDUAL_MOVED);
         let id = openSessionId;
         if (id) {
-            const existing = await db.query('SELECT CreatedBy, Provider FROM OpenIndividualSessions WHERE OpenSessionId = $1 FOR UPDATE', [id]);
+            const existing = await db.query('SELECT CreatedBy, Provider, SessionTypeId, Fee FROM OpenIndividualSessions WHERE OpenSessionId = $1 FOR UPDATE', [id]);
             if (!existing.rows[0]) return refuse(404, 'This open session was already closed or discarded.');
             if (!canSeeIndividualSession(viewer, existing.rows[0])) return refuse(403, 'Only the employee who opened this session, its counselor or therapist, or an administrator can change it.');
+            s.fee = keptScheduledFee(viewer, existing.rows[0], s);
         }
         const payNow = s.category === 'Individual' && s.payment > 0;
         let newBalance = null;
@@ -423,13 +443,20 @@ router.delete('/api/individual-sessions/open/:id', async (req, res) => {
     }
 });
 
-// Closes a session: records the attendance, the fee, and any payment in one transaction, and clears the open session
-// (openSessionId) it came from. A session can also be closed directly without being saved as open first.
-// A BIP intake (BIP Intake, DV Assessment) or BIP reinstate closes only with both boxes checked: paymentConfirmed (the payment
-// covers the fee and any past due balance, so the account owes nothing after) and paperworkCompleted (intake paperwork is
-// done for an intake; the BIP Reinstatement Contract is signed for a reinstate).
+const ASSESSMENT_BEGUN_INSTEAD = 'Assessments are begun once the payment is taken, then completed by the counselor. Use Begin Assessment.';
+
+// A begun assessment takes the client off the waiting list for an assessment
+const clearWaitingAssessor = async (db, clientId, changedBy, details) => {
+    const waiting = (await db.query('SELECT Assessor FROM Clients WHERE ClientId = $1 AND Assessor IS NOT NULL', [clientId])).rows[0];
+    if (!waiting) return;
+    await db.query('UPDATE Clients SET Assessor = NULL WHERE ClientId = $1', [clientId]);
+    await logClientChange(db, { clientId, changedBy, changeType: 'Assessor', oldValue: waiting.assessor, newValue: 'None', details });
+};
+
+// Closes an individual session opened before individual sessions moved to the Attendance tab: records the attendance,
+// the fee, and any payment in one transaction, and clears the open session (openSessionId) it came from.
 router.post('/api/individual-sessions/close', async (req, res) => {
-    const { openSessionId, comments, paymentComments, user, paymentConfirmed, paperworkCompleted } = req.body;
+    const { openSessionId, comments, paymentComments, user } = req.body;
     const db = await pool.connect();
     try {
         const viewer = await openGroupViewer(user);
@@ -462,41 +489,204 @@ router.post('/api/individual-sessions/close', async (req, res) => {
             await db.query('ROLLBACK');
             return res.status(400).json({ error: INDIVIDUAL_MOVED });
         }
-        const needsChecks = s.kind === 'BIP Intake' || s.kind === 'BIP Reinstate';
-        const secondCheck = s.kind === 'BIP Reinstate' ? 'BIP Reinstatement Contract signed' : 'intake paperwork completed';
-        if (needsChecks) {
-            const refuse = async (message) => { await db.query('ROLLBACK'); return res.status(400).json({ error: message }); };
-            if (paymentConfirmed !== true) return refuse('Check off the payment for the assessment and any past due balance first.');
-            if (paperworkCompleted !== true) return refuse(s.kind === 'BIP Reinstate' ? 'Check off that the BIP Reinstatement Contract is signed.' : 'Check off that the intake paperwork is completed.');
-            const balRes = await db.query('SELECT AccountBalance FROM Clients WHERE ClientId = $1 FOR UPDATE', [s.client]);
-            // Stored sign: positive = owes. The payment must leave the account owing nothing.
-            const amountDue = Math.max(0, Math.round((Number(balRes.rows[0].accountbalance || 0) + s.fee) * 100) / 100);
-            if (s.payment + 0.005 < amountDue) {
-                return refuse(`${s.clientName} needs to pay $${amountDue.toFixed(2)} (the ${s.typeName} and any past due balance) before the ${s.typeName} can be completed.`);
-            }
+        // Assessments are begun (paid) and later completed instead (POST /api/assessments/begin and /complete)
+        if (s.category === 'Assessment') {
+            await db.query('ROLLBACK');
+            return res.status(400).json({ error: ASSESSMENT_BEGUN_INSTEAD });
         }
         const note = String(comments || '').trim();
         const { attendanceId, newBalance } = await recordAttendance(db, {
             client: s.client, group: null, date: s.date, sessionNumber: 1, paid: true, groupFee: s.fee, accountPaid: s.payment,
             paymentMethod: s.paymentMethod, voucherUsed: false, type: s.category, createdBy: viewer.employeeemail, feeType: `${s.category} Fee`,
-            paymentComments: String(paymentComments || '').trim(),
-            comments: needsChecks ? `${(note || s.typeName).replace(/\.+$/, '')}. Payment received and ${secondCheck}.` : note || s.typeName,
+            paymentComments: String(paymentComments || '').trim(), comments: note || s.typeName,
         });
         await db.query('UPDATE Attendance SET SessionTypeId = $1, Provider = $2, OpenedBy = $3, PaidOnOpen = $5 WHERE AttendanceId = $4', [s.sessionTypeId, s.provider, openedBy, attendanceId, paidOnOpen]);
-        // A closed assessment takes the client off the waiting list for an assessment
-        if (s.category === 'Assessment') {
-            const waiting = (await db.query('SELECT Assessor FROM Clients WHERE ClientId = $1 AND Assessor IS NOT NULL', [s.client])).rows[0];
-            if (waiting) {
-                await db.query('UPDATE Clients SET Assessor = NULL WHERE ClientId = $1', [s.client]);
-                await logClientChange(db, {
-                    clientId: s.client, changedBy: viewer.employeeemail, changeType: 'Assessor', oldValue: waiting.assessor, newValue: 'None',
-                    details: `${s.typeName} closed on ${s.date} with ${s.provider}.`,
-                });
-            }
-        }
         await db.query('COMMIT');
         await logAction(user, `${s.category} Closed`, `${s.typeName} for ${s.clientName} (Client ID ${s.client}) on ${s.date} with ${s.provider}: fee $${s.fee.toFixed(2)}, paid $${s.payment.toFixed(2)}${s.paymentMethod ? ` ${s.paymentMethod}` : ''}${paidOnOpen > 0 ? ` (plus $${paidOnOpen.toFixed(2)} paid when opened)` : ''}`);
         res.status(201).json({ success: true, attendanceId, newBalance });
+    } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
+        res.status(500).json({ error: err.message });
+    } finally {
+        db.release();
+    }
+});
+
+// ---- Assessments being worked on (lib/assessmentWork.js) ----
+
+// Begins an assessment: from a scheduled one (openSessionId) or on the spot. The payment must cover the fee and any past
+// due balance and be checked off as received (paymentConfirmed). The attendance is recorded today with the fee and the
+// payment, marked In Progress; the scheduled open session is cleared and the client comes off the waiting list.
+// Only a Business Administrator's fee is used; everyone else gets the price list's (checkIndividualSession).
+router.post('/api/assessments/begin', async (req, res) => {
+    const { openSessionId, comments, paymentComments, paymentConfirmed } = req.body;
+    const viewer = req.user;
+    if (!ASSESSMENT_WORK_ROLES.includes(viewer?.role)) return res.status(403).json({ error: 'Only counselors and the office can begin assessments.' });
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        const refuse = async (status, error) => { await db.query('ROLLBACK'); return res.status(status).json({ error }); };
+        let open = null;
+        if (openSessionId) {
+            open = (await db.query('SELECT ClientId, Category, CreatedBy, Provider, SessionTypeId, Fee FROM OpenIndividualSessions WHERE OpenSessionId = $1 FOR UPDATE', [openSessionId])).rows[0];
+            if (!open) return refuse(409, 'This assessment was already begun or removed. Refresh the list.');
+            if (open.category !== 'Assessment') return refuse(400, 'That open session is not an assessment.');
+            if (!canSeeIndividualSession(viewer, open)) return refuse(403, 'Only the employee who scheduled this assessment, its counselor, or an administrator can begin it.');
+            if (Number(open.clientid) !== Number(req.body.client)) return refuse(400, 'This assessment is for a different client. Refresh the list.');
+        }
+        const checked = await checkIndividualSession(db, { ...req.body, category: 'Assessment', date: todayLocal(), paymentMethod: 'Cash' }, viewer);
+        if (checked.error) return refuse(400, checked.error);
+        const s = checked.session;
+        if (open) s.fee = keptScheduledFee(viewer, open, s);
+        if (!worksOnAssessment(viewer, s)) return refuse(403, 'A counselor can only begin assessments they are the counselor on.');
+        const already = await db.query(
+            `SELECT 1 FROM Attendance WHERE Client = $1 AND SessionTypeId = $2 AND AssessmentStatus = 'In Progress' LIMIT 1`,
+            [s.client, s.sessionTypeId]
+        );
+        if (already.rows[0]) return refuse(409, `${s.clientName} already has a ${s.typeName} in progress. Add notes to it or complete it instead.`);
+        const balRes = await db.query('SELECT AccountBalance FROM Clients WHERE ClientId = $1 FOR UPDATE', [s.client]);
+        const problem = beginPaymentProblem({
+            balance: balRes.rows[0].accountbalance, fee: s.fee, payment: s.payment, paymentConfirmed, clientName: s.clientName, typeName: s.typeName,
+        });
+        if (problem) return refuse(400, problem);
+        const note = String(comments || '').trim();
+        const { attendanceId, newBalance } = await recordAttendance(db, {
+            client: s.client, group: null, date: s.date, sessionNumber: 1, paid: true, groupFee: s.fee, accountPaid: s.payment,
+            paymentMethod: s.paymentMethod, voucherUsed: false, type: 'Assessment', createdBy: viewer.employeeemail, feeType: 'Assessment Fee',
+            paymentComments: String(paymentComments || '').trim(), comments: `${s.typeName} begun. Payment received.`,
+            sessionTypeId: s.sessionTypeId, provider: s.provider,
+        });
+        await db.query(`UPDATE Attendance SET AssessmentStatus = 'In Progress', OpenedBy = $2 WHERE AttendanceId = $1`, [attendanceId, open?.createdby || viewer.employeeemail]);
+        if (note) {
+            await db.query(
+                `INSERT INTO Notes (Client, Date, "User", Comments, Category, ApprovalStatus, AttendanceId) VALUES ($1, NOW(), $2, $3, 'Assessment', NULL, $4)`,
+                [s.client, viewer.employeeemail, note, attendanceId]
+            );
+        }
+        if (openSessionId) await db.query('DELETE FROM OpenIndividualSessions WHERE OpenSessionId = $1', [openSessionId]);
+        await clearWaitingAssessor(db, s.client, viewer.employeeemail, `${s.typeName} begun on ${dateText(s.date)} with ${s.provider}.`);
+        await db.query('COMMIT');
+        await logAction(viewer.employeeemail, 'Assessment Begun', `${s.typeName} for ${s.clientName} (Client ID ${s.client}) on ${s.date} with ${s.provider}: fee $${s.fee.toFixed(2)}, paid $${s.payment.toFixed(2)}${s.paymentMethod ? ` ${s.paymentMethod}` : ''}`);
+        res.status(201).json({ success: true, attendanceId, newBalance });
+    } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
+        res.status(err.status || 500).json({ error: err.message });
+    } finally {
+        db.release();
+    }
+});
+
+const IN_PROGRESS_COLUMNS = `a.AttendanceId, a.Client AS ClientId, c.FirstName, c.LastName, c.DOCNumber, c.DocType, c.ProgramType,
+    a.SessionTypeId, COALESCE(st.Name, 'Assessment') AS SessionTypeName, COALESCE(st.Kind, 'Standard') AS Kind,
+    to_char(a.Date, 'YYYY-MM-DD') AS BeganOn, (CURRENT_DATE - a.Date) AS DaysOpen, a.Provider, a.GroupFee AS Fee, a.AccountPaid AS Paid,
+    a.PaymentMethod, COALESCE(a.OpenedBy, a.CreatedBy) AS OpenedBy, a.CreatedBy AS BegunBy, a.AssessmentStatus,
+    n.NoteCount, n.LastNoteOn`;
+const IN_PROGRESS_FROM = `Attendance a JOIN Clients c ON c.ClientId = a.Client LEFT JOIN SessionTypes st ON st.SessionTypeId = a.SessionTypeId
+    LEFT JOIN LATERAL (SELECT COUNT(*)::int AS NoteCount, MAX(x.Date) AS LastNoteOn FROM Notes x
+                       WHERE x.AttendanceId = a.AttendanceId AND x.ApprovalStatus IS DISTINCT FROM 'Denied') n ON TRUE`;
+
+// Assessments begun and not completed yet, oldest first: every one for admins, a counselor's own for counselors
+router.get('/api/assessments/in-progress', async (req, res) => {
+    try {
+        if (!ASSESSMENT_WORK_ROLES.includes(req.user?.role)) return res.json([]);
+        const result = await pool.query(
+            `SELECT ${IN_PROGRESS_COLUMNS} FROM ${IN_PROGRESS_FROM}
+             WHERE a.Type = 'Assessment' AND a.AssessmentStatus = 'In Progress'
+             ORDER BY a.Date, c.LastName, c.FirstName`
+        );
+        res.json(result.rows.filter(row => worksOnAssessment(req.user, row)));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// The assessment (In Progress or Completed) if the employee works on it: { row } or { status, error }
+// lock: hold the attendance row for the caller's transaction, so two people completing it at once can't both go through
+const assessmentFor = async (db, attendanceId, viewer, lock = false) => {
+    if (!/^\d+$/.test(String(attendanceId))) return { status: 404, error: 'Assessment not found.' };
+    if (lock) await db.query('SELECT 1 FROM Attendance WHERE AttendanceId = $1 FOR UPDATE', [attendanceId]);
+    const r = await db.query(
+        `SELECT ${IN_PROGRESS_COLUMNS} FROM ${IN_PROGRESS_FROM} WHERE a.AttendanceId = $1 AND a.Type = 'Assessment'`,
+        [attendanceId]
+    );
+    const row = r.rows[0];
+    if (!row) return { status: 404, error: 'Assessment not found.' };
+    if (!worksOnAssessment(viewer, row)) return { status: 403, error: 'Only the assessment\'s counselor or an administrator can work on it.' };
+    return { row };
+};
+
+// An assessment with its notes, newest first
+router.get('/api/assessments/:id', async (req, res) => {
+    try {
+        const found = await assessmentFor(pool, req.params.id, req.user);
+        if (found.error) return res.status(found.status).json({ error: found.error });
+        const notes = await pool.query(
+            `SELECT NoteId, Date, "User", Comments, EditedBy, EditedOn FROM Notes
+             WHERE AttendanceId = $1 AND ApprovalStatus IS DISTINCT FROM 'Denied' ORDER BY Date DESC, NoteId DESC`,
+            [req.params.id]
+        );
+        res.json({ ...found.row, notes: notes.rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Adds a note to an assessment in progress. It is also a case note on the client's account (category Assessment).
+router.post('/api/assessments/:id/notes', async (req, res) => {
+    try {
+        const found = await assessmentFor(pool, req.params.id, req.user);
+        if (found.error) return res.status(found.status).json({ error: found.error });
+        if (found.row.assessmentstatus !== 'In Progress') return res.status(409).json({ error: 'This assessment is already completed. Add a case note on the client\'s account instead.' });
+        const problem = noteProblem(req.body.comments);
+        if (problem) return res.status(400).json({ error: problem });
+        const text = String(req.body.comments).trim();
+        const inserted = await pool.query(
+            `INSERT INTO Notes (Client, Date, "User", Comments, Category, ApprovalStatus, AttendanceId) VALUES ($1, NOW(), $2, $3, 'Assessment', NULL, $4)
+             RETURNING NoteId, Date, "User", Comments, EditedBy, EditedOn`,
+            [found.row.clientid, req.user.employeeemail, text, req.params.id]
+        );
+        await logAction(req.user.employeeemail, 'Assessment Note Added', `${found.row.sessiontypename} for Client ID ${found.row.clientid} (attendance ${req.params.id})`);
+        res.status(201).json(inserted.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Completes an assessment in progress. A BIP intake or reinstate needs its paperwork box checked (paperworkCompleted);
+// completing one is what clears a BIP client for group (lib/sql.js). An optional last note is added with it.
+router.post('/api/assessments/:id/complete', async (req, res) => {
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        const refuse = async (status, error) => { await db.query('ROLLBACK'); return res.status(status).json({ error }); };
+        const found = await assessmentFor(db, req.params.id, req.user, true);
+        if (found.error) return refuse(found.status, found.error);
+        const a = found.row;
+        if (a.assessmentstatus !== 'In Progress') return refuse(409, 'This assessment was already completed.');
+        const problem = completeProblem({ kind: a.kind, paperworkCompleted: req.body.paperworkCompleted });
+        if (problem) return refuse(400, problem);
+        const note = String(req.body.comments || '').trim();
+        if (note) {
+            const noteError = noteProblem(note);
+            if (noteError) return refuse(400, noteError);
+        }
+        const paperwork = PAPERWORK_KINDS.includes(a.kind) ? ` ${paperworkLabel(a.kind)}.` : '';
+        await db.query(
+            `INSERT INTO Notes (Client, Date, "User", Comments, Category, ApprovalStatus, AttendanceId) VALUES ($1, NOW(), $2, $3, 'Assessment', NULL, $4)`,
+            [a.clientid, req.user.employeeemail, `${a.sessiontypename} completed.${paperwork}${note ? ` ${note}` : ''}`, req.params.id]
+        );
+        await db.query(
+            `UPDATE Attendance SET AssessmentStatus = 'Completed', CompletedOn = NOW(), CompletedBy = $2,
+                 Comments = COALESCE(NULLIF(TRIM(Comments), ''), $3) || $4 WHERE AttendanceId = $1`,
+            [req.params.id, req.user.employeeemail, a.sessiontypename, ` Completed.${paperwork}`]
+        );
+        await logClientChange(db, {
+            clientId: a.clientid, changedBy: req.user.employeeemail, changeType: 'Assessment Completed',
+            newValue: a.sessiontypename, details: `Begun ${dateText(a.beganon)} with ${a.provider}.${paperwork}${note ? ` ${note}` : ''}`,
+        });
+        await db.query('COMMIT');
+        await logAction(req.user.employeeemail, 'Assessment Completed', `${a.sessiontypename} for ${a.lastname}, ${a.firstname} (Client ID ${a.clientid}), begun ${a.beganon}`);
+        res.json({ success: true });
     } catch (err) {
         await db.query('ROLLBACK').catch(() => {});
         res.status(500).json({ error: err.message });

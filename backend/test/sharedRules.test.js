@@ -112,3 +112,22 @@ test('group schedules are read the same way', async () => {
         assert.deepEqual(server(s), browser(s), s);
     }
 });
+
+test('assessment rules match: who works on one, what is due to begin, the paperwork box', async () => {
+    const browser = await frontend('assessmentWork.ts');
+    const server = require('../lib/assessmentWork');
+    assert.deepEqual(browser.ASSESSMENT_WORK_ROLES, server.ASSESSMENT_WORK_ROLES);
+    assert.deepEqual(browser.ASSESSMENT_ADMIN_ROLES, server.ASSESSMENT_ADMIN_ROLES);
+    assert.deepEqual(browser.PAPERWORK_KINDS, server.PAPERWORK_KINDS);
+    assert.equal(browser.NOTE_MAX, server.NOTE_MAX);
+    for (const balance of [-500, -20, 0, 0.01, 50, '75.50', null]) {
+        for (const fee of [0, 40, 150.5]) assert.equal(browser.amountDueToBegin(balance, fee), server.amountDueToBegin(balance, fee), `balance ${balance} fee ${fee}`);
+    }
+    for (const kind of ['Standard', 'BIP Intake', 'BIP Reinstate']) assert.equal(browser.paperworkLabel(kind), server.paperworkLabel(kind));
+    for (const role of ['Counselor', 'Office Admin', 'Business Administrator', 'Polygrapher']) {
+        for (const displayname of ['Pat Lee', ' pat lee ', 'Sam Ray']) {
+            const viewer = { role, displayname };
+            assert.equal(browser.worksOnAssessment(viewer, { provider: 'Pat Lee' }), server.worksOnAssessment(viewer, { provider: 'Pat Lee' }), `${role} ${displayname}`);
+        }
+    }
+});

@@ -57,6 +57,11 @@ const ALLOWED = [
     ['PUT', /^\/api\/individual-sessions\/open$/],
     ['DELETE', /^\/api\/individual-sessions\/open\/\d+$/],
     ['POST', /^\/api\/individual-sessions\/close$/],
+    // Assessments they're the counselor on: begin (with the payment), see, add notes, complete (routes/sessions.js keeps a
+    // counselor to their own, lib/assessmentWork.js)
+    ['POST', /^\/api\/assessments\/begin$/],
+    ['GET', /^\/api\/assessments\/(in-progress|\d+)$/],
+    ['POST', /^\/api\/assessments\/\d+\/(notes|complete)$/],
     // Assessment calendar: open their own times and schedule clients in them (routes/assessmentAppointments.js keeps a
     // counselor to their own times)
     ['GET', /^\/api\/assessment-appointments$/],

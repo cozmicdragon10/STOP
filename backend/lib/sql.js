@@ -4,11 +4,12 @@
 // monthly group fee rules, the first check-in of the month, or BIP weeks
 const INDIVIDUAL_SESSION_TYPES = ['Assessment', 'Individual'];
 const GROUP_ATTENDANCE = `Type NOT IN ('Assessment', 'Individual')`;
-// A BIP client's completed BIP assessments: intakes and reinstates done here, and intakes done at another provider
+// A BIP client's completed BIP assessments: intakes and reinstates done here (not ones begun and still In Progress), and
+// intakes done at another provider
 // At is when the row was entered (NULL on older attendance rows), used to order an assessment and a discharge on the same day.
 const BIP_ASSESSMENTS_FOR = (client) => `
     SELECT a.Date AS Done, a.CreatedOn AS At, st.Kind, 'here' AS Source FROM Attendance a JOIN SessionTypes st ON st.SessionTypeId = a.SessionTypeId
-    WHERE a.Client = ${client} AND st.Kind IN ('BIP Intake', 'BIP Reinstate')
+    WHERE a.Client = ${client} AND st.Kind IN ('BIP Intake', 'BIP Reinstate') AND a.AssessmentStatus IS DISTINCT FROM 'In Progress'
     UNION ALL
     SELECT o.AssessmentDate, o.RecordedOn, 'BIP Intake', 'outside' FROM OutsideBipAssessments o WHERE o.ClientId = ${client}`;
 // The client's last discharge as a one-row table (Day, Ts); no rows when they have never been discharged

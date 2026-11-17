@@ -155,6 +155,12 @@ reports changes back. Saves that finish after another client was opened don't ov
 - **Poly fee payment corrections** (`backend/lib/poly.js`): adjusting, refunding, or disputing a poly fee payment
   moves poly fee paid, which never goes below $0. Booking a polygraph spends the poly fee (paid resets to $0), so
   taking money back after that is owed on the account balance instead.
+- **Assessments** (`backend/lib/assessmentWork.js`, `frontend/src/utils/assessmentWork.ts`): booked on the
+  Assessment Calendar (Scheduled), then begun once the client pays the fee plus any past due balance (cash only, no
+  refund after). Beginning records the attendance that day, In Progress. The counselor adds notes (also saved as
+  Assessment case notes) for as long as it takes, then completes it; a BIP intake or reinstate clears the client for
+  group only when completed. Counselors work on their own assessments; Office Admins and Business Administrators on
+  all. Only a Business Administrator can change an assessment's price.
 - **New accounts**: New User refuses an email that already has an account; existing accounts are changed with Edit,
   which signs the person out when their password changes or the account is deactivated.
 
@@ -171,7 +177,7 @@ reports changes back. Saves that finish after another client was opened don't ov
   - The open client account reloads when you come back to the app from another window.
 
 Some rules exist in both the backend and the frontend (the monthly fee rule, the first check-in limit, BIP check-in
-messages, call-in reasons). `backend/test/sharedRules.test.js` fails if the two copies drift apart.
+messages, call-in reasons, assessment rules). `backend/test/sharedRules.test.js` fails if the two copies drift apart.
 
 ## API Endpoints
 

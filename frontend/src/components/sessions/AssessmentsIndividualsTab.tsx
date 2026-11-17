@@ -1,20 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CalendarDays, ClipboardList, Hourglass, Printer, Trash2 } from 'lucide-react';
+import { ClipboardList, Hourglass, MessageSquare, PlayCircle, Trash2 } from 'lucide-react';
 import AssessmentCalendar from './AssessmentCalendar';
+import AssessmentBeginForm from './AssessmentBeginForm';
+import AssessmentWorkspace from './AssessmentWorkspace';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import {
-  closeIndividualSession, deleteOpenIndividualSession, getBipIntake, getClosedIndividualSessions, getOpenIndividualSessions,
-  getSessionTypes, saveOpenIndividualSession, submitAccountPayment,
+  deleteOpenIndividualSession, getAssessmentsInProgress, getClosedIndividualSessions, getOpenIndividualSessions, getSessionTypes,
 } from '../../api';
-import type { BipIntake, ClosedIndividualSession, IndividualCategory, IndividualSessionPayload, OpenIndividualSession, SessionType } from '../../api';
-import ClientPicker from '../ClientPicker';
-import CardPaymentFields from '../payments/CardPaymentFields';
-import { emptyCardBilling, type CardBilling } from '../payments/cardBilling';
+import type { AssessmentInProgress, ClosedIndividualSession, OpenIndividualSession, SessionType } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
-import { formatBalance, formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
-import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
-import { printAttendanceReceipt, printReceipt, type Receipt } from '../../utils/receipt';
-import { idText } from '../../utils/clients';
+import { ASSESSMENT_ADMIN_ROLES, LONG_OPEN_DAYS, daysOpenText } from '../../utils/assessmentWork';
 
 interface TabClient {
   clientid: number;
@@ -27,9 +22,6 @@ interface TabClient {
   programstatus?: string | null;
   // The counselor the client is waiting to be assessed by
   assessor?: string | null;
-  // Card payments blocked by a Business Administrator: cash only
-  cardpaymentsblocked?: boolean | null;
-  cardblockreason?: string | null;
 }
 
 interface Employee {
@@ -47,96 +39,51 @@ interface Props {
   user: { employeeemail: string; displayname?: string; role?: string };
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
-  // Called after a session is closed or a card is processed so balances and Last Attended refresh
+  // Called after an assessment is begun so balances and Last Attended refresh
   onSaved?: () => void;
 }
 
-type PaymentMethod = 'Cash' | 'Credit Card';
+// What the main area shows: the calendar, the Begin steps (for a scheduled assessment, or a new one), or one assessment
+type View =
+  | { kind: 'calendar' }
+  | { kind: 'begin'; open: OpenIndividualSession | null; clientId?: string; counselor?: string }
+  | { kind: 'work'; attendanceId: number };
+type PanelTab = 'scheduled' | 'progress' | 'completed';
 
-interface FormState {
-  // Set while an open session is loaded for review and closing
-  openSessionId: number | null;
-  category: IndividualCategory;
-  clientId: string;
-  sessionTypeId: string;
-  date: string;
-  fee: string;
-  payment: string;
-  paymentMethod: PaymentMethod;
-  provider: string;
-  // About the assessment or session itself (kept on the attendance row)
-  comments: string;
-  // About the payment (added to the payment's ledger row)
-  paymentComments: string;
-  card: CardBilling;
-  // Set once a payment (cash or card) is processed: the amount is on the account, so the session itself records no payment
-  receipt: Receipt | null;
-  // Cash already applied to the account when this individual session was saved as open (already in the balance)
-  paidOnOpen: number;
-}
-
-const CATEGORIES: IndividualCategory[] = ['Assessment', 'Individual'];
-// Individual sessions moved to the Attendance tab (a counselor's individual group). The Individual choice stays here only
-// while individual sessions opened before the move are still open, so they can be finished.
-const INDIVIDUAL_MOVED = 'New individual sessions are checked in on the Attendance tab: pick the counselor’s individual group. Only individual sessions already open can be finished here.';
-// Roles that see every open session; everyone else sees the ones they opened or are the counselor/therapist on
-const ADMIN_ROLES = ['Business Administrator', 'Office Admin'];
-// Client program types that can have "SO clients only" price list entries (the server checks too)
-const SO_CLIENT_TYPES = ['State SO', 'Federal SO', 'Voluntary SO'];
-
-const money = (n: number) => `$${n.toFixed(2)}`;
-const cents = (n: number) => Math.round(n * 100) / 100;
 const errorMessage = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 const formatDay = (ymd: string) => (ymd === todayLocal() ? 'Today' : new Date(`${ymd}T00:00:00`).toLocaleDateString());
 
-// Assessments and individual sessions: one client per session, saved as open and then closed like a group check-in.
-// Closing records the attendance, the fee from the price list, and any cash payment. An individual session can also be
-// paid when it is saved as open: cash is applied to the account then, and card payments go on the account when processed,
-// so either stays there even if the session is discarded.
+// Assessments: scheduled on the calendar, begun once the payment is taken (the attendance is recorded that day), then
+// worked on by the counselor (notes, as often as needed, for days or weeks) until it is completed.
 export default function AssessmentsIndividualsTab({ active, clients, employees, user, onSuccess, onError, onSaved }: Props) {
   const employeeLabel = useEmployeeLabel();
-  const isAdmin = user.role === 'Business Administrator';
-  const blankForm = useCallback((category: IndividualCategory = 'Assessment'): FormState => ({
-    openSessionId: null, category, clientId: '', sessionTypeId: '', date: todayLocal(), fee: '', payment: '',
-    // A counselor starts with themselves; everyone else picks the counselor
-    paymentMethod: 'Cash', provider: user.role === 'Counselor' ? user.displayname || '' : '', comments: '', paymentComments: '', card: emptyCardBilling, receipt: null,
-    paidOnOpen: 0,
-  }), [user.displayname, user.role]);
-
-  const [form, setForm] = useState<FormState>(() => blankForm());
-  const [reviewing, setReviewing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState('');
+  const isAdmin = ASSESSMENT_ADMIN_ROLES.includes(user.role || '');
+  const [view, setView] = useState<View>({ kind: 'calendar' });
+  const [panelTab, setPanelTab] = useState<PanelTab>('progress');
   const [sessionTypes, setSessionTypes] = useState<SessionType[]>([]);
-  const [panelTab, setPanelTab] = useState<'open' | 'closed'>('open');
-  const [openSessions, setOpenSessions] = useState<OpenIndividualSession[]>([]);
-  const [closedSessions, setClosedSessions] = useState<ClosedIndividualSession[]>([]);
+  const [scheduled, setScheduled] = useState<OpenIndividualSession[]>([]);
+  const [inProgress, setInProgress] = useState<AssessmentInProgress[]>([]);
+  const [completed, setCompleted] = useState<ClosedIndividualSession[]>([]);
   const [listError, setListError] = useState('');
-  const [expandedClosed, setExpandedClosed] = useState<number | null>(null);
-  // Waiting for Assessment list: one assessor's clients, or everyone's ('')
-  // The tab shows the Assessment Calendar; the session form replaces it while an open session is being edited or closed,
-  // or a new on-the-fly assessment (no scheduled time) is being entered (composing)
-  const [composing, setComposing] = useState(false);
+  // Waiting for Assessment list: one assessor's clients, or everyone's (''); remembered per browser
   const [waitingFor, setWaitingFor] = useState(() => {
     try { return localStorage.getItem('waitingForAssessor') || ''; } catch { return ''; }
   });
   useEffect(() => {
     try { localStorage.setItem('waitingForAssessor', waitingFor); } catch { /* storage unavailable */ }
   }, [waitingFor]);
-  // Closing a BIP intake or reinstate: payment taken (first), then paperwork completed / contract signed; both are needed to close
-  const [paymentChecked, setPaymentChecked] = useState(false);
-  const [paperworkChecked, setPaperworkChecked] = useState(false);
-  // The client's last BIP intake as of the session date, for pricing a BIP reinstate; key is "clientId|date"
-  const [intake, setIntake] = useState<{ key: string; data: BipIntake | null } | null>(null);
 
   const loadLists = useCallback(async () => {
     try {
-      const [open, closed] = await Promise.all([getOpenIndividualSessions(user.employeeemail), getClosedIndividualSessions(user.employeeemail)]);
-      setOpenSessions(open);
-      setClosedSessions(closed);
+      const [open, working, closed] = await Promise.all([
+        getOpenIndividualSessions(user.employeeemail), getAssessmentsInProgress(), getClosedIndividualSessions(user.employeeemail),
+      ]);
+      setScheduled(open.filter(o => o.category === 'Assessment'));
+      setInProgress(working);
+      setCompleted(closed.filter(c => c.category === 'Assessment'));
       setListError('');
     } catch (err) {
-      setListError(errorMessage(err, 'Failed to load sessions.'));
+      setListError(errorMessage(err, 'Failed to load assessments.'));
     }
   }, [user.employeeemail]);
 
@@ -148,279 +95,22 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
     loadLists();
   }, [active, loadLists]);
 
-  const set = (patch: Partial<FormState>) => { setForm(f => ({ ...f, ...patch })); setFormError(''); };
-
-  const client = clients.find(c => String(c.clientid) === form.clientId) ?? null;
-  const clientIsBip = client?.programtype === 'BIP';
-  const clientIsSo = SO_CLIENT_TYPES.includes(client?.programtype || '');
-  // Inactive entries stay pickable only when an open session already uses them; BIP-only and SO-only ones are hidden for other clients
-  const typeChoices = sessionTypes.filter(t => t.category === form.category
-    && ((t.active && (!client || ((clientIsBip || !t.biponly) && (clientIsSo || !t.soonly)))) || String(t.sessiontypeid) === form.sessionTypeId));
-  const sessionType = sessionTypes.find(t => String(t.sessiontypeid) === form.sessionTypeId) ?? null;
-
-  // A BIP reinstate is priced by the time since the client's last BIP intake: the price list fee under 6 months,
-  // the late fee from 6 months to a year, and not allowed after that (the server applies the same rule)
-  const isReinstate = sessionType?.kind === 'BIP Reinstate';
-  const intakeKey = isReinstate && form.clientId && form.date ? `${form.clientId}|${form.date}` : '';
-  useEffect(() => {
-    if (!intakeKey) return;
-    let cancelled = false;
-    const [id, date] = intakeKey.split('|');
-    getBipIntake(Number(id), date)
-      .then(data => { if (!cancelled) setIntake({ key: intakeKey, data }); })
-      .catch(err => { if (!cancelled) setFormError(err.message || 'Failed to look up the BIP intake.'); });
-    return () => { cancelled = true; };
-  }, [intakeKey]);
-  // null while the lookup for the current client and date is still loading
-  const intakeInfo = intake && intake.key === intakeKey ? intake : null;
-  const reinstatePrice = !isReinstate || !intakeInfo?.data || intakeInfo.data.needsOurIntake ? null
-    : intakeInfo.data.window === 'early' ? Number(sessionType!.fee)
-    : intakeInfo.data.window === 'late' ? Number(sessionType!.latefee ?? sessionType!.fee)
-    : null;
-  const listFee = isReinstate ? reinstatePrice : sessionType ? Number(sessionType.fee) : null;
-
-  // A Business Administrator's fee box follows the reinstate price unless they typed a different amount
-  const reinstatePriceKey = reinstatePrice === null || !sessionType ? null : `${sessionType.sessiontypeid}|${sessionType.fee}|${sessionType.latefee}|${reinstatePrice}`;
-  const [pricedFor, setPricedFor] = useState<string | null>(null);
-  if (reinstatePriceKey !== pricedFor) {
-    setPricedFor(reinstatePriceKey);
-    if (reinstatePrice !== null && sessionType) {
-      const prices = [sessionType.fee, sessionType.latefee].filter(p => p !== null).map(p => Number(p).toFixed(2));
-      setForm(f => (f.fee === '' || prices.includes(Number(f.fee).toFixed(2)) ? { ...f, fee: reinstatePrice.toFixed(2) } : f));
-    }
-  }
-  // Only active counselors can be picked
-  const providers = Array.from(new Set(employees
+  // Only active counselors can be an assessment's counselor
+  const counselors = Array.from(new Set(employees
     .filter(e => e.active !== false && e.role === 'Counselor' && e.displayname)
     .map(e => e.displayname))).sort((a, b) => a.localeCompare(b));
-  // An open session saved earlier under someone who isn't a counselor still shows them, so reopening it keeps them
-  const savedNonCounselor = form.provider && !providers.includes(form.provider) ? form.provider : '';
-
-  // Only Business Administrators change the fee; for everyone else it is the price list's (the server enforces this too)
-  const fee = isAdmin ? Number(form.fee) : (listFee ?? 0);
-  const enteredPayment = Number(form.payment || 0);
-  // What this session still has to record; a processed card is already in the balance
-  const payment = form.receipt ? 0 : enteredPayment;
-  const balanceBefore = form.receipt ? form.receipt.newBalance : Number(client?.accountbalance || 0);
-  const balanceAfter = cents(balanceBefore + (Number.isFinite(fee) ? fee : 0) - (Number.isFinite(payment) ? payment : 0));
-  const bipIndividual = form.category === 'Individual' && client?.programtype === 'BIP';
-  // Only individual sessions already open here can be finished; new ones are checked in on the Attendance tab
-  const newIndividual = form.category === 'Individual' && !form.openSessionId;
-  // Assessments are paid in cash only (the server checks too)
-  const cashOnly = form.category === 'Assessment';
-  // A client blocked from card payments pays cash, even if Credit Card was picked before they were chosen
-  const cardBlockedClient = cardBlocked(client);
-  const paymentMethod: PaymentMethod = cashOnly || cardBlockedClient ? 'Cash' : form.paymentMethod;
-  // A card amount only counts once it is processed, so it must be processed or cleared before saving or closing
-  const cardPending = paymentMethod === 'Credit Card' && !form.receipt && enteredPayment > 0;
-  // Process Payment applies an individual session's payment (cash or card) to the account right away
-  const canProcess = !cashOnly && !form.receipt && !!client && !bipIndividual && Number.isFinite(enteredPayment) && enteredPayment > 0 && !saving;
-  const commentsLabel = form.category === 'Assessment' ? 'Assessment Comments' : 'Session Comments';
-
-  // A BIP intake or BIP reinstate must be paid in full along with any past due balance (the account can't owe anything
-  // after closing), then its second box checked: intake paperwork completed, or the reinstatement contract signed
-  const needsChecks = sessionType?.kind === 'BIP Intake' || sessionType?.kind === 'BIP Reinstate';
-  const secondCheckLabel = sessionType?.kind === 'BIP Reinstate' ? 'BIP Reinstatement Contract signed' : 'Intake paperwork completed';
-  const pastDue = Math.max(0, cents(balanceBefore));
-  const amountDue = Math.max(0, cents(balanceBefore + (Number.isFinite(fee) ? fee : 0)));
-  const paymentCovers = Number.isFinite(payment) && payment + 0.005 >= amountDue;
-  // Lowering the payment below the amount due unchecks both boxes
-  const paymentDone = needsChecks && paymentChecked && paymentCovers;
-  const paperworkDone = paymentDone && paperworkChecked;
-  const resetChecks = () => { setPaymentChecked(false); setPaperworkChecked(false); };
-
-  const problem = (): string | null => {
-    if (newIndividual) return INDIVIDUAL_MOVED;
-    if (!client) return 'Choose a client.';
-    if (bipIndividual) return 'BIP clients do not have individual sessions.';
-    if (!sessionType) return `Choose a${form.category === 'Assessment' ? 'n assessment' : 'n individual session'} type.`;
-    if (!form.date) return 'Enter the session date.';
-    if (sessionType.biponly && !clientIsBip) return `${sessionType.name} is only for BIP clients.`;
-    if (sessionType.soonly && !clientIsSo) return `${sessionType.name} is only for SO clients.`;
-    if (isReinstate) {
-      if (!intakeInfo) return 'Still checking the client\'s last BIP intake. Try again in a moment.';
-      if (!intakeInfo.data) return `No BIP Intake or DV Assessment on record for this client, so a ${sessionType.name} can't be done. Do a new BIP Intake or DV Assessment instead.`;
-      if (intakeInfo.data.needsOurIntake) return `This client was discharged after an intake done at another provider, so a ${sessionType.name} can't be done. Do our BIP Intake or DV Assessment instead.`;
-      if (intakeInfo.data.window === 'expired') return `It has been a year or more since the last ${intakeInfo.data.intakename}, so a ${sessionType.name} can't be done. Do a new BIP Intake or DV Assessment instead.`;
-    }
-    if (!form.provider.trim()) return 'Choose the counselor or therapist.';
-    if (isAdmin && (form.fee === '' || !Number.isFinite(fee) || fee < 0)) return 'Enter a fee of $0.00 or more.';
-    if (!Number.isFinite(payment) || payment < 0) return 'Enter a payment of $0.00 or more.';
-    if (cardPending) return 'Press Process Payment to apply the card payment, or clear the amount.';
-    return null;
-  };
-
-  const payload = (): IndividualSessionPayload => ({
-    openSessionId: form.openSessionId, client: Number(form.clientId), category: form.category, sessionTypeId: Number(form.sessionTypeId),
-    date: form.date, fee: cents(fee), payment: cents(payment), paymentMethod, provider: form.provider.trim(),
-    comments: form.comments.trim(), paymentComments: form.paymentComments.trim(), user: user.employeeemail,
-    paymentConfirmed: paymentDone, paperworkCompleted: paperworkDone,
-  });
-
-  const pickType = (id: string) => {
-    const t = sessionTypes.find(s => String(s.sessiontypeid) === id);
-    set({ sessionTypeId: id, fee: t ? Number(t.fee).toFixed(2) : '' });
-  };
-
-  const run = async (action: () => Promise<void>) => {
-    const p = problem();
-    if (p) { setFormError(p); return; }
-    setSaving(true);
-    setFormError('');
-    try {
-      await action();
-    } catch (err) {
-      // Shown in the form, which keeps what was entered so it can be retried
-      setFormError(errorMessage(err, 'Something went wrong.'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // Saved right away, separately from the session, so the payment stands whether or not the session is ever closed
-  // Cash or card: applied to the account now, with a receipt that can be printed
-  const processPayment = async () => {
-    if (!client || !canProcess) return;
-    const amount = cents(enteredPayment);
-    const method = paymentMethod;
-    setSaving(true);
-    setFormError('');
-    try {
-      const res = await submitAccountPayment({
-        client: client.clientid,
-        amount,
-        comments: form.paymentComments.trim() || `${method} payment processed for ${sessionType?.name ?? 'individual'} session.`,
-        createdBy: user.employeeemail,
-        paymentMethod: method,
-      });
-      const receipt: Receipt = {
-        clientName: `${client.lastname}, ${client.firstname}`,
-        docNumber: idText(client),
-        amount,
-        method,
-        newBalance: Number(res.newBalance),
-        transactionIds: res.transactionIds,
-        processedBy: user.employeeemail,
-        date: new Date().toLocaleString(),
-      };
-      setForm(f => (f.clientId === String(client.clientid) ? { ...f, receipt } : f));
-      onSuccess(`${method} payment processed for ${client.firstname} ${client.lastname}.`);
-      onSaved?.();
-    } catch (err) {
-      setFormError(errorMessage(err, 'Payment could not be processed.'));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleSaveOpen = () => run(async () => {
-    const res = await saveOpenIndividualSession(payload());
-    // An individual session's cash payment is applied to the account when it is saved
-    const paidNow = res.newBalance !== null && res.newBalance !== undefined;
-    onSuccess(`${form.category} for ${client!.lastname}, ${client!.firstname} saved to Open. ${
-      paidNow ? `The ${money(payment)} payment was applied to the account (new balance ${formatBalance(res.newBalance!)}); the fee has not been charged yet.`
-      : form.receipt ? `The ${form.receipt.method.toLowerCase()} payment is on the account; the fee has not been charged yet.` : 'Nothing has been charged yet.'}`);
-    setForm(blankForm(form.category));
-    setReviewing(false);
-    setComposing(false);
-    setPanelTab('open');
-    loadLists();
-    if (paidNow) onSaved?.();
-  });
-
-  // A receipt for the session being reviewed: what closing will record, and anything already paid
-  const printPendingReceipt = () => {
-    if (!client) return;
-    printAttendanceReceipt({
-      clientName: `${client.lastname}, ${client.firstname}`, docNumber: idText(client),
-      sessionKind: form.category, sessionName: sessionType?.name ?? form.category, sessionDate: form.date, provider: form.provider || null,
-      fee: Number.isFinite(fee) ? fee : 0,
-      payments: [
-        { label: 'Paid when the session was opened', amount: form.paidOnOpen, method: 'Cash', alreadyApplied: true },
-        { label: 'Payment processed', amount: form.receipt?.amount ?? 0, method: form.receipt?.method, alreadyApplied: true },
-        { label: 'Payment', amount: Number.isFinite(payment) ? payment : 0, method: paymentMethod },
-      ],
-      balanceBefore, balanceAfter, clientId: client.clientid,
-    }, onError);
-  };
-
-  const printClosedReceipt = (c: ClosedIndividualSession) => {
-    const paidOnOpen = Number(c.paidonopen || 0);
-    printAttendanceReceipt({
-      clientName: `${c.lastname}, ${c.firstname}`, docNumber: idText(clients.find(x => x.clientid === c.clientid)),
-      sessionKind: c.category, sessionName: c.sessiontypename || c.category, sessionDate: c.sessiondate, provider: c.provider,
-      fee: Number(c.fee || 0),
-      payments: [
-        { label: 'Paid when the session was opened', amount: paidOnOpen, method: 'Cash', alreadyApplied: true },
-        { label: paidOnOpen > 0 ? 'Paid when the session was closed' : 'Payment', amount: Number(c.payment || 0), method: c.paymentmethod },
-      ],
-      clientId: c.clientid,
-    }, onError);
-  };
-
-  const handleClose = () => run(async () => {
-    const res = await closeIndividualSession(payload());
-    onSuccess(`${needsChecks ? `${sessionType!.name} completed` : `${form.category} closed`} for ${client!.lastname}, ${client!.firstname}. New balance ${formatBalance(res.newBalance)}.`);
-    setForm(blankForm(form.category));
-    setReviewing(false);
-    setComposing(false);
-    resetChecks();
-    loadLists();
-    onSaved?.();
-  });
-
-  // Back to the calendar, dropping what's on the form (an open session stays open as it was last saved)
-  const backToCalendar = () => {
-    setForm(blankForm(form.category));
-    setReviewing(false);
-    setComposing(false);
-    setFormError('');
-    resetChecks();
-  };
-  // A new assessment without a scheduled time
-  const startNewAssessment = () => {
-    setForm(blankForm('Assessment'));
-    setReviewing(false);
-    setFormError('');
-    resetChecks();
-    setComposing(true);
-  };
-
-  const resume = (o: OpenIndividualSession) => {
-    // An assessment from the Assessment Calendar has no type yet: it opens for editing so the type (and fee) is picked
-    const typed = o.sessiontypeid !== null;
-    setForm({
-      openSessionId: o.opensessionid, category: o.category, clientId: String(o.clientid), sessionTypeId: typed ? String(o.sessiontypeid) : '',
-      date: o.sessiondate, fee: typed ? Number(o.fee).toFixed(2) : '', payment: Number(o.payment) > 0 ? Number(o.payment).toFixed(2) : '',
-      paymentMethod: o.paymentmethod || 'Cash', provider: o.provider || '', comments: o.comments || '', paymentComments: o.paymentcomments || '',
-      card: emptyCardBilling, receipt: null, paidOnOpen: Number(o.paidonopen || 0),
-    });
-    setFormError(typed ? '' : `Choose the ${o.category === 'Assessment' ? 'assessment' : 'session'} type, then review to close it.`);
-    resetChecks();
-    setReviewing(typed);
-  };
 
   const discard = async (o: OpenIndividualSession) => {
-    if (!window.confirm(`Discard the open ${o.category.toLowerCase()} for ${o.lastname}, ${o.firstname}? The fee was not charged, so nothing is undone. Any payment already taken stays on the account.`)) return;
+    if (!window.confirm(`Remove the scheduled assessment for ${o.lastname}, ${o.firstname}? Nothing was charged.`)) return;
     try {
       await deleteOpenIndividualSession(o.opensessionid, user.employeeemail);
-      if (form.openSessionId === o.opensessionid) { setForm(blankForm(form.category)); setReviewing(false); setComposing(false); }
-      onSuccess(`Open ${o.category.toLowerCase()} for ${o.lastname}, ${o.firstname} discarded.`);
+      if (view.kind === 'begin' && view.open?.opensessionid === o.opensessionid) setView({ kind: 'calendar' });
+      onSuccess(`Scheduled assessment for ${o.lastname}, ${o.firstname} removed.`);
       loadLists();
     } catch (err) {
-      onError(errorMessage(err, 'Failed to discard the session.'));
+      onError(errorMessage(err, 'Failed to remove the assessment.'));
     }
   };
-
-  // The form and the side panel always show the same category; switching keeps the client, date, and provider
-  const panelCategory = form.category;
-  const switchCategory = (c: IndividualCategory) => {
-    if (c !== form.category) setForm(f => ({ ...blankForm(c), clientId: f.clientId, date: f.date, provider: f.provider }));
-  };
-  const shownOpen = openSessions.filter(o => o.category === panelCategory);
-  const shownCategories = openSessions.some(o => o.category === 'Individual') || form.category === 'Individual' ? CATEGORIES : CATEGORIES.slice(0, 1);
-  const shownClosed = closedSessions.filter(c => c.category === panelCategory);
-  const panelNoun = panelCategory === 'Assessment' ? 'assessments' : 'individual sessions';
 
   // Active clients waiting for an assessment, with how many each assessor has
   const waiting = clients.filter(c => c.assessor && c.programstatus === 'Active')
@@ -429,448 +119,147 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
     .sort(([a], [b]) => a.localeCompare(b));
   const shownWaiting = waitingFor ? waiting.filter(c => c.assessor === waitingFor) : waiting;
 
-  const label = 'block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5';
-  const input = 'w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm';
-  const blockMinus = (e: React.KeyboardEvent) => { if (e.key === '-' || e.key === 'e' || e.key === 'E') e.preventDefault(); };
-
-  // Shown on the entry form, and in an intake's review where the payment is taken
-  const commentsField = (
-    <div>
-      <label htmlFor="session-comments" className={label}>{commentsLabel} <span className="normal-case font-normal text-slate-500">(optional)</span></label>
-      <textarea id="session-comments" value={form.comments} onChange={e => set({ comments: e.target.value })} rows={3} className={input} placeholder={`About the ${form.category === 'Assessment' ? 'assessment' : 'session'}…`} />
-    </div>
-  );
-  const paymentCommentsField = (
-    <div>
-      <label htmlFor="payment-comments" className={label}>Payment Comments <span className="normal-case font-normal text-slate-500">(optional)</span></label>
-      <textarea id="payment-comments" value={form.paymentComments} onChange={e => set({ paymentComments: e.target.value })} rows={2} className={input} placeholder="e.g. receipt #, who paid…" />
-    </div>
-  );
-  // An individual session's payment: taken when it is saved as open (cash is applied to the account right away) or when it is closed
-  const paymentAmountField = (
-    <div>
-      <label htmlFor="individual-payment" className={label}>Payment <span className="normal-case font-normal text-slate-500">(optional)</span></label>
-      <div className="relative">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
-        <input id="individual-payment" type="number" step="0.01" min="0" value={form.payment} disabled={!!form.receipt} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} placeholder="0.00" className={`${input} pl-7 disabled:opacity-50`} />
-      </div>
-    </div>
-  );
-  const paymentMethodField = !cashOnly && enteredPayment > 0 && (
-    <div>
-      <label className={label}>Payment Method</label>
-      <div className="grid grid-cols-2 gap-3">
-        {(['Cash', 'Credit Card'] as const).map(m => (
-          <button key={m} type="button" disabled={!!form.receipt || (m === 'Credit Card' && cardBlockedClient)} title={m === 'Credit Card' && cardBlockedClient ? cardBlockedText(client) : undefined} onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-sm font-semibold transition disabled:opacity-50 ${paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-slate-200'}`}>{m}</button>
-        ))}
-      </div>
-      {cardBlockedClient && <p className="text-xs text-amber-400 mt-1.5">{cardBlockedText(client)}</p>}
-      {paymentMethod === 'Cash' && !reviewing && (
-        <p className="text-xs text-slate-500 mt-2">Saving as open applies the cash payment to the account right away; the fee is charged when the session is closed.</p>
-      )}
-      {paymentMethod === 'Credit Card' && (
-        <div className="mt-3 space-y-3">
-          <p className="text-xs text-slate-500">Card payments are applied to the account as soon as they are processed, even if this session isn't closed.</p>
-          <CardPaymentFields value={form.card} onChange={card => set({ card })} />
-          <div className="flex flex-wrap justify-end items-center gap-2">
-            {form.receipt && <span className="text-xs text-emerald-400 mr-auto">Payment processed and applied to account</span>}
-            <button type="button" onClick={() => printReceipt(form.receipt as Receipt, onError)} disabled={!form.receipt} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Print Receipt</button>
-            <button type="button" onClick={processPayment} disabled={!cardPending || !canProcess} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">{saving ? 'Processing...' : 'Process Payment'}</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  const showForm = composing || reviewing || form.openSessionId !== null;
+  const selectedWork = view.kind === 'work' ? view.attendanceId : null;
+  const selectedOpen = view.kind === 'begin' ? view.open?.opensessionid ?? null : null;
+  const longOpen = inProgress.filter(a => Number(a.daysopen) > LONG_OPEN_DAYS).length;
+  const tabLabel = (t: PanelTab) => t === 'scheduled' ? `Scheduled${scheduled.length ? ` (${scheduled.length})` : ''}`
+    : t === 'progress' ? `In Progress${inProgress.length ? ` (${inProgress.length})` : ''}` : 'Completed';
+  const empty = (text: string) => <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">{text}</p>;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {!showForm ? (
-        <div className="lg:col-span-2">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+      <div className="lg:col-span-2 lg:row-span-2">
+        {view.kind === 'calendar' && (
           <AssessmentCalendar
             clients={clients}
-            counselors={providers}
+            counselors={counselors}
             user={user}
-            onNewAssessment={startNewAssessment}
-            // Assigning or changing a time adds, moves or removes an open session
+            onNewAssessment={() => setView({ kind: 'begin', open: null })}
+            // Assigning or changing a time adds, moves or removes a scheduled assessment
             onSuccess={(message) => { onSuccess(message); loadLists(); }}
             onError={onError}
           />
-        </div>
-      ) : (
-      <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl">
-        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 md:gap-4 mb-4 md:mb-6 border-b border-slate-800 pb-4">
-          <div>
-            <h2 className="text-lg font-bold text-white">{form.openSessionId ? `Open ${form.category}` : `New ${form.category}`}</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              {form.openSessionId
-                ? 'Save to keep it open, or review and close it to record the attendance, fee, and payment.'
-                : 'For an assessment without a scheduled time. Save it as open, or review and close it now.'}
-            </p>
-          </div>
-          <button type="button" onClick={backToCalendar} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-950 border border-slate-800 text-slate-300 hover:text-white disabled:opacity-50 shrink-0">
-            <CalendarDays size={14} /> Back to Calendar
-          </button>
-          {/* Only while an old Individual session is open; with one choice there's nothing to switch */}
-          {shownCategories.length > 1 && (
-          <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 shrink-0">
-            {shownCategories.map(c => (
-              <button
-                key={c}
-                type="button"
-                disabled={reviewing}
-                onClick={() => switchCategory(c)}
-                className={`px-3 py-1.5 rounded text-xs font-semibold disabled:cursor-not-allowed ${form.category === c ? 'bg-blue-600 text-white' : 'text-slate-400 disabled:opacity-40'}`}
-              >
-                {c === 'Assessment' ? 'Assessment' : 'Individual'}
-              </button>
-            ))}
-          </div>
-          )}
-        </div>
-
-        {!reviewing ? (
-          <div className="space-y-5 max-w-xl">
-            {form.openSessionId && (
-              <p className="text-xs text-blue-300 bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">Editing an open session. Save to keep it open, or review to close it.</p>
-            )}
-            <div>
-              <label className={label}>Client</label>
-              <ClientPicker clients={clients} value={form.clientId} onChange={id => set({ clientId: id, ...(form.receipt ? { payment: '', receipt: null } : {}) })} className={input} required />
-              {client && (
-                <p className="text-xs text-slate-500 mt-1.5">
-                  {client.programtype || 'No program'} · Balance <span className={toDisplayBalance(client.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatBalanceLabeled(client.accountbalance)}</span>
-                </p>
-              )}
-              {bipIndividual && <p className="text-xs text-amber-400 mt-1.5">BIP clients do not have individual sessions.</p>}
-              {newIndividual && <p className="text-xs text-amber-400 mt-1.5">{INDIVIDUAL_MOVED}</p>}
-            </div>
-
-            <div>
-              <label className={label}>{form.category === 'Assessment' ? 'Assessment Type' : 'Session Type'}</label>
-              <select value={form.sessionTypeId} onChange={e => pickType(e.target.value)} className={input} required>
-                <option value="">Select…</option>
-                {typeChoices.map(t => <option key={t.sessiontypeid} value={t.sessiontypeid}>{t.name} ({money(Number(t.fee))}){t.active ? '' : ' (inactive)'}</option>)}
-              </select>
-              {typeChoices.length === 0 && (
-                <p className="text-xs text-slate-500 mt-1.5">No {form.category === 'Assessment' ? 'assessment' : 'individual session'} types on the price list{client ? ' for this client' : ''}. A Business Administrator can add them in Admin.</p>
-              )}
-              {sessionType?.biponly && client && !clientIsBip && <p className="text-xs text-amber-400 mt-1.5">{sessionType.name} is only for BIP clients.</p>}
-              {sessionType?.soonly && client && !clientIsSo && <p className="text-xs text-amber-400 mt-1.5">{sessionType.name} is only for SO clients.</p>}
-              {isReinstate && client && clientIsBip && (
-                !intakeInfo ? <p className="text-xs text-slate-500 mt-1.5">Checking the last BIP intake…</p>
-                : !intakeInfo.data ? (
-                  <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 mt-1.5">No BIP Intake or DV Assessment on record for this client. A reinstate can't be done; do a new BIP Intake or DV Assessment instead.</p>
-                ) : intakeInfo.data.needsOurIntake ? (
-                  <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 mt-1.5">Discharged after an intake done at another provider ({intakeInfo.data.intakename}). A reinstate can't be done; do our BIP Intake or DV Assessment instead.</p>
-                ) : intakeInfo.data.window === 'expired' ? (
-                  <p className="text-xs text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 mt-1.5">Last {intakeInfo.data.intakename} was {formatDay(intakeInfo.data.intakedate)}, a year or more before this session. A reinstate can't be done; do a new BIP Intake or DV Assessment instead.</p>
-                ) : (
-                  <p className="text-xs text-slate-400 bg-slate-950 border border-slate-800 rounded-lg p-2.5 mt-1.5">
-                    Last {intakeInfo.data.intakename}: {formatDay(intakeInfo.data.intakedate)} ({intakeInfo.data.window === 'early' ? 'under 6 months ago' : '6 months to a year ago'}). Reinstate price: <span className="text-white font-semibold">{money(reinstatePrice ?? 0)}</span>
-                  </p>
-                )
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className={label}>Session Date</label>
-                <input type="date" value={form.date} max={todayLocal()} onChange={e => set({ date: e.target.value })} className={input} required />
-              </div>
-              <div>
-                <label className={label}>Counselor / Therapist</label>
-                <select value={form.provider} onChange={e => set({ provider: e.target.value })} className={input} required>
-                  <option value="">Select…</option>
-                  {savedNonCounselor && <option value={savedNonCounselor}>{savedNonCounselor} (not a counselor)</option>}
-                  {providers.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className={label}>Fee</label>
-                {isAdmin ? (
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
-                    <input type="number" step="0.01" min="0" value={form.fee} onKeyDown={blockMinus} onChange={e => set({ fee: e.target.value.replace(/-/g, '') })} placeholder="0.00" className={`${input} pl-7`} />
-                  </div>
-                ) : (
-                  <p className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-slate-300">{listFee !== null ? money(listFee) : '—'}</p>
-                )}
-                <p className="text-[0.6875rem] text-slate-500 mt-1">{isAdmin ? 'From the price list; you can change it for this session.' : 'From the price list.'}</p>
-              </div>
-              {/* An assessment's payment is taken when it is reviewed and closed */}
-              {!cashOnly && paymentAmountField}
-            </div>
-
-            {paymentMethodField}
-            {form.paidOnOpen > 0 && <p className="text-xs text-emerald-400">{money(form.paidOnOpen)} was already paid when this session was opened.</p>}
-
-            {!cashOnly && !form.receipt && paymentCommentsField}
-            {commentsField}
-
-            {formError && <p role="alert" className="text-xs text-red-400 bg-red-500/10 border border-red-500 rounded-lg p-3">{formError}</p>}
-
-            <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
-              {(form.openSessionId || form.clientId) && (
-                <button type="button" disabled={saving} onClick={() => { setForm(blankForm(form.category)); setFormError(''); }} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-semibold px-5 py-2.5 rounded-lg text-sm">Clear</button>
-              )}
-              <button type="button" disabled={saving} onClick={handleSaveOpen} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 disabled:opacity-50 text-slate-200 font-semibold px-5 py-2.5 rounded-lg text-sm">{saving ? 'Saving...' : 'Save as Open'}</button>
-              <button type="button" disabled={saving} onClick={() => { const p = problem(); if (p) setFormError(p); else { resetChecks(); setReviewing(true); } }} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold px-5 py-2.5 rounded-lg text-sm">Review & Close</button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-5 max-w-xl">
-            <p className="text-xs text-blue-300 bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
-              Closing records this {form.category.toLowerCase()} as attendance{form.receipt ? ' and charges the fee' : ', charges the fee, and records the payment'}. Check the details before confirming.
-            </p>
-            <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 text-sm space-y-1.5">
-              {[
-                ['Client', client ? `${client.lastname}, ${client.firstname}` : ''],
-                [form.category === 'Assessment' ? 'Assessment' : 'Session', sessionType?.name ?? ''],
-                ['Date', formatDay(form.date)],
-                ['Counselor / Therapist', form.provider],
-                // An intake's comments are edited below instead
-                ...(!needsChecks && form.comments.trim() ? [[commentsLabel, form.comments.trim()]] : []),
-              ].map(([k, v]) => (
-                <div key={k} className="flex justify-between gap-4"><span className="text-slate-400">{k}</span><span className="text-white text-right">{v}</span></div>
-              ))}
-              {/* An individual session's balances are in its payment card below */}
-              {cashOnly && (
-                <>
-                  <div className="border-t border-slate-800 my-2" />
-                  <div className="flex justify-between"><span className="text-slate-400">Current balance</span><span className={toDisplayBalance(balanceBefore) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatBalance(balanceBefore)}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-400">Fee</span><span className="text-red-400">-{money(fee)}</span></div>
-                  <div className="flex justify-between"><span className="text-slate-400">Payment{payment > 0 ? ` (${paymentMethod})` : ''}</span><span className="text-emerald-400">+{money(payment)}</span></div>
-                  <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="font-semibold text-slate-300">Balance after</span><span className={`font-bold ${toDisplayBalance(balanceAfter) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(balanceAfter)}</span></div>
-                </>
-              )}
-            </div>
-
-            {/* An individual session can also be paid (or paid more) when it is closed. Laid out like a group's Check-In Details. */}
-            {!cashOnly && client && (
-              <article className="bg-slate-950 border border-slate-800 rounded-lg p-4">
-                <div className="flex justify-between items-baseline gap-3 mb-3">
-                  <p className="font-semibold text-white truncate">{client.lastname}, {client.firstname}</p>
-                  <p className="text-xs text-slate-400 whitespace-nowrap">ID # {idText(client) || '—'} · Balance {formatBalance(balanceBefore)}</p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-300 items-end">
-                  <label className="flex flex-col gap-1">
-                    <span>Payment ($)</span>
-                    <input id="individual-payment" type="number" step="0.01" min="0" autoFocus placeholder="0.00" disabled={!!form.receipt} value={form.payment} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-sm disabled:opacity-50" />
-                  </label>
-                  <div className="flex flex-col gap-1">
-                    Payment Method
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {(['Cash', 'Credit Card'] as const).map(m => (
-                        <button key={m} type="button" disabled={!!form.receipt || (m === 'Credit Card' && cardBlockedClient)} title={m === 'Credit Card' && cardBlockedClient ? cardBlockedText(client) : undefined} onClick={() => set({ paymentMethod: m })} className={`border rounded-lg py-2.5 text-xs font-semibold transition disabled:opacity-50 ${paymentMethod === m ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'}`}>{m}</button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                {cardBlockedClient && <p className="mt-2 text-xs text-amber-400">{cardBlockedText(client)}</p>}
-
-                <div className="mt-3 bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs space-y-1.5">
-                  <div className="flex justify-between"><span className="text-slate-400">Current balance</span><span className="text-white">{formatBalance(balanceBefore)}</span></div>
-                  {form.paidOnOpen > 0 && <p className="text-slate-500">Includes the {money(form.paidOnOpen)} paid when this session was opened.</p>}
-                  <div className="flex justify-between"><span className="text-slate-400">{sessionType?.name ?? 'Session'} fee</span><span className="text-red-400">{formatBalance(fee)}</span></div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">{form.receipt ? 'Payment (processed)' : 'This payment'}</span>
-                    <span className="text-emerald-400">{formatBalance(-(form.receipt ? form.receipt.amount : (Number.isFinite(enteredPayment) ? enteredPayment : 0)))}</span>
-                  </div>
-                  <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="font-semibold text-slate-300">Balance after close</span><span className="font-bold text-white">{formatBalance(balanceAfter)}</span></div>
-                </div>
-
-                {paymentMethod === 'Credit Card' && !form.receipt && (
-                  <div className="mt-3">
-                    <CardPaymentFields value={form.card} onChange={card => set({ card })} />
-                  </div>
-                )}
-                {!form.receipt && <div className="mt-3">{paymentCommentsField}</div>}
-
-                <p className="mt-3 text-xs text-slate-500">
-                  {form.receipt
-                    ? `${form.receipt.method} payment processed and applied to the account. Closing charges the fee.`
-                    : paymentMethod === 'Credit Card'
-                      ? 'Card payments must be processed before closing. They are applied to the account right away, even if this session isn\'t closed.'
-                      : 'Process Payment applies the cash to the account now and gives a receipt. A cash amount left unprocessed is recorded when the session closes.'}
-                </p>
-                <div className="mt-3 flex flex-wrap justify-end items-center gap-2">
-                  {form.receipt && <span className="text-xs text-emerald-400 mr-auto">Payment processed</span>}
-                  <button type="button" onClick={() => printReceipt(form.receipt as Receipt, onError)} disabled={!form.receipt} className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Print Receipt</button>
-                  <button type="button" onClick={processPayment} disabled={!canProcess} className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed">{saving ? 'Processing...' : 'Process Payment'}</button>
-                </div>
-                {cardPending && <p className="mt-2 text-xs text-red-400 text-right">Press Process Payment to apply the card payment, or clear the amount.</p>}
-              </article>
-            )}
-
-            {needsChecks && (
-              <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4 text-sm">
-                <div>
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Amount Due</p>
-                  <p className="text-white text-lg font-bold">{money(amountDue)}</p>
-                  <p className="text-xs text-slate-500">{sessionType!.name} {money(fee)}{pastDue > 0 ? ` + past due balance ${money(pastDue)}` : ''}{balanceBefore < 0 ? ` − account credit ${money(-balanceBefore)}` : ''}</p>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className={label}>Payment</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
-                      <input type="number" step="0.01" min="0" value={form.payment} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} placeholder="0.00" className={`${input} pl-7`} />
-                    </div>
-                    {amountDue > 0 && !paymentCovers && (
-                      <button type="button" onClick={() => set({ payment: amountDue.toFixed(2) })} className="text-xs text-blue-400 hover:text-blue-300 mt-1">Enter amount due ({money(amountDue)})</button>
-                    )}
-                  </div>
-                  <div>
-                    <label className={label}>Method</label>
-                    <p className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-slate-300">Cash <span className="text-xs text-slate-500">(cash only)</span></p>
-                  </div>
-                </div>
-                {paymentCommentsField}
-                <label className={`flex items-start gap-2.5 ${paymentCovers ? 'text-slate-200 cursor-pointer' : 'text-slate-500 cursor-not-allowed'}`}>
-                  <input type="checkbox" checked={paymentDone} disabled={!paymentCovers} onChange={e => { setPaymentChecked(e.target.checked); if (!e.target.checked) setPaperworkChecked(false); }} className="mt-0.5 accent-emerald-500" />
-                  <span>
-                    Payment received for the {sessionType!.name}{pastDue > 0 ? ' and the past due balance' : ''} ({money(amountDue)})
-                    {!paymentCovers && <span className="block text-xs text-amber-400">The payment must cover the full amount due ({money(amountDue)}) before this can be checked.</span>}
-                  </span>
-                </label>
-                <label className={`flex items-start gap-2.5 ${paymentDone ? 'text-slate-200 cursor-pointer' : 'text-slate-500 cursor-not-allowed'}`}>
-                  <input type="checkbox" checked={paperworkDone} disabled={!paymentDone} onChange={e => setPaperworkChecked(e.target.checked)} className="mt-0.5 accent-emerald-500" />
-                  <span>
-                    {secondCheckLabel}
-                    {!paymentDone && <span className="block text-xs text-slate-500">Check off the payment first.</span>}
-                  </span>
-                </label>
-                {commentsField}
-              </div>
-            )}
-
-            {cashOnly && !needsChecks && (
-              <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4 text-sm">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className={label}>Payment <span className="normal-case font-normal text-slate-500">(optional)</span></label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
-                      <input type="number" step="0.01" min="0" value={form.payment} onKeyDown={blockMinus} onChange={e => set({ payment: e.target.value.replace(/-/g, '') })} placeholder="0.00" className={`${input} pl-7`} />
-                    </div>
-                  </div>
-                  <div>
-                    <label className={label}>Method</label>
-                    <p className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm text-slate-300">Cash <span className="text-xs text-slate-500">(cash only)</span></p>
-                  </div>
-                </div>
-                {paymentCommentsField}
-              </div>
-            )}
-
-            {formError && <p role="alert" className="text-xs text-red-400 bg-red-500/10 border border-red-500 rounded-lg p-3">{formError}</p>}
-
-            <div className="flex justify-end gap-3 pt-4 border-t border-slate-800">
-              <button type="button" onClick={printPendingReceipt} title="Print a receipt with the fee and payment" className="mr-auto bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold px-4 py-2.5 rounded-lg text-sm flex items-center gap-1.5"><Printer size={14} /> Print Receipt</button>
-              <button type="button" disabled={saving} onClick={() => { setReviewing(false); setFormError(''); }} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-semibold px-5 py-2.5 rounded-lg text-sm">Back / Edit</button>
-              {needsChecks && form.openSessionId && (
-                <button type="button" disabled={saving} onClick={handleSaveOpen} className="bg-slate-800 hover:bg-slate-700 border border-slate-700 disabled:opacity-50 text-slate-200 font-semibold px-5 py-2.5 rounded-lg text-sm">Keep Open</button>
-              )}
-              <button type="button" disabled={saving || (needsChecks && !paperworkDone)} onClick={handleClose} className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold px-5 py-2.5 rounded-lg text-sm">{saving ? 'Closing...' : needsChecks ? 'Complete Assessment' : 'Confirm & Close Session'}</button>
-            </div>
-          </div>
+        )}
+        {view.kind === 'begin' && (
+          <AssessmentBeginForm
+            key={view.open ? `open-${view.open.opensessionid}` : `new-${view.clientId || ''}`}
+            clients={clients}
+            sessionTypes={sessionTypes}
+            counselors={counselors}
+            user={user}
+            open={view.open}
+            startClientId={view.clientId}
+            startCounselor={view.counselor}
+            onBegun={(attendanceId, message) => {
+              onSuccess(message);
+              setView({ kind: 'work', attendanceId });
+              setPanelTab('progress');
+              loadLists();
+              onSaved?.();
+            }}
+            onSaved={(message) => { onSuccess(message); setView({ kind: 'calendar' }); loadLists(); }}
+            onCancel={() => setView({ kind: 'calendar' })}
+          />
+        )}
+        {view.kind === 'work' && (
+          <AssessmentWorkspace
+            key={view.attendanceId}
+            attendanceId={view.attendanceId}
+            user={user}
+            clients={clients}
+            onBack={() => setView({ kind: 'calendar' })}
+            onChanged={loadLists}
+            onSuccess={onSuccess}
+            onError={onError}
+          />
         )}
       </div>
-      )}
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl">
-        <div className="flex items-center justify-between gap-2 mb-1">
-          <h3 className="font-semibold text-white flex items-center gap-2"><ClipboardList size={18} className="text-blue-400" /> {panelTab === 'open' ? 'Open Sessions' : 'Closed Sessions'}</h3>
-          <div className="flex bg-slate-950 border border-slate-800 rounded-lg p-0.5">
-            {(['open', 'closed'] as const).map(t => (
-              <button key={t} type="button" onClick={() => setPanelTab(t)} className={`px-3 py-1 rounded text-xs font-semibold transition ${panelTab === t ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
-                {t === 'open' ? `Open${shownOpen.length ? ` (${shownOpen.length})` : ''}` : 'Closed'}
-              </button>
-            ))}
-          </div>
+        <h3 className="font-semibold text-white flex items-center gap-2 mb-3"><ClipboardList size={18} className="text-blue-400" /> Assessments</h3>
+        <div className="grid grid-cols-3 bg-slate-950 border border-slate-800 rounded-lg p-0.5 mb-3">
+          {(['scheduled', 'progress', 'completed'] as const).map(t => (
+            <button key={t} type="button" onClick={() => setPanelTab(t)} className={`px-2 py-1 rounded text-xs font-semibold transition ${panelTab === t ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+              {tabLabel(t)}
+            </button>
+          ))}
         </div>
-        {shownCategories.length > 1 && (
-        <div className="grid grid-cols-2 bg-slate-950 border border-slate-800 rounded-lg p-0.5 my-3">
-          {shownCategories.map(c => {
-            const count = openSessions.filter(o => o.category === c).length;
-            return (
-              <button key={c} type="button" disabled={reviewing} onClick={() => switchCategory(c)} title={reviewing ? 'Finish or go back from the review to switch' : undefined} className={`px-3 py-1 rounded text-xs font-semibold transition disabled:cursor-not-allowed ${panelCategory === c ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200 disabled:opacity-40'}`}>
-                {c === 'Assessment' ? 'Assessments' : 'Individuals'}{count ? ` (${count} open)` : ''}
-              </button>
-            );
-          })}
-        </div>
-        )}
 
         {listError ? (
-          <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3 mt-4">{listError}</p>
-        ) : panelTab === 'open' ? (
+          <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{listError}</p>
+        ) : panelTab === 'scheduled' ? (
           <>
-            <p className="text-xs text-slate-400 leading-relaxed mb-4">
-              {ADMIN_ROLES.includes(user.role || '') ? 'Sessions saved as open.' : 'Sessions you opened or are the counselor/therapist on.'} Open one to review and close it.
-            </p>
-            {shownOpen.length === 0 ? (
-              <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">No open {panelNoun}.</p>
-            ) : (
-              <ul className="space-y-2">
-                {shownOpen.map(o => (
-                  <li key={o.opensessionid} className={`bg-slate-950 border rounded-lg p-3 ${form.openSessionId === o.opensessionid ? 'border-blue-500/60' : 'border-slate-800'}`}>
+            <p className="text-xs text-slate-400 leading-relaxed mb-3">Booked from the calendar, not begun yet. Begin one when the client is here and pays.</p>
+            {scheduled.length === 0 ? empty('No scheduled assessments.') : (
+              <ul className="space-y-2 max-h-[32rem] overflow-y-auto pr-1">
+                {scheduled.map(o => (
+                  <li key={o.opensessionid} className={`bg-slate-950 border rounded-lg p-3 ${selectedOpen === o.opensessionid ? 'border-blue-500/60' : 'border-slate-800'}`}>
                     <div className="flex justify-between items-start gap-2">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-white truncate">{o.lastname}, {o.firstname}</p>
-                        <p className="text-xs text-slate-300 truncate">{o.category} · {o.sessiontypename ?? <span className="text-amber-300">Type not chosen yet</span>}</p>
-                        {Number(o.paidonopen) > 0 && <p className="text-xs text-emerald-400">Paid {money(Number(o.paidonopen))}</p>}
-                        <p className={`text-xs ${o.sessiondate === todayLocal() ? 'text-slate-400' : 'text-amber-400'}`}>{formatDay(o.sessiondate)}{o.provider ? ` · ${o.provider}` : ''}</p>
-                        <p className="text-[0.6875rem] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${employeeLabel(o.createdby)}` : ''}</p>
+                        <p className="text-xs text-slate-300 truncate">{o.sessiontypename ?? <span className="text-amber-300">Type not chosen yet</span>}</p>
+                        <p className={`text-xs ${o.sessiondate < todayLocal() ? 'text-amber-400' : 'text-slate-400'}`}>{formatDay(o.sessiondate)}{o.provider ? ` · ${o.provider}` : ''}</p>
                       </div>
-                      <button type="button" onClick={() => discard(o)} className="text-slate-500 hover:text-red-400 p-1 rounded shrink-0" aria-label={`Discard open ${o.category.toLowerCase()} for ${o.lastname}, ${o.firstname}`}>
+                      <button type="button" onClick={() => discard(o)} className="text-slate-500 hover:text-red-400 p-1 rounded shrink-0" aria-label={`Remove the scheduled assessment for ${o.lastname}, ${o.firstname}`}>
                         <Trash2 size={14} />
                       </button>
                     </div>
-                    <button type="button" onClick={() => resume(o)} className="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold py-1.5 rounded-lg">Open & Close Session</button>
+                    <button type="button" onClick={() => setView({ kind: 'begin', open: o })} className="mt-2 w-full bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold py-1.5 rounded-lg flex items-center justify-center gap-1.5">
+                      <PlayCircle size={13} /> Begin
+                    </button>
                   </li>
                 ))}
               </ul>
             )}
           </>
-        ) : (
+        ) : panelTab === 'progress' ? (
           <>
-            <p className="text-xs text-slate-400 leading-relaxed mb-4">{user.role === 'Business Administrator' ? 'Recently closed sessions.' : 'Recently closed sessions you opened, closed, or were the counselor/therapist on.'}</p>
-            {shownClosed.length === 0 ? (
-              <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">No closed {panelNoun}.</p>
-            ) : (
+            <p className="text-xs text-slate-400 leading-relaxed mb-3">
+              Paid and begun, not completed yet{isAdmin ? '' : ' (yours)'}. Open one to add notes or complete it.
+              {longOpen > 0 && <span className="text-amber-300"> {longOpen} open more than {LONG_OPEN_DAYS} days.</span>}
+            </p>
+            {inProgress.length === 0 ? empty('No assessments in progress.') : (
               <ul className="space-y-2 max-h-[32rem] overflow-y-auto pr-1">
-                {shownClosed.map(c => {
-                  const expanded = expandedClosed === c.attendanceid;
+                {inProgress.map(a => {
+                  const long = Number(a.daysopen) > LONG_OPEN_DAYS;
                   return (
-                    <li key={c.attendanceid} className={`bg-slate-950 border rounded-lg ${expanded ? 'border-blue-500/40' : 'border-slate-800'}`}>
-                      <button type="button" onClick={() => setExpandedClosed(expanded ? null : c.attendanceid)} aria-expanded={expanded} className="w-full text-left p-3">
-                        <p className="text-sm font-semibold text-white truncate">{c.lastname}, {c.firstname}</p>
-                        <p className="text-xs text-slate-300 truncate">{c.category}{c.sessiontypename ? ` · ${c.sessiontypename}` : ''}</p>
-                        <p className="text-xs text-slate-400">{formatDay(c.sessiondate)}{c.provider ? ` · ${c.provider}` : ''}</p>
-                      </button>
-                      {expanded && (
-                        <div className="border-t border-slate-800 px-3 py-2 text-xs space-y-1">
-                          <div className="flex justify-between"><span className="text-slate-400">Fee</span><span className="text-slate-200">{money(Number(c.fee || 0))}</span></div>
-                          {Number(c.paidonopen) > 0 && <div className="flex justify-between"><span className="text-slate-400">Paid when opened</span><span className="text-slate-200">{money(Number(c.paidonopen))}</span></div>}
-                          <div className="flex justify-between"><span className="text-slate-400">{Number(c.paidonopen) > 0 ? 'Paid when closed' : 'Paid'}</span><span className="text-slate-200">{Number(c.payment) > 0 ? `${money(Number(c.payment))} ${c.paymentmethod || ''}`.trim() : 'No payment'}</span></div>
-                          {c.paymentcomments && <p className="text-slate-400 pt-1"><span className="text-slate-500">Payment:</span> {c.paymentcomments}</p>}
-                          {c.comments && <p className="text-slate-400 pt-1"><span className="text-slate-500">{c.category === 'Assessment' ? 'Assessment' : 'Session'}:</span> {c.comments}</p>}
-                          <button type="button" onClick={() => printClosedReceipt(c)} className="mt-1 w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold py-1.5 rounded-lg flex items-center justify-center gap-1.5"><Printer size={12} /> Print Receipt</button>
-                          <p className="text-[0.6875rem] text-slate-500 pt-1">
-                            Closed{c.closedon ? ` ${new Date(c.closedon).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}` : ''}{c.closedby ? ` by ${c.closedby}` : ''}
-                            {c.openedby && c.openedby !== c.closedby ? ` · Opened by ${c.openedby}` : ''}
-                          </p>
+                    <li key={a.attendanceid}>
+                      <button type="button" onClick={() => setView({ kind: 'work', attendanceId: a.attendanceid })} className={`w-full text-left bg-slate-950 border rounded-lg p-3 hover:border-slate-600 transition ${selectedWork === a.attendanceid ? 'border-blue-500/60' : long ? 'border-amber-500/40' : 'border-slate-800'}`}>
+                        <div className="flex justify-between items-start gap-2">
+                          <p className="text-sm font-semibold text-white truncate">{a.lastname}, {a.firstname}</p>
+                          <span className={`shrink-0 text-[0.6875rem] font-semibold px-1.5 py-0.5 rounded ${long ? 'bg-amber-500/15 text-amber-300' : 'bg-slate-800 text-slate-300'}`}>{daysOpenText(Number(a.daysopen))}</span>
                         </div>
-                      )}
+                        <p className="text-xs text-slate-300 truncate">{a.sessiontypename}{a.provider ? ` · ${a.provider}` : ''}</p>
+                        <p className="text-[0.6875rem] text-slate-500 flex items-center gap-1 mt-0.5">
+                          <MessageSquare size={11} />
+                          {a.notecount ? `${a.notecount} note${a.notecount === 1 ? '' : 's'} · last ${new Date(a.lastnoteon!).toLocaleDateString()}` : 'No notes yet'}
+                        </p>
+                      </button>
                     </li>
                   );
                 })}
+              </ul>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="text-xs text-slate-400 leading-relaxed mb-3">{user.role === 'Business Administrator' ? 'Recently completed assessments.' : 'Recently completed assessments you began, completed, or were the counselor on.'}</p>
+            {completed.length === 0 ? empty('No completed assessments.') : (
+              <ul className="space-y-2 max-h-[32rem] overflow-y-auto pr-1">
+                {completed.map(c => (
+                  <li key={c.attendanceid}>
+                    <button type="button" onClick={() => setView({ kind: 'work', attendanceId: c.attendanceid })} className={`w-full text-left bg-slate-950 border rounded-lg p-3 hover:border-slate-600 transition ${selectedWork === c.attendanceid ? 'border-blue-500/60' : 'border-slate-800'}`}>
+                      <p className="text-sm font-semibold text-white truncate">{c.lastname}, {c.firstname}</p>
+                      <p className="text-xs text-slate-300 truncate">{c.sessiontypename || 'Assessment'}{c.provider ? ` · ${c.provider}` : ''}</p>
+                      <p className="text-[0.6875rem] text-slate-500">
+                        Begun {formatDay(c.sessiondate)}
+                        {c.closedon ? ` · completed ${new Date(c.closedon).toLocaleDateString()}` : ''}
+                        {c.closedby ? ` by ${employeeLabel(c.closedby)}` : ''}
+                        {c.notecount ? ` · ${c.notecount} note${c.notecount === 1 ? '' : 's'}` : ''}
+                      </p>
+                    </button>
+                  </li>
+                ))}
               </ul>
             )}
           </>
@@ -878,19 +267,15 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
       </div>
 
       {/* Clients waiting to be assessed, by the counselor they are waiting for (set on the client's Information tab;
-          closing an assessment for the client takes them off) */}
+          beginning an assessment for the client takes them off) */}
       <div className="lg:col-start-3 bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl">
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <h3 className="font-semibold text-white flex items-center gap-2"><Hourglass size={18} className="text-blue-400" /> Waiting for Assessment{shownWaiting.length ? ` (${shownWaiting.length})` : ''}</h3>
-        </div>
+        <h3 className="font-semibold text-white flex items-center gap-2 mb-3"><Hourglass size={18} className="text-blue-400" /> Waiting for Assessment{shownWaiting.length ? ` (${shownWaiting.length})` : ''}</h3>
         <label htmlFor="waiting-assessor" className="sr-only">Assessor</label>
         <select id="waiting-assessor" value={waitingFor} onChange={e => setWaitingFor(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white text-sm mb-3">
           <option value="">All assessors ({waiting.length})</option>
           {assessors.map(([name, n]) => <option key={name} value={name}>{name} ({n})</option>)}
         </select>
-        {shownWaiting.length === 0 ? (
-          <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">No clients are waiting for an assessment.</p>
-        ) : (
+        {shownWaiting.length === 0 ? empty('No clients are waiting for an assessment.') : (
           <ul className="space-y-2 max-h-[32rem] overflow-y-auto pr-1">
             {shownWaiting.map(c => (
               <li key={c.clientid} className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex justify-between items-center gap-2">
@@ -900,9 +285,9 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                 </div>
                 <button
                   type="button"
-                  disabled={reviewing}
-                  onClick={() => setForm(f => ({ ...blankForm('Assessment'), clientId: String(c.clientid), date: f.date, provider: c.assessor || f.provider }))}
-                  className="shrink-0 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-semibold px-3 py-1.5 rounded-lg"
+                  onClick={() => setView({ kind: 'begin', open: null, clientId: String(c.clientid), counselor: c.assessor || undefined })}
+                  title="Begin an assessment for this client now"
+                  className="shrink-0 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg"
                 >Start</button>
               </li>
             ))}

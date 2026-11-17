@@ -145,16 +145,16 @@ export default function ProgressTab({ clientId, role, userEmail, onChanged, onSu
           <h3 className="text-xs font-bold uppercase text-blue-400 tracking-wider">Open Assessments</h3>
           <ul className="divide-y divide-slate-800 border border-slate-800 rounded-lg">
             {progress.open.map(o => (
-              <li key={o.opensessionid} className="flex justify-between items-start gap-3 px-3 py-2 text-xs">
+              <li key={`${o.status}-${o.opensessionid}`} className="flex justify-between items-start gap-3 px-3 py-2 text-xs">
                 <div className="min-w-0">
-                  <p className="text-white font-semibold">{o.name} <span className="ml-1 bg-amber-500/10 text-amber-300 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold uppercase">Open</span></p>
-                  <p className="text-slate-400">{formatDay(o.date)}{o.provider ? ` · ${o.provider}` : ''}</p>
+                  <p className="text-white font-semibold">{o.name} <span className={`ml-1 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold uppercase ${o.status === 'In Progress' ? 'bg-amber-500/10 text-amber-300' : 'bg-blue-500/10 text-blue-300'}`}>{o.status}</span></p>
+                  <p className="text-slate-400">{o.status === 'In Progress' ? 'Begun ' : ''}{formatDay(o.date)}{o.provider ? ` · ${o.provider}` : ''}</p>
                 </div>
-                <span className="text-slate-400 shrink-0">Fee {money(o.fee)}</span>
+                <span className="text-slate-400 shrink-0">{o.status === 'In Progress' ? 'Paid · ' : ''}Fee {money(o.fee)}</span>
               </li>
             ))}
           </ul>
-          <p className="text-xs text-slate-500">Completed on the Assessments tab.</p>
+          <p className="text-xs text-slate-500">Begun and completed on the Assessments tab.</p>
         </div>
       )}
 
