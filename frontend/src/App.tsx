@@ -836,8 +836,9 @@ export default function App() {
     ));
   // Counselors: the groups they lead, which decide "my clients" on the roster and My Day
   const isCounselor = role === 'Counselor';
-  // Home page: Business Administrators (isBusinessAdmin; DEV signs in as one) get the office's Today panel and case
-  // notes to approve; Counselors and Office Admins don't see the client counts
+  // Home page: Business Administrators (isBusinessAdmin; DEV signs in as one) and Office Admins get the office's Today
+  // panel; only Business Administrators get case notes to approve; Counselors and Office Admins don't see the client counts
+  const showOfficeToday = isBusinessAdmin || role === 'Office Admin';
   const showClientCounts = !['Counselor', 'Office Admin'].includes(role);
   const counselorGroupIds = isCounselor ? myGroupIds(groups, user.displayname) : null;
   const isAllowed = (tab: string) => {
@@ -1074,8 +1075,8 @@ export default function App() {
               )}
             </div>
 
-            {/* Every counselor's groups and every examiner's polygraphs today (Business Administrators and DEV) */}
-            {isBusinessAdmin && (
+            {/* Every counselor's groups and every examiner's polygraphs today (Business Administrators, DEV, Office Admins) */}
+            {showOfficeToday && (
               <OfficeToday
                 groups={groups}
                 polySlots={polySlots}

@@ -31,7 +31,7 @@ const SLOT_STYLE: Record<string, string> = {
   Closed: 'bg-slate-800 text-slate-400 border-slate-700',
 };
 
-// Business Administrators (and DEV): what is happening in the office today, every counselor's groups and every
+// Business Administrators, DEV and Office Admins: what is happening in the office today, every counselor's groups and every
 // examiner's polygraph slots, with the day's cancellations and reschedules applied
 export default function OfficeToday({ groups, polySlots, examinerName, privacy, onOpenAttendance, onOpenPolygraphs }: Props) {
   const today = todayLocal();
