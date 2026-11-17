@@ -34,7 +34,7 @@ const dateText = (value) => {
 };
 
 // The Edit Info fields logged by clientInfoChanges, as [change type, how to read it from a client row]. The ID #, status,
-// program, agent, assessor, groups, pretrial, bus passes, copay and money fields are logged separately in routes/clients.js.
+// program, agent, assessor, groups, pretrial, bus passes, copays and money fields are logged separately in routes/clients.js.
 const CLIENT_INFO_FIELDS = [
     ['First Name', c => c.firstname],
     ['Middle Name', c => c.middlename],

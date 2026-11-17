@@ -171,8 +171,11 @@ export interface Client extends Omit<ClientColumns, 'programtype'> {
     federalunits?: Record<string, number | string> | null;
     // Monthly refills by code ({ '6022': 8 }): on the 1st the code's units are set to this
     federalunitrefills?: Record<string, number | string> | null;
-    // Federal clients: what they pay for an individual session instead of the Individual price (blank = nothing)
-    copay?: Money | null;
+    // Federal clients: what they pay instead of the regular fee (blank = nothing): Group Copay for group attendance,
+    // Individual Copay for individual sessions, Polygraph Copay charged to the account when a polygraph is scheduled
+    groupcopay?: Money | null;
+    individualcopay?: Money | null;
+    polycopay?: Money | null;
     // The client's own program type, else the group's, else State SO
     programtype: string;
     lastattended: string | null;
@@ -2165,6 +2168,8 @@ export type PolyAssignReply =
     | {
         success?: false; code: 'POLY_SCHEDULING_REQUIREMENTS'; error: string;
         vouchers: number; polyFeePaid: number; polyFee: number; accountBalance: number; amountDue: number; balanceDue: number;
+        // Federal clients: their polygraph copay and Max Debt Override, when the copay would go past it
+        polyCopay?: number; maxOwed?: number;
     }
     | { success?: false; code?: undefined; error: string };
 

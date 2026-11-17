@@ -162,7 +162,9 @@ export default function ClientPolygraphs({
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs font-semibold text-blue-400 uppercase tracking-wide">Schedule Polygraph</p>
             <p className={`text-xs ${needs.met ? 'text-emerald-400' : 'text-amber-400'}`}>
-              Vouchers {needs.vouchers}/{needs.fullSet}
+              {needs.federalCopay !== null
+                ? (needs.federalCopay > 0 ? `Polygraph copay $${needs.federalCopay.toFixed(2)} (charged to the account)` : 'No polygraph copay')
+                : `Vouchers ${needs.vouchers}/${needs.fullSet}`}
               {!needs.met && ' · payment needed before scheduling'}
             </p>
           </div>

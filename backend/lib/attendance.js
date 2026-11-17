@@ -32,20 +32,26 @@ const chargedWithinMonths = async (db, client, date, months) => {
 const FIRST_CHECKIN_MAX_OWED = 0;
 
 // Which payment rule a client's group check-in follows (mirrors checkInPaymentRule in frontend/src/utils/balance.ts):
-//   'none'  BIP, Federal SO and Fed Drug Test (drug test) clients: no balance requirement
-//   'each'  Chaperon clients: every attendance is paid the day of it, so the balance after check-in, today's fee
-//           included, must be $0.00 or better
-//   'first' everyone else: the first group check-in of the month needs the balance before today's fee at $0.00 or better
-const NO_CHECKIN_LIMIT_PROGRAMS = ['BIP', 'Federal SO', 'Fed Drug Test'];
+//   'none'    BIP clients: no balance requirement
+//   'federal' Federal SO, Fed Drug Test and Poly Only clients: no balance requirement, so they can owe any amount, unless
+//             a Max Debt Override is set: then a check-in that charges a copay can't leave them owing more than it
+//   'each'    Chaperon clients: every attendance is paid the day of it, so the balance after check-in, today's fee
+//             included, must be $0.00 or better
+//   'first'   everyone else: the first group check-in of the month needs the balance before today's fee at $0.00 or better
+const NO_CHECKIN_LIMIT_PROGRAMS = ['BIP'];
+const FEDERAL_PAYMENT_PROGRAMS = ['Federal SO', 'Fed Drug Test', 'Poly Only'];
 const PAY_EACH_VISIT_PROGRAMS = ['Chaperon'];
 const checkInPaymentRule = (programType) =>
-    NO_CHECKIN_LIMIT_PROGRAMS.includes(programType) ? 'none' : PAY_EACH_VISIT_PROGRAMS.includes(programType) ? 'each' : 'first';
+    NO_CHECKIN_LIMIT_PROGRAMS.includes(programType) ? 'none'
+        : FEDERAL_PAYMENT_PROGRAMS.includes(programType) ? 'federal'
+            : PAY_EACH_VISIT_PROGRAMS.includes(programType) ? 'each' : 'first';
 // The smallest payment that lets a group or individual check-in through, from the balance before it (stored sign:
 // positive = owes) and today's fee; 0 when nothing has to be paid. maxOwed: a Max Debt Override (ClientDebtLimits) lets
-// the client owe up to that much instead of FIRST_CHECKIN_MAX_OWED. Mirrors minimumCheckInPayment in frontend/src/utils/balance.ts.
+// the client owe up to that much instead of FIRST_CHECKIN_MAX_OWED; for federal clients it is the most a charge may
+// leave them owing. Mirrors minimumCheckInPayment in frontend/src/utils/balance.ts.
 const allowedOwed = (maxOwed) => Math.max(FIRST_CHECKIN_MAX_OWED, Number(maxOwed) || 0);
 const minimumCheckInPayment = (rule, balance, fee, attendedThisMonth, maxOwed = 0) => {
-    const owed = rule === 'each' ? Number(balance || 0) + Number(fee || 0)
+    const owed = rule === 'each' || (rule === 'federal' && Number(fee) > 0 && Number(maxOwed) > 0) ? Number(balance || 0) + Number(fee || 0)
         : rule === 'first' && !attendedThisMonth ? Number(balance || 0) : -Infinity;
     return Math.max(0, Math.round((owed - allowedOwed(maxOwed)) * 100) / 100);
 };
@@ -53,8 +59,16 @@ const minimumCheckInPayment = (rule, balance, fee, attendedThisMonth, maxOwed = 
 const allowedBalanceText = (maxOwed) => (Number(maxOwed) > 0
     ? `owing at most $${allowedOwed(maxOwed).toFixed(2)} (Max Debt Override)`
     : `${FIRST_CHECKIN_MAX_OWED > 0 ? '-' : ''}$${FIRST_CHECKIN_MAX_OWED.toFixed(2)} or better`);
+// Why a check-in was refused for being short; kind: 'group' or 'individual'
+const shortPaymentMessage = (rule, name, kind, maxOwed, short) => {
+    const limit = allowedBalanceText(maxOwed);
+    const more = `(pay at least $${short.toFixed(2)} more)`;
+    if (rule === 'federal') return `${name}'s copay would put the account past their Max Debt Override: the balance after check-in, including today's copay, must be ${limit} ${more}.`;
+    if (rule === 'each') return `${name}'s chaperon ${kind === 'group' ? 'attendance' : 'session'} must be paid the day of it: the balance after check-in, including today's fee, must be ${limit} ${more}.`;
+    return `${name} must pay their existing balance before their first ${kind} ${kind === 'group' ? 'check-in' : 'session'} of the month: the balance must be ${limit} ${more}.`;
+};
 
-// A federal client's group fee is their Copay (nothing when blank), never the treatment fee: Fed Drug Test clients pay
+// A federal client's group fee is their Group Copay (nothing when blank), never the treatment fee: Fed Drug Test clients pay
 // it at every drug test, Federal SO clients on their first group attendance of the month. null for everyone else.
 // Mirrors federalGroupFee in frontend/src/utils/clients.ts.
 const federalGroupFee = (programType, copay, attendedThisMonth) => {
@@ -86,7 +100,7 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         const g = await db.query('SELECT UPPER(TRIM(ProgramType)) AS t FROM Groups WHERE GroupId = $1', [group]);
         if (g.rows[0]?.t !== 'INDIVIDUAL') throw Object.assign(new Error('Only an INDIVIDUAL group records individual sessions.'), { status: 400 });
     }
-    const clientRes = await db.query('SELECT AccountBalance, ProgramType, Phase, FirstName, LastName, TreatmentFee, Copay FROM Clients WHERE ClientId = $1 FOR UPDATE', [client]);
+    const clientRes = await db.query('SELECT AccountBalance, ProgramType, Phase, FirstName, LastName, TreatmentFee, GroupCopay FROM Clients WHERE ClientId = $1 FOR UPDATE', [client]);
     if (clientRes.rows.length === 0) {
         throw new Error(`Client ${client} not found.`);
     }
@@ -137,8 +151,8 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         const monthly = isMonthlyFeeClient(clientRes.rows[0]);
         const periodMonths = feePeriodMonths(clientRes.rows[0]);
         const chargedOn = periodMonths ? await chargedWithinMonths(db, client, sessionDate, periodMonths) : null;
-        const { programtype, copay } = clientRes.rows[0];
-        const federalFee = federalGroupFee(programtype, copay, attendedThatMonth);
+        const { programtype, groupcopay } = clientRes.rows[0];
+        const federalFee = federalGroupFee(programtype, groupcopay, attendedThatMonth);
         if (federalFee !== null) {
             feeNum = federalFee;
             feeReason = programtype === 'Federal SO' && attendedThatMonth ? `copay already charged for ${monthName}`
@@ -169,17 +183,14 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         }
         feeNum = Math.round(feeNum * 100) / 100;
 
-        // The check-in's payment rule (checkInPaymentRule): Chaperon attendances are paid the day of them, and other
-        // clients' first group check-in of the month needs the balance at FIRST_CHECKIN_MAX_OWED or better (or within a
-        // Max Debt Override)
+        // The check-in's payment rule (checkInPaymentRule): Chaperon attendances are paid the day of them, federal clients
+        // can owe any amount unless a Max Debt Override caps it, and other clients' first group check-in of the month
+        // needs the balance at FIRST_CHECKIN_MAX_OWED or better (or within a Max Debt Override)
         const rule = checkInPaymentRule(programtype);
         const short = Math.round((minimumCheckInPayment(rule, oldBalance, feeNum, attendedThatMonth, maxOwed) - Number(accountPaid || 0)) * 100) / 100;
         if (short > 0) {
             const { lastname, firstname } = clientRes.rows[0];
-            const limit = allowedBalanceText(maxOwed);
-            throw new Error(rule === 'each'
-                ? `${lastname}, ${firstname}'s chaperon attendance must be paid the day of it: the balance after check-in, including today's fee, must be ${limit} (pay at least $${short.toFixed(2)} more).`
-                : `${lastname}, ${firstname} must pay their existing balance before their first group check-in of the month: the balance must be ${limit} (pay at least $${short.toFixed(2)} more).`);
+            throw new Error(shortPaymentMessage(rule, `${lastname}, ${firstname}`, 'group', maxOwed, short));
         }
     }
 
@@ -193,12 +204,7 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         )).rows.length > 0;
         const rule = checkInPaymentRule(programtype);
         const short = Math.round((minimumCheckInPayment(rule, oldBalance, feeNum, hadOne, maxOwed) - Number(accountPaid || 0)) * 100) / 100;
-        if (short > 0) {
-            const limit = allowedBalanceText(maxOwed);
-            throw new Error(rule === 'each'
-                ? `${lastname}, ${firstname}'s chaperon session must be paid the day of it: the balance after check-in, including today's fee, must be ${limit} (pay at least $${short.toFixed(2)} more).`
-                : `${lastname}, ${firstname} must pay their existing balance before their first individual session of the month: the balance must be ${limit} (pay at least $${short.toFixed(2)} more).`);
-        }
+        if (short > 0) throw new Error(shortPaymentMessage(rule, `${lastname}, ${firstname}`, 'individual', maxOwed, short));
     }
     const paidNum = Number(accountPaid || 0);
     const newBalance = oldBalance - paidNum + feeNum;
@@ -291,6 +297,6 @@ const individualPrice = async (db) => {
 
 module.exports = {
     isMonthlyFeeClient, feePeriodMonths, chargedWithinMonths, FIRST_CHECKIN_MAX_OWED, checkInPaymentRule, minimumCheckInPayment, federalGroupFee,
-    allowedOwed,
+    allowedOwed, allowedBalanceText, FEDERAL_PAYMENT_PROGRAMS,
     recordAttendance, individualPrice,
 };

@@ -7,15 +7,20 @@
 export const FIRST_CHECKIN_MAX_OWED = 0;
 
 // Which payment rule a client's group check-in follows (mirrors checkInPaymentRule in backend/lib/attendance.js):
-//   'none'  BIP, Federal SO and Fed Drug Test (drug test) clients: no balance requirement
-//   'each'  Chaperon clients: every attendance is paid the day of it, so the balance after check-in, today's fee
-//           included, must be $0.00 or better
-//   'first' everyone else: the first group check-in of the month needs the balance before today's fee at $0.00 or better
-export type CheckInPaymentRule = 'none' | 'each' | 'first';
-export const NO_CHECKIN_LIMIT_PROGRAMS = ['BIP', 'Federal SO', 'Fed Drug Test'];
+//   'none'    BIP clients: no balance requirement
+//   'federal' Federal SO, Fed Drug Test and Poly Only clients: no balance requirement, so they can owe any amount, unless
+//             a Max Debt Override is set: then a check-in that charges a copay can't leave them owing more than it
+//   'each'    Chaperon clients: every attendance is paid the day of it, so the balance after check-in, today's fee
+//             included, must be $0.00 or better
+//   'first'   everyone else: the first group check-in of the month needs the balance before today's fee at $0.00 or better
+export type CheckInPaymentRule = 'none' | 'federal' | 'each' | 'first';
+export const NO_CHECKIN_LIMIT_PROGRAMS = ['BIP'];
+export const FEDERAL_PAYMENT_PROGRAMS = ['Federal SO', 'Fed Drug Test', 'Poly Only'];
 export const PAY_EACH_VISIT_PROGRAMS = ['Chaperon'];
 export const checkInPaymentRule = (programType?: string | null): CheckInPaymentRule =>
-  NO_CHECKIN_LIMIT_PROGRAMS.includes(programType || '') ? 'none' : PAY_EACH_VISIT_PROGRAMS.includes(programType || '') ? 'each' : 'first';
+  NO_CHECKIN_LIMIT_PROGRAMS.includes(programType || '') ? 'none'
+    : FEDERAL_PAYMENT_PROGRAMS.includes(programType || '') ? 'federal'
+      : PAY_EACH_VISIT_PROGRAMS.includes(programType || '') ? 'each' : 'first';
 
 // A Max Debt Override (Business Administrators) lets a client owe up to its amount and still attend; this is the most it
 // can be. Mirrors MAX_DEBT_LIMIT in backend/lib/debtLimits.js.
@@ -24,10 +29,10 @@ export const MAX_DEBT_LIMIT = 10000;
 export const allowedOwed = (maxOwed?: number | string | null): number => Math.max(FIRST_CHECKIN_MAX_OWED, Number(maxOwed) || 0);
 
 // The smallest payment that lets a group or individual check-in through, from the balance before it (stored sign:
-// positive = owes) and today's fee; 0 when nothing has to be paid. maxOwed: the client's Max Debt Override, if any.
-// Mirrors minimumCheckInPayment in backend/lib/attendance.js.
+// positive = owes) and today's fee; 0 when nothing has to be paid. maxOwed: the client's Max Debt Override, if any (for
+// federal clients, the most a charge may leave them owing). Mirrors minimumCheckInPayment in backend/lib/attendance.js.
 export const minimumCheckInPayment = (rule: CheckInPaymentRule, balance: number | string | null | undefined, fee: number, attendedThisMonth: boolean, maxOwed: number | string | null = 0): number => {
-  const owed = rule === 'each' ? Number(balance || 0) + Number(fee || 0)
+  const owed = rule === 'each' || (rule === 'federal' && Number(fee) > 0 && Number(maxOwed) > 0) ? Number(balance || 0) + Number(fee || 0)
     : rule === 'first' && !attendedThisMonth ? Number(balance || 0) : -Infinity;
   return Math.max(0, Math.round((owed - allowedOwed(maxOwed)) * 100) / 100);
 };

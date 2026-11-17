@@ -5,6 +5,9 @@ const { logAction, pool } = require('../db');
 const { requireRole } = require('../lib/auth');
 const { dateText, logClientChange, noteText: shortText } = require('../lib/changeLog');
 const { LAST_POLY_RESULT_SQL, NO_POLY_PROGRAM_TYPES, POLY_INCENTIVE_OVERRIDE_RESULTS, POLY_NDI_WAIT, POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, endPolyFeeOverride, polyOverrideText } = require('../lib/poly');
+const { FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
+const { federalPolyNeeds, postCopay } = require('../lib/copays');
+const { ACTIVE_DEBT_LIMIT } = require('../lib/sql');
 
 const router = express.Router();
 
@@ -188,6 +191,9 @@ const slotNoteContext = async (slot) => {
 // Assign Client to Polygraph Slot. The client needs a full set of poly fee vouchers (polyVoucherMax) and an
 // account balance of $0.00 or better. Otherwise the request is refused with what is owed, so the front end can take
 // that payment. Scheduling uses all of the vouchers.
+// Federal clients (Federal SO, Poly Only) don't use poly fee vouchers and can owe any amount: their Polygraph Copay, if
+// any, is charged to the account when they are scheduled. A Max Debt Override caps that charge: the client pays down
+// first if the copay would leave them owing more than it (refused the same way, with amountDue toward the account).
 router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
     const db = await pool.connect();
     try {
@@ -254,7 +260,9 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
         }
 
         await db.query('BEGIN');
-        const clientRes = await db.query('SELECT PolyFeeVoucher, PolyFeePaid, PolyFee, AccountBalance, Phase FROM Clients WHERE ClientId = $1 FOR UPDATE', [clientId]);
+        const clientRes = await db.query(
+            `SELECT PolyFeeVoucher, PolyFeePaid, PolyFee, AccountBalance, Phase, ProgramType, PolyCopay, ${ACTIVE_DEBT_LIMIT('$1::int')} AS MaxOwed
+             FROM Clients WHERE ClientId = $1 FOR UPDATE`, [clientId]);
         if (clientRes.rows.length === 0) {
             await db.query('ROLLBACK');
             return res.status(404).json({ error: 'Client not found.' });
@@ -279,7 +287,19 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
         const fullSet = polyVoucherMax(clientRes.rows[0].phase);
         // Stored sign: positive = owes
         const accountBalance = Number(clientRes.rows[0].accountbalance || 0);
-        if (vouchers < fullSet || accountBalance > 0) {
+        const federal = FEDERAL_PROGRAM_TYPES.includes(clientRes.rows[0].programtype);
+        const maxOwed = Number(clientRes.rows[0].maxowed || 0);
+        const federalNeeds = federal ? federalPolyNeeds(clientRes.rows[0].polycopay, accountBalance, maxOwed) : null;
+        if (federalNeeds && federalNeeds.amountDue > 0) {
+            await db.query('ROLLBACK');
+            return res.status(409).json({
+                code: 'POLY_SCHEDULING_REQUIREMENTS',
+                error: `This client's $${federalNeeds.copay.toFixed(2)} polygraph copay would put the account past their Max Debt Override (owing at most $${maxOwed.toFixed(2)}); pay at least $${federalNeeds.amountDue.toFixed(2)} on the account first.`,
+                vouchers, polyFeePaid: Number(clientRes.rows[0].polyfeepaid || 0), polyFee: Number(clientRes.rows[0].polyfee || 0),
+                accountBalance, amountDue: 0, balanceDue: federalNeeds.amountDue, polyCopay: federalNeeds.copay, maxOwed,
+            });
+        }
+        if (!federal && (vouchers < fullSet || accountBalance > 0)) {
             await db.query('ROLLBACK');
             const polyFeePaid = Number(clientRes.rows[0].polyfeepaid || 0);
             const polyFee = Number(clientRes.rows[0].polyfee || 0);
@@ -301,41 +321,52 @@ router.post('/api/polygraphs/slots/:slotId/assign', async (req, res) => {
 
         // Insert new scheduled appointment
         await db.query(
-            `INSERT INTO PolygraphAppointments (SlotId, Client, ScheduledDateTime, Polygrapher, Type, Status, PolyVouchersUsed)
-             VALUES ($1, $2, $3, $4, $5, 'Scheduled', $6)`,
-            [slotId, clientId, scheduledDateTime, slot.polygrapher, slotType, fullSet]
+            `INSERT INTO PolygraphAppointments (SlotId, Client, ScheduledDateTime, Polygrapher, Type, Status, PolyVouchersUsed, PolyCopayCharged)
+             VALUES ($1, $2, $3, $4, $5, 'Scheduled', $6, $7)`,
+            [slotId, clientId, scheduledDateTime, slot.polygrapher, slotType, federal ? 0 : fullSet, federalNeeds?.copay || 0]
         );
 
         // Mark slot as filled
         await db.query('UPDATE PolygraphSlots SET IsFilled = TRUE, Type = $1 WHERE SlotId = $2', [slotType, slotId]);
 
-        // Use the vouchers. The paid-in-full poly fee they came from is spent too, so the next polygraph starts a new poly fee.
-        await db.query(
-            `UPDATE Clients SET
-                PolyFeeVoucher = PolyFeeVoucher - $1,
-                PolyFeePaid = CASE WHEN PolyFeePaid >= PolyFee THEN PolyFeePaid - PolyFee ELSE PolyFeePaid END,
-                PolyVouchersBeforeFill = NULL
-             WHERE ClientId = $2`,
-            [fullSet, clientId]
-        );
-        // The vouchers used go on the account's change log, not the case note
-        await logClientChange(db, {
-            clientId, changedBy: user, changeType: 'Poly Fee Vouchers',
-            oldValue: String(vouchers), newValue: String(vouchers - fullSet),
-            details: `${fullSet} poly fee voucher${fullSet === 1 ? '' : 's'} used to schedule the polygraph ${noteContext}.`,
-        });
-
-        // Spending the last fill a poly fee override allows ends it and puts the regular poly fee back
         let overrideText = '';
-        const polyOverride = await activePolyFeeOverride(db, clientId);
-        if (polyOverride && Number(polyOverride.fillsused) >= Number(polyOverride.fillsallowed)) {
-            const { override } = await endPolyFeeOverride(db, clientId);
-            overrideText = ` Temporary poly fee override (${polyOverrideText(override)}) used up; poly fee back to $${Number(override.regularfee).toFixed(2)}.`;
+        if (federal) {
+            // A federal client's polygraph copay goes on the account instead of vouchers being used
+            if (federalNeeds.copay > 0) {
+                await postCopay(db, {
+                    clientId, amount: federalNeeds.copay, changedBy: user,
+                    comments: `Polygraph copay for the polygraph scheduled ${noteContext}.`,
+                });
+                overrideText = ` Polygraph copay of $${federalNeeds.copay.toFixed(2)} charged to the account.`;
+            }
+        } else {
+            // Use the vouchers. The paid-in-full poly fee they came from is spent too, so the next polygraph starts a new poly fee.
+            await db.query(
+                `UPDATE Clients SET
+                    PolyFeeVoucher = PolyFeeVoucher - $1,
+                    PolyFeePaid = CASE WHEN PolyFeePaid >= PolyFee THEN PolyFeePaid - PolyFee ELSE PolyFeePaid END,
+                    PolyVouchersBeforeFill = NULL
+                 WHERE ClientId = $2`,
+                [fullSet, clientId]
+            );
+            // The vouchers used go on the account's change log, not the case note
             await logClientChange(db, {
-                clientId, changedBy: user, changeType: 'Poly Fee Override',
-                oldValue: polyOverrideText(override), newValue: 'Ended',
-                details: `All ${override.fillsallowed} fill(s) used; poly fee back to $${Number(override.regularfee).toFixed(2)}.`,
+                clientId, changedBy: user, changeType: 'Poly Fee Vouchers',
+                oldValue: String(vouchers), newValue: String(vouchers - fullSet),
+                details: `${fullSet} poly fee voucher${fullSet === 1 ? '' : 's'} used to schedule the polygraph ${noteContext}.`,
             });
+
+            // Spending the last fill a poly fee override allows ends it and puts the regular poly fee back
+            const polyOverride = await activePolyFeeOverride(db, clientId);
+            if (polyOverride && Number(polyOverride.fillsused) >= Number(polyOverride.fillsallowed)) {
+                const { override } = await endPolyFeeOverride(db, clientId);
+                overrideText = ` Temporary poly fee override (${polyOverrideText(override)}) used up; poly fee back to $${Number(override.regularfee).toFixed(2)}.`;
+                await logClientChange(db, {
+                    clientId, changedBy: user, changeType: 'Poly Fee Override',
+                    oldValue: polyOverrideText(override), newValue: 'Ended',
+                    details: `All ${override.fillsallowed} fill(s) used; poly fee back to $${Number(override.regularfee).toFixed(2)}.`,
+                });
+            }
         }
 
         // Record the appointment in the client's case notes
@@ -446,18 +477,33 @@ router.post('/api/polygraphs/slots/:slotId/open', async (req, res) => {
         await db.query('BEGIN');
 
         // Remember who was booked so the cancellation can be logged on their account
-        const apptRes = await db.query("SELECT Client, PolyVouchersUsed FROM PolygraphAppointments WHERE SlotId = $1 AND Status = 'Scheduled'", [slotId]);
+        const apptRes = await db.query("SELECT Client, PolyVouchersUsed, PolyCopayCharged FROM PolygraphAppointments WHERE SlotId = $1 AND Status = 'Scheduled'", [slotId]);
 
         // Remove the scheduled appointment
         await db.query("DELETE FROM PolygraphAppointments WHERE SlotId = $1 AND Status = 'Scheduled'", [slotId]);
 
         if (apptRes.rows.length > 0) {
-            const { client, polyvouchersused } = apptRes.rows[0];
+            const { client, polyvouchersused, polycopaycharged } = apptRes.rows[0];
             const rule = overrideVoucherRule ? null : polyVoucherReturnRule(String(reason).trim(), slot);
             const ruleOverridden = overrideVoucherRule && polyVoucherReturnRule(String(reason).trim(), slot) !== null;
-            const refunded = (rule ?? returnVouchers !== false) ? Number(polyvouchersused || 0) : 0;
+            // A federal client's polygraph copay is credited back whenever vouchers would be returned
+            const giveBack = Boolean(rule ?? returnVouchers !== false);
+            const refunded = giveBack ? Number(polyvouchersused || 0) : 0;
             // Whether the vouchers went back goes on the account's change log, not the case note
-            const overrideText = ruleOverridden ? ` Set to ${refunded > 0 ? 'returned' : 'not returned'} by Business Administrator override.` : '';
+            const overrideText = ruleOverridden ? ` Set to ${giveBack ? 'returned' : 'not returned'} by Business Administrator override.` : '';
+            const copay = Number(polycopaycharged || 0);
+            if (copay > 0 && giveBack) {
+                await db.query('SELECT 1 FROM Clients WHERE ClientId = $1 FOR UPDATE', [client]);
+                await postCopay(db, {
+                    clientId: client, amount: -copay, changedBy: user,
+                    comments: `Polygraph copay credited back: polygraph reservation canceled ${noteContext} (${String(reason).trim()}).${overrideText}`,
+                });
+            } else if (copay > 0) {
+                await logClientChange(db, {
+                    clientId: client, changedBy: user, changeType: 'Polygraph Copay',
+                    details: `$${copay.toFixed(2)} polygraph copay not credited back: polygraph reservation canceled ${noteContext} (${String(reason).trim()}).${overrideText}`,
+                });
+            }
             if (refunded > 0) {
                 const voucherRes = await db.query(
                     `UPDATE Clients c SET PolyFeeVoucher = LEAST(c.PolyFeeVoucher + $1, ${POLY_VOUCHER_MAX_SQL('c.Phase')})
@@ -653,17 +699,20 @@ router.delete('/api/polygraphs/slots/:slotId', requireRole('Business Administrat
         const { slotId } = req.params;
         await db.query('BEGIN');
         const slot = (await db.query('SELECT * FROM PolygraphSlots WHERE SlotId = $1', [slotId])).rows[0];
-        // A client booked into the slot loses the booking; that goes on their change log (vouchers used aren't returned)
+        // A client booked into the slot loses the booking; that goes on their change log (vouchers used aren't returned,
+        // nor is a polygraph copay credited back)
         const booked = (await db.query(
-            "DELETE FROM PolygraphAppointments WHERE SlotId = $1 RETURNING Client, Status, PolyVouchersUsed", [slotId]
+            "DELETE FROM PolygraphAppointments WHERE SlotId = $1 RETURNING Client, Status, PolyVouchersUsed, PolyCopayCharged", [slotId]
         )).rows.filter(a => a.status === 'Scheduled' && a.client);
         if (slot) {
             const context = booked.length ? await slotNoteContext(slot) : '';
             for (const a of booked) {
                 const used = Number(a.polyvouchersused || 0);
+                const copay = Number(a.polycopaycharged || 0);
                 await logClientChange(db, {
                     clientId: a.client, changedBy: req.user.employeeemail, changeType: 'Polygraph', newValue: 'Canceled',
-                    details: `Polygraph slot ${context} was deleted.${used > 0 ? ` The ${used} poly fee voucher${used === 1 ? '' : 's'} used to book it ${used === 1 ? 'was' : 'were'} not returned.` : ''}`,
+                    details: `Polygraph slot ${context} was deleted.${used > 0 ? ` The ${used} poly fee voucher${used === 1 ? '' : 's'} used to book it ${used === 1 ? 'was' : 'were'} not returned.` : ''}`
+                        + (copay > 0 ? ` The $${copay.toFixed(2)} polygraph copay charged to book it was not credited back.` : ''),
                 });
             }
         }

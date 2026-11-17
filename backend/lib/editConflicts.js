@@ -5,7 +5,7 @@
 
 // Client fields compared as numbers (150 and "150.00" match); blanks are compared as text
 const NUMBER_FIELDS = new Set(['treatmentfee', 'accountbalance', 'vouchers', 'polyfeevoucher', 'polyfeepaid', 'polyfee',
-    'copay', 'buspasses', 'buspassrefill', 'groupid', 'individualgroupid']);
+    'groupcopay', 'individualcopay', 'polycopay', 'buspasses', 'buspassrefill', 'groupid', 'individualgroupid']);
 const UNIT_FIELDS = new Set(['federalunits', 'federalunitrefills']);
 const isDateField = (field) => /date/i.test(field);
 
@@ -47,7 +47,7 @@ const CLIENT_FIELD_LABELS = {
     programstartdate: 'Program Start Date', address: 'Address', city: 'City', county: 'County', state: 'State', zip: 'Zip',
     mainphone: 'Main Phone', altphone: 'Alt Phone', emergencycontact: 'Emergency Contact', emergencycontactphone: 'Emergency Contact Phone',
     comments: 'Comments', programtype: 'Program Type', pretrial: 'Pretrial', phase: 'Phase', groupid: 'Group',
-    individualgroupid: 'Individual Group', assessor: 'Assessor', copay: 'Copay', buspasses: 'Bus Passes', buspassrefill: 'Bus Pass Refill',
+    individualgroupid: 'Individual Group', assessor: 'Assessor', groupcopay: 'Group Copay', individualcopay: 'Individual Copay', polycopay: 'Polygraph Copay', buspasses: 'Bus Passes', buspassrefill: 'Bus Pass Refill',
     treatmentfee: 'Treatment Fee', accountbalance: 'Account Balance', vouchers: 'Vouchers', polyfeevoucher: 'Poly Fee Voucher',
     polyfeepaid: 'Poly Fee Paid', polyfee: 'Poly Fee', federalunits: 'Federal Units', federalunitrefills: 'Federal Unit Refills',
 };
@@ -68,7 +68,7 @@ const shownValue = (field, row) => {
         const shown = -Number(v);
         return `${shown < 0 ? '-' : ''}$${Math.abs(shown).toFixed(2)}`;
     }
-    if (['treatmentfee', 'polyfeepaid', 'polyfee', 'copay'].includes(field)) return `$${Number(v).toFixed(2)}`;
+    if (['treatmentfee', 'polyfeepaid', 'polyfee', 'groupcopay', 'individualcopay', 'polycopay'].includes(field)) return `$${Number(v).toFixed(2)}`;
     if (isDateField(field)) return String(v).split('T')[0];
     const text = String(v);
     return text.length > 60 ? `${text.slice(0, 57)}...` : text;

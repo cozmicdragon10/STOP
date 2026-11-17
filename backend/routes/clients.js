@@ -12,6 +12,7 @@ const { MONEY_FIELDS, LABELS: MONEY_LABELS, moneyEditProblem, moneyText, standar
 const { POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, countPolyFeeFill } = require('../lib/poly');
 const { ACTIVE_DEBT_LIMIT, ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED, INDIVIDUAL_THIS_MONTH, SESSION_FEE_SQL } = require('../lib/sql');
 const { BUS_PASS_MAX, FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
+const { COPAY_FIELDS, copayText } = require('../lib/copays');
 const { FEDERAL_UNITS_SQL, FEDERAL_UNIT_REFILLS_SQL, LAST_DRUG_TEST_SQL, saveClientFederalUnits, saveClientUnitRefills, unitsProblem } = require('../lib/federalUnits');
 
 const router = express.Router();
@@ -761,7 +762,7 @@ const updateClientInfo = async (req, res) => {
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
             comments, programtype, race, dateofbirth, sex, pretrial, assessor, buspasses, buspassrefill,
-            individualgroupid, federalunits, federalunitrefills, copay, doctype, expected
+            individualgroupid, federalunits, federalunitrefills, doctype, expected
         } = req.body;
         // Changes are logged under whoever is signed in, whether or not the screen sent its name
         const updatedBy = req.user?.employeeemail || req.body.updatedBy;
@@ -772,10 +773,15 @@ const updateClientInfo = async (req, res) => {
         if (doctype !== undefined && doctype !== null && doctype !== '' && !ID_TYPES.includes(doctype)) {
             return res.status(400).json({ error: `ID # type must be one of: ${ID_TYPES.join(', ')}.` });
         }
-        // Federal clients' copay for individual sessions: changed only when sent; blank clears it
-        const copayValue = copay === undefined || copay === null || copay === '' ? null : Math.round(Number(copay) * 100) / 100;
-        if (copayValue !== null && !(Number.isFinite(copayValue) && copayValue >= 0)) {
-            return res.status(400).json({ error: 'Copay must be $0.00 or more, or blank.' });
+        // Federal clients' copays (group, individual, polygraph): each changed only when sent; blank clears it
+        const copays = {};
+        for (const [field, label] of COPAY_FIELDS) {
+            const value = req.body[field];
+            const amount = value === undefined || value === null || value === '' ? null : Math.round(Number(value) * 100) / 100;
+            if (amount !== null && !(Number.isFinite(amount) && amount >= 0)) {
+                return res.status(400).json({ error: `${label} must be $0.00 or more, or blank.` });
+            }
+            copays[field] = { sent: value !== undefined, amount };
         }
         // Bus passes and the monthly refill: whole numbers from 0 to BUS_PASS_MAX, changed only when sent
         const passCount = (value) => (value === undefined || value === null || value === '' ? null : Number(value));
@@ -814,7 +820,7 @@ const updateClientInfo = async (req, res) => {
             return res.status(status).json(body);
         };
         // Tracked fields before the edit, for the change log; locks the client until the save is done
-        const beforeRes = await db.query(`SELECT ${CLIENT_INFO_COLUMNS}, AccountBalance, TreatmentFee, Vouchers, DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1 FOR UPDATE`, [id]);
+        const beforeRes = await db.query(`SELECT ${CLIENT_INFO_COLUMNS}, AccountBalance, TreatmentFee, Vouchers, DocType, DOCNumber, GroupCopay, IndividualCopay, PolyCopay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, PolyFee, PolyFeePaid, PolyFeeVoucher, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1 FOR UPDATE`, [id]);
         const before = beforeRes.rows[0];
         if (!before) return refuse(404, { error: 'Client not found.' });
         // Someone else changed a field this edit changes: refuse, and send the client as it is now
@@ -903,9 +909,13 @@ const updateClientInfo = async (req, res) => {
                 -- Only SO clients (after this edit) have an individual group
                 IndividualGroupId = CASE WHEN COALESCE($23, ProgramType) = ANY($39::text[])
                     THEN (CASE WHEN $37::boolean THEN $38::int ELSE IndividualGroupId END) ELSE NULL END,
-                -- Federal clients only (after this edit); changed only when sent
-                Copay = CASE WHEN COALESCE($23, ProgramType) = ANY($42::text[])
-                    THEN (CASE WHEN $40::boolean THEN $41::numeric ELSE Copay END) ELSE NULL END,
+                -- Federal clients only (after this edit); each changed only when sent
+                GroupCopay = CASE WHEN COALESCE($23, ProgramType) = ANY($42::text[])
+                    THEN (CASE WHEN $40::boolean THEN $41::numeric ELSE GroupCopay END) ELSE NULL END,
+                IndividualCopay = CASE WHEN COALESCE($23, ProgramType) = ANY($42::text[])
+                    THEN (CASE WHEN $46::boolean THEN $47::numeric ELSE IndividualCopay END) ELSE NULL END,
+                PolyCopay = CASE WHEN COALESCE($23, ProgramType) = ANY($42::text[])
+                    THEN (CASE WHEN $48::boolean THEN $49::numeric ELSE PolyCopay END) ELSE NULL END,
                 DocType = CASE WHEN $43::boolean THEN $44::text ELSE DocType END
             WHERE ClientId = $24`,
             [
@@ -925,9 +935,11 @@ const updateClientInfo = async (req, res) => {
                 assessor !== undefined, String(assessor ?? '').trim() || null,
                 busPasses, busPassRefill,
                 individualgroupid !== undefined, individualGroup.id, SO_PROGRAM_TYPES,
-                copay !== undefined, copayValue, FEDERAL_PROGRAM_TYPES,
+                copays.groupcopay.sent, copays.groupcopay.amount, FEDERAL_PROGRAM_TYPES,
                 doctype !== undefined, doctype || null,
                 sent,
+                copays.individualcopay.sent, copays.individualcopay.amount,
+                copays.polycopay.sent, copays.polycopay.amount,
             ]
         );
 
@@ -948,7 +960,7 @@ const updateClientInfo = async (req, res) => {
         );
 
         if (before && updated.rows[0]) {
-            const after = await db.query(`SELECT ${CLIENT_INFO_COLUMNS}, DocType, DOCNumber, Copay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1`, [id]);
+            const after = await db.query(`SELECT ${CLIENT_INFO_COLUMNS}, DocType, DOCNumber, GroupCopay, IndividualCopay, PolyCopay, ProgramStatus, ProgramType, SupervisingAgent, GroupId, IndividualGroupId, Pretrial, Assessor, BusPasses, BusPassRefill FROM Clients WHERE ClientId = $1`, [id]);
             const now = after.rows[0];
             // An edit that makes the poly fee paid in full filled the vouchers (see the CASE above); that counts toward an override
             const wasFull = Number(before.polyfee) > 0 && Number(before.polyfeepaid) >= Number(before.polyfee);
@@ -975,7 +987,7 @@ const updateClientInfo = async (req, res) => {
                 ['Assessor', before.assessor, now.assessor],
                 ['Bus Passes', String(before.buspasses ?? 0), String(now.buspasses ?? 0)],
                 ['Bus Pass Refill', String(before.buspassrefill ?? 0), String(now.buspassrefill ?? 0)],
-                ['Copay', before.copay === null ? '' : `${Number(before.copay).toFixed(2)}`, now.copay === null ? '' : `${Number(now.copay).toFixed(2)}`],
+                ...COPAY_FIELDS.map(([field, label]) => [label, copayText(before[field]), copayText(now[field])]),
                 // Every change to the money fields, so a balance can't change without a trail (vouchers trimmed by a phase
                 // change are logged above with the reason)
                 ...MONEY_FIELDS.filter(f => !(f === 'polyfeevoucher' && vouchersTrimmed))

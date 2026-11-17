@@ -6,7 +6,7 @@
 type Row = Record<string, any>;
 
 // Fields compared as numbers (150 and "150.00" match); blanks are compared as text
-const NUMBER_FIELDS = ['treatmentfee', 'accountbalance', 'vouchers', 'polyfeevoucher', 'polyfeepaid', 'polyfee', 'copay',
+const NUMBER_FIELDS = ['treatmentfee', 'accountbalance', 'vouchers', 'polyfeevoucher', 'polyfeepaid', 'polyfee', 'groupcopay', 'individualcopay', 'polycopay',
   'buspasses', 'buspassrefill', 'groupid', 'individualgroupid'];
 export const UNIT_FIELDS = ['federalunits', 'federalunitrefills'];
 const isDateField = (field: string) => /date/i.test(field);

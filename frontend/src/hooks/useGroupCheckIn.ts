@@ -49,8 +49,9 @@ export interface ClientRecord {
   federalunits?: Record<string, number | string> | null;
   // Fed Drug Test clients: date (YYYY-MM-DD) of their latest drug test; they can be tested once a day
   lastdrugtest?: string | null;
-  // Federal clients: what they pay for an individual session instead of the Individual price (blank = nothing)
-  copay?: number | string | null;
+  // Federal clients: what they pay instead of the group fee and the Individual price (blank = nothing)
+  groupcopay?: number | string | null;
+  individualcopay?: number | string | null;
 }
 
 export interface GroupRecord {
@@ -114,10 +115,10 @@ export const feeAlreadyCharged = (client: ClientRecord): boolean =>
   client.feealreadycharged ?? (isMonthlyFeeClient(client.programtype, client.phase) && Boolean(client.attendedthismonth));
 
 // Each client is charged the treatment fee on their own account. A client with no fee set is charged nothing.
-// State SO Phase 1 clients are charged only on their first attendance of the month. Federal clients pay their copay
+// State SO Phase 1 clients are charged only on their first attendance of the month. Federal clients pay their Group Copay
 // instead (federalGroupFee).
 export const clientFee = (client: ClientRecord): number => {
-  const federal = federalGroupFee(client.programtype, client.copay, Boolean(client.attendedthismonth));
+  const federal = federalGroupFee(client.programtype, client.groupcopay, Boolean(client.attendedthismonth));
   if (federal !== null) return federal;
   if (feeAlreadyCharged(client)) return 0;
   if (client.activefeeoverride !== null && client.activefeeoverride !== undefined) return Number(client.activefeeoverride) || 0;

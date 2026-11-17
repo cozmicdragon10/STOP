@@ -103,10 +103,10 @@ router.post('/api/attendance/batch', async (req, res) => {
                 throw Object.assign(new Error(`${bip.rows.map(r => r.name).join('; ')}: BIP clients do not have individual sessions.`), { status: 400 });
             }
         }
-        // Federal clients' individual sessions are charged their Copay (nothing when blank), not the Individual price
+        // Federal clients' individual sessions are charged their Individual Copay (nothing when blank), not the Individual price
         const copays = individual ? new Map((await clientDb.query(
-            'SELECT ClientId, Copay FROM Clients WHERE ClientId = ANY($1::int[]) AND ProgramType = ANY($2::text[])',
-            [clientIds, FEDERAL_PROGRAM_TYPES])).rows.map(r => [r.clientid, Number(r.copay || 0)])) : new Map();
+            'SELECT ClientId, IndividualCopay FROM Clients WHERE ClientId = ANY($1::int[]) AND ProgramType = ANY($2::text[])',
+            [clientIds, FEDERAL_PROGRAM_TYPES])).rows.map(r => [r.clientid, Number(r.individualcopay || 0)])) : new Map();
         // Federal SO clients use their 6022 (group) or 6012 (individual) units by how long they attended (lib/federalUnits.js)
         const unitClients = new Map((await clientDb.query(
             `SELECT ClientId, ProgramType, LastName || ', ' || FirstName AS name FROM Clients WHERE ClientId = ANY($1::int[]) AND ProgramType = ANY($2::text[])`,

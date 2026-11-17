@@ -51,6 +51,18 @@ test('federal clients are charged the same copay', async () => {
     }
 });
 
+test('federal polygraph copays need the same payment first', async () => {
+    const browser = await frontend('clients.ts');
+    const { federalPolyNeeds } = require('../lib/copays');
+    for (const copay of [null, '', 0, '25.00', 40]) {
+        for (const balance of [-20, 0, 50, '90.00', 500]) {
+            for (const maxOwed of [0, null, 100, '250.00']) {
+                assert.deepEqual(federalPolyNeeds(copay, balance, maxOwed), browser.federalPolyNeeds(copay, balance, maxOwed), `copay ${copay} balance ${balance} max ${maxOwed}`);
+            }
+        }
+    }
+});
+
 test('monthly treatment fee applies to the same programs and phases', async () => {
     const { isMonthlyFeeClient: browser, SO_PHASES } = await frontend('soPhases.ts');
     for (const programtype of ['State SO', 'Federal SO', 'Voluntary SO', 'BIP', null]) {

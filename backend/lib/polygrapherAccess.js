@@ -28,7 +28,7 @@ const ALLOWED = [
 
 // Client fields a Polygrapher isn't sent: money, billing, and internal comments
 const HIDDEN_CLIENT_FIELDS = ['accountbalance', 'treatmentfee', 'vouchers', 'polyfeevoucher', 'polyfeepaid', 'polyfee',
-    'polyvouchersbeforefill', 'copay', 'buspasses', 'buspassrefill', 'federalunits', 'federalunitrefills', 'activefeeoverride',
+    'polyvouchersbeforefill', 'groupcopay', 'individualcopay', 'polycopay', 'buspasses', 'buspassrefill', 'federalunits', 'federalunitrefills', 'activefeeoverride',
     'feealreadycharged', 'attendedthismonth', 'cardpaymentsblocked', 'cardblockreason', 'comments'];
 const CLIENT_ROWS = /^\/api\/clients(\/\d+)?$/;
 

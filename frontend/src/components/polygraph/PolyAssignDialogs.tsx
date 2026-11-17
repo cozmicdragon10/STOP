@@ -135,9 +135,9 @@ export default function PolyAssignDialogs({ assignment: a, slots, clients, userE
           onProcessed={(newBalance, polyFeePaid, polyFeeVoucher) => {
             const updated = { ...a.paymentPrompt!.client, accountbalance: newBalance, polyfeepaid: polyFeePaid, polyfeevoucher: polyFeeVoucher };
             onClientUpdated(updated);
-            const { met, fullSet } = polySchedulingNeeds(updated);
+            const { met, fullSet, federalCopay } = polySchedulingNeeds(updated);
             if (met) {
-              onSuccess(`${fullSet}/${fullSet} poly fee vouchers and the account is paid up. Click ${accountOpen ? 'Schedule' : 'Confirm & Assign Slot'} to schedule.`);
+              onSuccess(`${federalCopay !== null ? 'The polygraph copay now fits within the Max Debt Override' : `${fullSet}/${fullSet} poly fee vouchers and the account is paid up`}. Click ${accountOpen ? 'Schedule' : 'Confirm & Assign Slot'} to schedule.`);
             }
           }}
         />

@@ -3,11 +3,22 @@ import { checkInPaymentRule, minimumCheckInPayment } from './balance';
 import { federalGroupFee } from './clients';
 
 describe('check-in payment rule', () => {
-  it('BIP, Federal SO and drug test clients have no balance requirement', () => {
-    for (const p of ['BIP', 'Federal SO', 'Fed Drug Test']) {
-      expect(checkInPaymentRule(p)).toBe('none');
-      expect(minimumCheckInPayment('none', 500, 40, false)).toBe(0);
-    }
+  it('BIP clients have no balance requirement', () => {
+    expect(checkInPaymentRule('BIP')).toBe('none');
+    expect(minimumCheckInPayment('none', 500, 40, false)).toBe(0);
+  });
+
+  it('federal clients can owe any amount when no max debt override is set', () => {
+    for (const p of ['Federal SO', 'Fed Drug Test', 'Poly Only']) expect(checkInPaymentRule(p)).toBe('federal');
+    expect(minimumCheckInPayment('federal', 5000, 40, false)).toBe(0);
+    expect(minimumCheckInPayment('federal', 5000, 40, false, null)).toBe(0);
+  });
+
+  it('a max debt override caps what a federal copay can leave the client owing', () => {
+    expect(minimumCheckInPayment('federal', 80, 40, true, 100)).toBe(20);
+    expect(minimumCheckInPayment('federal', 50, 40, false, '100.00')).toBe(0);
+    // Nothing charged today: nothing to pay, even over the cap
+    expect(minimumCheckInPayment('federal', 500, 0, false, 100)).toBe(0);
   });
 
   it('Chaperon clients pay each attendance the day of it, today\'s fee included', () => {

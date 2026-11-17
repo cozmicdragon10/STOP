@@ -53,7 +53,16 @@ export function usePolyAssignment({ role, userEmail, clients, setClients, setPol
   // then the account balance. Short vouchers with nothing owed on the poly fee must be fixed in Edit Info.
   const promptPayment = (client: ClientRow) => {
     const name = `${client.firstname} ${client.lastname}`;
-    const { vouchers, fullSet, polyFeePaid, polyFee, short, polyDue, balanceDue } = polySchedulingNeeds(client);
+    const { vouchers, fullSet, polyFeePaid, polyFee, short, polyDue, balanceDue, federalCopay } = polySchedulingNeeds(client);
+    if (federalCopay !== null) {
+      // Federal: only reached when the polygraph copay would put the account past a Max Debt Override
+      setPaymentPrompt({
+        client, amountDue: balanceDue,
+        notice: `${name}'s $${federalCopay.toFixed(2)} polygraph copay is charged to the account when they are scheduled, and that would put them `
+          + `past their Max Debt Override (owing at most $${Number(client.maxowed || 0).toFixed(2)}). Paying $${balanceDue.toFixed(2)} on the account lets them be scheduled.`,
+      });
+      return;
+    }
     if (short && polyDue <= 0) {
       onError(`${name} has ${vouchers}/${fullSet} poly fee vouchers but nothing is owed on the poly fee. Correct the vouchers in the client's Edit Info.`);
       return;
@@ -122,7 +131,10 @@ export function usePolyAssignment({ role, userEmail, clients, setClients, setPol
         });
       } else if (res?.code === 'POLY_SCHEDULING_REQUIREMENTS' && client) {
         // The server's figures are current; refresh the client and ask for the payment
-        const updated = { ...client, polyfeevoucher: res.vouchers, polyfeepaid: res.polyFeePaid, polyfee: res.polyFee, accountbalance: res.accountBalance };
+        const updated = {
+          ...client, polyfeevoucher: res.vouchers, polyfeepaid: res.polyFeePaid, polyfee: res.polyFee, accountbalance: res.accountBalance,
+          ...(res.polyCopay !== undefined ? { polycopay: res.polyCopay, maxowed: res.maxOwed } : {}),
+        };
         setClients(prev => prev.map(c => c.clientid === client.clientid ? updated : c));
         promptPayment(updated);
       } else if (res?.error) {

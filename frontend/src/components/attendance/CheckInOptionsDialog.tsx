@@ -36,10 +36,10 @@ const PAYMENT_METHODS: PaymentMethod[] = ['Cash', 'Credit Card'];
 
 // Explains the fee line: where it comes from, or why nothing is charged
 const feeLabel = (c: ClientRecord, fee: number): string => {
-  if (federalGroupFee(c.programtype, c.copay, Boolean(c.attendedthismonth)) !== null) {
-    if (fee > 0) return c.programtype === 'Federal SO' ? 'Copay (first group of the month)' : 'Copay (each drug test)';
-    return c.programtype === 'Federal SO' && c.attendedthismonth && Number(c.copay || 0) > 0
-      ? 'Copay already charged this month (nothing charged)' : 'No copay on account (nothing charged)';
+  if (federalGroupFee(c.programtype, c.groupcopay, Boolean(c.attendedthismonth)) !== null) {
+    if (fee > 0) return c.programtype === 'Federal SO' ? 'Group copay (first group of the month)' : 'Group copay (each drug test)';
+    return c.programtype === 'Federal SO' && c.attendedthismonth && Number(c.groupcopay || 0) > 0
+      ? 'Group copay already charged this month (nothing charged)' : 'No group copay on account (nothing charged)';
   }
   if (fee > 0) return 'Treatment fee (from account)';
   if (feeAlreadyCharged(c)) {
@@ -50,7 +50,8 @@ const feeLabel = (c: ClientRecord, fee: number): string => {
 };
 // How much a client still has to pay before the check-in is allowed (0 when they may check in), by their payment rule
 // (checkInPaymentRule): Chaperon attendances are paid the day of them, others need the balance paid on their first group
-// check-in of the month, and BIP and federal clients have no requirement. Balances are in the stored sign (positive = owes);
+// check-in of the month, BIP clients have no requirement, and federal clients have none unless a Max Debt Override caps
+// what a copay may leave them owing. Balances are in the stored sign (positive = owes);
 // a processed card payment is already in the balance. A card amount counts only once the card is processed.
 // Individual sessions count the client's first individual session of the month. A Max Debt Override (maxowed) raises
 // how much the client may owe.
@@ -206,7 +207,9 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
             )}
             {stillOwed > 0 && (
               <div className="mb-3 bg-red-500/10 border border-red-500/40 rounded-lg p-3 text-xs text-red-300">
-                {rule === 'each'
+                {rule === 'federal'
+                  ? <>{c.firstname} has a Max Debt Override. The balance after check-in, including today's copay, must be {allowedText}.</>
+                  : rule === 'each'
                   ? <>Chaperon attendance is paid the day of it. The balance after check-in, including today's fee, must be {allowedText}.</>
                   : <>This is {c.firstname}'s first {individual ? 'individual session' : 'group check-in'} this month. The balance before today's fee must be {allowedText} to be checked in.</>}
                 {' '}A payment of at least <strong>${minimumPayment.toFixed(2)}</strong> is
@@ -247,7 +250,7 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
                 <span className="text-white">{formatBalance(baseBalance)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">{federalCopay ? (fee > 0 ? 'Individual session copay (federal client)' : 'Federal client: no copay (nothing charged)') : individual ? 'Individual session (price from Admin)' : feeLabel(c, fee)}</span>
+                <span className="text-slate-400">{federalCopay ? (fee > 0 ? 'Individual copay (federal client)' : 'Federal client: no individual copay (nothing charged)') : individual ? 'Individual session (price from Admin)' : feeLabel(c, fee)}</span>
                 <span className="text-red-400">{formatBalance(fee)}</span>
               </div>
               <div className="flex justify-between">

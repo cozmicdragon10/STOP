@@ -333,7 +333,8 @@ export default function ClientLedger({ client, role, userEmail, financials, high
         // Includes the fees of check-ins that took a payment (their one row is the payment)
         const charges = feesCharged(month.rows);
         // Net of refunds and disputes
-        const payments = month.rows.filter(f => f.type !== 'Charge')
+        // Adjustments (a polygraph copay credited back) lower the balance but aren't money paid
+        const payments = month.rows.filter(f => f.type !== 'Charge' && f.type !== 'Adjustment')
           .reduce((t, f) => t + (PAYMENT_REVERSAL_TYPES.includes(f.type) ? -1 : 1) * Number(f.amount || 0), 0);
         const collapsed = collapsedMonths.has(month.key);
         return (

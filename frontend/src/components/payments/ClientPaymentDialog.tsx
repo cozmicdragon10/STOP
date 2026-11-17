@@ -7,7 +7,7 @@ import { takesPolygraphs } from '../../utils/polygraph';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import CardPaymentFields from './CardPaymentFields';
 import { emptyCardBilling, type CardBilling } from './cardBilling';
-import { idText } from '../../utils/clients';
+import { FEDERAL_PROGRAM_TYPES, idText } from '../../utils/clients';
 
 interface Props {
   client: ClientRecord;
@@ -49,8 +49,9 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
   const parsedAmount = amount.trim() === '' ? 0 : Number(amount);
   const validAmount = Number.isFinite(parsedAmount) && parsedAmount > 0;
 
-  // Poly fee option is offered only when the client record carries poly fee figures; BIP, Fed Drug Test and Chaperon clients don't take polygraphs
-  const hasPolyFee = client.polyfee != null && takesPolygraphs(client.programtype);
+  // Poly fee option is offered only when the client record carries poly fee figures; BIP, Fed Drug Test and Chaperon clients
+  // don't take polygraphs, and federal clients pay a Polygraph Copay on the account instead of a poly fee
+  const hasPolyFee = client.polyfee != null && takesPolygraphs(client.programtype) && !FEDERAL_PROGRAM_TYPES.includes(client.programtype || '');
   const polyFee = Number(client.polyfee ?? 0);
   const polyPaid = Number(client.polyfeepaid ?? 0);
   const polyOwed = Math.max(0, polyFee - polyPaid);

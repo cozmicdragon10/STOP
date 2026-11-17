@@ -65,7 +65,10 @@ export const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
   { type: 'Treatment Fee', label: 'Treatment Fee' },
   { type: 'Fee Override', label: 'Temporary Fee Override' },
   { type: 'Vouchers', label: 'Vouchers' },
-  { type: 'Copay', label: 'Copay' },
+  { type: 'Group Copay', label: 'Group Copay' },
+  { type: 'Individual Copay', label: 'Individual Copay' },
+  { type: 'Polygraph Copay', label: 'Polygraph Copay' },
+  { type: 'Copay', label: 'Copay (before Nov 2026)' },
   { type: 'Card Payments', label: 'Card Payments' },
   // Polygraphs
   { type: 'Polygraph', label: 'Polygraph' },
@@ -152,7 +155,7 @@ export const INDIVIDUAL_GROUP_TYPE = 'INDIVIDUAL';
 export const isIndividualGroup = (groupProgram?: string | null) => (groupProgram || '').trim().toUpperCase() === INDIVIDUAL_GROUP_TYPE;
 // The Admin price list's Individual price that an individual group check-in charges: the active Individual entry named
 // "Individual", else the first active one; null when there is none. Mirrors individualPrice in backend/lib/attendance.js.
-// What one client is charged for an individual session: federal clients pay their copay (nothing when blank), everyone
+// What one client is charged for an individual session: federal clients pay their Individual Copay (nothing when blank), everyone
 // else the Admin Individual price. Mirrors the batch check-in in backend/routes/attendance.js.
 // A client's ID # (docnumber) isn't always a DOC number; doctype says which kind it is. Mirrors backend lib/clientId.js.
 export const ID_TYPES = ['DOC', 'PACTS', 'Case #', 'DHS', 'OCS'];
@@ -162,15 +165,37 @@ export const idText = (c: { docnumber?: string | null; doctype?: string | null }
   if (!number) return '';
   return c?.doctype ? `${c.doctype} ${number}` : number;
 };
-export const individualSessionFee = (client: { programtype?: string | null; copay?: number | string | null }, individualPrice: number) =>
-  FEDERAL_PROGRAM_TYPES.includes(client.programtype || '') ? Number(client.copay || 0) : individualPrice;
-// A federal client's group fee is their Copay (nothing when blank), never the treatment fee: Fed Drug Test clients pay
+export const individualSessionFee = (client: { programtype?: string | null; individualcopay?: number | string | null }, individualPrice: number) =>
+  FEDERAL_PROGRAM_TYPES.includes(client.programtype || '') ? Number(client.individualcopay || 0) : individualPrice;
+// A federal client's group fee is their Group Copay (nothing when blank), never the treatment fee: Fed Drug Test clients pay
 // it at every drug test, Federal SO clients on their first group attendance of the month. null for everyone else.
 // Mirrors federalGroupFee in backend/lib/attendance.js.
 export const federalGroupFee = (programType: string | null | undefined, copay: number | string | null | undefined, attendedThisMonth: boolean): number | null => {
   if (programType === 'Fed Drug Test') return Number(copay || 0);
   if (programType === 'Federal SO') return attendedThisMonth ? 0 : Number(copay || 0);
   return null;
+};
+
+// Federal clients' copays, as Edit Info shows them: the ones their program uses. Only Federal SO and Fed Drug Test clients
+// have a group fee (federalGroupFee), and Fed Drug Test clients don't take polygraphs (NO_POLY_PROGRAM_TYPES in polygraph.ts).
+export type CopayField = 'groupcopay' | 'individualcopay' | 'polycopay';
+const COPAY_FIELDS: { field: CopayField; label: string; hint: string; programs: string[] }[] = [
+  { field: 'groupcopay', label: 'Group Copay', hint: 'group attendance', programs: ['Federal SO', 'Fed Drug Test'] },
+  { field: 'individualcopay', label: 'Individual Copay', hint: 'individual sessions', programs: FEDERAL_PROGRAM_TYPES },
+  { field: 'polycopay', label: 'Polygraph Copay', hint: 'charged to the account when scheduled', programs: ['Federal SO', 'Poly Only'] },
+];
+export const copayFieldsFor = (programType?: string | null) => COPAY_FIELDS.filter(f => f.programs.includes(programType || ''));
+export const copayText = (v: unknown) => (v === null || v === undefined || v === '' ? 'None' : `$${Number(v).toFixed(2)}`);
+
+// What a federal client's polygraph booking needs: { copay, amountDue } where amountDue is the payment needed first so
+// that charging the Polygraph Copay stays within a Max Debt Override (0 when none is set or nothing is charged). Federal
+// clients can otherwise owe any amount. balance uses the stored sign (positive = owes). Mirrors federalPolyNeeds in
+// backend/lib/copays.js.
+export const federalPolyNeeds = (polyCopay: unknown, balance: unknown, maxOwed: unknown) => {
+  const copay = Math.round((Number(polyCopay) || 0) * 100) / 100;
+  const cap = Number(maxOwed) || 0;
+  const over = copay > 0 && cap > 0 ? Number(balance || 0) + copay - cap : 0;
+  return { copay, amountDue: Math.max(0, Math.round(over * 100) / 100) };
 };
 export const individualPriceFrom =(types: { sessiontypeid: number; category: string; name: string; fee: number | string; active: boolean }[]): number | null => {
   const active = types.filter(t => t.category === 'Individual' && t.active)

@@ -1,5 +1,6 @@
 import { formatDisplayTime, localYmd, timeBetween, toLocalDay } from './dates';
 import { POLY_VOUCHER_MAX_BY_PHASE } from './soPhases';
+import { FEDERAL_PROGRAM_TYPES, federalPolyNeeds } from './clients';
 
 export const POLY_OVERDUE_MONTHS = 6;
 
@@ -52,16 +53,23 @@ export const polyVoucherMax = (phase?: string | null): number => POLY_VOUCHER_MA
 
 // To be scheduled for a polygraph a client needs a full set of poly fee vouchers and an account balance of
 // $0.00 or better (stored sign: positive = owes). Mirrors the server's check on assignment.
-export const polySchedulingNeeds = (client: { polyfeevoucher?: unknown; polyfeepaid?: unknown; polyfee?: unknown; accountbalance?: unknown; phase?: string | null }) => {
+// Federal clients don't use vouchers and can owe any amount: their Polygraph Copay (federalCopay) is charged to the
+// account when they are scheduled, and they only pay first when it would put them past a Max Debt Override.
+export const polySchedulingNeeds = (client: { polyfeevoucher?: unknown; polyfeepaid?: unknown; polyfee?: unknown; accountbalance?: unknown; phase?: string | null;
+  programtype?: string | null; polycopay?: unknown; maxowed?: unknown }) => {
   const vouchers = Number(client.polyfeevoucher ?? 0);
   const fullSet = polyVoucherMax(client.phase);
   const polyFeePaid = Number(client.polyfeepaid ?? 0);
   const polyFee = Number(client.polyfee ?? 0);
+  if (FEDERAL_PROGRAM_TYPES.includes(client.programtype ?? '')) {
+    const { copay, amountDue } = federalPolyNeeds(client.polycopay, client.accountbalance, client.maxowed);
+    return { vouchers, fullSet, polyFeePaid, polyFee, short: false, polyDue: 0, balanceDue: amountDue, met: amountDue === 0, federalCopay: copay };
+  }
   const short = vouchers < fullSet;
   // Paying off the poly fee is what fills the vouchers, so it is only owed while they are short
   const polyDue = short ? Math.max(0, polyFee - polyFeePaid) : 0;
   const balanceDue = Math.max(0, Number(client.accountbalance) || 0);
-  return { vouchers, fullSet, polyFeePaid, polyFee, short, polyDue, balanceDue, met: !short && balanceDue === 0 };
+  return { vouchers, fullSet, polyFeePaid, polyFee, short, polyDue, balanceDue, met: !short && balanceDue === 0, federalCopay: null as number | null };
 };
 
 export const POLY_CANCEL_REASONS =['Client requested cancellation', 'Client late / did not show', 'Examiner rescheduled', 'Weather', 'Other'];
