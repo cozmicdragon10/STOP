@@ -10,7 +10,7 @@ test('builds a PDF discharge summary', async () => {
             counselor: 'Counselor One', lastattended: '2026-10-01', lastpoly: null,
         },
         dischargeType: 'Program Failed',
-        subcategory: 'Attendance',
+        subcategories: ['Attendance', 'Polys'],
         note: 'Missed four consecutive sessions.',
         dischargedOn: '2026-10-26',
         dischargedBy: 'admin@example.com',

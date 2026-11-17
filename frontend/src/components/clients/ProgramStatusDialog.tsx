@@ -27,7 +27,8 @@ interface Props {
 export default function ProgramStatusDialog({ action, client, employees, groupCounselor, userEmail, onClose, onStatusChanged, onSuccess, onError }: Props) {
   const activating = action === 'activate';
   const [choice, setChoice] = useState('');
-  const [subcategory, setSubcategory] = useState('');
+  // One or more subcategories may be checked
+  const [picked, setPicked] = useState<string[]>([]);
   const [note, setNote] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -41,14 +42,17 @@ export default function ProgramStatusDialog({ action, client, employees, groupCo
   const choices = activating ? EDITABLE_PROGRAM_STATUSES : DISCHARGE_STATUSES;
   const actionButton = activating ? 'bg-blue-600 hover:bg-blue-500' : 'bg-amber-600 hover:bg-amber-500';
   const subcategories = activating ? undefined : DISCHARGE_SUBCATEGORIES[choice];
-  const choiceLabel = subcategory ? `${choice} (${subcategory})` : choice;
+  // Kept in list order, matching how the server stores them
+  const chosen = subcategories ? subcategories.filter(s => picked.includes(s)) : [];
+  const choiceLabel = chosen.length ? `${choice} (${chosen.join(', ')})` : choice;
+  const toggleSubcategory = (s: string) => setPicked(p => p.includes(s) ? p.filter(x => x !== s) : [...p, s]);
   const name = `${client.firstname} ${client.lastname}`;
 
   const handleConfirm = async () => {
     setSaving(true);
     setError('');
     try {
-      const programstatus = await changeClientProgramStatus(action, client.clientid, choice, subcategory || null, note.trim(), userEmail);
+      const programstatus = await changeClientProgramStatus(action, client.clientid, choice, chosen, note.trim(), userEmail);
       await onStatusChanged(programstatus);
       onSuccess(activating
         ? `${name} set to ${programstatus}.`
@@ -86,7 +90,7 @@ export default function ProgramStatusDialog({ action, client, employees, groupCo
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {choices.map(s => (
                   <label key={s} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-xs ${choice === s ? (activating ? 'border-blue-500 bg-blue-500/10 text-white' : 'border-amber-500 bg-amber-500/10 text-white') : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}>
-                    <input type="radio" name="status-dialog-choice" value={s} checked={choice === s} onChange={() => { setChoice(s); setSubcategory(''); }} className={activating ? 'accent-blue-500' : 'accent-amber-500'} />
+                    <input type="radio" name="status-dialog-choice" value={s} checked={choice === s} onChange={() => { setChoice(s); setPicked([]); }} className={activating ? 'accent-blue-500' : 'accent-amber-500'} />
                     {s}
                   </label>
                 ))}
@@ -94,11 +98,11 @@ export default function ProgramStatusDialog({ action, client, employees, groupCo
             </div>
             {subcategories && (
               <div>
-                <p className="block text-xs text-slate-400 uppercase mb-2">{choice} Subcategory</p>
+                <p className="block text-xs text-slate-400 uppercase mb-2">{choice} Subcategory <span className="normal-case">(check all that apply)</span></p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {subcategories.map(s => (
-                    <label key={s} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-xs ${subcategory === s ? 'border-amber-500 bg-amber-500/10 text-white' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}>
-                      <input type="radio" name="status-dialog-subcategory" value={s} checked={subcategory === s} onChange={() => setSubcategory(s)} className="accent-amber-500" />
+                    <label key={s} className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer text-xs ${picked.includes(s) ? 'border-amber-500 bg-amber-500/10 text-white' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}>
+                      <input type="checkbox" value={s} checked={picked.includes(s)} onChange={() => toggleSubcategory(s)} className="accent-amber-500" />
                       {s}
                     </label>
                   ))}
@@ -132,7 +136,7 @@ export default function ProgramStatusDialog({ action, client, employees, groupCo
               <button type="button" onClick={onClose} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded text-xs font-semibold">Cancel</button>
               <button
                 type="button"
-                disabled={!choice || (!!subcategories && !subcategory) || !note.trim() || (offerReinstate && !!bipChoiceProblem(reinstateChoice))}
+                disabled={!choice || (!!subcategories && chosen.length === 0) || !note.trim() || (offerReinstate && !!bipChoiceProblem(reinstateChoice))}
                 onClick={() => setConfirming(true)}
                 className={`${actionButton} disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded text-xs font-semibold`}
               >

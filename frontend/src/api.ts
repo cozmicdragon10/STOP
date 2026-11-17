@@ -606,11 +606,11 @@ export async function grantBusPass(clientId: number, busPassNumber: string, user
 
 // 'discharge' is Business Administrators only (the server checks the role); 'activate' sets a discharged client
 // back to Active or Inactive. Returns the client's new program status.
-export async function changeClientProgramStatus(action: 'discharge' | 'activate', clientId: number, status: string, subcategory: string | null, note: string, user: string): Promise<string> {
+export async function changeClientProgramStatus(action: 'discharge' | 'activate', clientId: number, status: string, subcategories: string[], note: string, user: string): Promise<string> {
     const res = await apiFetch(`${API_BASE}/clients/${clientId}/${action}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, subcategory, note, user }),
+        body: JSON.stringify({ status, subcategories, note, user }),
     });
     // An outdated server answers with an HTML error page, not JSON
     const body = await res.json().catch(() => ({}));

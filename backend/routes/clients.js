@@ -261,14 +261,22 @@ const STATUS_ACTIONS = {
 
 const changeProgramStatus = (action) => async (req, res) => {
     const { id } = req.params;
-    const { status, subcategory, note, user } = req.body;
+    const { status, note, user } = req.body;
     if (!action.statuses.includes(status)) {
         return res.status(400).json({ error: `Choose one of: ${action.statuses.join(', ')}.` });
     }
+    // One or more subcategories; a single string is still accepted from an older page
+    const raw = req.body.subcategories ?? req.body.subcategory;
+    const picked = raw == null || raw === '' ? [] : Array.isArray(raw) ? raw : [raw];
     const subcategories = action.recordsDischarge ? DISCHARGE_SUBCATEGORIES[status] : undefined;
-    if (subcategories ? !subcategories.includes(subcategory) : subcategory) {
-        return res.status(400).json({ error: subcategories ? `Choose a ${status} subcategory: ${subcategories.join(', ')}.` : `${status} has no subcategories.` });
+    if (subcategories
+        ? picked.length === 0 || picked.some(s => !subcategories.includes(s))
+        : picked.length > 0) {
+        return res.status(400).json({ error: subcategories ? `Choose at least one ${status} subcategory: ${subcategories.join(', ')}.` : `${status} has no subcategories.` });
     }
+    // Stored and shown in list order, e.g. 'Attendance, Polys'
+    const chosen = subcategories ? subcategories.filter(s => picked.includes(s)) : [];
+    const subcategory = chosen.join(', ');
     if (typeof note !== 'string' || !note.trim()) {
         return res.status(400).json({ error: `A ${action.label.toLowerCase()} note is required.` });
     }
@@ -312,7 +320,7 @@ const changeProgramStatus = (action) => async (req, res) => {
             const client = clientRes.rows[0];
             const dischargedOn = dischargeRes.rows[0].dischargedon;
             const pdf = await buildDischargeSummaryPdf({
-                client, dischargeType: status, subcategory, note: note.trim(), dischargedOn, dischargedBy: roleRes.rows[0].displayname || user,
+                client, dischargeType: status, subcategories: chosen, note: note.trim(), dischargedOn, dischargedBy: roleRes.rows[0].displayname || user,
             });
             const day = `${dischargedOn.getFullYear()}-${String(dischargedOn.getMonth() + 1).padStart(2, '0')}-${String(dischargedOn.getDate()).padStart(2, '0')}`;
             summaryFileName = `Discharge Summary - ${client.firstname} ${client.lastname} - ${day}.pdf`;
@@ -323,7 +331,7 @@ const changeProgramStatus = (action) => async (req, res) => {
         }
         await logClientChange(db, {
             clientId: id, changedBy: user, changeType: 'Program Status',
-            oldValue: oldStatus || 'None', newValue: status, details: subcategory ? `${action.details} Subcategory: ${subcategory}.` : action.details,
+            oldValue: oldStatus || 'None', newValue: status, details: subcategory ? `${action.details} ${chosen.length > 1 ? 'Subcategories' : 'Subcategory'}: ${subcategory}.` : action.details,
         });
         await db.query('COMMIT');
         await logAction(user, action.logAction, `Client ID ${id}: ${oldStatus || 'None'} to ${statusLabel}`);

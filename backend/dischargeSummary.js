@@ -34,10 +34,12 @@ const DISCHARGE_REASONS = {
 };
 
 // Builds the discharge summary PDF and resolves with its bytes.
-// info: { client, dischargeType, subcategory, note, dischargedOn, dischargedBy }
+// info: { client, dischargeType, subcategories (array, may be empty), note, dischargedOn, dischargedBy }
 // client: a Clients row plus groupname, counselor, lastattended, lastpoly
 const buildDischargeSummaryPdf = (info) => new Promise((resolve, reject) => {
-    const { client, dischargeType, subcategory, note, dischargedOn, dischargedBy } = info;
+    const { client, dischargeType, note, dischargedOn, dischargedBy } = info;
+    const subcategories = info.subcategories || [];
+    const subcategory = subcategories.join(', ');
     const fullName = [client.firstname, client.middlename, client.lastname].filter(Boolean).join(' ');
     const doc = new PDFDocument({ size: 'LETTER', margins: { top: 60, bottom: 60, left: 72, right: 72 }, info: { Title: `Discharge Summary - ${fullName}` } });
     const chunks = [];
@@ -82,9 +84,9 @@ const buildDischargeSummaryPdf = (info) => new Promise((resolve, reject) => {
         doc.moveDown(1);
     };
     section('Course of Treatment/Treatment Outcome:', treatmentOutcome(dischargeType));
-    const reason = DISCHARGE_REASONS[dischargeType]?.[subcategory];
+    const reasons = subcategories.map(s => DISCHARGE_REASONS[dischargeType]?.[s]).filter(Boolean);
     section('Reasons for Discharge:',
-        `${reason ? `${reason}\n\n` : ''}Last attended: ${formatDate(client.lastattended)}.  Last polygraph: ${formatDate(client.lastpoly)}.\n\n${note}`);
+        `${reasons.map(r => `${r}\n\n`).join('')}Last attended: ${formatDate(client.lastattended)}.  Last polygraph: ${formatDate(client.lastpoly)}.\n\n${note}`);
 
     doc.moveDown(2);
     doc.font('Times-Bold').fontSize(11).text('Therapist: ', left, doc.y, { continued: true }).font('Times-Roman').text(client.counselor || '________________________________');
