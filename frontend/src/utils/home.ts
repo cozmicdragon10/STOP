@@ -107,3 +107,15 @@ export const polySlotsOn = <T extends HomeSlot>(slots: T[], today: string) => {
   const count = (st: string) => list.filter(s => (s.status || 'Open') === st).length;
   return { list, open: count('Open'), assigned: count('Assigned'), closed: count('Closed') };
 };
+
+// A day (YYYY-MM-DD, local) moved by delta days
+export const shiftDay = (day: string, delta: number) => {
+  const [y, m, d] = day.split('-').map(Number);
+  const next = new Date(y, m - 1, d + delta);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}`;
+};
+
+// 'Today', 'Yesterday' or 'Tomorrow' when the day is one of those, otherwise ''
+export const relativeDayName = (day: string, today: string) =>
+  day === today ? 'Today' : day === shiftDay(today, -1) ? 'Yesterday' : day === shiftDay(today, 1) ? 'Tomorrow' : '';

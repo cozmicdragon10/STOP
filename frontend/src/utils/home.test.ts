@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { meetingsOn, needsGroup, polySlotsOn } from './home';
+import { meetingsOn, needsGroup, polySlotsOn, relativeDayName, shiftDay } from './home';
 
 describe('needsGroup', () => {
   it('flags active clients in a program with groups who have no group of either kind', () => {
@@ -56,5 +56,20 @@ describe('polySlotsOn', () => {
     const day = polySlotsOn(slots, THURSDAY);
     expect(day.list.map(s => s.slotid)).toEqual([2, 1, 4]);
     expect([day.open, day.assigned, day.closed]).toEqual([1, 1, 1]);
+  });
+});
+
+describe('day picker', () => {
+  it('moves across month and year ends', () => {
+    expect(shiftDay('2026-11-30', 1)).toBe('2026-12-01');
+    expect(shiftDay('2027-01-01', -1)).toBe('2026-12-31');
+    expect(shiftDay('2026-11-17', 7)).toBe('2026-11-24');
+  });
+
+  it('names today and the days either side', () => {
+    expect(relativeDayName('2026-11-17', '2026-11-17')).toBe('Today');
+    expect(relativeDayName('2026-11-16', '2026-11-17')).toBe('Yesterday');
+    expect(relativeDayName('2026-11-18', '2026-11-17')).toBe('Tomorrow');
+    expect(relativeDayName('2026-11-20', '2026-11-17')).toBe('');
   });
 });
