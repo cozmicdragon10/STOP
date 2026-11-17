@@ -6,7 +6,7 @@ import PopupDialog from '../home/PopupDialog';
 import { formatDisplayTime, getLocalDateString } from '../../utils/dates';
 import { assessmentPickList } from '../../utils/counselor';
 import {
-  assignAssessmentSlot, cancelAssessmentAppointment, cancelOpenAssessmentTimes, createAssessmentAppointment, getAssessmentAppointments,
+  assignAssessmentSlot, cancelAssessmentAppointment, cancelOpenAssessmentTimes, getAssessmentAppointments,
   openAssessmentSlot, unassignAssessmentSlot, updateAssessmentAppointment,
   type AssessmentAppointment, type AssessmentCreateResult, type AssessmentRepeat,
 } from '../../api';
@@ -44,8 +44,9 @@ const shiftMonth = (ym: string, by: number) => {
 const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 const longDay = (ymd: string) => new Date(`${ymd}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
-// open: a counselor's availability (no client); schedule: a client at a new time; edit: reschedule an existing time
-type FormMode = 'open' | 'schedule' | 'edit';
+// open: a counselor's availability (no client); edit: change an open time. A client gets a time only by being assigned
+// to an open one (or begins right away with New Assessment).
+type FormMode = 'open' | 'edit';
 interface FormState { clientId: string; assessor: string; date: string; time: string; location: string; notes: string; repeat: AssessmentRepeat; until: string }
 // The last location used, so a new time starts there (remembered per browser)
 const LOCATION_KEY = 'stop.assessmentCalendar.location';
@@ -118,8 +119,6 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
   const monthOpen = shown.filter(a => a.status === 'Open').length;
   const monthScheduled = shown.filter(a => a.status === 'Scheduled').length;
 
-  // Active clients; those waiting to be assessed by the chosen counselor come first
-  const pickerClients = assessmentPickList(clients, form.assessor);
   const canChange = (a: { assessor: string }) => !isCounselor || a.assessor === me;
   // Counselors work on their own times; everyone else picks the counselor
   const assessorChoices = isCounselor ? counselors.filter(name => name === me) : counselors;
@@ -140,16 +139,9 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
     setFormError('');
   };
   const closeForm = () => { setMode(null); setEditingId(null); setFormError(''); };
-  const onClientChange = (clientId: string) => {
-    // Scheduling a client starts with the client's own assessor when none is chosen yet
-    const client = clients.find(c => String(c.clientid) === clientId);
-    const theirs = client?.assessor && assessorChoices.includes(client.assessor) ? client.assessor : '';
-    set({ clientId, assessor: form.assessor || theirs });
-  };
 
   const save = async () => {
     if (saving || !mode) return;
-    if (mode === 'schedule' && !form.clientId) return setFormError('Choose a client.');
     if (!form.assessor) return setFormError('Choose the counselor.');
     if (!form.date) return setFormError('Enter the date.');
     if (!form.time) return setFormError('Enter the time.');
@@ -164,9 +156,6 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
       if (mode === 'open') {
         const result = await openAssessmentSlot({ ...details, ...repeat });
         onSuccess(repeats ? createdText('Opened', result) : `Opened ${formatDisplayTime(form.time)} on ${longDay(form.date)} for assessments.`);
-      } else if (mode === 'schedule') {
-        const result = await createAssessmentAppointment({ ...details, ...repeat, clientId: Number(form.clientId) });
-        onSuccess(repeats ? createdText('Scheduled', result) : 'Assessment scheduled.');
       } else if (editingId !== null) {
         await updateAssessmentAppointment(editingId, details);
         onSuccess('Assessment time changed.');
@@ -430,9 +419,6 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
           <button type="button" onClick={() => startForm('open', pickedDay || today)} className={`${smallButton} bg-blue-600 hover:bg-blue-500 text-white border-blue-600`}>
             <CalendarPlus size={14} /> Open Availability
           </button>
-          <button type="button" onClick={() => startForm('schedule', pickedDay || today)} className={`${smallButton} bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700`}>
-            <UserPlus size={14} /> Schedule Client
-          </button>
           <button type="button" onClick={onNewAssessment} title="Start an assessment now, without a scheduled time" className={`${smallButton} bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-700`}>
             <ClipboardPlus size={14} /> New Assessment
           </button>
@@ -458,7 +444,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
 
       {mode && (
         <PopupDialog
-          title={mode === 'open' ? 'Open Availability' : mode === 'schedule' ? 'Schedule a Client' : editing?.status === 'Open' ? 'Change Open Time' : 'Reschedule Assessment'}
+          title={mode === 'open' ? 'Open Availability' : editing?.status === 'Open' ? 'Change Open Time' : 'Reschedule Assessment'}
           subtitle={mode === 'open' ? 'Opens a time with no client. A client can be assigned to it from the calendar.' : undefined}
           busy={saving}
           onClose={closeForm}>
@@ -467,11 +453,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
             {mode !== 'open' && (
               <div>
                 <label className="block text-xs text-slate-400 uppercase mb-1">Client</label>
-                {mode === 'schedule' ? (
-                  <ClientPicker clients={pickerClients} value={form.clientId} onChange={onClientChange} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm placeholder-slate-500" />
-                ) : (
-                  <p className="bg-slate-950 border border-slate-800 rounded p-2 text-sm text-white">{editing?.clientid ? `${editing.lastname}, ${editing.firstname}` : 'Open (no client yet)'}</p>
-                )}
+                <p className="bg-slate-950 border border-slate-800 rounded p-2 text-sm text-white">{editing?.clientid ? `${editing.lastname}, ${editing.firstname}` : 'Open (no client yet)'}</p>
               </div>
             )}
             <div>
@@ -525,7 +507,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
           <div className="flex justify-end gap-2">
             <button type="button" onClick={closeForm} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-1.5 rounded text-xs font-semibold">Close</button>
             <button type="button" onClick={save} disabled={saving} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-1.5 rounded text-xs font-semibold">
-              {saving ? 'Saving...' : mode === 'open' ? 'Open Time' : mode === 'schedule' ? 'Schedule' : 'Save Changes'}
+              {saving ? 'Saving...' : mode === 'open' ? 'Open Time' : 'Save Changes'}
             </button>
           </div>
           </div>
