@@ -22,6 +22,8 @@ interface TabClient {
   programstatus?: string | null;
   // The counselor the client is waiting to be assessed by
   assessor?: string | null;
+  // Max Debt Override in effect (how much they may owe after an assessment begins)
+  maxowed?: number | string | null;
 }
 
 interface Employee {
@@ -230,6 +232,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                           <span className={`shrink-0 text-[0.6875rem] font-semibold px-1.5 py-0.5 rounded ${long ? 'bg-amber-500/15 text-amber-300' : 'bg-slate-800 text-slate-300'}`}>{daysOpenText(Number(a.daysopen))}</span>
                         </div>
                         <p className="text-xs text-slate-300 truncate">{a.sessiontypename}{a.provider ? ` · ${a.provider}` : ''}</p>
+                        {a.fundedby && <p className="text-[0.6875rem] text-sky-300">Billed to {a.fundedby}</p>}
                         <p className="text-[0.6875rem] text-slate-500 flex items-center gap-1 mt-0.5">
                           <MessageSquare size={11} />
                           {a.notecount ? `${a.notecount} note${a.notecount === 1 ? '' : 's'} · last ${new Date(a.lastnoteon!).toLocaleDateString()}` : 'No notes yet'}
@@ -250,7 +253,7 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
                   <li key={c.attendanceid}>
                     <button type="button" onClick={() => setView({ kind: 'work', attendanceId: c.attendanceid })} className={`w-full text-left bg-slate-950 border rounded-lg p-3 hover:border-slate-600 transition ${selectedWork === c.attendanceid ? 'border-blue-500/60' : 'border-slate-800'}`}>
                       <p className="text-sm font-semibold text-white truncate">{c.lastname}, {c.firstname}</p>
-                      <p className="text-xs text-slate-300 truncate">{c.sessiontypename || 'Assessment'}{c.provider ? ` · ${c.provider}` : ''}</p>
+                      <p className="text-xs text-slate-300 truncate">{c.sessiontypename || 'Assessment'}{c.provider ? ` · ${c.provider}` : ''}{c.fundedby ? ` · ${c.fundedby}` : ''}</p>
                       <p className="text-[0.6875rem] text-slate-500">
                         Begun {formatDay(c.sessiondate)}
                         {c.closedon ? ` · completed ${new Date(c.closedon).toLocaleDateString()}` : ''}

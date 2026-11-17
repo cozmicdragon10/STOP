@@ -4,7 +4,7 @@ const { moneyText } = require('./moneyFields');
 const { todayLocal } = require('./dates');
 const { LAST_POLY_RESULT_SQL, POLY_VOUCHER_EARNING_RESULTS, polyVoucherMax } = require('./poly');
 const {
-    BIP_CHECKIN_BLOCK, FEE_ONCE_PER_PERIOD_PROGRAMS, FEE_PERIOD_MONTHS, GROUP_ATTENDANCE, INDIVIDUAL_SESSION_TYPES, MONTHLY_FEE_PHASES,
+    ACTIVE_DEBT_LIMIT, BIP_CHECKIN_BLOCK, FEE_ONCE_PER_PERIOD_PROGRAMS, FEE_PERIOD_MONTHS, GROUP_ATTENDANCE, INDIVIDUAL_SESSION_TYPES, MONTHLY_FEE_PHASES,
     bipCheckInBlockMessage,
 } = require('./sql');
 
@@ -40,13 +40,19 @@ const NO_CHECKIN_LIMIT_PROGRAMS = ['BIP', 'Federal SO', 'Fed Drug Test'];
 const PAY_EACH_VISIT_PROGRAMS = ['Chaperon'];
 const checkInPaymentRule = (programType) =>
     NO_CHECKIN_LIMIT_PROGRAMS.includes(programType) ? 'none' : PAY_EACH_VISIT_PROGRAMS.includes(programType) ? 'each' : 'first';
-// The smallest payment that lets a group check-in through, from the balance before it (stored sign: positive = owes)
-// and today's fee; 0 when nothing has to be paid. Mirrors minimumCheckInPayment in frontend/src/utils/balance.ts.
-const minimumCheckInPayment = (rule, balance, fee, attendedThisMonth) => {
+// The smallest payment that lets a group or individual check-in through, from the balance before it (stored sign:
+// positive = owes) and today's fee; 0 when nothing has to be paid. maxOwed: a Max Debt Override (ClientDebtLimits) lets
+// the client owe up to that much instead of FIRST_CHECKIN_MAX_OWED. Mirrors minimumCheckInPayment in frontend/src/utils/balance.ts.
+const allowedOwed = (maxOwed) => Math.max(FIRST_CHECKIN_MAX_OWED, Number(maxOwed) || 0);
+const minimumCheckInPayment = (rule, balance, fee, attendedThisMonth, maxOwed = 0) => {
     const owed = rule === 'each' ? Number(balance || 0) + Number(fee || 0)
         : rule === 'first' && !attendedThisMonth ? Number(balance || 0) : -Infinity;
-    return Math.max(0, Math.round((owed - FIRST_CHECKIN_MAX_OWED) * 100) / 100);
+    return Math.max(0, Math.round((owed - allowedOwed(maxOwed)) * 100) / 100);
 };
+// How the allowed balance reads in a refusal: "$0.00 or better", or "owing at most $100.00 (Max Debt Override)"
+const allowedBalanceText = (maxOwed) => (Number(maxOwed) > 0
+    ? `owing at most $${allowedOwed(maxOwed).toFixed(2)} (Max Debt Override)`
+    : `${FIRST_CHECKIN_MAX_OWED > 0 ? '-' : ''}$${FIRST_CHECKIN_MAX_OWED.toFixed(2)} or better`);
 
 // A federal client's group fee is their Copay (nothing when blank), never the treatment fee: Fed Drug Test clients pay
 // it at every drug test, Federal SO clients on their first group attendance of the month. null for everyone else.
@@ -107,6 +113,8 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         }
     }
     const oldBalance = Number(clientRes.rows[0].accountbalance || 0);
+    // A Max Debt Override in effect today: how much the client may owe and still attend (0 when none)
+    const maxOwed = Number((await db.query(`SELECT ${ACTIVE_DEBT_LIMIT('$1::int')} AS maxowed`, [client])).rows[0]?.maxowed || 0);
 
     // Whether the client already attended a group in the session's month (assessments and individual sessions don't count)
     const attendedThatMonth = group && !isIndividualSession
@@ -162,15 +170,34 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         feeNum = Math.round(feeNum * 100) / 100;
 
         // The check-in's payment rule (checkInPaymentRule): Chaperon attendances are paid the day of them, and other
-        // clients' first group check-in of the month needs the balance at FIRST_CHECKIN_MAX_OWED or better
+        // clients' first group check-in of the month needs the balance at FIRST_CHECKIN_MAX_OWED or better (or within a
+        // Max Debt Override)
         const rule = checkInPaymentRule(programtype);
-        const short = Math.round((minimumCheckInPayment(rule, oldBalance, feeNum, attendedThatMonth) - Number(accountPaid || 0)) * 100) / 100;
+        const short = Math.round((minimumCheckInPayment(rule, oldBalance, feeNum, attendedThatMonth, maxOwed) - Number(accountPaid || 0)) * 100) / 100;
         if (short > 0) {
             const { lastname, firstname } = clientRes.rows[0];
-            const limit = `${FIRST_CHECKIN_MAX_OWED > 0 ? '-' : ''}$${FIRST_CHECKIN_MAX_OWED.toFixed(2)}`;
+            const limit = allowedBalanceText(maxOwed);
             throw new Error(rule === 'each'
-                ? `${lastname}, ${firstname}'s chaperon attendance must be paid the day of it: the balance after check-in, including today's fee, must be ${limit} or better (pay at least $${short.toFixed(2)} more).`
-                : `${lastname}, ${firstname} must pay their existing balance before their first group check-in of the month: the balance must be ${limit} or better (pay at least $${short.toFixed(2)} more).`);
+                ? `${lastname}, ${firstname}'s chaperon attendance must be paid the day of it: the balance after check-in, including today's fee, must be ${limit} (pay at least $${short.toFixed(2)} more).`
+                : `${lastname}, ${firstname} must pay their existing balance before their first group check-in of the month: the balance must be ${limit} (pay at least $${short.toFixed(2)} more).`);
+        }
+    }
+
+    // An individual session in a counselor's INDIVIDUAL group follows the same payment rule, counting the client's first
+    // individual session of the month (Chaperon: every one), within any Max Debt Override
+    if (group && type === 'Individual') {
+        const { programtype, lastname, firstname } = clientRes.rows[0];
+        const hadOne = (await db.query(
+            `SELECT 1 FROM Attendance WHERE Client = $1 AND Type = 'Individual' AND date_trunc('month', Date) = date_trunc('month', $2::date) LIMIT 1`,
+            [client, sessionDate]
+        )).rows.length > 0;
+        const rule = checkInPaymentRule(programtype);
+        const short = Math.round((minimumCheckInPayment(rule, oldBalance, feeNum, hadOne, maxOwed) - Number(accountPaid || 0)) * 100) / 100;
+        if (short > 0) {
+            const limit = allowedBalanceText(maxOwed);
+            throw new Error(rule === 'each'
+                ? `${lastname}, ${firstname}'s chaperon session must be paid the day of it: the balance after check-in, including today's fee, must be ${limit} (pay at least $${short.toFixed(2)} more).`
+                : `${lastname}, ${firstname} must pay their existing balance before their first individual session of the month: the balance must be ${limit} (pay at least $${short.toFixed(2)} more).`);
         }
     }
     const paidNum = Number(accountPaid || 0);
@@ -264,5 +291,6 @@ const individualPrice = async (db) => {
 
 module.exports = {
     isMonthlyFeeClient, feePeriodMonths, chargedWithinMonths, FIRST_CHECKIN_MAX_OWED, checkInPaymentRule, minimumCheckInPayment, federalGroupFee,
+    allowedOwed,
     recordAttendance, individualPrice,
 };

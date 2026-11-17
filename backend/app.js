@@ -32,6 +32,7 @@ app.use(counselorAccess);
 app.use(require('./routes/auth'));
 app.use(require('./routes/clients'));
 app.use(require('./routes/clientOverrides'));
+app.use(require('./routes/clientDebtLimits'));
 app.use(require('./routes/groups'));
 app.use(require('./routes/attendance'));
 app.use(require('./routes/openGroups'));

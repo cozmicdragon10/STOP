@@ -23,6 +23,13 @@ describe('check-in payment rule', () => {
     expect(minimumCheckInPayment('first', 0, 180, false)).toBe(0);
     expect(minimumCheckInPayment('first', 50, 180, true)).toBe(0);
   });
+
+  it('lets a max debt override owe up to its amount', () => {
+    expect(minimumCheckInPayment('first', 80, 40, false, 100)).toBe(0);
+    expect(minimumCheckInPayment('first', 130, 40, false, '100.00')).toBe(30);
+    expect(minimumCheckInPayment('each', 80, 40, true, 100)).toBe(20);
+    expect(minimumCheckInPayment('none', 900, 40, false, 100)).toBe(0);
+  });
 });
 
 describe('federal group fee', () => {

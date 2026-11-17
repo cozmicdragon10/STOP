@@ -96,9 +96,11 @@ export default function AssessmentWorkspace({ attendanceId, user, clients, onBac
     if (!detail) return;
     printAttendanceReceipt({
       clientName: `${detail.lastname}, ${detail.firstname}`, docNumber: idText(clients.find(c => c.clientid === detail.clientid)),
-      sessionKind: 'Assessment', sessionName: detail.sessiontypename, sessionDate: detail.beganon, provider: detail.provider,
+      sessionKind: 'Assessment', sessionDate: detail.beganon, provider: detail.provider,
+      // On a DHS invoice or voucher the client is charged nothing
+      sessionName: detail.fundedby ? `${detail.sessiontypename} (billed to ${detail.fundedby})` : detail.sessiontypename,
       fee: Number(detail.fee || 0),
-      payments: [{ label: 'Paid when begun', amount: Number(detail.paid || 0), method: detail.paymentmethod || 'Cash' }],
+      payments: [{ label: detail.fundedby ? 'Past due balance paid' : 'Paid when begun', amount: Number(detail.paid || 0), method: detail.paymentmethod || 'Cash' }],
       clientId: detail.clientid,
     }, onError);
   };
@@ -137,8 +139,10 @@ export default function AssessmentWorkspace({ attendanceId, user, clients, onBac
             {[
               ['Begun', longDay(detail.beganon)],
               [inProgress ? 'Open' : 'Status', inProgress ? daysOpenText(Number(detail.daysopen)).replace(/^Open /, '') : 'Completed'],
-              ['Price', money(Number(detail.fee || 0))],
-              ['Paid', `${money(Number(detail.paid || 0))}${detail.paymentmethod ? ` ${detail.paymentmethod}` : ''}`],
+              ['Price', money(Number(detail.fundedby ? detail.fundedprice || 0 : detail.fee || 0))],
+              detail.fundedby
+                ? ['Billed to', detail.fundedby]
+                : ['Paid', `${money(Number(detail.paid || 0))}${detail.paymentmethod ? ` ${detail.paymentmethod}` : ''}`],
             ].map(([k, v]) => (
               <div key={k} className="bg-slate-950 border border-slate-800 rounded-lg p-3">
                 <p className="text-[0.6875rem] uppercase tracking-wide text-slate-500">{k}</p>

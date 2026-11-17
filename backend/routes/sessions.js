@@ -5,10 +5,11 @@ const { OPEN_GROUP_ADMIN_ROLES, activeRoleFor, openGroupViewer } = require('../l
 const { recordAttendance } = require('../lib/attendance');
 const { dateText, dollars, logClientChange } = require('../lib/changeLog');
 const { moneyText } = require('../lib/moneyFields');
-const { BIP_CHECKIN_BLOCK, INDIVIDUAL_SESSION_TYPES, NEEDS_OUR_INTAKE, YMD } = require('../lib/sql');
+const { ACTIVE_DEBT_LIMIT, BIP_CHECKIN_BLOCK, INDIVIDUAL_SESSION_TYPES, NEEDS_OUR_INTAKE, YMD } = require('../lib/sql');
 const { staleFields, staleMessage } = require('../lib/editConflicts');
 const {
-    ASSESSMENT_WORK_ROLES, PAPERWORK_KINDS, beginPaymentProblem, completeProblem, noteProblem, paperworkLabel, worksOnAssessment,
+    ASSESSMENT_WORK_ROLES, FUNDING_ROLE, PAPERWORK_KINDS, beginPaymentProblem, completeProblem, fundingProblem, noteProblem, paperworkLabel,
+    worksOnAssessment,
 } = require('../lib/assessmentWork');
 
 const router = express.Router();
@@ -100,7 +101,8 @@ router.get('/api/clients/:id/progress', async (req, res) => {
              FROM OpenIndividualSessions o LEFT JOIN SessionTypes st ON st.SessionTypeId = o.SessionTypeId
              WHERE o.ClientId = $1 AND o.Category = 'Assessment'
              UNION ALL
-             SELECT a.AttendanceId, 'In Progress', COALESCE(st.Name, 'Assessment'), to_char(a.Date, 'YYYY-MM-DD'), a.Provider, a.GroupFee, a.CreatedBy
+             SELECT a.AttendanceId, 'In Progress', COALESCE(st.Name, 'Assessment') || COALESCE(' (' || a.FundedBy || ')', ''), to_char(a.Date, 'YYYY-MM-DD'), a.Provider,
+                    COALESCE(a.FundedPrice, a.GroupFee), a.CreatedBy
              FROM Attendance a LEFT JOIN SessionTypes st ON st.SessionTypeId = a.SessionTypeId
              WHERE a.Client = $1 AND a.Type = 'Assessment' AND a.AssessmentStatus = 'In Progress'
              ORDER BY Date DESC`,
@@ -273,7 +275,7 @@ router.get('/api/individual-sessions/closed', async (req, res) => {
                     a.Provider, a.Comments, COALESCE(a.OpenedBy, a.CreatedBy) AS OpenedBy,
                     -- An assessment closes when it is completed; other sessions when they were recorded
                     COALESCE(a.CompletedBy, a.CreatedBy) AS ClosedBy, COALESCE(a.CompletedOn, a.CreatedOn) AS ClosedOn,
-                    a.CreatedBy AS BegunBy, a.CreatedOn AS BegunOn,
+                    a.CreatedBy AS BegunBy, a.CreatedOn AS BegunOn, a.FundedBy, a.FundedPrice,
                     (SELECT COUNT(*)::int FROM Notes n WHERE n.AttendanceId = a.AttendanceId) AS NoteCount,
                     -- What was typed as payment comments: the payment's ledger text without its standard opening sentence
                     (SELECT NULLIF(regexp_replace(f.Comments, '^Payment applied during .* session on \\d{4}-\\d{2}-\\d{2}\\.\\s*', ''), '')
@@ -518,10 +520,17 @@ router.post('/api/individual-sessions/close', async (req, res) => {
 // due balance and be checked off as received (paymentConfirmed). The attendance is recorded today with the fee and the
 // payment, marked In Progress; the scheduled open session is cleared and the client comes off the waiting list.
 // Only a Business Administrator's fee is used; everyone else gets the price list's (checkIndividualSession).
+// fundedBy ('DHS Invoice' or 'Voucher', Business Administrators only, with a required fundingNote): the client isn't
+// charged the fee (the price is kept in FundedPrice for billing) and only a past due balance has to be paid; the note
+// goes on the client's case notes.
 router.post('/api/assessments/begin', async (req, res) => {
     const { openSessionId, comments, paymentComments, paymentConfirmed } = req.body;
+    const fundedBy = req.body.fundedBy || null;
+    const fundingNote = String(req.body.fundingNote || '').trim();
     const viewer = req.user;
     if (!ASSESSMENT_WORK_ROLES.includes(viewer?.role)) return res.status(403).json({ error: 'Only counselors and the office can begin assessments.' });
+    const fundingError = fundingProblem({ fundedBy, fundingNote, role: viewer.role });
+    if (fundingError) return res.status(fundedBy && viewer.role !== FUNDING_ROLE ? 403 : 400).json({ error: fundingError });
     const db = await pool.connect();
     try {
         await db.query('BEGIN');
@@ -544,19 +553,32 @@ router.post('/api/assessments/begin', async (req, res) => {
             [s.client, s.sessionTypeId]
         );
         if (already.rows[0]) return refuse(409, `${s.clientName} already has a ${s.typeName} in progress. Add notes to it or complete it instead.`);
-        const balRes = await db.query('SELECT AccountBalance FROM Clients WHERE ClientId = $1 FOR UPDATE', [s.client]);
+        const balRes = await db.query(`SELECT AccountBalance, ${ACTIVE_DEBT_LIMIT('$1::int')} AS MaxOwed FROM Clients WHERE ClientId = $1 FOR UPDATE`, [s.client]);
         const problem = beginPaymentProblem({
-            balance: balRes.rows[0].accountbalance, fee: s.fee, payment: s.payment, paymentConfirmed, clientName: s.clientName, typeName: s.typeName,
+            balance: balRes.rows[0].accountbalance, fee: s.fee, payment: s.payment, paymentConfirmed, fundedBy, maxOwed: balRes.rows[0].maxowed,
+            clientName: s.clientName, typeName: s.typeName,
         });
         if (problem) return refuse(400, problem);
         const note = String(comments || '').trim();
         const { attendanceId, newBalance } = await recordAttendance(db, {
-            client: s.client, group: null, date: s.date, sessionNumber: 1, paid: true, groupFee: s.fee, accountPaid: s.payment,
+            client: s.client, group: null, date: s.date, sessionNumber: 1, paid: true, groupFee: fundedBy ? 0 : s.fee, accountPaid: s.payment,
             paymentMethod: s.paymentMethod, voucherUsed: false, type: 'Assessment', createdBy: viewer.employeeemail, feeType: 'Assessment Fee',
-            paymentComments: String(paymentComments || '').trim(), comments: `${s.typeName} begun. Payment received.`,
+            paymentComments: String(paymentComments || '').trim(),
+            comments: fundedBy ? `${s.typeName} begun on a ${fundedBy} ($${s.fee.toFixed(2)}, not charged to the client).` : `${s.typeName} begun. Payment received.`,
             sessionTypeId: s.sessionTypeId, provider: s.provider,
         });
-        await db.query(`UPDATE Attendance SET AssessmentStatus = 'In Progress', OpenedBy = $2 WHERE AttendanceId = $1`, [attendanceId, open?.createdby || viewer.employeeemail]);
+        await db.query(
+            `UPDATE Attendance SET AssessmentStatus = 'In Progress', OpenedBy = $2, FundedBy = $3, FundedPrice = $4 WHERE AttendanceId = $1`,
+            [attendanceId, open?.createdby || viewer.employeeemail, fundedBy, fundedBy ? s.fee : null]
+        );
+        if (fundedBy) {
+            const fundingText = `${s.typeName} begun without payment: billed to a ${fundedBy} ($${s.fee.toFixed(2)}). ${fundingNote}`;
+            await db.query(
+                `INSERT INTO Notes (Client, Date, "User", Comments, Category, ApprovalStatus, AttendanceId) VALUES ($1, NOW(), $2, $3, 'Assessment', NULL, $4)`,
+                [s.client, viewer.employeeemail, fundingText, attendanceId]
+            );
+            await logClientChange(db, { clientId: s.client, changedBy: viewer.employeeemail, changeType: 'Assessment Funding', newValue: fundedBy, details: fundingText });
+        }
         if (note) {
             await db.query(
                 `INSERT INTO Notes (Client, Date, "User", Comments, Category, ApprovalStatus, AttendanceId) VALUES ($1, NOW(), $2, $3, 'Assessment', NULL, $4)`,
@@ -566,7 +588,7 @@ router.post('/api/assessments/begin', async (req, res) => {
         if (openSessionId) await db.query('DELETE FROM OpenIndividualSessions WHERE OpenSessionId = $1', [openSessionId]);
         await clearWaitingAssessor(db, s.client, viewer.employeeemail, `${s.typeName} begun on ${dateText(s.date)} with ${s.provider}.`);
         await db.query('COMMIT');
-        await logAction(viewer.employeeemail, 'Assessment Begun', `${s.typeName} for ${s.clientName} (Client ID ${s.client}) on ${s.date} with ${s.provider}: fee $${s.fee.toFixed(2)}, paid $${s.payment.toFixed(2)}${s.paymentMethod ? ` ${s.paymentMethod}` : ''}`);
+        await logAction(viewer.employeeemail, 'Assessment Begun', `${s.typeName} for ${s.clientName} (Client ID ${s.client}) on ${s.date} with ${s.provider}: ${fundedBy ? `billed to ${fundedBy} $${s.fee.toFixed(2)}, client not charged` : `fee $${s.fee.toFixed(2)}`}, paid $${s.payment.toFixed(2)}${s.paymentMethod ? ` ${s.paymentMethod}` : ''}`);
         res.status(201).json({ success: true, attendanceId, newBalance });
     } catch (err) {
         await db.query('ROLLBACK').catch(() => {});
@@ -579,7 +601,7 @@ router.post('/api/assessments/begin', async (req, res) => {
 const IN_PROGRESS_COLUMNS = `a.AttendanceId, a.Client AS ClientId, c.FirstName, c.LastName, c.DOCNumber, c.DocType, c.ProgramType,
     a.SessionTypeId, COALESCE(st.Name, 'Assessment') AS SessionTypeName, COALESCE(st.Kind, 'Standard') AS Kind,
     to_char(a.Date, 'YYYY-MM-DD') AS BeganOn, (CURRENT_DATE - a.Date) AS DaysOpen, a.Provider, a.GroupFee AS Fee, a.AccountPaid AS Paid,
-    a.PaymentMethod, COALESCE(a.OpenedBy, a.CreatedBy) AS OpenedBy, a.CreatedBy AS BegunBy, a.AssessmentStatus,
+    a.PaymentMethod, COALESCE(a.OpenedBy, a.CreatedBy) AS OpenedBy, a.CreatedBy AS BegunBy, a.AssessmentStatus, a.FundedBy, a.FundedPrice,
     n.NoteCount, n.LastNoteOn`;
 const IN_PROGRESS_FROM = `Attendance a JOIN Clients c ON c.ClientId = a.Client LEFT JOIN SessionTypes st ON st.SessionTypeId = a.SessionTypeId
     LEFT JOIN LATERAL (SELECT COUNT(*)::int AS NoteCount, MAX(x.Date) AS LastNoteOn FROM Notes x

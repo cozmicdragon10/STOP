@@ -160,7 +160,13 @@ reports changes back. Saves that finish after another client was opened don't ov
   refund after). Beginning records the attendance that day, In Progress. The counselor adds notes (also saved as
   Assessment case notes) for as long as it takes, then completes it; a BIP intake or reinstate clears the client for
   group only when completed. Counselors work on their own assessments; Office Admins and Business Administrators on
-  all. Only a Business Administrator can change an assessment's price.
+  all. Only a Business Administrator can change an assessment's price, or begin one on a DHS invoice or voucher: the
+  client isn't charged (the price is kept on the attendance for billing), a past due balance is still paid first, and
+  the required note goes on the client's case notes.
+- **Max Debt Override** (`backend/routes/clientDebtLimits.js`, set on the client's account by Business Administrators,
+  through an expiration date): the client may owe up to its amount and still attend. It raises the $0.00 needed at the
+  first group check-in of the month (every check-in for Chaperon clients) and at the first individual session of the
+  month, and lets an assessment begin with up to that much owed after its fee.
 - **New accounts**: New User refuses an email that already has an account; existing accounts are changed with Edit,
   which signs the person out when their password changes or the account is deactivated.
 

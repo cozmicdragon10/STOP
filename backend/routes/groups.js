@@ -2,7 +2,7 @@ const express = require('express');
 const { pool } = require('../db');
 const { requireRole } = require('../lib/auth');
 const { groupNameFor, logClientChange } = require('../lib/changeLog');
-const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED, GROUP_ATTENDANCE } = require('../lib/sql');
+const { ACTIVE_DEBT_LIMIT, ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED, GROUP_ATTENDANCE, INDIVIDUAL_THIS_MONTH } = require('../lib/sql');
 const { FEDERAL_UNITS_SQL, LAST_DRUG_TEST_SQL } = require('../lib/federalUnits');
 const { staleFields, staleMessage } = require('../lib/editConflicts');
 
@@ -44,7 +44,7 @@ router.get('/api/groups/:id/clients', async (req, res) => {
     try {
         const { id } = req.params;
         const result = await pool.query(
-            `SELECT c.*, ${ATTENDED_THIS_MONTH} AS AttendedThisMonth, ${FEE_ALREADY_CHARGED} AS FeeAlreadyCharged, ${ACTIVE_FEE_OVERRIDE} AS ActiveFeeOverride,
+            `SELECT c.*, ${ATTENDED_THIS_MONTH} AS AttendedThisMonth, ${FEE_ALREADY_CHARGED} AS FeeAlreadyCharged, ${ACTIVE_FEE_OVERRIDE} AS ActiveFeeOverride, ${INDIVIDUAL_THIS_MONTH} AS IndividualThisMonth, ${ACTIVE_DEBT_LIMIT()} AS MaxOwed,
                     (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
                     (SELECT Date FROM Attendance WHERE Client = c.ClientId AND ${GROUP_ATTENDANCE} ORDER BY Date DESC LIMIT 1) AS LastGroupAttended,
                     ${BIP_CHECKIN_BLOCK} AS BipCheckInBlock, ${FEDERAL_UNITS_SQL('c.ClientId')} AS FederalUnits, CASE WHEN c.ProgramType = 'Fed Drug Test' THEN ${LAST_DRUG_TEST_SQL('c.ClientId')} END AS LastDrugTest

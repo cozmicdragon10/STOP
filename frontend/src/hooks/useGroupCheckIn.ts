@@ -26,6 +26,10 @@ export interface ClientRecord {
   activefeeoverride?: number | string | null;
   // True when the client already has an attendance this calendar month
   attendedthismonth?: boolean | null;
+  // True when the client already had an individual session this calendar month (the individual first-of-the-month rule)
+  individualthismonth?: boolean | null;
+  // Max Debt Override in effect: how much the client may owe and still attend (null when none: $0.00)
+  maxowed?: number | string | null;
   // This period's treatment fee was already charged (month for Phase 1 and 2, 3 or 6 months for Phase 3 and 4)
   feealreadycharged?: boolean | null;
   // Date of the client's most recent attendance

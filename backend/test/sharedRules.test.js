@@ -15,6 +15,11 @@ test('first check-in of the month allows the same amount owed', async () => {
     assert.equal(FIRST_CHECKIN_MAX_OWED, browser);
 });
 
+test('the max debt override has the same ceiling', async () => {
+    const { MAX_DEBT_LIMIT: browser } = await frontend('balance.ts');
+    assert.equal(require('../lib/debtLimits').MAX_DEBT_LIMIT, browser);
+});
+
 const PROGRAMS = ['State SO', 'Voluntary SO', 'Federal SO', 'Fed Drug Test', 'Chaperon', 'BIP', 'Poly Only', null];
 
 test('check-in payment rules and minimum payments match', async () => {
@@ -25,6 +30,8 @@ test('check-in payment rules and minimum payments match', async () => {
         for (const balance of [-20, 0, 0.01, 50, '75.50']) {
             for (const fee of [0, 40, 180]) {
                 for (const attended of [false, true]) {
+                    for (const maxOwed of [0, null, 100, '250.00']) assert.equal(minimumCheckInPayment(rule, balance, fee, attended, maxOwed), browser.minimumCheckInPayment(rule, balance, fee, attended, maxOwed),
+                        `max owed ${maxOwed}`);
                     assert.equal(minimumCheckInPayment(rule, balance, fee, attended), browser.minimumCheckInPayment(rule, balance, fee, attended),
                         `${p} balance ${balance} fee ${fee} attended ${attended}`);
                 }
@@ -120,8 +127,14 @@ test('assessment rules match: who works on one, what is due to begin, the paperw
     assert.deepEqual(browser.ASSESSMENT_ADMIN_ROLES, server.ASSESSMENT_ADMIN_ROLES);
     assert.deepEqual(browser.PAPERWORK_KINDS, server.PAPERWORK_KINDS);
     assert.equal(browser.NOTE_MAX, server.NOTE_MAX);
+    assert.deepEqual([...browser.FUNDING_SOURCES], server.FUNDING_SOURCES);
+    assert.equal(browser.FUNDING_ROLE, server.FUNDING_ROLE);
     for (const balance of [-500, -20, 0, 0.01, 50, '75.50', null]) {
-        for (const fee of [0, 40, 150.5]) assert.equal(browser.amountDueToBegin(balance, fee), server.amountDueToBegin(balance, fee), `balance ${balance} fee ${fee}`);
+        for (const fee of [0, 40, 150.5]) {
+            for (const funded of [null, 'DHS Invoice']) {
+                for (const maxOwed of [0, 75, '200.00']) assert.equal(browser.amountDueToBegin(balance, fee, funded, maxOwed), server.amountDueToBegin(balance, fee, funded, maxOwed), `balance ${balance} fee ${fee} ${funded} ${maxOwed}`);
+            }
+        }
     }
     for (const kind of ['Standard', 'BIP Intake', 'BIP Reinstate']) assert.equal(browser.paperworkLabel(kind), server.paperworkLabel(kind));
     for (const role of ['Counselor', 'Office Admin', 'Business Administrator', 'Polygrapher']) {

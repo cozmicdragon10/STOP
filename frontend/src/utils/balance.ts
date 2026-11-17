@@ -17,12 +17,19 @@ export const PAY_EACH_VISIT_PROGRAMS = ['Chaperon'];
 export const checkInPaymentRule = (programType?: string | null): CheckInPaymentRule =>
   NO_CHECKIN_LIMIT_PROGRAMS.includes(programType || '') ? 'none' : PAY_EACH_VISIT_PROGRAMS.includes(programType || '') ? 'each' : 'first';
 
-// The smallest payment that lets a group check-in through, from the balance before it (stored sign: positive = owes)
-// and today's fee; 0 when nothing has to be paid. Mirrors minimumCheckInPayment in backend/lib/attendance.js.
-export const minimumCheckInPayment = (rule: CheckInPaymentRule, balance: number | string | null | undefined, fee: number, attendedThisMonth: boolean): number => {
+// A Max Debt Override (Business Administrators) lets a client owe up to its amount and still attend; this is the most it
+// can be. Mirrors MAX_DEBT_LIMIT in backend/lib/debtLimits.js.
+export const MAX_DEBT_LIMIT = 10000;
+// How much the client may owe at a checked check-in: FIRST_CHECKIN_MAX_OWED, or more under a Max Debt Override
+export const allowedOwed = (maxOwed?: number | string | null): number => Math.max(FIRST_CHECKIN_MAX_OWED, Number(maxOwed) || 0);
+
+// The smallest payment that lets a group or individual check-in through, from the balance before it (stored sign:
+// positive = owes) and today's fee; 0 when nothing has to be paid. maxOwed: the client's Max Debt Override, if any.
+// Mirrors minimumCheckInPayment in backend/lib/attendance.js.
+export const minimumCheckInPayment = (rule: CheckInPaymentRule, balance: number | string | null | undefined, fee: number, attendedThisMonth: boolean, maxOwed: number | string | null = 0): number => {
   const owed = rule === 'each' ? Number(balance || 0) + Number(fee || 0)
     : rule === 'first' && !attendedThisMonth ? Number(balance || 0) : -Infinity;
-  return Math.max(0, Math.round((owed - FIRST_CHECKIN_MAX_OWED) * 100) / 100);
+  return Math.max(0, Math.round((owed - allowedOwed(maxOwed)) * 100) / 100);
 };
 
 export const toDisplayBalance = (stored: number | string | null | undefined): number => -(Number(stored) || 0);

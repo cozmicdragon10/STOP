@@ -43,6 +43,11 @@ const bipCheckInBlockMessage = (block, name) => (block === 'intake'
 // True when the client already has an attendance row in the current calendar month.
 // Used for the State SO Phase 1 rule: the treatment fee is charged once per month.
 const ATTENDED_THIS_MONTH = `EXISTS (SELECT 1 FROM Attendance a WHERE a.Client = c.ClientId AND a.${GROUP_ATTENDANCE} AND date_trunc('month', a.Date) = date_trunc('month', CURRENT_DATE))`;
+// True when the client already had an individual session this calendar month (the individual first-of-the-month rule)
+const INDIVIDUAL_THIS_MONTH = `EXISTS (SELECT 1 FROM Attendance a WHERE a.Client = c.ClientId AND a.Type = 'Individual' AND date_trunc('month', a.Date) = date_trunc('month', CURRENT_DATE))`;
+// The most a client may owe and still attend under an unexpired Max Debt Override (ClientDebtLimits), or NULL (none: $0.00)
+const ACTIVE_DEBT_LIMIT = (client = 'c.ClientId') => `(SELECT d.MaxOwed FROM ClientDebtLimits d
+    WHERE d.ClientId = ${client} AND d.ExpirationDate >= CURRENT_DATE ORDER BY d.CreatedOn DESC, d.DebtLimitId DESC LIMIT 1)`;
 
 // State SO and Voluntary SO clients pay the treatment fee once per period: Phase 1 and 2 once per calendar month (on their
 // first group attendance), Phase 3 and 4 once per this many months, rolling from their last charged group attendance.
@@ -72,5 +77,6 @@ const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
 module.exports = {
     INDIVIDUAL_SESSION_TYPES, GROUP_ATTENDANCE, NEEDS_OUR_INTAKE, BIP_CHECKIN_BLOCK, bipCheckInBlockMessage, ATTENDED_THIS_MONTH,
+    INDIVIDUAL_THIS_MONTH, ACTIVE_DEBT_LIMIT,
     MONTHLY_FEE_PHASES, FEE_PERIOD_MONTHS, FEE_ONCE_PER_PERIOD_PROGRAMS, FEE_ALREADY_CHARGED, ACTIVE_FEE_OVERRIDE, SESSION_FEE_SQL, YMD,
 };

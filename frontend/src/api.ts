@@ -1128,6 +1128,8 @@ export interface ClosedIndividualSession {
     closedon: string | null;
     begunby: string | null;
     begunon: string | null;
+    fundedby: 'DHS Invoice' | 'Voucher' | null;
+    fundedprice: string | number | null;
     notecount: number;
 }
 
@@ -1152,6 +1154,9 @@ export interface AssessmentInProgress {
     openedby: string | null;
     begunby: string | null;
     assessmentstatus: 'In Progress' | 'Completed';
+    // Begun on a DHS invoice or voucher: the client wasn't charged (fee 0) and fundedprice is what it was billed at
+    fundedby: 'DHS Invoice' | 'Voucher' | null;
+    fundedprice: string | number | null;
     notecount: number;
     lastnoteon: string | null;
 }
@@ -1183,6 +1188,9 @@ export interface BeginAssessmentPayload {
     paymentComments: string;
     // The payment for the fee and any past due balance was received
     paymentConfirmed: boolean;
+    // Business Administrators only: a DHS invoice or voucher covers the fee (not charged to the client), with a required note
+    fundedBy: 'DHS Invoice' | 'Voucher' | null;
+    fundingNote: string;
     user: string;
 }
 
@@ -2205,6 +2213,36 @@ export async function deletePolygraphSlot(slotId: number): Promise<{ success: tr
         method: 'DELETE',
     });
     return jsonResponse(res, 'Failed to delete slot.');
+}
+
+// Max Debt Override: through expirationdate (YYYY-MM-DD) the client may owe up to maxowed and still attend
+export interface DebtLimit {
+    debtlimitid: number;
+    maxowed: string | number;
+    expirationdate: string;
+    expirestext: string;
+    createdby: string | null;
+    createdon: string;
+}
+
+export async function fetchClientDebtLimit(clientId: number): Promise<{ limit: DebtLimit | null }> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/debt-limit`);
+    return jsonResponse(res, 'Failed to load the max debt override.');
+}
+
+// Business Administrators only; the server checks the role
+export async function saveClientDebtLimit(clientId: number, maxOwed: number, expirationDate: string): Promise<{ limit: DebtLimit }> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/debt-limit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maxOwed, expirationDate }),
+    });
+    return jsonResponse(res, 'Failed to save the max debt override.');
+}
+
+export async function deleteClientDebtLimit(clientId: number): Promise<{ success: true }> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/debt-limit`, { method: 'DELETE' });
+    return jsonResponse(res, 'Failed to remove the max debt override.');
 }
 
 export async function fetchClientFeeOverride(clientId: number): Promise<{ override: TempFeeOverride | null }> {

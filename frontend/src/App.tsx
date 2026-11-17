@@ -53,6 +53,7 @@ import ClientAttendanceHistory from './components/clients/ClientAttendanceHistor
 import ClientPolygraphs from './components/clients/ClientPolygraphs';
 import ClientLedger from './components/clients/ClientLedger';
 import TempFeeOverridePanel from './components/clients/TempFeeOverridePanel';
+import MaxDebtOverridePanel from './components/clients/MaxDebtOverridePanel';
 import PolyFeeOverridePanel from './components/clients/PolyFeeOverridePanel';
 import PendingNotesButton from './components/clients/PendingNotesButton';
 import EmployeeLabelProvider from './components/EmployeeLabelProvider';
@@ -1343,6 +1344,15 @@ export default function App() {
                       if (openClientIdRef.current === selectedClientDetail.clientid) setClientFeeOverride(override);
                       loadDashboardData();
                     }}
+                    onSuccess={setSuccessMsg}
+                  />}
+
+                  {/* Max Debt Override: how much the client may owe and still attend, through a date */}
+                  {role !== 'Polygrapher' && <MaxDebtOverridePanel
+                    key={`debt-${selectedClientDetail.clientid}`}
+                    client={selectedClientDetail}
+                    role={role}
+                    onChanged={() => loadDashboardData()}
                     onSuccess={setSuccessMsg}
                   />}
 

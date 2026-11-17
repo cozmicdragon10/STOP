@@ -10,7 +10,7 @@ const { CLIENT_INFO_COLUMNS, clientInfoChanges, groupNameFor, logClientChange, n
 const { changedFields, clientConflictMessage } = require('../lib/editConflicts');
 const { MONEY_FIELDS, LABELS: MONEY_LABELS, moneyEditProblem, moneyText, standardTreatmentFee } = require('../lib/moneyFields');
 const { POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, countPolyFeeFill } = require('../lib/poly');
-const { ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED, SESSION_FEE_SQL } = require('../lib/sql');
+const { ACTIVE_DEBT_LIMIT, ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED, INDIVIDUAL_THIS_MONTH, SESSION_FEE_SQL } = require('../lib/sql');
 const { BUS_PASS_MAX, FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
 const { FEDERAL_UNITS_SQL, FEDERAL_UNIT_REFILLS_SQL, LAST_DRUG_TEST_SQL, saveClientFederalUnits, saveClientUnitRefills, unitsProblem } = require('../lib/federalUnits');
 
@@ -45,6 +45,8 @@ const clientRowsSql = (where) => `
         ${ATTENDED_THIS_MONTH} AS AttendedThisMonth,
         ${FEE_ALREADY_CHARGED} AS FeeAlreadyCharged,
         ${ACTIVE_FEE_OVERRIDE} AS ActiveFeeOverride,
+        ${INDIVIDUAL_THIS_MONTH} AS IndividualThisMonth,
+        ${ACTIVE_DEBT_LIMIT()} AS MaxOwed,
         ${BIP_CHECKIN_BLOCK} AS BipCheckInBlock
     FROM Clients c
     LEFT JOIN Groups g ON c.GroupId = g.GroupId

@@ -5,7 +5,7 @@ import { beginAssessment, getBipIntake, saveOpenIndividualSession } from '../../
 import type { BipIntake, OpenIndividualSession, SessionType } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { formatBalance, formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
-import { amountDueToBegin } from '../../utils/assessmentWork';
+import { FUNDING_ROLE, FUNDING_SOURCES, amountDueToBegin, type FundingSource } from '../../utils/assessmentWork';
 
 export interface BeginClient {
   clientid: number;
@@ -16,6 +16,8 @@ export interface BeginClient {
   programtype?: string | null;
   accountbalance?: number | string | null;
   programstatus?: string | null;
+  // Max Debt Override in effect: how much the client may owe after the assessment begins
+  maxowed?: number | string | null;
 }
 
 interface Props {
@@ -105,10 +107,18 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
   const feeNum = isAdmin ? Number(fee) : (shownFee ?? 0);
   const paymentNum = Number(payment || 0);
   const balance = Number(client?.accountbalance || 0);
-  const due = amountDueToBegin(balance, feeNum);
+  // Business Administrators can begin on a DHS invoice or voucher: the fee isn't charged, a past due balance still is
+  const canFund = user.role === FUNDING_ROLE;
+  const [fundedBy, setFundedBy] = useState<FundingSource | null>(null);
+  const [fundingNote, setFundingNote] = useState('');
+  const charged = fundedBy ? 0 : (Number.isFinite(feeNum) ? feeNum : 0);
+  const maxOwed = Number(client?.maxowed) || 0;
+  const due = amountDueToBegin(balance, feeNum, fundedBy, maxOwed);
   const covers = Number.isFinite(paymentNum) && paymentNum + 0.005 >= due;
-  const confirmed = paymentConfirmed && covers;
-  const balanceAfter = cents(balance + (Number.isFinite(feeNum) ? feeNum : 0) - (Number.isFinite(paymentNum) ? paymentNum : 0));
+  // Nothing to collect (credit, a DHS invoice or voucher, or a Max Debt Override covers it): no payment box
+  const needsPaymentBox = due > 0;
+  const confirmed = !needsPaymentBox || (paymentConfirmed && covers);
+  const balanceAfter = cents(balance + charged - (Number.isFinite(paymentNum) ? paymentNum : 0));
   // Counselors begin their own assessments; everyone else picks the counselor
   const counselorChoices = isCounselor ? counselors.filter(n => n === user.displayname) : counselors;
   const savedOther = provider && !counselorChoices.includes(provider) ? provider : '';
@@ -160,6 +170,7 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
   const begin = async () => {
     const p = detailsProblem();
     if (p) { setError(p); setStep(1); return; }
+    if (fundedBy && !fundingNote.trim()) { setError(`Enter a note about the ${fundedBy}.`); return; }
     if (!covers) { setError(`The payment must cover the amount due (${money(due)}).`); return; }
     if (!confirmed) { setError('Check off that the payment was received.'); return; }
     setSaving(true);
@@ -168,9 +179,9 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
       const res = await beginAssessment({
         openSessionId: open?.opensessionid ?? null, client: Number(clientId), sessionTypeId: Number(sessionTypeId), fee: cents(feeNum),
         payment: cents(paymentNum), provider: provider.trim(), comments: firstNote.trim(), paymentComments: paymentComments.trim(),
-        paymentConfirmed: true, user: user.employeeemail,
+        paymentConfirmed: confirmed, fundedBy, fundingNote: fundingNote.trim(), user: user.employeeemail,
       });
-      onBegun(res.attendanceId, `${sessionType!.name} begun for ${client!.lastname}, ${client!.firstname}. New balance ${formatBalance(res.newBalance)}.`);
+      onBegun(res.attendanceId, `${sessionType!.name} begun for ${client!.lastname}, ${client!.firstname}${fundedBy ? ` on a ${fundedBy} (not charged to the client)` : ''}. New balance ${formatBalance(res.newBalance)}.`);
     } catch (err) {
       setError(errorMessage(err, 'Failed to begin the assessment.'));
     } finally {
@@ -305,16 +316,48 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
             ))}
             <div className="border-t border-slate-800 my-2" />
             <div className="flex justify-between"><span className="text-slate-400">Current balance</span><span className={toDisplayBalance(balance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatBalance(balance)}</span></div>
-            <div className="flex justify-between"><span className="text-slate-400">Price</span><span className="text-red-400">-{money(feeNum)}</span></div>
+            {fundedBy ? (
+              <div className="flex justify-between gap-4"><span className="text-slate-400">Price ({money(Number.isFinite(feeNum) ? feeNum : 0)})</span><span className="text-sky-300 text-right">Billed to {fundedBy}, not charged</span></div>
+            ) : (
+              <div className="flex justify-between"><span className="text-slate-400">Price</span><span className="text-red-400">-{money(feeNum)}</span></div>
+            )}
             <div className="flex justify-between"><span className="text-slate-400">Payment (Cash)</span><span className="text-emerald-400">+{money(Number.isFinite(paymentNum) ? paymentNum : 0)}</span></div>
             <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="font-semibold text-slate-300">Balance after</span><span className={`font-bold ${toDisplayBalance(balanceAfter) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(balanceAfter)}</span></div>
           </div>
+
+          {canFund && (
+            <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3 text-sm">
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Who Pays for the Assessment</p>
+                <p className="text-[0.6875rem] text-slate-500">Business Administrators only. A DHS invoice or voucher begins it without charging the client; any past due balance is still paid.</p>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {([null, ...FUNDING_SOURCES] as (FundingSource | null)[]).map(f => (
+                  <button key={f ?? 'client'} type="button" onClick={() => { setFundedBy(f); setPaymentConfirmed(false); setError(''); }}
+                    className={`border rounded-lg py-2 text-xs font-semibold transition ${fundedBy === f ? 'border-sky-500 bg-sky-500/10 text-sky-300' : 'border-slate-700 bg-slate-900 text-slate-400 hover:text-slate-200'}`}>
+                    {f ?? 'Client Pays'}
+                  </button>
+                ))}
+              </div>
+              {fundedBy && (
+                <div>
+                  <label htmlFor="funding-note" className={label}>{fundedBy} Note <span className="normal-case font-normal text-red-400">(required)</span></label>
+                  <textarea id="funding-note" value={fundingNote} maxLength={4000} onChange={e => { setFundingNote(e.target.value); setError(''); }} rows={2} className={input} placeholder={`${fundedBy} number, who approved it…`} />
+                  <p className="text-[0.6875rem] text-slate-500 mt-1">Saved as a case note on the client's account.</p>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-4 text-sm">
             <div>
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Amount Due to Begin</p>
               <p className="text-white text-lg font-bold">{money(due)}</p>
-              <p className="text-xs text-slate-500">{sessionType?.name} {money(feeNum)}{balance > 0 ? ` + past due balance ${money(balance)}` : ''}{balance < 0 ? ` − account credit ${money(-balance)}` : ''}</p>
+              <p className="text-xs text-slate-500">
+                {fundedBy ? `${sessionType?.name} billed to ${fundedBy}` : `${sessionType?.name} ${money(feeNum)}`}
+                {balance > 0 ? ` + past due balance ${money(balance)}` : ''}{balance < 0 && !fundedBy ? ` − account credit ${money(-balance)}` : ''}
+                {maxOwed > 0 ? ` − Max Debt Override ${money(maxOwed)} (may owe up to this after it begins)` : ''}
+              </p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -336,15 +379,21 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
               <label htmlFor="begin-payment-comments" className={label}>Payment Comments <span className="normal-case font-normal text-slate-500">(optional)</span></label>
               <textarea id="begin-payment-comments" value={paymentComments} onChange={e => setPaymentComments(e.target.value)} rows={2} className={input} placeholder="e.g. receipt #, who paid…" />
             </div>
-            <label className={`flex items-start gap-2.5 ${covers ? 'text-slate-200 cursor-pointer' : 'text-slate-500 cursor-not-allowed'}`}>
-              <input type="checkbox" checked={confirmed} disabled={!covers} onChange={e => { setPaymentConfirmed(e.target.checked); setError(''); }} className="mt-0.5 accent-emerald-500" />
-              <span>
-                {due > 0
-                  ? <>Payment received for the {sessionType?.name}{balance > 0 ? ' and the past due balance' : ''} ({money(due)})</>
-                  : <>The account credit covers the {sessionType?.name}; no payment is needed</>}
-                {!covers && <span className="block text-xs text-amber-400">The payment must cover the full amount due before this can be checked.</span>}
-              </span>
-            </label>
+            {needsPaymentBox ? (
+              <label className={`flex items-start gap-2.5 ${covers ? 'text-slate-200 cursor-pointer' : 'text-slate-500 cursor-not-allowed'}`}>
+                <input type="checkbox" checked={confirmed} disabled={!covers} onChange={e => { setPaymentConfirmed(e.target.checked); setError(''); }} className="mt-0.5 accent-emerald-500" />
+                <span>
+                  {fundedBy
+                    ? <>Payment received toward the past due balance ({money(due)})</>
+                    : <>Payment received for the {sessionType?.name}{balance > 0 ? ' and the past due balance' : ''} ({money(due)})</>}
+                  {!covers && <span className="block text-xs text-amber-400">The payment must cover the full amount due before this can be checked.</span>}
+                </span>
+              </label>
+            ) : (
+              <p className="text-xs text-sky-300">
+                Nothing to collect: {fundedBy ? `the ${fundedBy} covers the ${sessionType?.name}` : balance < 0 && balance + feeNum <= 0 ? 'the account credit covers it' : 'it is within the Max Debt Override'}. A payment is optional.
+              </p>
+            )}
             <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5">Once the assessment is begun the payment is not refunded, whatever the results.</p>
           </div>
 
