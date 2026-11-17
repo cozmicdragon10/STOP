@@ -41,6 +41,7 @@ import MyDay from './components/home/MyDay';
 import OfficeToday from './components/home/OfficeToday';
 import DevHealth from './components/home/DevHealth';
 import HomeCount from './components/home/HomeCount';
+import PolygrapherHome from './components/home/PolygrapherHome';
 import { needsGroup } from './utils/home';
 import type { ClientFilters } from './utils/clients';
 import CalendarsTab from './components/home/CalendarsTab';
@@ -839,7 +840,8 @@ export default function App() {
   // Home page: Business Administrators (isBusinessAdmin; DEV signs in as one) and Office Admins get the office's Today
   // panel; only Business Administrators get case notes to approve; Counselors and Office Admins don't see the client counts
   const showOfficeToday = isBusinessAdmin || role === 'Office Admin';
-  const showClientCounts = !['Counselor', 'Office Admin'].includes(role);
+  const isPolygrapher = role === 'Polygrapher';
+  const showClientCounts = !['Counselor', 'Office Admin', 'Polygrapher'].includes(role);
   const counselorGroupIds = isCounselor ? myGroupIds(groups, user.displayname) : null;
   const isAllowed = (tab: string) => {
     // Everyone has their own Settings (appearance and layout)
@@ -942,6 +944,17 @@ export default function App() {
     setHighlightedSlotId(slotId);
   };
 
+  // A Polygrapher's Home counts: the Polygraphs tab showing only their own slots, on Poly Schedule (optionally one
+  // status, from today on) or Poly Results
+  const openMyPolygraphs = (subTab: 'schedule' | 'results', status: '' | 'Open' | 'Assigned' = '') => {
+    clearPolyFilters();
+    setPolyShowPast(false);
+    setPolyExaminerFilter(user.employeeemail);
+    setPolyStatusFilter(status);
+    setPolySubTab(subTab);
+    setActiveTab('polygraph');
+  };
+
   // The tabs of the open client's account
   const clientTabItems: NavItem[] = [
     { tab: 'information', icon: Users, label: 'Information', shortLabel: 'Info' },
@@ -1030,9 +1043,21 @@ export default function App() {
             {/* DEV accounts: the server and database at a glance. Hidden in privacy view, which locks the DEV tab. */}
             {user.isdev && !privacyOn && <DevHealth onOpenDev={() => openTab('dev')} />}
 
-            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${isBusinessAdmin ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
-              {/* Counselors and Office Admins don't see the client counts here; Business Administrators do. Each count
-                  opens the list behind it. */}
+            {/* A Polygrapher's Home is their own polygraph work instead of the office counts below */}
+            {isPolygrapher && (
+              <PolygrapherHome
+                polySlots={polySlots}
+                userEmail={user.employeeemail}
+                privacy={privacyOn}
+                onOpenSchedule={(status) => openMyPolygraphs('schedule', status)}
+                onOpenResults={() => openMyPolygraphs('results')}
+                onOpenSlot={openPolySlot}
+              />
+            )}
+
+            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${isPolygrapher ? 'hidden' : isBusinessAdmin ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
+              {/* Counselors, Office Admins and Polygraphers don't see the client counts here; Business Administrators do.
+                  Each count opens the list behind it. */}
               {showClientCounts && (
                 <HomeCount
                   label="Active Clients"

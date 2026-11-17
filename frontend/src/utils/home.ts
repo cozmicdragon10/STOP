@@ -1,6 +1,6 @@
 // Home page rules: the office counts and today's schedule for Business Administrators (and DEV, who sign in as one)
 import { GROUP_TYPES_BY_PROGRAM } from './clients';
-import { weekdayName } from './counselor';
+import { dayKey, weekdayName } from './counselor';
 import { formatDisplayTime } from './dates';
 import { parseSchedule } from './schedule';
 import { slotStart } from './polygraph';
@@ -119,3 +119,29 @@ export const shiftDay = (day: string, delta: number) => {
 // 'Today', 'Yesterday' or 'Tomorrow' when the day is one of those, otherwise ''
 export const relativeDayName = (day: string, today: string) =>
   day === today ? 'Today' : day === shiftDay(today, -1) ? 'Yesterday' : day === shiftDay(today, 1) ? 'Tomorrow' : '';
+
+// A Polygrapher's own slots (the examiner's email, compared without case), for their Home page:
+// - needResult: booked appointments whose time has passed, still waiting on a result (oldest first). A booked slot
+//   keeps the Assigned status until its result is recorded or it is cancelled.
+// - bookedSoon: booked appointments from now through the next 7 days
+// - openAhead: open slots from now on, not yet booked
+export const polygrapherSlots = <T extends HomeSlot>(slots: T[], email: string, now = new Date()) => {
+  const me = email.trim().toLowerCase();
+  const mine = slots.filter(s => (s.polygrapher || '').trim().toLowerCase() === me);
+  const today = dayKey(now);
+  const weekEnd = shiftDay(today, 7);
+  const dayOf = (s: T) => String(s.date || '').split('T')[0];
+  // A slot without a readable time counts as passed once its day is over
+  const passed = (s: T) => {
+    const start = slotStart(s);
+    return start ? start.getTime() <= now.getTime() : dayOf(s) < today;
+  };
+  const byTime = (a: T, b: T) => (slotStart(a)?.getTime() ?? 0) - (slotStart(b)?.getTime() ?? 0) || a.slotid - b.slotid;
+  const booked = mine.filter(s => s.status === 'Assigned');
+  return {
+    mine,
+    needResult: booked.filter(passed).sort(byTime),
+    bookedSoon: booked.filter(s => !passed(s) && dayOf(s) < weekEnd).sort(byTime),
+    openAhead: mine.filter(s => (s.status || 'Open') === 'Open' && !passed(s)).sort(byTime),
+  };
+};

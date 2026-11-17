@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { ChevronLeft, ChevronRight, Layers, ShieldAlert } from 'lucide-react';
+import { Layers } from 'lucide-react';
 import { getGroupScheduleChanges } from '../../api';
 import type { GroupScheduleChange, PolygraphSlot } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
-import { formatDisplayTime } from '../../utils/dates';
-import { meetingsOn, polySlotsOn, relativeDayName, shiftDay } from '../../utils/home';
+import { meetingsOn, polySlotsOn } from '../../utils/home';
 import type { HomeGroup } from '../../utils/home';
+import DayPicker from './DayPicker';
+import PolySlotList from './PolySlotList';
 
 interface Props {
   groups: HomeGroup[];
@@ -24,14 +25,6 @@ const STATUS_STYLE = {
   cancelled: 'text-slate-500 line-through',
   movedAway: 'text-slate-500 line-through',
 } as const;
-
-const SLOT_STYLE: Record<string, string> = {
-  Open: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  Assigned: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  Closed: 'bg-slate-800 text-slate-400 border-slate-700',
-};
-
-const DAY_BUTTON = 'p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700';
 
 // Business Administrators, DEV and Office Admins: what is happening in the office on a day (today to start; earlier and
 // later days can be picked), every counselor's groups and every examiner's polygraph slots, with the day's cancellations
@@ -55,38 +48,11 @@ export default function OfficeToday({ groups, polySlots, examinerName, privacy, 
   const meetings = meetingsOn(groups, changes?.month === month ? changes.list : [], day);
   const meetingCount = meetings.filter(m => m.status === 'scheduled' || m.status === 'movedHere').length;
   const polys = polySlotsOn(polySlots, day);
-  const [y, m, d] = day.split('-').map(Number);
-  const dayLabel = new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: y === Number(today.slice(0, 4)) ? undefined : 'numeric' });
-  const relative = relativeDayName(day, today);
   const onWhen = day === today ? 'today' : 'on this day';
 
   return (
     <section>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3">
-        <h3 className="text-xs uppercase tracking-wide text-slate-400 font-semibold mr-auto">
-          {relative ? `${relative} · ` : ''}{dayLabel}
-        </h3>
-        <div className="flex items-center gap-1.5">
-          <button type="button" onClick={() => setDay(shiftDay(day, -1))} aria-label="Previous day" title="Previous day" className={DAY_BUTTON}>
-            <ChevronLeft size={14} />
-          </button>
-          <input
-            type="date"
-            value={day}
-            onChange={e => { if (e.target.value) setDay(e.target.value); }}
-            aria-label="Pick a day"
-            className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-white text-xs [color-scheme:dark]"
-          />
-          <button type="button" onClick={() => setDay(shiftDay(day, 1))} aria-label="Next day" title="Next day" className={DAY_BUTTON}>
-            <ChevronRight size={14} />
-          </button>
-          {day !== today && (
-            <button type="button" onClick={() => setDay(today)} className="px-2.5 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold">
-              Today
-            </button>
-          )}
-        </div>
-      </div>
+      <DayPicker day={day} today={today} onChange={setDay} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <div className="flex items-center justify-between gap-3 mb-3">
@@ -115,37 +81,15 @@ export default function OfficeToday({ groups, polySlots, examinerName, privacy, 
           )}
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <button type="button" onClick={onOpenPolygraphs} className="flex items-center gap-2 text-blue-400 hover:text-blue-300" title="Open Polygraphs">
-              <ShieldAlert size={16} />
-              <span className="font-semibold text-white">Polygraphs</span>
-            </button>
-            <span className="text-xs text-slate-400">{polys.assigned} booked · {polys.open} open{polys.closed ? ` · ${polys.closed} closed` : ''}</span>
-          </div>
-          {polys.list.length === 0 ? (
-            <p className="text-sm text-slate-500">No polygraph slots {onWhen}.</p>
-          ) : (
-            <ul className="divide-y divide-slate-800">
-              {polys.list.map(s => {
-                const status = s.status || 'Open';
-                return (
-                  <li key={s.slotid} className="py-2 flex items-baseline gap-3 text-sm">
-                    <span className="w-20 shrink-0 text-xs text-slate-400">{formatDisplayTime(s.time) || '—'}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="text-slate-300">{s.polygrapher ? examinerName(s.polygrapher) : 'No examiner'}</span>
-                      {s.location && <span className="text-xs text-slate-500"> · {s.location}</span>}
-                      {status === 'Assigned' && s.assignedClientName && !privacy && <span className="block text-xs text-slate-400">{s.assignedClientName}</span>}
-                    </span>
-                    <span className={`shrink-0 px-2 py-0.5 rounded-full border text-[0.625rem] font-semibold ${SLOT_STYLE[status] ?? SLOT_STYLE.Open}`}>
-                      {status === 'Assigned' ? 'Booked' : status}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
+        <PolySlotList
+          title="Polygraphs"
+          summary={`${polys.assigned} booked · ${polys.open} open${polys.closed ? ` · ${polys.closed} closed` : ''}`}
+          slots={polys.list}
+          empty={`No polygraph slots ${onWhen}.`}
+          examinerName={examinerName}
+          privacy={privacy}
+          onOpen={onOpenPolygraphs}
+        />
       </div>
     </section>
   );

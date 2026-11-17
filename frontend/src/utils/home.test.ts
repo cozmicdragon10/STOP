@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { meetingsOn, needsGroup, polySlotsOn, relativeDayName, shiftDay } from './home';
+import { meetingsOn, needsGroup, polySlotsOn, polygrapherSlots, relativeDayName, shiftDay } from './home';
 
 describe('needsGroup', () => {
   it('flags active clients in a program with groups who have no group of either kind', () => {
@@ -71,5 +71,28 @@ describe('day picker', () => {
     expect(relativeDayName('2026-11-16', '2026-11-17')).toBe('Yesterday');
     expect(relativeDayName('2026-11-18', '2026-11-17')).toBe('Tomorrow');
     expect(relativeDayName('2026-11-20', '2026-11-17')).toBe('');
+  });
+});
+
+describe('polygrapherSlots', () => {
+  // Tuesday 2026-11-17 at 12:00 local
+  const now = new Date(2026, 10, 17, 12, 0);
+  const slots = [
+    { slotid: 1, date: '2026-11-17', time: '09:00:00', polygrapher: 'Kelly@Office.com', status: 'Assigned' },
+    { slotid: 2, date: '2026-11-10', time: '10:00:00', polygrapher: 'kelly@office.com', status: 'Assigned' },
+    { slotid: 3, date: '2026-11-17', time: '15:00:00', polygrapher: 'kelly@office.com', status: 'Assigned' },
+    { slotid: 4, date: '2026-11-24', time: '09:00:00', polygrapher: 'kelly@office.com', status: 'Assigned' },
+    { slotid: 5, date: '2026-11-19', time: '09:00:00', polygrapher: 'kelly@office.com', status: 'Open' },
+    { slotid: 6, date: '2026-11-17', time: '08:00:00', polygrapher: 'kelly@office.com', status: 'Closed' },
+    { slotid: 7, date: '2026-11-16', time: '09:00:00', polygrapher: 'other@office.com', status: 'Assigned' },
+  ];
+
+  it('keeps only my slots and sorts out what needs a result, what is booked this week, and what is open', () => {
+    const mine = polygrapherSlots(slots, ' kelly@office.com ', now);
+    expect(mine.mine.map(s => s.slotid)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(mine.needResult.map(s => s.slotid)).toEqual([2, 1]);
+    // Slot 4 is exactly 7 days out, so not within the next 7 days
+    expect(mine.bookedSoon.map(s => s.slotid)).toEqual([3]);
+    expect(mine.openAhead.map(s => s.slotid)).toEqual([5]);
   });
 });
