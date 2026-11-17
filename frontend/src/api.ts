@@ -2015,6 +2015,23 @@ export async function deleteClientNote(noteId: number, user: string, original?: 
     return savedResponse(res, 'Failed to delete the note.');
 }
 
+export interface ClientDischarge {
+    dischargeid: number;
+    // Local wall-clock text, 'YYYY-MM-DDTHH:MM:SS'
+    dischargedon: string;
+    dischargetype: string;
+    // Joined by ', ' when there is more than one
+    subcategory: string | null;
+    note: string | null;
+    dischargedby: string | null;
+}
+
+// Every discharge on record, newest first (kept after reactivation). Not for Polygraphers; the server refuses them.
+export async function getClientDischarges(clientId: number): Promise<ClientDischarge[]> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/discharges`);
+    return jsonResponse(res, 'Failed to load the discharge history.');
+}
+
 // Newest first
 export async function getClientPolygraphs(clientId: number): Promise<PolygraphResult[]> {
     const res = await apiFetch(`${API_BASE}/clients/${clientId}/polygraphs`);

@@ -349,6 +349,21 @@ const changeProgramStatus = (action) => async (req, res) => {
 router.post('/api/clients/:id/discharge', changeProgramStatus(STATUS_ACTIONS.discharge));
 router.post('/api/clients/:id/activate', changeProgramStatus(STATUS_ACTIONS.activate));
 
+// Every discharge on record for the client, newest first (kept after reactivation, so the count is how many times they
+// have been discharged). DischargedOn goes out as local wall-clock text so time zones cannot shift it.
+router.get('/api/clients/:id/discharges', async (req, res) => {
+    try {
+        const result = await pool.query(
+            `SELECT DischargeId, to_char(DischargedOn, 'YYYY-MM-DD"T"HH24:MI:SS') AS DischargedOn, DischargeType, Subcategory, Note, DischargedBy
+             FROM ClientDischarges WHERE ClientId = $1 ORDER BY ClientDischarges.DischargedOn DESC, DischargeId DESC`,
+            [req.params.id]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 router.get('/api/clients/:id/attendance', async (req, res) => {
     try {
         const { id } = req.params;

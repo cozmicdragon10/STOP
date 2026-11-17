@@ -48,7 +48,8 @@ test('a Polygrapher reaches only their part of the app', () => {
     for (const [m, p] of [['GET', '/api/clients/12/financials'], ['GET', '/api/clients/12/notes'], ['GET', '/api/clients/12/attendance'],
         ['PATCH', '/api/clients/12'], ['POST', '/api/financials/payment'], ['POST', '/api/clients/12/activate'],
         ['POST', '/api/polygraphs/slots/3/assign'], ['DELETE', '/api/polygraphs/slots/3'], ['PATCH', '/api/attachments/5'],
-        ['DELETE', '/api/attachments/5'], ['POST', '/api/documents'], ['GET', '/api/reports/agent'], ['GET', '/api/clients/12/change-log']]) {
+        ['DELETE', '/api/attachments/5'], ['POST', '/api/documents'], ['GET', '/api/reports/agent'], ['GET', '/api/clients/12/change-log'],
+        ['GET', '/api/clients/12/discharges']]) {
         assert.ok(!isAllowed(m, p), `${m} ${p} should be refused`);
     }
 });

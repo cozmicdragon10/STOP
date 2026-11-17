@@ -58,6 +58,7 @@ import ReportsTab from './components/reports/ReportsTab';
 import ClientRoster from './components/clients/ClientRoster';
 import ClientAttachments from './components/clients/ClientAttachments';
 import ClientChangeLog from './components/clients/ClientChangeLog';
+import DischargeHistoryPanel from './components/clients/DischargeHistoryPanel';
 import ClientNotes from './components/clients/ClientNotes';
 import ClientAttendanceHistory from './components/clients/ClientAttendanceHistory';
 import ClientPolygraphs from './components/clients/ClientPolygraphs';
@@ -1411,6 +1412,12 @@ export default function App() {
                     limited={role === 'Polygrapher'}
                     onBusPassGranted={handleBusPassGranted}
                   />
+
+                  {/* Discharge History: how many times the client has been discharged; reloads after Discharge or Activate */}
+                  {role !== 'Polygrapher' && <DischargeHistoryPanel
+                    key={`discharges-${selectedClientDetail.clientid}-${accountTabsVersion}`}
+                    clientId={selectedClientDetail.clientid}
+                  />}
 
                   {/* Section 4 – Temporary Fee Override */}
                   {role !== 'Polygrapher' && <TempFeeOverridePanel

@@ -5,7 +5,7 @@ const { isCounselorAllowed } = require('../lib/counselorAccess');
 test('a Counselor can check in, take payments, and see every client', () => {
     for (const [m, p] of [['GET', '/api/clients'], ['GET', '/api/clients/12'], ['PATCH', '/api/clients/12'],
         ['GET', '/api/clients/12/financials'], ['GET', '/api/clients/12/notes'], ['GET', '/api/clients/12/attendance'],
-        ['POST', '/api/attendance/batch'],['POST', '/api/financials/payment'],
+        ['GET', '/api/clients/12/discharges'], ['POST', '/api/attendance/batch'],['POST', '/api/financials/payment'],
         ['GET', '/api/clients/covered-by-me'], ['GET', '/api/my-sessions'], ['GET', '/api/open-groups'], ['PUT', '/api/open-groups'], ['POST', '/api/callin/client'],
         ['GET', '/api/individual-sessions/open'], ['POST', '/api/individual-sessions/close'],
         ['GET', '/api/polygraphs/slots'], ['GET', '/api/clients/12/polygraphs'], ['GET', '/api/clients/12/attachments'],

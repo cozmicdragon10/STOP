@@ -238,3 +238,7 @@ export const clientFitsGroup = (clientProgram?: string | null, groupProgram?: st
   const groupType = (groupProgram || '').trim().toUpperCase();
   return !groupType || groupType === INDIVIDUAL_GROUP_TYPE || (GROUP_TYPES_BY_PROGRAM[clientProgram || ''] ?? []).includes(groupType);
 };
+
+// The Discharge History count: "Never discharged", "Discharged 1 time", "Discharged 3 times"
+export const dischargeCountText = (count: number) =>
+  count <= 0 ? 'Never discharged' : `Discharged ${count} ${count === 1 ? 'time' : 'times'}`;
