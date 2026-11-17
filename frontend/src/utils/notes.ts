@@ -5,7 +5,7 @@ export const parseGroupCallInNote = (text: string) => {
 };
 
 // Label shown above a case note. Group call-ins read "<date> · Group Call-In"; everything else keeps its category.
-export const caseNoteLabel = (note: any) => {
+export const caseNoteLabel = (note: { category: string; comments: string }) => {
   const groupCallIn = note.category === 'Call-In' ? parseGroupCallInNote(note.comments) : null;
   if (!groupCallIn) return note.category;
   const dateLabel = groupCallIn.forDate ? new Date(`${groupCallIn.forDate}T00:00:00`).toLocaleDateString() : 'Day Of';

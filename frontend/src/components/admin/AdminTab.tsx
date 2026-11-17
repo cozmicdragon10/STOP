@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Activity, PlusCircle } from 'lucide-react';
 import { EditConflictError, addEmployee, getEmployees, getSystemLogs, updateEmployee } from '../../api';
-import type { SystemLog } from '../../api';
+import type { Employee as Account, SystemLog } from '../../api';
 import SessionPriceList from '../sessions/SessionPriceList';
 import ProgramFeeList from './ProgramFeeList';
 import FederalUnitList from './FederalUnitList';
@@ -22,7 +22,7 @@ interface Props {
   onOpenTransaction: (clientId: number, transactionId: number) => void;
   // Shared with the rest of the app (examiner names, counselor pickers), so App keeps the list
   employees: Employee[];
-  onEmployeesChanged: (employees: Employee[]) => void;
+  onEmployeesChanged: (employees: Account[]) => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
 }

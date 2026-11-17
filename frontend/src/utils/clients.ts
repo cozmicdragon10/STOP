@@ -134,11 +134,13 @@ export const SO_ATTENDANCE_LIMIT_MONTHS: Record<string, number> = {
   'Phase 4 - Semi Anual': 7,
 };
 // True when an SO client's last attendance is more than their phase allows. Clients who never attended, or without an SO phase, aren't flagged.
-export const isAttendanceOverdue = (client: any, today = new Date()) => {
-  const limit = SO_ATTENDANCE_LIMIT_MONTHS[client.phase];
+export const isAttendanceOverdue = (
+  client: { phase?: string | null; programtype?: string | null; lastattended?: string | null; lastdateattended?: string | null },
+  today = new Date()) => {
+  const limit = SO_ATTENDANCE_LIMIT_MONTHS[client.phase ?? ''];
   // The latest attendance row's date, or the stored last date attended when that isn't loaded
   const lastValue = client.lastattended ?? client.lastdateattended;
-  if (!SO_PROGRAM_TYPES.includes(client.programtype) || !limit || !lastValue) return false;
+  if (!SO_PROGRAM_TYPES.includes(client.programtype ?? '') || !limit || !lastValue) return false;
   const last = new Date(lastValue);
   if (isNaN(last.getTime())) return false;
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());

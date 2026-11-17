@@ -13,7 +13,8 @@ interface GroupRow {
   counselor?: string | null;
   schedule?: string | null;
   active?: boolean | null;
-  clientcount?: number | null;
+  // The server sends the count as text
+  clientcount?: number | string | null;
 }
 
 interface Props {
@@ -131,7 +132,7 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
   const groupById = new Map(groups.map(g => [String(g.groupid), g]));
   const meetingOf = (groupid: number | string, groupname: string, date: string, change?: GroupScheduleChange): Meeting => {
     const g = groupById.get(String(groupid));
-    return { groupid, groupname, date, time: parseSchedule(g?.schedule || '').time, clients: g?.clientcount ?? null, change };
+    return { groupid, groupname, date, time: parseSchedule(g?.schedule || '').time, clients: g?.clientcount == null ? null : Number(g.clientcount), change };
   };
 
   // Calendar entries by day: sessions from the server, then the upcoming scheduled groups that haven't happened yet

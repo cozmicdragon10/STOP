@@ -2,11 +2,12 @@ import { useState } from 'react';
 import BipAssessmentPicker from './BipAssessmentPicker';
 import { bipChoiceProblem, counselorChoices, openBipAssessment } from './bipAssessment';
 import type { BipAssessmentChoice } from './bipAssessment';
+import { errorMessage } from '../../utils/errors';
 
 interface Employee {
   displayname: string;
   role: string;
-  active?: boolean;
+  active?: boolean | null;
 }
 
 interface Props {
@@ -33,8 +34,8 @@ export default function BipIntakePrompt({ client, employees, user, onDone }: Pro
     try {
       const name = await openBipAssessment(client.clientid, value, user.employeeemail);
       onDone(name ? `${name} for ${client.name} opened. Complete it on the Assessments tab.` : null);
-    } catch (err: any) {
-      setError(err.message || 'Failed to open the assessment.');
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to open the assessment.'));
       setSaving(false);
     }
   };

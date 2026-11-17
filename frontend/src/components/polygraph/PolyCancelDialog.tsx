@@ -4,7 +4,7 @@ import { POLY_CANCEL_NOTICE_HOURS, POLY_CANCEL_REASONS, polyVoucherReturnRule, s
 
 interface Props {
   // The assigned slot being cancelled (as listed on the schedule)
-  slot: { slotid: number; assignedClientName?: string | null; [key: string]: unknown };
+  slot: { slotid: number; assignedClientName?: string | null; date?: string | null; time?: string | null };
   role: string;
   userEmail: string;
   onClose: () => void;

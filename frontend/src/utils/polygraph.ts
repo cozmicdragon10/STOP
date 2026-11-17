@@ -3,13 +3,17 @@ import { POLY_VOUCHER_MAX_BY_PHASE } from './soPhases';
 
 export const POLY_OVERDUE_MONTHS = 6;
 
+// The fields of a polygraph result and of a slot these helpers read
+type PolygraphTaken = { polygraphdatetime?: string | null; date?: string | null };
+type SlotTime = { date?: string | null; time?: string | null } | null | undefined;
+
 // BIP, Fed Drug Test and Chaperon clients don't take polygraphs, so they have no polygraph notices, poly fee or bookings.
 // Mirrors NO_POLY_PROGRAM_TYPES in backend/routes/polygraphs.js.
 export const NO_POLY_PROGRAM_TYPES = ['BIP', 'Fed Drug Test', 'Chaperon'];
 export const takesPolygraphs = (programtype?: string | null) => !NO_POLY_PROGRAM_TYPES.includes(programtype ?? '');
 
 // When the client's most recent polygraph was taken: the actual polygraph date, falling back to the recorded date for older results without one
-export const lastPolygraphTaken = (polygraphs: any[]): Date | null => {
+export const lastPolygraphTaken = (polygraphs: PolygraphTaken[]): Date | null => {
   const taken = polygraphs
     .map(p => p.polygraphdatetime ? new Date(p.polygraphdatetime) : p.date ? toLocalDay(p.date) : null)
     .filter((d): d is Date => !!d && !isNaN(d.getTime()));
@@ -18,14 +22,17 @@ export const lastPolygraphTaken = (polygraphs: any[]): Date | null => {
 export const isPolygraphOverdue = (last: Date, today = new Date()) =>
   new Date(today.getFullYear(), today.getMonth(), today.getDate()) >= new Date(last.getFullYear(), last.getMonth() + POLY_OVERDUE_MONTHS, last.getDate());
 // For a client booked into a polygraph: how long since their last one, or that they haven't taken one yet
-export const polygraphHistoryText = (polygraphs: any[], today = new Date()) => {
+export const polygraphHistoryText = (polygraphs: PolygraphTaken[], today = new Date()) => {
   const last = lastPolygraphTaken(polygraphs);
   if (!last) return 'No polygraph taken yet.';
   const since = timeBetween(localYmd(last), localYmd(today));
   return `${since === 'Same day' ? 'Last polygraph was today' : `${since} since last polygraph`} (${last.toLocaleDateString()})${isPolygraphOverdue(last, today) ? ', overdue' : ''}.`;
 };
 // Red polygraph notice for a client's account, or null when none applies (none for programs that don't take polygraphs)
-export const polygraphNotice = (client: any, polygraphs: any[], today = new Date()) => {
+export const polygraphNotice = (
+  client: { programtype?: string | null; nopolyrequired?: boolean | null; lastdateattended?: string | null },
+  polygraphs: PolygraphTaken[],
+  today = new Date()) => {
   if (!takesPolygraphs(client.programtype) || client.nopolyrequired) return null;
   const last = lastPolygraphTaken(polygraphs);
   if (last) {
@@ -70,7 +77,7 @@ export const POLY_INCENTIVE_OVERRIDE_RESULTS = ['Inconclusive', 'No Opinion'];
 export const POLY_CANCEL_NOTICE_HOURS = 48;
 
 // When a slot starts, in local time. Times may be stored as "14:30:00" or "2:30 PM".
-export const slotStart = (slot: any): Date | null => {
+export const slotStart = (slot: SlotTime): Date | null => {
   const [year, month, day] = String(slot?.date || '').split('T')[0].split('-').map(Number);
   const match = /^\s*(\d{1,2}):(\d{2})(?::\d{2})?\s*(am|pm)?\s*$/i.exec(String(slot?.time || ''));
   if (!year || !month || !day || !match) return null;
@@ -81,13 +88,13 @@ export const slotStart = (slot: any): Date | null => {
 
 // Cancelling a reservation reopens the slot, unless the appointment time has passed: then the slot closes (the server
 // decides; PolyCancelDialog says so too). The cancel button's label and hover text say which.
-export const slotHasPassed = (slot: any, now = new Date()) => {
+export const slotHasPassed = (slot: SlotTime, now = new Date()) => {
   const start = slotStart(slot);
   return start !== null && start.getTime() <= now.getTime();
 };
-export const cancelReservationLabel = (slot: any, now = new Date()) =>
+export const cancelReservationLabel = (slot: SlotTime, now = new Date()) =>
   (slotHasPassed(slot, now) ? 'Cancel Reservation' : 'Cancel Reservation & Reopen');
-export const cancelReservationHint = (slot: any, now = new Date()) =>
+export const cancelReservationHint = (slot: SlotTime, now = new Date()) =>
   (slotHasPassed(slot, now) ? 'The appointment time has passed, so cancelling closes the slot instead of reopening it.' : undefined);
 
 // One-line description of a slot: date @ time · location
@@ -95,7 +102,7 @@ export const slotSummary = (slot: { date: string; time?: string; location?: stri
   `${new Date(slot.date).toLocaleDateString()} @ ${formatDisplayTime(slot.time)}${slot.location ? ` · ${slot.location}` : ''}`;
 
 // Whether a cancellation returns the booking's poly fee vouchers: true/false is fixed by the reason, null leaves it to staff
-export const polyVoucherReturnRule = (reason: string, slot: any): boolean | null => {
+export const polyVoucherReturnRule = (reason: string, slot: SlotTime): boolean | null => {
   switch (reason) {
     case 'Weather':
     case 'Examiner rescheduled':

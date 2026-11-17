@@ -37,7 +37,8 @@ interface Props {
   clients: ReportClient[];
   groups: ReportGroup[];
   statuses: string[];
-  onOpenClient: (client: any) => void;
+  // Opens the client's account by id
+  onOpenClient: (clientId: number) => void;
 }
 
 const NO_COUNSELOR = 'No counselor';
@@ -377,7 +378,7 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
                               </thead>
                               <tbody className="divide-y divide-slate-800/60">
                                 {members.map(m => (
-                                  <tr key={m.clientid} onClick={() => onOpenClient(m)} className="cursor-pointer hover:bg-slate-800/50" title="Open client account">
+                                  <tr key={m.clientid} onClick={() => onOpenClient(m.clientid)} className="cursor-pointer hover:bg-slate-800/50" title="Open client account">
                                     <td className="py-1.5 pr-3 text-white font-medium">{m.lastname}, {m.firstname}</td>
                                     <td className="py-1.5 pr-3 text-slate-400 font-mono">{idText(m) || '—'}</td>
                                     <td className="py-1.5 pr-3 text-slate-300">{m.programtype || '—'}</td>

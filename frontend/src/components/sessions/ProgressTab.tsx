@@ -4,6 +4,7 @@ import { PlusCircle, Trash2 } from 'lucide-react';
 import { deleteOutsideBipAssessment, getClientProgress, recordOutsideBipAssessment } from '../../api';
 import type { ClientProgress, CompletedAssessment } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
+import { errorMessage } from '../../utils/errors';
 
 interface Props {
   clientId: number;
@@ -35,7 +36,7 @@ export default function ProgressTab({ clientId, role, userEmail, onChanged, onSu
   const canRecord = ADMIN_ROLES.includes(role || '');
 
   const load = useCallback(() => {
-    getClientProgress(clientId).then(setProgress).catch(err => setError(err.message || 'Failed to load the client\'s progress.'));
+    getClientProgress(clientId).then(setProgress).catch(err => setError(errorMessage(err, 'Failed to load the client\'s progress.')));
   }, [clientId]);
   useEffect(load, [load]);
 
@@ -51,8 +52,8 @@ export default function ProgressTab({ clientId, role, userEmail, onChanged, onSu
       setForm(null);
       load();
       onChanged();
-    } catch (err: any) {
-      setError(err.message || 'Failed to record the outside assessment.');
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to record the outside assessment.'));
     } finally {
       setSaving(false);
     }
@@ -65,8 +66,8 @@ export default function ProgressTab({ clientId, role, userEmail, onChanged, onSu
       onSuccess(`Outside ${what} removed.`);
       load();
       onChanged();
-    } catch (err: any) {
-      setError(err.message || 'Failed to remove the outside assessment.');
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to remove the outside assessment.'));
     }
   };
 

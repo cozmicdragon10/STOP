@@ -4,7 +4,7 @@ import { todayLocal } from '../../hooks/useGroupCheckIn';
 export interface Employee {
   displayname: string;
   role: string;
-  active?: boolean;
+  active?: boolean | null;
 }
 
 // What was picked in BipAssessmentPicker: choice is a price list entry id, 'none', or '' (nothing yet). fee and name come with an entry.

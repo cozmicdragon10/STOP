@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import type { ComponentProps } from 'react';
 import { getAgentReport, getDepositReport } from '../../api';
 import { reportTabsFor, currentReportFor } from '../../utils/reports';
 import { PROGRAM_STATUSES } from '../../utils/clients';
@@ -13,14 +12,13 @@ import MonthlyPoReports from './MonthlyPoReports';
 import FederalSoGroupReport from './FederalSoGroupReport';
 import type { Client, Group } from '../../api';
 
-type CounselorReportProps = ComponentProps<typeof CounselorClientReport>;
 
 interface Props {
   user: { employeeemail: string; role: string };
   // Current clients (not discharged)
   clients: Client[];
   groups: Group[];
-  onOpenClient: CounselorReportProps['onOpenClient'];
+  onOpenClient: (client: Client) => void;
   // Opens an account by id, loading the client if it isn't in the current list (e.g. discharged)
   onOpenClientId: (clientId: number) => void;
 }
@@ -126,7 +124,7 @@ export default function ReportsTab({ user, clients, groups, onOpenClient, onOpen
         </div>
       )}
 
-      {currentReport === 'counselorClients' && <CounselorClientReport clients={clients} groups={groups} statuses={PROGRAM_STATUSES} onOpenClient={onOpenClient} />}
+      {currentReport === 'counselorClients' && <CounselorClientReport clients={clients} groups={groups} statuses={PROGRAM_STATUSES} onOpenClient={onOpenClientId} />}
 
       {currentReport === 'federalSo' && <FederalSoGroupReport clients={clients} groups={groups} onOpenClient={onOpenClient} />}
 

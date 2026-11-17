@@ -6,6 +6,7 @@ import type { GroupDeposit, GroupReportRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { escapeHtml } from '../../utils/receipt';
 import { idText } from '../../utils/clients';
+import { errorMessage } from '../../utils/errors';
 
 interface GroupTotals {
   key: string;
@@ -103,7 +104,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
     let cancelled = false;
     getGroupReport(from, to)
       .then(data => { if (!cancelled) { setRows(data); setLoaded({ key: rangeKey, error: '' }); } })
-      .catch(err => { if (!cancelled) setLoaded({ key: rangeKey, error: err.message || 'Failed to load the group report.' }); });
+      .catch(err => { if (!cancelled) setLoaded({ key: rangeKey, error: errorMessage(err, 'Failed to load the group report.') }); });
     // Loaded on their own so the report still shows if deposits can't be read
     getGroupDeposits(from, to)
       .then(list => {
@@ -111,7 +112,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
         setDeposits(new Map(list.map(d => [depositKey(d.groupid, d.sessiondate, d.sessionnumber), d])));
         setDepositsLoaded({ key: rangeKey, error: '' });
       })
-      .catch(err => { if (!cancelled) { setDeposits(new Map()); setDepositsLoaded({ key: rangeKey, error: err.message || 'Failed to load group deposits.' }); } });
+      .catch(err => { if (!cancelled) { setDeposits(new Map()); setDepositsLoaded({ key: rangeKey, error: errorMessage(err, 'Failed to load group deposits.') }); } });
     return () => { cancelled = true; };
   }, [rangeKey, from, to]);
   const status = !loaded || (rangeKey && loaded.key !== rangeKey) ? 'loading' : loaded.error ? 'error' : 'ready';
@@ -242,8 +243,8 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
       const saved = await saveGroupDeposit({ ...sessionRef(g, attendees), amountDeposited: cents(amount), depositDate: form.date, notes: form.notes, user: userEmail });
       setDeposits(prev => new Map(prev).set(key, saved));
       setEditing(null);
-    } catch (err: any) {
-      setFormError({ key, message: err.message || 'Failed to save the deposit.' });
+    } catch (err) {
+      setFormError({ key, message: errorMessage(err, 'Failed to save the deposit.') });
     } finally {
       setSaving(false);
     }
@@ -260,8 +261,8 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
         next.delete(key);
         return next;
       });
-    } catch (err: any) {
-      setFormError({ key, message: err.message || 'Failed to remove the deposit.' });
+    } catch (err) {
+      setFormError({ key, message: errorMessage(err, 'Failed to remove the deposit.') });
     }
   };
 

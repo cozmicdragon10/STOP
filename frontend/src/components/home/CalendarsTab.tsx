@@ -9,7 +9,8 @@ interface GroupRow {
   counselor?: string | null;
   schedule?: string | null;
   active?: boolean | null;
-  clientcount?: number | null;
+  // The server sends the count as text
+  clientcount?: number | string | null;
 }
 
 interface Props {

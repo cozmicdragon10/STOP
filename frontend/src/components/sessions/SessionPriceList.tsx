@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { PlusCircle } from 'lucide-react';
 import { EditConflictError, getSessionTypes, saveSessionType } from '../../api';
 import type { IndividualCategory, SessionType, SessionTypeKind } from '../../api';
+import { errorMessage } from '../../utils/errors';
 
 interface Props {
   userEmail: string;
@@ -50,7 +51,7 @@ export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Prop
   const [showInactive, setShowInactive] = useState(false);
 
   useEffect(() => {
-    getSessionTypes().then(setTypes).catch(err => setError(err.message || 'Failed to load the price list.'));
+    getSessionTypes().then(setTypes).catch(err => setError(errorMessage(err, 'Failed to load the price list.')));
   }, []);
 
   const save = async () => {
@@ -71,7 +72,7 @@ export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Prop
       setTypes(prev => (editing.id ? prev.map(t => (t.sessiontypeid === saved.sessiontypeid ? saved : t)) : [...prev, saved]));
       onSuccess(`${saved.category} "${saved.name}" saved.`);
       setEditing(null);
-    } catch (err: any) {
+    } catch (err) {
       // Changed on another screen since the form opened: reload the list and the form with the entry as it is now
       if (err instanceof EditConflictError && editing.id) {
         const fresh = await getSessionTypes().catch(() => null);
@@ -81,7 +82,7 @@ export default function SessionPriceList({ userEmail, canEdit, onSuccess }: Prop
           if (current) editEntry(current);
         }
       }
-      setError(err.message || 'Failed to save the price list entry.');
+      setError(errorMessage(err, 'Failed to save the price list entry.'));
     } finally {
       setSaving(false);
     }

@@ -1,4 +1,5 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
+import type { ComponentProps } from 'react';
 import { 
   Users, ClipboardCheck, ShieldCheck, Shield, LogOut, AlertCircle, X, FileText,
   DollarSign, Calendar, Activity, PhoneCall, ShieldAlert, 
@@ -18,7 +19,10 @@ import {
   getEmployees, fetchClientFeeOverride, fetchPolyFeeOverride,
   getOpenGroups, deleteOpenGroup, getClosedGroups, getSupervisingAgents, getCoveredByMe
 } from './api';
-import type { CardBlock, CoveredClient, ClientNote, ClosedGroupSession, DeviceState, OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, SupervisingAgent } from './api';
+import type {
+  CardBlock, Client, ClientAttendance, CoveredClient, ClientNote, ClosedGroupSession, DeviceState, Employee, FinancialTransaction, Group,
+  OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, PolygraphResult, PolygraphSlot, SupervisingAgent, TempFeeOverride,
+} from './api';
 import DeviceAccess from './components/device/DeviceAccess';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
@@ -71,9 +75,10 @@ import { UnsavedFormsContext } from './hooks/useUnsavedForm';
 import { DISCHARGE_STATUSES, GROUP_TYPES_BY_PROGRAM, idText, isPolyGroup } from './utils/clients';
 import { scrollToStackedPanel } from './utils/layout';
 import { polygraphHistoryText, polygraphNotice, slotStart, slotSummary, takesPolygraphs } from './utils/polygraph';
+import { errorMessage } from './utils/errors';
 
 export default function App() {
-  const [user, setUser] = useState<any>(null);
+  const [user, setUser] = useState<Employee | null>(null);
   // "Remember me" keeps only the email, in this browser on this PC. Passwords are never stored.
   const REMEMBERED_EMAIL_KEY = 'stop.rememberedEmail';
   const [rememberedEmail] = useState<string | null>(() => {
@@ -120,8 +125,8 @@ export default function App() {
       .catch(() => { if (!cancelled) setCoveredByMe([]); });
     return () => { cancelled = true; };
   }, [user?.role, user?.employeeemail, activeTab]);
-  const [clients, setClients] = useState<any[]>([]);
-  const [groups, setGroups] = useState<any[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -135,7 +140,7 @@ export default function App() {
   }, [successMsg]);
 
   // Selected Client Details Drawer State
-  const [selectedClientDetail, setSelectedClientDetail] = useState<any>(null);
+  const [selectedClientDetail, setSelectedClientDetail] = useState<Client | null>(null);
   const [showClientPayment, setShowClientPayment] = useState(false);
   const [clientTab, setClientTab] = useState<'information' | 'progress' | 'attendance' | 'financials' | 'notes' | 'polygraphs' | 'attachments' | 'changelog'>('information');
   // The account page's scrolling area; switching tabs starts the new tab at the top
@@ -175,19 +180,19 @@ export default function App() {
     if (leave) leavePrompt?.leave();
     setLeavePrompt(null);
   };
-  const [clientAttendance, setClientAttendance] = useState<any[]>([]);
-  const [clientFinancials, setClientFinancials] = useState<any[]>([]);
-  const [clientNotes, setClientNotes] = useState<any[]>([]);
+  const [clientAttendance, setClientAttendance] = useState<ClientAttendance[]>([]);
+  const [clientFinancials, setClientFinancials] = useState<FinancialTransaction[]>([]);
+  const [clientNotes, setClientNotes] = useState<ClientNote[]>([]);
   // The Call-In dialog over the open account
   const [showCallIn, setShowCallIn] = useState(false);
-  const [clientPolygraphs, setClientPolygraphs] = useState<any[]>([]);
+  const [clientPolygraphs, setClientPolygraphs] = useState<PolygraphResult[]>([]);
   // Client whose polygraphs are loaded, so the notice never uses the previous client's results
   const [clientPolygraphsFor, setClientPolygraphsFor] = useState<number | null>(null);
   // When the open account's polygraphs were loaded; tells a booked slot that is still upcoming from one awaiting results
   const [clientPolygraphsAt, setClientPolygraphsAt] = useState(() => Date.now());
   // Shown at the top of the Information tab when part of the account could not be loaded
   const [accountLoadError, setAccountLoadError] = useState('');
-  const [clientFeeOverride, setClientFeeOverride] = useState<any>(null);
+  const [clientFeeOverride, setClientFeeOverride] = useState<TempFeeOverride | null>(null);
   // Temporary poly fee override: a reduced poly fee for a number of fills
   const [clientPolyOverride, setClientPolyOverride] = useState<PolyFeeOverride | null>(null);
   // Shown on the poly fee override panel when the override could not be loaded
@@ -236,14 +241,14 @@ export default function App() {
   // Poly Schedule only: '', 'Open', 'Assigned', or 'Closed'
   const [polyStatusFilter, setPolyStatusFilter] = useState('');
   const [polyDateSort, setPolyDateSort] = useState<'asc' | 'desc'>('asc');
-  const [polySlots, setPolySlots] = useState<any[]>([]);
+  const [polySlots, setPolySlots] = useState<PolygraphSlot[]>([]);
   // Slot opened from a client's account; outlined on the Poly Schedule for a few seconds
   const [highlightedSlotId, setHighlightedSlotId] = useState<number | null>(null);
   
   // Assigned slot whose reservation is being cancelled (PolyCancelDialog)
-  const [reopenTarget, setReopenTarget] = useState<any>(null);
+  const [reopenTarget, setReopenTarget] = useState<ComponentProps<typeof PolyCancelDialog>['slot'] | null>(null);
   // Open or assigned slot being moved (PolyRescheduleDialog)
-  const [rescheduleTarget, setRescheduleTarget] = useState<any>(null);
+  const [rescheduleTarget, setRescheduleTarget] = useState<PolygraphSlot | null>(null);
 
   // Inactive groups stay in the directory but are hidden from every picker for new assignments and sessions
   const activeGroups = groups.filter(g => g.active !== false);
@@ -261,7 +266,7 @@ export default function App() {
   })();
 
   // Employee accounts: managed on the Admin tab, also used for examiner names and counselor pickers
-  const [employees, setEmployees] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   // Active counselors, for a client's Assessor
   const counselorNames: string[] = employees.filter(e => e.role === 'Counselor' && e.active !== false && e.displayname)
     .map(e => e.displayname).sort((a, b) => a.localeCompare(b));
@@ -400,18 +405,19 @@ export default function App() {
   }, [activeTab]);
 
   const loadOpenGroups = async () => {
+    if (!user) return;
     try {
       setOpenGroups(await getOpenGroups(user.employeeemail));
       setOpenGroupsError('');
-    } catch (err: any) {
-      setOpenGroupsError(err.message || 'Failed to load open groups.');
+    } catch (err) {
+      setOpenGroupsError(errorMessage(err, 'Failed to load open groups.'));
     }
     // Closing an open group moves it to the Closed tab, so both lists refresh together
     try {
       setClosedGroups(await getClosedGroups(user.employeeemail));
       setClosedGroupsError('');
-    } catch (err: any) {
-      setClosedGroupsError(err.message || 'Failed to load closed groups.');
+    } catch (err) {
+      setClosedGroupsError(errorMessage(err, 'Failed to load closed groups.'));
     }
   };
 
@@ -431,7 +437,7 @@ export default function App() {
     setPolySlots,
     onAssigned: (freshClients) => {
       // Scheduled from the client's account: show the booking and the spent vouchers there too
-      setSelectedClientDetail((c: any) => (c ? { ...c, ...(freshClients.find((fc: any) => fc.clientid === c.clientid) ?? {}) } : c));
+      setSelectedClientDetail(c => (c ? { ...c, ...(freshClients.find(fc => fc.clientid === c.clientid) ?? {}) } : c));
     },
     onSuccess: setSuccessMsg,
     onError: setError,
@@ -462,8 +468,8 @@ export default function App() {
       await deletePolygraphSlot(slotId);
       setSuccessMsg('Open polygraph slot deleted successfully!');
       setPolySlots(await getPolygraphSlots());
-    } catch (err: any) {
-      setError(err.message || 'Failed to delete slot.');
+    } catch (err) {
+      setError(errorMessage(err, 'Failed to delete slot.'));
     } finally {
       setLoading(false);
     }
@@ -485,7 +491,7 @@ export default function App() {
   const handleNoPolyRequiredSaved = async (saved: boolean) => {
     if (!selectedClientDetail) return;
     const clientid = selectedClientDetail.clientid;
-    setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, nopolyrequired: saved } : c));
+    setSelectedClientDetail(c => (c && c.clientid === clientid ? { ...c, nopolyrequired: saved } : c));
     setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, nopolyrequired: saved } : c));
     setSuccessMsg(`No Poly Required ${saved ? 'checked' : 'unchecked'} for ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}.`);
     setClientNotes(await getClientNotes(clientid));
@@ -494,7 +500,7 @@ export default function App() {
   // Card payments were blocked or allowed on the Ledger tab: the account and roster take the new fields (so every payment
   // screen sees them), and Case Notes reloads for the note the server added
   const handleCardBlockChanged = async (clientid: number, changes: CardBlock) => {
-    setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, ...changes } : c));
+    setSelectedClientDetail(c => (c && c.clientid === clientid ? { ...c, ...changes } : c));
     setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, ...changes } : c));
     setClientNotes(await getClientNotes(clientid));
   };
@@ -503,7 +509,7 @@ export default function App() {
   const handleBusPassGranted = (busPasses: number, note: ClientNote) => {
     if (!selectedClientDetail) return;
     const clientid = selectedClientDetail.clientid;
-    setSelectedClientDetail((c: typeof selectedClientDetail) => (c && c.clientid === clientid ? { ...c, buspasses: busPasses } : c));
+    setSelectedClientDetail(c => (c && c.clientid === clientid ? { ...c, buspasses: busPasses } : c));
     setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, buspasses: busPasses } : c));
     setClientNotes(prev => [note, ...prev]);
     setSuccessMsg(`Bus pass granted to ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}. ${busPasses} left.`);
@@ -524,14 +530,15 @@ export default function App() {
   }, [openClientId, isBusinessAdmin, clientNotes.length]);
 
   // A discharged client's program status is locked; only the Activate button changes it
-  const clientIsDischarged = DISCHARGE_STATUSES.includes(selectedClientDetail?.programstatus);
+  const clientIsDischarged = DISCHARGE_STATUSES.includes(selectedClientDetail?.programstatus ?? '');
 
   // Program status dialog: Discharge (Business Administrators only) or Activate (any account type, discharged clients only)
   const [statusDialog, setStatusDialog] = useState<'discharge' | 'activate' | null>(null);
   // The dialog saved a new program status: update the client everywhere and reload what the change wrote
   const handleProgramStatusChanged = async (programstatus: string) => {
+    if (!selectedClientDetail) return;
     const clientid = selectedClientDetail.clientid;
-    setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, programstatus } : c));
+    setSelectedClientDetail(c => (c && c.clientid === clientid ? { ...c, programstatus } : c));
     setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, programstatus } : c));
     // The list holds current clients only: a reactivated client joins it and a discharged one leaves it
     getClients().then(setClients).catch(err => console.error('Failed to refresh clients', err));
@@ -544,8 +551,8 @@ export default function App() {
   };
 
   // Edit Info saved: update the client everywhere; a client just moved to BIP is asked about a BIP Intake or DV Assessment
-  const handleClientInfoSaved = (saved: any, previousProgramType: string | null) => {
-    setSelectedClientDetail((c: any) => (c && c.clientid === saved.clientid ? saved : c));
+  const handleClientInfoSaved = (saved: Client, previousProgramType: string | null) => {
+    setSelectedClientDetail(c => (c && c.clientid === saved.clientid ? saved : c));
     setClients(prev => prev.map(c => c.clientid === saved.clientid ? { ...c, ...saved } : c));
     if (saved.programtype === 'BIP' && previousProgramType !== 'BIP') {
       setBipIntakePrompt({ clientid: saved.clientid, name: `${saved.lastname}, ${saved.firstname}`, groupCounselor: counselorOfGroup(saved.groupid) });
@@ -556,7 +563,7 @@ export default function App() {
   const [highlightTransactionId, setHighlightTransactionId] = useState<number | null>(null);
 
   // Drawer Log Loading
-  const openClientLogs = async (client: any) => {
+  const openClientLogs = async (client: Client) => {
     setStatusDialog(null);
     setHighlightTransactionId(null);
     setSelectedClientDetail(client);
@@ -591,14 +598,14 @@ export default function App() {
     try {
       const { override } = await fetchClientFeeOverride(client.clientid);
       setClientFeeOverride(override);
-    } catch (err: any) {
-      setAccountLoadError(err.message || 'Could not load the temporary fee override.');
+    } catch (err) {
+      setAccountLoadError(errorMessage(err, 'Could not load the temporary fee override.'));
     }
     try {
       const { override } = await fetchPolyFeeOverride(client.clientid);
       setClientPolyOverride(override);
-    } catch (err: any) {
-      setPolyOverrideLoadError(err.message || 'Could not load the poly fee override.');
+    } catch (err) {
+      setPolyOverrideLoadError(errorMessage(err, 'Could not load the poly fee override.'));
     }
   };
 
@@ -607,7 +614,7 @@ export default function App() {
     try {
       openClientLogs(clients.find(c => c.clientid === clientId) ?? await getClient(clientId));
     } catch (err) {
-      setError(err instanceof Error && err.message ? err.message : 'Failed to load the client.');
+      setError(errorMessage(err, 'Failed to load the client.'));
     }
   };
 
@@ -621,7 +628,7 @@ export default function App() {
   // Poly fields changed by a poly fee override; applied to the open client and the client list
   const applyPolyOverrideResult = (clientid: number, res: PolyFeeOverrideResult) => {
     const changes = { polyfeepaid: res.polyFeePaid, polyfee: res.polyFee, polyfeevoucher: res.polyFeeVoucher };
-    setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, ...changes } : c));
+    setSelectedClientDetail(c => (c && c.clientid === clientid ? { ...c, ...changes } : c));
     setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, ...changes } : c));
   };
 
@@ -630,7 +637,7 @@ export default function App() {
 
   // A payment was corrected on the ledger: update the client and reload what the change moved
   const handleLedgerPaymentChanged = ({ clientId, changes, attendance, financials, polyOverride }: LedgerRefresh) => {
-    setSelectedClientDetail((c: any) => (c && c.clientid === clientId ? { ...c, ...changes } : c));
+    setSelectedClientDetail(c => (c && c.clientid === clientId ? { ...c, ...changes } : c));
     setClients(prev => prev.map(c => c.clientid === clientId ? { ...c, ...changes } : c));
     // The reloaded rows belong to that client; skip them if another account was opened meanwhile
     if (openClientIdRef.current !== clientId) return;
@@ -642,7 +649,7 @@ export default function App() {
   // An attendance was deleted on the Attendance tab: update the client, reload the account's lists, and the closed
   // groups it may have been part of
   const handleAttendanceDeleted = ({ clientId, changes, attendance, financials }: AttendanceDeleted) => {
-    setSelectedClientDetail((c: { clientid: number } | null) => (c && c.clientid === clientId ? { ...c, ...changes } : c));
+    setSelectedClientDetail(c => (c && c.clientid === clientId ? { ...c, ...changes } : c));
     setClients(prev => prev.map(c => c.clientid === clientId ? { ...c, ...changes } : c));
     loadOpenGroups();
     if (openClientIdRef.current !== clientId) return;
@@ -658,16 +665,16 @@ export default function App() {
 
   // The open client as it is on the server now (a save refused because someone else changed it, or a refresh): shown in
   // the account and the client list
-  const applyFreshClient = useCallback((fresh: any) => {
-    setSelectedClientDetail((c: any) => (c && c.clientid === fresh.clientid ? { ...c, ...fresh } : c));
+  const applyFreshClient = useCallback((fresh: Client) => {
+    setSelectedClientDetail(c => (c && c.clientid === fresh.clientid ? { ...c, ...fresh } : c));
     setClients(prev => prev.map(c => c.clientid === fresh.clientid ? { ...c, ...fresh } : c));
-  }, []);
+  }, [setClients]);
 
   // Coming back to the app (another window or browser tab) reloads the open account's details, balance, ledger, and
   // attendance, so changes other people made meanwhile show. Not while a payment or discharge dialog is open, and at most
   // every 15 seconds. A reload is dropped if the account changed on this screen while it loaded, so it never replaces
   // something newer. Unsaved Edit Info changes stay: the form lays them over the reloaded client.
-  const accountRefresh = useRef({ client: null as any, financials: [] as any[], attendance: [] as any[], at: 0 });
+  const accountRefresh = useRef({ client: null as Client | null, financials: [] as FinancialTransaction[], attendance: [] as ClientAttendance[], at: 0 });
   useEffect(() => {
     accountRefresh.current = { ...accountRefresh.current, client: selectedClientDetail, financials: clientFinancials, attendance: clientAttendance };
   }, [selectedClientDetail, clientFinancials, clientAttendance]);
@@ -1115,7 +1122,7 @@ export default function App() {
             onProcessed={async (newBalance, polyFeePaid, polyFeeVoucher) => {
               const clientid = selectedClientDetail.clientid;
               const changes = { accountbalance: newBalance, polyfeepaid: polyFeePaid, polyfeevoucher: polyFeeVoucher };
-              setSelectedClientDetail((c: any) => (c && c.clientid === clientid ? { ...c, ...changes } : c));
+              setSelectedClientDetail(c => (c && c.clientid === clientid ? { ...c, ...changes } : c));
               setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, ...changes } : c));
               try {
                 setClientFinancials(await getClientFinancials(clientid));
@@ -1228,8 +1235,8 @@ export default function App() {
                           setSuccessMsg('Client deleted successfully!');
                           setSelectedClientDetail(null);
                           loadDashboardData();
-                        } catch (err: any) {
-                          setError(err.message || 'Error deleting client.');
+                        } catch (err) {
+                          setError(errorMessage(err, 'Error deleting client.'));
                         } finally {
                           setLoading(false);
                         }
@@ -1650,8 +1657,8 @@ export default function App() {
                                 await deleteOpenGroup(o.opensessionid, user.employeeemail);
                                 setSuccessMsg(`Open check-in for ${o.groupname} discarded.`);
                                 loadOpenGroups();
-                              } catch (err: any) {
-                                setError(err.message || 'Failed to discard the open group.');
+                              } catch (err) {
+                                setError(errorMessage(err, 'Failed to discard the open group.'));
                               }
                             }}
                             className="text-slate-500 hover:text-red-400 p-1 rounded shrink-0"
@@ -1706,7 +1713,8 @@ export default function App() {
             onSuccess={setSuccessMsg}
             onError={setError}
             onGroupsChanged={loadDashboardData}
-            onOpenClient={openClientLogs}
+            // A roster row has only a few fields; this opens the full client (loading it when not in the list)
+            onOpenClient={c => openClientById(c.clientid)}
           />
         )}
 
@@ -1729,7 +1737,7 @@ export default function App() {
           onClientUpdated={(updated) => {
             setClients(prev => prev.map(c => c.clientid === updated.clientid ? { ...c, ...updated } : c));
             // The same client may be open in the account drawer
-            setSelectedClientDetail((c: any) => (c && c.clientid === updated.clientid ? { ...c, ...updated } : c));
+            setSelectedClientDetail(c => (c && c.clientid === updated.clientid ? { ...c, ...updated } : c));
           }}
           onSuccess={setSuccessMsg}
           onError={setError}

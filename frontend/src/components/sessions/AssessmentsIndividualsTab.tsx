@@ -30,7 +30,7 @@ interface Employee {
   employeeemail: string;
   displayname: string;
   role: string;
-  active?: boolean;
+  active?: boolean | null;
 }
 
 interface Props {

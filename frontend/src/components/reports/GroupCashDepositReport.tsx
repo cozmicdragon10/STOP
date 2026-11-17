@@ -3,6 +3,7 @@ import { getGroupCashDeposits, setGroupCashDroppedOff } from '../../api';
 import type { GroupCashDepositRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
+import { errorMessage } from '../../utils/errors';
 
 interface GroupTotals {
   key: string;
@@ -56,7 +57,7 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
     let cancelled = false;
     getGroupCashDeposits(from, to, userEmail)
       .then(data => { if (!cancelled) { setRows(data); setLoaded({ key: rangeKey, error: '' }); } })
-      .catch(err => { if (!cancelled) setLoaded({ key: rangeKey, error: err.message || 'Failed to load group cash deposits.' }); });
+      .catch(err => { if (!cancelled) setLoaded({ key: rangeKey, error: errorMessage(err, 'Failed to load group cash deposits.') }); });
     return () => { cancelled = true; };
   }, [rangeKey, from, to, userEmail]);
   const status = !loaded || (rangeKey && loaded.key !== rangeKey) ? 'loading' : loaded.error ? 'error' : 'ready';
@@ -118,8 +119,8 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
       });
       const cleared = { amountdeposited: null, depositdate: null, notes: null, recordedby: null, recordedbyname: null, recordedon: null };
       setRows(prev => prev.map(o => rowKey(o) === key ? { ...o, ...cleared, ...(deposit || {}) } : o));
-    } catch (err: any) {
-      setRowError({ key, message: err.message || 'Failed to update the deposit.' });
+    } catch (err) {
+      setRowError({ key, message: errorMessage(err, 'Failed to update the deposit.') });
     } finally {
       setSaving(prev => {
         const next = new Set(prev);

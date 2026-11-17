@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Mail, Pencil, Phone, PlusCircle, Search, Trash2, UserCheck } from 'lucide-react';
 import { EditConflictError, deleteSupervisingAgent, getClients, getSupervisingAgents, saveSupervisingAgent } from '../../api';
-import type { SupervisingAgent } from '../../api';
+import type { Client, SupervisingAgent } from '../../api';
 import { usePagination } from '../../hooks/usePagination';
 import Pagination from '../Pagination';
 import { scrollToStackedPanel } from '../../utils/layout';
 import { idText } from '../../utils/clients';
+import { errorMessage } from '../../utils/errors';
 
 interface Props {
   // Current clients (not discharged); the selected agent's discharged clients are loaded on their own
-  clients: any[];
+  clients: Client[];
   user: { employeeemail: string; role: string };
   dischargeStatuses: string[];
-  onOpenClient: (client: any) => void;
+  onOpenClient: (client: Client) => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   // Reload the roster after a rename moves clients to the new agent name
@@ -26,7 +27,7 @@ interface AgentRow {
   key: string;
   agent: SupervisingAgent | null;
   name: string;
-  clients: any[];
+  clients: Client[];
 }
 
 // Clients link to an agent by name; case and surrounding spaces are ignored (the server matches the same way)
@@ -64,8 +65,8 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
       setAgents(loaded);
       onAgentsLoaded(loaded);
       setLoadError('');
-    } catch (err: any) {
-      setLoadError(err.message || 'Failed to load supervising agents.');
+    } catch (err) {
+      setLoadError(errorMessage(err, 'Failed to load supervising agents.'));
     }
   }, [onAgentsLoaded]);
 
@@ -75,7 +76,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
     loadAgents();
   }, [loadAgents]);
 
-  const isDischarged = (c: any) => dischargeStatuses.includes(c.programstatus);
+  const isDischarged = (c: Client) => dischargeStatuses.includes(c.programstatus);
 
   const rows = useMemo<AgentRow[]>(() => {
     const byKey = new Map<string, AgentRow>();
@@ -107,7 +108,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
     let cancelled = false;
     getClients({ status: 'discharged', agent: selectedName })
       .then(loaded => { if (!cancelled) setDischargedLoaded({ key: selectedKey, clients: loaded }); })
-      .catch(err => { if (!cancelled) onError(err.message || 'Failed to load discharged clients.'); });
+      .catch(err => { if (!cancelled) onError(errorMessage(err, 'Failed to load discharged clients.')); });
     return () => { cancelled = true; };
   }, [selectedKey, selectedName, clients, onError]);
 
@@ -154,7 +155,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
       closeForm();
       await loadAgents();
       setSelectedKey(agentKey(saved.name));
-    } catch (err: any) {
+    } catch (err) {
       // Changed on another screen since the form opened: reload the form with the agent as it is now
       if (err instanceof EditConflictError && editingId) {
         const fresh = await getSupervisingAgents().catch(() => null);
@@ -166,7 +167,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
           else closeForm();
         }
       }
-      onError(err.message || 'Failed to save the supervising agent.');
+      onError(errorMessage(err, 'Failed to save the supervising agent.'));
     } finally {
       setSaving(false);
     }
@@ -179,8 +180,8 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
       onSuccess('Agent deleted.');
       if (editingId === agent.agentid) closeForm();
       await loadAgents();
-    } catch (err: any) {
-      onError(err.message || 'Failed to delete the supervising agent.');
+    } catch (err) {
+      onError(errorMessage(err, 'Failed to delete the supervising agent.'));
     }
   };
 

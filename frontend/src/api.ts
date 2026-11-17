@@ -218,6 +218,8 @@ export interface Employee {
     active: boolean | null;
     // A counselor's license credentials, e.g. "LPC, LADC-MH" (printed after their name on receipts)
     credentials?: string | null;
+    // The signed-in user only (backend/lib/auth.js sessionUser): a DEV account, which opens the DEV menu
+    isdev?: boolean;
 }
 
 export interface PolygraphSlot {

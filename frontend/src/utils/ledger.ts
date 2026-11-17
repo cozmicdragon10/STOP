@@ -1,11 +1,15 @@
 import { toDisplayBalance } from './balance';
+import type { ClientAttendance, FinancialTransaction } from '../api';
+
+// Only the fields each helper reads, so partial rows (and tests) fit
+type LedgerFields<K extends keyof FinancialTransaction> = Partial<Pick<FinancialTransaction, K>>;
 
 // Attendance balance math uses the same display sign as the balance shown on the card.
 // Each row stores the balance after its session, so the "before" balance is rebuilt from that row alone.
 export const signedMoney = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toFixed(2)}`;
 // Same format as signedMoney, for amounts entered on forms and shown in messages
 export const formatMoney = signedMoney;
-export const attendanceBalanceChange = (att: any) => {
+export const attendanceBalanceChange = (att: Partial<Pick<ClientAttendance, 'groupfee' | 'accountpaid' | 'accounttotal'>>) => {
   const fee = Number(att.groupfee || 0);
   const paid = Number(att.accountpaid || 0);
   return {
@@ -18,7 +22,7 @@ export const attendanceBalanceChange = (att: any) => {
 
 // Refunds and disputes take money back off a credit card payment, so like a charge they add to what the client owes
 export const PAYMENT_REVERSAL_TYPES = ['Refund', 'Dispute'];
-export const addsToOwed = (fin: any) => fin.type === 'Charge' || PAYMENT_REVERSAL_TYPES.includes(fin.type);
+export const addsToOwed = (fin: LedgerFields<'type'>) => fin.type === 'Charge' || PAYMENT_REVERSAL_TYPES.includes(fin.type ?? '');
 
 // Financial Ledger row colors: fees red, refunds and disputes amber, payments green
 export const LEDGER_TONES = {
@@ -29,7 +33,10 @@ export const LEDGER_TONES = {
 
 // What's left of a credit card payment after its refunds and disputes (a won dispute puts its amount back),
 // and how much is in dispute while one is open
-export const cardPaymentStatus = (payment: any, ledger: any[]) => {
+export const cardPaymentStatus = (
+  payment: LedgerFields<'amount' | 'transactionid' | 'disputestatus'>,
+  ledger: LedgerFields<'relatedtransactionid' | 'amount' | 'type'>[],
+) => {
   let refunded = 0;
   let kept = Number(payment.amount || 0);
   let lastDispute = 0;
@@ -37,7 +44,7 @@ export const cardPaymentStatus = (payment: any, ledger: any[]) => {
     if (row.relatedtransactionid !== payment.transactionid) continue;
     const amount = Number(row.amount || 0);
     if (row.type === 'Refund') refunded += amount;
-    if (PAYMENT_REVERSAL_TYPES.includes(row.type)) kept -= amount;
+    if (PAYMENT_REVERSAL_TYPES.includes(row.type ?? '')) kept -= amount;
     else if (row.type === 'Dispute Won') kept += amount;
     if (row.type === 'Dispute') lastDispute = amount;
   }
@@ -50,12 +57,12 @@ export const cardPaymentStatus = (payment: any, ledger: any[]) => {
 
 // A check-in that took a payment has one ledger row, the payment; sessionfee is the fee charged at that check-in
 // (SESSION_FEE_SQL in backend/lib/sql.js). 0 for every other row.
-export const sessionFeeOf = (fin: any) => Number(fin.sessionfee || 0);
+export const sessionFeeOf = (fin: LedgerFields<'sessionfee'>) => Number(fin.sessionfee || 0);
 // What a month's rows charged: fee rows, plus the fees of check-ins whose row is their payment
-export const feesCharged = (rows: any[]) => rows.reduce((t, f) => t + (f.type === 'Charge' ? Number(f.amount || 0) : sessionFeeOf(f)), 0);
+export const feesCharged = (rows: LedgerFields<'type' | 'amount' | 'sessionfee'>[]) => rows.reduce((t, f) => t + (f.type === 'Charge' ? Number(f.amount || 0) : sessionFeeOf(f)), 0);
 
 // Ledger rows store the balance after each transaction. Working back from the amount gives the balance before it.
-export const ledgerBalanceChange = (fin: any) => {
+export const ledgerBalanceChange = (fin: LedgerFields<'amount' | 'feetype' | 'type' | 'sessionfee'> & { finalbalance?: FinancialTransaction['finalbalance'] | null }) => {
   if (fin.finalbalance === null || fin.finalbalance === undefined) return null;
   const amount = Number(fin.amount || 0);
   const after = Number(fin.finalbalance);
