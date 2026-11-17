@@ -1,3 +1,5 @@
 node_modules/
 login.json
 screenshots/
+# The approved test device's cookie for the DEV database (servers.js)
+.device-token

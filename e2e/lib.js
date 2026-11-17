@@ -1,10 +1,9 @@
 // Shared pieces for the end-to-end tests. Person A uses the real site in Edge (headless); person B is a second login
-// talking to the API directly, the way another workstation would.
+// talking to the API directly, the way another workstation would. Both use the test copy started by servers.js.
 const fs = require('fs');
 const path = require('path');
+const { SITE, API } = require('./servers');
 
-const SITE = process.env.STOP_E2E_SITE || 'https://localhost:5173';
-const API = process.env.STOP_E2E_API || 'https://localhost:5000/api';
 const LOGIN_FILE = process.env.STOP_E2E_LOGIN || path.join(__dirname, 'login.json');
 const SHOTS = path.join(__dirname, 'screenshots');
 
@@ -17,16 +16,24 @@ const login = () => {
     return JSON.parse(fs.readFileSync(LOGIN_FILE, 'utf8'));
 };
 
+// The approved device cookie both people send (set by run.js from servers.deviceToken)
+let device = null;
+const useDevice = (deviceToken) => { device = deviceToken; };
+const deviceCookie = () => {
+    if (!device) throw new Error('No approved test device; run.js sets one before the tests start.');
+    return `stop_device=${encodeURIComponent(device)}`;
+};
+
 // Person B
 let token = null;
 async function api(method, url, body) {
     if (!token) {
-        const r = await fetch(`${API}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(login()) });
+        const r = await fetch(`${API}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: deviceCookie() }, body: JSON.stringify(login()) });
         token = (await r.json()).token;
         if (!token) throw new Error(`Person B could not log in (HTTP ${r.status}).`);
     }
     const r = await fetch(`${API}${url}`, {
-        method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: body ? JSON.stringify(body) : undefined,
+        method, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, Cookie: deviceCookie() }, body: body ? JSON.stringify(body) : undefined,
     });
     const text = await r.text();
     let json;
@@ -39,6 +46,9 @@ async function browser() {
     const { chromium } = require('playwright-core');
     const b = await chromium.launch({ channel: 'msedge', headless: true });
     const ctx = await b.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1400, height: 1000 } });
+    // Cookies are shared across ports on one host, so this covers both the site and the API
+    deviceCookie();
+    await ctx.addCookies([{ name: 'stop_device', value: device, domain: 'localhost', path: '/', secure: true, httpOnly: true, sameSite: 'Strict' }]);
     const page = await ctx.newPage();
     page.on('dialog', d => d.accept());
     const { email, password } = login();
@@ -69,4 +79,4 @@ const shot = async (page, name) => {
     await page.screenshot({ path: path.join(SHOTS, `${name}.png`) });
 };
 
-module.exports = { api, browser, tab, openClient, fieldInput, shownMessages, shot, login, SITE, API };
+module.exports = { useDevice, api, browser, tab, openClient, fieldInput, shownMessages, shot, login, SITE, API };

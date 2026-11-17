@@ -1,7 +1,9 @@
 // Two people editing at once, end to end: person A in the real site, person B through the API.
 // Creates (or reuses) records named "Concurrency Test", takes small test payments, and edits test notes, so it must
 // only ever run against a TEST COPY of the database:  node run.js --test-database
-const { api, browser, tab, openClient, fieldInput, shownMessages, shot, login } = require('./lib');
+// It starts its own copy of STOP on the DEV database (servers.js) and stops it at the end; the live site is never used.
+const { useDevice, api, browser, tab, openClient, fieldInput, shownMessages, shot, login } = require('./lib');
+const { startServers, stopServers, deviceToken } = require('./servers');
 
 if (!process.argv.includes('--test-database')) {
     console.error('These tests create records and take payments. Run them only against a test copy of the database:\n'
@@ -234,8 +236,14 @@ const scenarios = {
     },
 };
 
+// The test copy is stopped however the run ends: finished, failed, or Ctrl+C
+process.on('exit', stopServers);
+process.on('SIGINT', () => process.exit(130));
+
 (async () => {
     const me = login().email;
+    await startServers();
+    useDevice(await deviceToken());
     const t = await setUp(me);
     const only = process.argv.slice(2).filter(a => !a.startsWith('--'));
     const { b, page } = await browser();
