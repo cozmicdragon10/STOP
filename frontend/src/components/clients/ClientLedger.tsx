@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useUnsavedForm } from '../../hooks/useUnsavedForm';
-import { AlertCircle, Ban, HandCoins, Pencil, Printer, SlidersHorizontal, X } from 'lucide-react';
+import { AlertCircle, Ban, HandCoins, Pencil, Printer, SlidersHorizontal, Undo2, X } from 'lucide-react';
 import { printReceipt } from '../../utils/receipt';
-import { adjustCashPayment, fetchPolyFeeOverride, forgiveClientDebt, getClientAttendance, getClientFinancials, recordCardPaymentAction, setClientCardPayments } from '../../api';
+import { adjustCashPayment, fetchPolyFeeOverride, forgiveClientDebt, getClientAttendance, getClientFinancials, recordCardPaymentAction, setClientCardPayments, updateForgiveness } from '../../api';
 import type { CardBlock, CardPaymentAction, PaymentChangeResult, PolyFeeOverride } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
 import MonthHeader from './MonthHeader';
@@ -47,10 +47,12 @@ interface Props {
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-type PaymentActionKind = 'adjust' | CardPaymentAction;
+// forgive-change and forgive-undo correct a debt forgiveness (a wrong amount, or the wrong client)
+type PaymentActionKind = 'adjust' | 'forgive-change' | 'forgive-undo' | CardPaymentAction;
+const isForgiveAction = (kind: PaymentActionKind) => kind === 'forgive-change' || kind === 'forgive-undo';
 
-const ACTION_TITLES: Record<PaymentActionKind, string> = { adjust: 'Adjust cash payment', refund: 'Refund', dispute: 'Dispute (owed again until won)', 'dispute-won': 'Dispute won: apply the payment again', 'dispute-lost': 'Dispute lost' };
-const ACTION_SUBMIT_LABELS: Record<PaymentActionKind, string> = { adjust: 'Save Adjustment', refund: 'Record Refund', dispute: 'Record Dispute', 'dispute-won': 'Mark Won', 'dispute-lost': 'Mark Lost' };
+const ACTION_TITLES: Record<PaymentActionKind, string> = { adjust: 'Adjust cash payment', 'forgive-change': 'Change the amount forgiven', 'forgive-undo': 'Undo this forgiveness: the client owes it again', refund: 'Refund', dispute: 'Dispute (owed again until won)', 'dispute-won': 'Dispute won: apply the payment again', 'dispute-lost': 'Dispute lost' };
+const ACTION_SUBMIT_LABELS: Record<PaymentActionKind, string> = { adjust: 'Save Adjustment', 'forgive-change': 'Save Change', 'forgive-undo': 'Undo Forgiveness', refund: 'Record Refund', dispute: 'Record Dispute', 'dispute-won': 'Mark Won', 'dispute-lost': 'Mark Lost' };
 
 // The Financial Ledger tab of a client's account: entries by month, and (Business Administrators) corrections to a
 // payment: adjust a cash payment, or refund, dispute, and settle a dispute on a card payment
@@ -174,21 +176,27 @@ export default function ClientLedger({ client, role, userEmail, financials, high
     const { id, kind } = paymentAction;
     const reason = paymentAction.reason.trim();
     const amount = Number(paymentAction.amount);
-    const needsAmount = kind === 'adjust' || kind === 'refund' || kind === 'dispute';
+    const needsAmount = kind === 'adjust' || kind === 'forgive-change' || kind === 'refund' || kind === 'dispute';
     if ((needsAmount && !(amount > 0)) || !reason) return;
     const clientid = client.clientid;
+    // What the forgiveness row showed when the form opened (the server refuses if it was corrected meanwhile)
+    const forgivenBefore = Number(financials.find(f => f.transactionid === id)?.amount ?? 0);
     setSaving(true);
     setPaymentActionError('');
     try {
-      const res: PaymentChangeResult = kind === 'adjust'
+      const res: Pick<PaymentChangeResult, 'newBalance'> & Partial<PaymentChangeResult> = kind === 'adjust'
         ? await adjustCashPayment(id, { amount, reason, user: userEmail })
-        : await recordCardPaymentAction(id, { action: kind, amount: needsAmount ? amount : undefined, reason, user: userEmail });
+        : kind === 'forgive-change' || kind === 'forgive-undo'
+          ? await updateForgiveness(id, { amount: kind === 'forgive-undo' ? 0 : amount, reason, expectedAmount: forgivenBefore })
+          : await recordCardPaymentAction(id, { action: kind, amount: needsAmount ? amount : undefined, reason, user: userEmail });
       const changes: Record<string, unknown> = { accountbalance: res.newBalance };
       if (res.polyFeePaid !== undefined) changes.polyfeepaid = res.polyFeePaid;
       if (res.polyFeeVoucher !== undefined) changes.polyfeevoucher = res.polyFeeVoucher;
       setPaymentAction(null);
       const what = {
         adjust: `Payment adjusted to ${formatMoney(amount)}.`,
+        'forgive-change': `Forgiveness changed from ${formatMoney(forgivenBefore)} to ${formatMoney(amount)}.`,
+        'forgive-undo': `Forgiveness of ${formatMoney(forgivenBefore)} undone; the client owes it again.`,
         refund: `Refund of ${formatMoney(amount)} recorded.`,
         dispute: `Dispute of ${formatMoney(amount)} recorded; the amount is owed again until the dispute is won.`,
         'dispute-won': 'Dispute marked won; the payment is applied again.',
@@ -436,7 +444,9 @@ export default function ClientLedger({ client, role, userEmail, financials, high
               const reversal = PAYMENT_REVERSAL_TYPES.includes(fin.type);
               const minus = charge || reversal;
               const tone = charge ? LEDGER_TONES.charge : reversal ? LEDGER_TONES.reversal : LEDGER_TONES.payment;
-              const badge = charge ? 'Fee' : fin.type === 'Payment' ? 'Payment' : fin.feetype === FORGIVEN_FEE_TYPE ? 'Forgiven' : fin.type;
+              const forgiven = fin.type === 'Adjustment' && fin.feetype === FORGIVEN_FEE_TYPE;
+              const undone = forgiven && Number(fin.amount) === 0;
+              const badge = charge ? 'Fee' : fin.type === 'Payment' ? 'Payment' : undone ? 'Undone' : forgiven ? 'Forgiven' : fin.type;
               const isPoly = fin.feetype === 'Poly Fee';
               // Payments saved before the method was recorded were all cash
               const canAdjust = isAdmin && fin.type === 'Payment' && (!fin.paymentmethod || fin.paymentmethod === 'Cash');
@@ -462,7 +472,7 @@ export default function ClientLedger({ client, role, userEmail, financials, high
                     <div>
                       <p className="font-semibold text-white">
                         {fin.feetype || fin.type}
-                        <span className={`ml-2 align-middle text-[0.625rem] uppercase tracking-wide px-2 py-0.5 rounded border ${tone.badge}`}>{badge}</span>
+                        <span className={`ml-2 align-middle text-[0.625rem] uppercase tracking-wide px-2 py-0.5 rounded border ${undone ? 'text-slate-400 bg-slate-800 border-slate-700' : tone.badge}`}>{badge}</span>
                         {!charge && fin.paymentmethod && (
                           <span className="ml-2 align-middle text-[0.625rem] uppercase tracking-wide bg-slate-800 text-slate-300 px-2 py-0.5 rounded">{fin.paymentmethod}</span>
                         )}
@@ -473,7 +483,7 @@ export default function ClientLedger({ client, role, userEmail, financials, high
                       <p className="text-xs text-slate-400">{new Date(fin.date).toLocaleString()} — {fin.comments}</p>
                       {fin.adjustedon && (
                         <p className="text-xs text-amber-400 mt-1">
-                          Adjusted from {formatMoney(Number(fin.originalamount))} by {employeeLabel(fin.adjustedby)} on {new Date(fin.adjustedon).toLocaleDateString()}{fin.adjustmentreason ? `: ${fin.adjustmentreason}` : ''}
+                          {undone ? `Undone (was ${formatMoney(Number(fin.originalamount))}) by` : `${forgiven ? 'Forgiven amount changed' : 'Adjusted'} from ${formatMoney(Number(fin.originalamount))} by`} {employeeLabel(fin.adjustedby)} on {new Date(fin.adjustedon).toLocaleDateString()}{fin.adjustmentreason ? `: ${fin.adjustmentreason}` : ''}
                         </p>
                       )}
                       {card && card.kept < Number(fin.amount) && (
@@ -502,6 +512,18 @@ export default function ClientLedger({ client, role, userEmail, financials, high
                             </button>
                           )}
                           {canAdjust && <button type="button" onClick={() => startAction('adjust', Number(fin.amount))} className={linkClass}><Pencil size={12} /> Adjust</button>}
+                          {isAdmin && forgiven && (
+                            <>
+                              <button type="button" onClick={() => startAction('forgive-change', Number(fin.amount))} className={linkClass} title="Change the amount forgiven">
+                                <Pencil size={12} /> {undone ? 'Forgive Again' : 'Change'}
+                              </button>
+                              {!undone && (
+                                <button type="button" onClick={() => startAction('forgive-undo', 0)} className={linkClass} title="Undo, e.g. it was put on the wrong client">
+                                  <Undo2 size={12} /> Undo
+                                </button>
+                              )}
+                            </>
+                          )}
                           {isAdmin && card && !disputeOpen && card.kept > 0 && (
                             <>
                               <button type="button" onClick={() => startAction('refund', card.kept)} className={linkClass}>Refund</button>
@@ -519,15 +541,21 @@ export default function ClientLedger({ client, role, userEmail, financials, high
                     </div>
                   </div>
                   {action && (() => {
-                    const needsAmount = action.kind === 'adjust' || action.kind === 'refund' || action.kind === 'dispute';
+                    const forgiveAction = isForgiveAction(action.kind);
+                    const needsAmount = action.kind === 'adjust' || action.kind === 'forgive-change' || action.kind === 'refund' || action.kind === 'dispute';
                     const entered = Number(action.amount) || 0;
-                    const max = action.kind === 'adjust' ? Infinity : card?.kept ?? 0;
-                    // Change to what was paid on this payment: positive means the client paid more
-                    const paidChange = action.kind === 'adjust' ? entered - Number(fin.amount)
+                    // A forgiveness can grow only by what the client still owes (never into credit)
+                    const max = action.kind === 'adjust' ? Infinity
+                      : action.kind === 'forgive-change' ? Number(fin.amount) + owed
+                      : card?.kept ?? 0;
+                    // Change to what was paid (or forgiven) on this row: positive means the client owes less
+                    const paidChange = action.kind === 'adjust' || action.kind === 'forgive-change' ? entered - Number(fin.amount)
+                      : action.kind === 'forgive-undo' ? -Number(fin.amount)
                       : action.kind === 'dispute-won' ? (card?.openDispute ?? 0)
                       : action.kind === 'dispute-lost' ? 0
                       : -entered;
-                    const amountOk = !needsAmount || (entered > 0 && entered <= max + 0.005 && (action.kind !== 'adjust' || Math.abs(paidChange) >= 0.005));
+                    const amountOk = !needsAmount || (entered > 0 && entered <= max + 0.005
+                      && ((action.kind !== 'adjust' && action.kind !== 'forgive-change') || Math.abs(paidChange) >= 0.005));
                     let preview: React.ReactNode = null;
                     if (action.kind === 'dispute-lost') {
                       preview = <>The disputed {formatMoney(card?.openDispute ?? 0)} stays owed{isPoly ? ' on the poly fee' : ''}.</>;
@@ -552,7 +580,7 @@ export default function ClientLedger({ client, role, userEmail, financials, high
                       const newBalance = Number(client.accountbalance || 0) - paidChange;
                       preview = <>
                         Balance {formatBalance(client.accountbalance)} → {formatBalance(newBalance)}.
-                        {action.kind === 'adjust' ? ' Later ledger and attendance balances move by the same amount.' : ['Group Fee', 'Assessment Fee', 'Individual Fee'].includes(fin.feetype) ? ' The check-in it was taken at and the Group Income Report are updated too.' : ''}
+                        {action.kind === 'adjust' || forgiveAction ? ' Later ledger and attendance balances move by the same amount.' : ['Group Fee', 'Assessment Fee', 'Individual Fee'].includes(fin.feetype) ? ' The check-in it was taken at and the Group Income Report are updated too.' : ''}
                       </>;
                     }
                     return (
@@ -570,7 +598,7 @@ export default function ClientLedger({ client, role, userEmail, financials, high
                                 value={action.amount}
                                 onKeyDown={(e) => { if (e.key === '-' || e.key === 'e' || e.key === 'E') e.preventDefault(); }}
                                 onChange={(e) => setPaymentAction({ ...action, amount: e.target.value.replace(/-/g, '') })}
-                                aria-label={action.kind === 'adjust' ? 'Correct payment amount' : 'Amount'}
+                                aria-label={action.kind === 'adjust' ? 'Correct payment amount' : action.kind === 'forgive-change' ? 'Correct amount forgiven' : 'Amount'}
                                 autoFocus
                                 required
                                 className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 pl-7 pr-3 text-white text-sm"
@@ -587,7 +615,8 @@ export default function ClientLedger({ client, role, userEmail, financials, high
                             className="flex-1 min-w-[12rem] bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-sm"
                           />
                         </div>
-                        {needsAmount && Number.isFinite(max) && <p className="text-xs text-slate-500">Up to {formatMoney(max)} (what's left of this payment).</p>}
+                        {needsAmount && Number.isFinite(max) && <p className="text-xs text-slate-500">Up to {formatMoney(max)} ({action.kind === 'forgive-change' ? 'this forgiveness plus what the client still owes' : "what's left of this payment"}).</p>}
+                        {action.kind === 'forgive-undo' && <p className="text-xs text-slate-400">Use this if it was the wrong client or shouldn't have been forgiven. If it belongs on another client, forgive it on that client's ledger next.</p>}
                         {preview && <p className="text-xs text-slate-400">{preview}</p>}
                         {/* Booking the polygraph already used the vouchers, so changing this payment can't take them back */}
                         {isPoly && action.kind !== 'dispute-lost' && bookedSlot && (

@@ -171,7 +171,10 @@ reports changes back. Saves that finish after another client was opened don't ov
   Forgive Debt button, Business Administrators and DEV only): writes off some or all of what a client owes, with a
   required reason. It is an Adjustment ledger row (fee type Debt Forgiven), so it lowers the balance without counting
   as a payment on any cash or income report, and goes on the change log and system log. It can't put the account in
-  credit, and is refused if the balance changed while the form was open.
+  credit, and is refused if the balance changed while the form was open. A forgiven row's **Change** fixes a wrong
+  amount and **Undo** sets it to $0.00 so the client owes it again (wrong client: undo it, then forgive on the right
+  one); `PUT /api/financials/:id/forgiveness`. Like a cash payment adjustment, the row keeps its first amount and who
+  corrected it and why, and later ledger and attendance balances move by the difference.
 - **New accounts**: New User refuses an email that already has an account; existing accounts are changed with Edit,
   which signs the person out when their password changes or the account is deactivated.
 

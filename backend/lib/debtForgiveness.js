@@ -18,4 +18,25 @@ const forgivenessProblem = ({ amount, reason, owed, expectedOwed }) => {
     return null;
 };
 
-module.exports = { FORGIVEN_FEE_TYPE, forgivenessProblem };
+// Why a correction to a forgiveness can't be saved, or null. A wrong amount is changed to the right one; a wrong client
+// (or one forgiven by mistake) is undone by changing it to $0.00, so the client owes it again. oldAmount: what the row
+// forgives now; expectedAmount: what the screen showed (refused if someone corrected it meanwhile); owed: what the
+// client owes now. Forgiving more can't put the account in credit. The ledger's Change/Undo form applies the same
+// limits (frontend/src/components/clients/ClientLedger.tsx).
+const forgivenessEditProblem = ({ oldAmount, newAmount, expectedAmount, owed, reason }) => {
+    if (expectedAmount !== undefined && expectedAmount !== null && cents(expectedAmount) !== cents(oldAmount)) {
+        return `This forgiveness was changed while the form was open: it is now $${Number(oldAmount).toFixed(2)}. Check it and try again.`;
+    }
+    if (newAmount === '' || newAmount === null || newAmount === undefined || !Number.isFinite(Number(newAmount)) || cents(newAmount) < 0) {
+        return 'Enter the amount that should have been forgiven, or $0.00 to undo it.';
+    }
+    if (cents(newAmount) === cents(oldAmount)) return `The forgiveness is already $${Number(oldAmount).toFixed(2)}.`;
+    const more = cents(newAmount) - cents(oldAmount);
+    if (more > Math.max(0, cents(owed))) {
+        return `The client owes $${Math.max(0, Number(owed)).toFixed(2)}, so this can forgive at most $${((cents(oldAmount) + Math.max(0, cents(owed))) / 100).toFixed(2)}.`;
+    }
+    if (!String(reason || '').trim()) return 'A reason is required to change or undo a forgiveness.';
+    return null;
+};
+
+module.exports = { FORGIVEN_FEE_TYPE, forgivenessProblem, forgivenessEditProblem };

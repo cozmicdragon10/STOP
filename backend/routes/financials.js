@@ -4,7 +4,7 @@ const { logAction, pool } = require('../db');
 const { activeRoleFor, OPEN_GROUP_ADMIN_ROLES } = require('../lib/access');
 const { assertCardAllowed } = require('../lib/cardBlock');
 const { requireRole } = require('../lib/auth');
-const { FORGIVEN_FEE_TYPE, forgivenessProblem } = require('../lib/debtForgiveness');
+const { FORGIVEN_FEE_TYPE, forgivenessEditProblem, forgivenessProblem } = require('../lib/debtForgiveness');
 const { dollars, logClientChange } = require('../lib/changeLog');
 const { moneyText } = require('../lib/moneyFields');
 const { polyVoucherMax, changePolyFeePaid, countPolyFeeFill, splitPolyPaidChange, voucherChangeText } = require('../lib/poly');
@@ -214,6 +214,69 @@ router.post('/api/clients/:id/forgive-debt', requireRole('Business Administrator
         await db.query('COMMIT');
         await logAction(user, 'Debt Forgiven', `Client ID ${clientId}: forgave $${forgiven.toFixed(2)} (owed $${before.toFixed(2)}, now $${after.toFixed(2)}): ${why}`);
         res.status(201).json({ success: true, newBalance: after, forgiven, transactionId: saved.rows[0].transactionid });
+    } catch (error) {
+        await db.query('ROLLBACK');
+        res.status(500).json({ error: error.message });
+    } finally {
+        db.release();
+    }
+});
+
+// Changes the amount of a forgiveness, or undoes it (amount 0: the client owes it again, e.g. it was put on the wrong
+// client). Business Administrators and DEV. Like a cash payment adjustment, the row keeps its first amount and who
+// corrected it and why, and the difference moves the client's balance and the balance stored on this and every later
+// ledger and attendance row.
+router.put('/api/financials/:id/forgiveness', requireRole('Business Administrator'), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0 || id > 2147483647) return res.status(400).json({ error: 'Unknown ledger entry.' });
+    const { amount, reason, expectedAmount } = req.body || {};
+    const user = req.user.employeeemail;
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        const found = await db.query('SELECT Client FROM FinancialTransactions WHERE TransactionId = $1', [id]);
+        if (!found.rows[0]) {
+            await db.query('ROLLBACK');
+            return res.status(404).json({ error: 'That ledger entry no longer exists.' });
+        }
+        // The client row first, as every money change does, then the entry itself
+        const clientRes = await db.query('SELECT AccountBalance FROM Clients WHERE ClientId = $1 FOR UPDATE', [found.rows[0].client]);
+        const tx = (await db.query('SELECT * FROM FinancialTransactions WHERE TransactionId = $1 FOR UPDATE', [id])).rows[0];
+        if (tx.type !== 'Adjustment' || tx.feetype !== FORGIVEN_FEE_TYPE) {
+            await db.query('ROLLBACK');
+            return res.status(400).json({ error: 'Only a debt forgiveness can be changed or undone here.' });
+        }
+        const before = Number(clientRes.rows[0].accountbalance || 0);
+        const oldAmount = Number(tx.amount);
+        const problem = forgivenessEditProblem({ oldAmount, newAmount: amount, expectedAmount, owed: before, reason });
+        if (problem) {
+            await db.query('ROLLBACK');
+            return res.status(400).json({ error: problem, amount: oldAmount });
+        }
+        const newAmount = Math.round(Number(amount) * 100) / 100;
+        const why = String(reason).trim();
+        // Forgiving more lowers what the client owes (stored sign: positive = owes)
+        const delta = Math.round((newAmount - oldAmount) * 100) / 100;
+        const after = await shiftBalanceFrom(db, tx, delta, null);
+        await db.query(
+            `UPDATE FinancialTransactions SET Amount = $1, OriginalAmount = COALESCE(OriginalAmount, $2), AdjustedBy = $3,
+                 AdjustedOn = NOW(), AdjustmentReason = $4
+             WHERE TransactionId = $5`,
+            [newAmount, oldAmount, user, why, id]
+        );
+        const forgivenOn = new Date(tx.date).toLocaleDateString('en-US');
+        const what = newAmount === 0
+            ? `Debt forgiveness of ${dollars(oldAmount)} from ${forgivenOn} undone: the client owes it again`
+            : `Debt forgiveness from ${forgivenOn} changed from ${dollars(oldAmount)} to ${dollars(newAmount)}`;
+        await logClientChange(db, {
+            clientId: tx.client, changedBy: user, changeType: newAmount === 0 ? 'Debt Forgiveness Undone' : 'Debt Forgiveness Changed',
+            oldValue: moneyText('accountbalance', before), newValue: moneyText('accountbalance', after),
+            details: `${what}. ${why}`,
+        });
+        await db.query('COMMIT');
+        await logAction(user, newAmount === 0 ? 'Debt Forgiveness Undone' : 'Debt Forgiveness Changed',
+            `Client ID ${tx.client}, entry ${id}: ${what} (owed $${before.toFixed(2)}, now $${after.toFixed(2)}): ${why}`);
+        res.json({ success: true, newBalance: after, amount: newAmount, undone: newAmount === 0 });
     } catch (error) {
         await db.query('ROLLBACK');
         res.status(500).json({ error: error.message });

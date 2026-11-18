@@ -59,6 +59,8 @@ export const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
   { type: 'Payment', label: 'Payment' },
   { type: 'Custom Fee', label: 'Custom Fee' },
   { type: 'Debt Forgiven', label: 'Debt Forgiven' },
+  { type: 'Debt Forgiveness Changed', label: 'Debt Forgiveness Changed' },
+  { type: 'Debt Forgiveness Undone', label: 'Debt Forgiveness Undone' },
   { type: 'Payment Adjusted', label: 'Payment Adjusted' },
   { type: 'Payment Refunded', label: 'Payment Refunded' },
   { type: 'Payment Disputed', label: 'Payment Disputed' },

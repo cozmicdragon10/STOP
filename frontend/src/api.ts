@@ -1379,6 +1379,17 @@ export async function forgiveClientDebt(clientId: number, data: { amount: number
     return jsonResponse(res, 'Could not forgive the debt.');
 }
 
+// Changes the amount of a debt forgiveness, or undoes it with amount 0 (the client owes it again). expectedAmount is
+// what the row showed; the server refuses if someone corrected it meanwhile.
+export async function updateForgiveness(transactionId: number, data: { amount: number; reason: string; expectedAmount: number }): Promise<{ success: true; newBalance: number; amount: number; undone: boolean }> {
+    const res = await apiFetch(`${API_BASE}/financials/${transactionId}/forgiveness`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return jsonResponse(res, 'Could not change the forgiveness.');
+}
+
 // What a payment correction changed. The poly fields come back only for poly fee payments.
 export interface PaymentChangeResult {
     newBalance: number;
