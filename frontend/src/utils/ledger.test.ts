@@ -1,6 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { attendanceBalanceChange, cardPaymentStatus, feesCharged, ledgerBalanceChange, signedMoney } from './ledger';
+import { FORGIVEN_FEE_TYPE, attendanceBalanceChange, cardPaymentStatus, feesCharged, forgivenessProblem, ledgerBalanceChange, signedMoney } from './ledger';
 import { formatBalance, toDisplayBalance } from './balance';
+
+describe('forgivenessProblem', () => {
+  const ok = { amount: 50, reason: 'Hardship', owed: 120 };
+  it('allows forgiving up to what is owed, with a reason', () => {
+    expect(forgivenessProblem(ok)).toBeNull();
+    expect(forgivenessProblem({ ...ok, amount: '120.00' })).toBeNull();
+  });
+  it('refuses nothing owed, a bad amount, more than is owed, or no reason', () => {
+    expect(forgivenessProblem({ ...ok, owed: 0 })).toMatch(/does not owe/);
+    expect(forgivenessProblem({ ...ok, owed: -20 })).toMatch(/does not owe/);
+    expect(forgivenessProblem({ ...ok, amount: '' })).toMatch(/more than \$0\.00/);
+    expect(forgivenessProblem({ ...ok, amount: 120.01 })).toMatch(/up to what the client owes, \$120\.00/);
+    expect(forgivenessProblem({ ...ok, reason: '  ' })).toMatch(/reason is required/);
+  });
+  it('a forgiven row lowers the balance like a payment', () => {
+    expect(ledgerBalanceChange({ type: 'Adjustment', feetype: FORGIVEN_FEE_TYPE, amount: '50', finalbalance: '70' }))
+      .toEqual({ before: -120, after: -70, changesBalance: true });
+  });
+});
 
 describe('balance display', () => {
   it('flips the stored sign: stored positive (owes) shows as negative', () => {

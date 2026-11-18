@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useUnsavedForm } from '../../hooks/useUnsavedForm';
-import { AlertCircle, Ban, Pencil, Printer, SlidersHorizontal, X } from 'lucide-react';
+import { AlertCircle, Ban, HandCoins, Pencil, Printer, SlidersHorizontal, X } from 'lucide-react';
 import { printReceipt } from '../../utils/receipt';
-import { adjustCashPayment, fetchPolyFeeOverride, getClientAttendance, getClientFinancials, recordCardPaymentAction, setClientCardPayments } from '../../api';
+import { adjustCashPayment, fetchPolyFeeOverride, forgiveClientDebt, getClientAttendance, getClientFinancials, recordCardPaymentAction, setClientCardPayments } from '../../api';
 import type { CardBlock, CardPaymentAction, PaymentChangeResult, PolyFeeOverride } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
 import MonthHeader from './MonthHeader';
 import { EMPTY_LEDGER_FILTERS, groupByMonth, sortedUnique, toggleInSet } from '../../utils/filters';
-import { LEDGER_TONES, PAYMENT_REVERSAL_TYPES, cardPaymentStatus, feesCharged, formatMoney, ledgerBalanceChange, sessionFeeOf, signedMoney } from '../../utils/ledger';
+import { FORGIVEN_FEE_TYPE, LEDGER_TONES, PAYMENT_REVERSAL_TYPES, cardPaymentStatus, feesCharged, forgivenessProblem, formatMoney, ledgerBalanceChange, sessionFeeOf, signedMoney } from '../../utils/ledger';
 import { formatBalance } from '../../utils/balance';
 import { formatDisplayTime, localYmd } from '../../utils/dates';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
@@ -120,8 +120,12 @@ export default function ClientLedger({ client, role, userEmail, financials, high
   const [paymentAction, setPaymentAction] = useState<{ id: number; kind: PaymentActionKind; amount: string; reason: string } | null>(null);
   const [paymentActionError, setPaymentActionError] = useState('');
   const [saving, setSaving] = useState(false);
-  // An adjustment, refund, or dispute form is open
-  useUnsavedForm(paymentAction !== null);
+  // Forgive Debt form (Business Administrators and DEV): owed is the balance it was opened with, sent so the server can
+  // refuse if a payment or charge changed it meanwhile
+  const [forgive, setForgive] = useState<{ amount: string; reason: string; owed: number } | null>(null);
+  const [forgiveError, setForgiveError] = useState('');
+  // An adjustment, refund, dispute, or forgive debt form is open
+  useUnsavedForm(paymentAction !== null || forgive !== null);
   // Shown after a poly fee payment change when the client is already booked into a polygraph with vouchers
   const [scheduledPolyNotice, setScheduledPolyNotice] = useState<{ slotId: number; text: string } | null>(null);
 
@@ -216,6 +220,31 @@ export default function ClientLedger({ client, role, userEmail, financials, high
     }
   };
 
+  // What the client owes now (stored balance, positive = owes)
+  const owed = Math.max(0, Number(client.accountbalance) || 0);
+  const handleForgive = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgive) return;
+    const amount = Math.round(Number(forgive.amount) * 100) / 100;
+    const problem = forgivenessProblem({ amount, reason: forgive.reason, owed: forgive.owed });
+    if (problem) { setForgiveError(problem); return; }
+    if (!window.confirm(`Forgive ${formatMoney(amount)} of ${client.firstname} ${client.lastname}'s debt? This can't be undone from the ledger.`)) return;
+    const clientid = client.clientid;
+    setSaving(true);
+    setForgiveError('');
+    try {
+      const res = await forgiveClientDebt(clientid, { amount, reason: forgive.reason.trim(), expectedOwed: forgive.owed });
+      setForgive(null);
+      onSuccess(`${formatMoney(res.forgiven)} of debt forgiven. Updated Balance: ${formatBalance(res.newBalance)}.`);
+      const [attendance, fin, poly] = await Promise.all([getClientAttendance(clientid), getClientFinancials(clientid), fetchPolyFeeOverride(clientid)]);
+      onPaymentChanged({ clientId: clientid, changes: { accountbalance: res.newBalance }, attendance, financials: fin, polyOverride: poly.override });
+    } catch (err) {
+      setForgiveError(err instanceof Error && err.message ? err.message : 'Could not forgive the debt.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
       {/* Card payments: everyone sees a block; Business Administrators can set or lift it */}
@@ -297,10 +326,68 @@ export default function ClientLedger({ client, role, userEmail, financials, high
             <span className="bg-blue-600 text-white rounded-full px-1.5 text-[0.625rem] leading-4">{activeFilterCount}</span>
           )}
         </button>
+        {isAdmin && owed > 0 && forgive === null && (
+          <button
+            type="button"
+            onClick={() => { setForgive({ amount: owed.toFixed(2), reason: '', owed }); setForgiveError(''); }}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border bg-slate-800 border-slate-700 text-slate-300 hover:text-white"
+          >
+            <HandCoins size={13} /> Forgive Debt
+          </button>
+        )}
         <span className="ml-auto text-xs text-slate-500">
           {shown.length === financials.length ? `${financials.length} entries` : `Showing ${shown.length} of ${financials.length}`}
         </span>
       </div>
+      {forgive && (() => {
+        const amount = Number(forgive.amount) || 0;
+        const after = forgive.owed - amount;
+        return (
+          <form onSubmit={handleForgive} className="bg-slate-950 border border-emerald-500/40 rounded-xl p-3 space-y-2">
+            <p className="text-xs font-semibold text-emerald-300">Forgive debt</p>
+            <p className="text-xs text-slate-400">
+              Lowers what the client owes without recording a payment, so it doesn't count as money received on any report.
+              It goes on the ledger, the change log and the system log with your name and the reason.
+            </p>
+            <div className="flex flex-wrap gap-2 items-start">
+              <div className="relative w-36">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
+                <input
+                  type="number" step="0.01" min="0.01" max={forgive.owed.toFixed(2)}
+                  aria-label="Amount to forgive"
+                  value={forgive.amount}
+                  onKeyDown={e => { if (e.key === '-' || e.key === 'e' || e.key === 'E') e.preventDefault(); }}
+                  onChange={e => setForgive(f => f && { ...f, amount: e.target.value.replace(/-/g, '') })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 pl-7 pr-2 text-white text-sm"
+                  required
+                />
+              </div>
+              <input
+                type="text"
+                value={forgive.reason}
+                onChange={e => setForgive(f => f && { ...f, reason: e.target.value })}
+                placeholder="Reason, e.g. hardship approved by the director"
+                aria-label="Reason"
+                autoFocus
+                required
+                className="flex-1 min-w-48 bg-slate-900 border border-slate-700 rounded-lg p-2 text-white text-sm"
+              />
+            </div>
+            <p className="text-xs text-slate-400">
+              Owes {formatMoney(forgive.owed)} now
+              {amount > 0 && amount <= forgive.owed + 0.005 && <> · balance after: <span className="font-semibold text-slate-200">{formatBalance(after)}</span></>}
+              {amount > 0 && amount < forgive.owed - 0.005 && <> · <button type="button" onClick={() => setForgive(f => f && { ...f, amount: f.owed.toFixed(2) })} className="underline hover:text-white">forgive all</button></>}
+            </p>
+            {forgiveError && <p className="text-xs text-red-400">{forgiveError}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => { setForgive(null); setForgiveError(''); }} className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-lg text-xs font-semibold">Cancel</button>
+              <button type="submit" disabled={saving || !forgive.reason.trim() || !(amount > 0)} className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg text-xs font-semibold">
+                Forgive {amount > 0 ? formatMoney(amount) : 'Debt'}
+              </button>
+            </div>
+          </form>
+        );
+      })()}
       {showFilters && <RecordFilterBar
         search={filters.search}
         onSearch={v => setFilters(f => ({ ...f, search: v }))}
@@ -349,7 +436,7 @@ export default function ClientLedger({ client, role, userEmail, financials, high
               const reversal = PAYMENT_REVERSAL_TYPES.includes(fin.type);
               const minus = charge || reversal;
               const tone = charge ? LEDGER_TONES.charge : reversal ? LEDGER_TONES.reversal : LEDGER_TONES.payment;
-              const badge = charge ? 'Fee' : fin.type === 'Payment' ? 'Payment' : fin.type;
+              const badge = charge ? 'Fee' : fin.type === 'Payment' ? 'Payment' : fin.feetype === FORGIVEN_FEE_TYPE ? 'Forgiven' : fin.type;
               const isPoly = fin.feetype === 'Poly Fee';
               // Payments saved before the method was recorded were all cash
               const canAdjust = isAdmin && fin.type === 'Payment' && (!fin.paymentmethod || fin.paymentmethod === 'Cash');

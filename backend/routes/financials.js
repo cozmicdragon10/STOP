@@ -3,6 +3,8 @@ const { effectiveRole } = require('../lib/roles');
 const { logAction, pool } = require('../db');
 const { activeRoleFor, OPEN_GROUP_ADMIN_ROLES } = require('../lib/access');
 const { assertCardAllowed } = require('../lib/cardBlock');
+const { requireRole } = require('../lib/auth');
+const { FORGIVEN_FEE_TYPE, forgivenessProblem } = require('../lib/debtForgiveness');
 const { dollars, logClientChange } = require('../lib/changeLog');
 const { moneyText } = require('../lib/moneyFields');
 const { polyVoucherMax, changePolyFeePaid, countPolyFeeFill, splitPolyPaidChange, voucherChangeText } = require('../lib/poly');
@@ -170,6 +172,53 @@ router.post('/api/financials/charge', async (req, res) => {
         res.status(500).json({ error: error.message });
     } finally {
         clientDb.release();
+    }
+});
+
+// Forgives some or all of what a client owes (Business Administrators, and DEV who signs in as one). Saved as an
+// Adjustment row, so it lowers the balance without counting as money received (lib/debtForgiveness.js).
+router.post('/api/clients/:id/forgive-debt', requireRole('Business Administrator'), async (req, res) => {
+    const clientId = Number(req.params.id);
+    if (!Number.isInteger(clientId) || clientId <= 0) return res.status(400).json({ error: 'Unknown client.' });
+    const { amount, reason, expectedOwed } = req.body || {};
+    const user = req.user.employeeemail;
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        const found = await db.query('SELECT AccountBalance FROM Clients WHERE ClientId = $1 FOR UPDATE', [clientId]);
+        if (!found.rows[0]) {
+            await db.query('ROLLBACK');
+            return res.status(404).json({ error: 'Client not found.' });
+        }
+        const before = Number(found.rows[0].accountbalance || 0);
+        const problem = forgivenessProblem({ amount, reason, owed: before, expectedOwed });
+        if (problem) {
+            await db.query('ROLLBACK');
+            return res.status(400).json({ error: problem, owed: Math.max(0, before) });
+        }
+        const forgiven = Math.round(Number(amount) * 100) / 100;
+        const why = String(reason).trim();
+        const after = Math.round((before - forgiven) * 100) / 100;
+
+        await db.query('UPDATE Clients SET AccountBalance = $1 WHERE ClientId = $2', [after, clientId]);
+        const saved = await db.query(
+            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, EnteredBy)
+             VALUES ($1, NOW(), 'Adjustment', $2, $3, $4, $5, $6) RETURNING TransactionId`,
+            [clientId, forgiven, FORGIVEN_FEE_TYPE, after, why, user]
+        );
+        await logClientChange(db, {
+            clientId, changedBy: user, changeType: FORGIVEN_FEE_TYPE,
+            oldValue: moneyText('accountbalance', before), newValue: moneyText('accountbalance', after),
+            details: `${dollars(forgiven)} of debt forgiven: ${why}`,
+        });
+        await db.query('COMMIT');
+        await logAction(user, 'Debt Forgiven', `Client ID ${clientId}: forgave $${forgiven.toFixed(2)} (owed $${before.toFixed(2)}, now $${after.toFixed(2)}): ${why}`);
+        res.status(201).json({ success: true, newBalance: after, forgiven, transactionId: saved.rows[0].transactionid });
+    } catch (error) {
+        await db.query('ROLLBACK');
+        res.status(500).json({ error: error.message });
+    } finally {
+        db.release();
     }
 });
 

@@ -1368,6 +1368,17 @@ export async function submitCustomCharge(data: { client: number; amount: number;
     return jsonResponse(res, 'Error charging custom fee.');
 }
 
+// Forgives some or all of what a client owes (Business Administrators and DEV). expectedOwed is the balance the form
+// showed; the server refuses if it changed meanwhile.
+export async function forgiveClientDebt(clientId: number, data: { amount: number; reason: string; expectedOwed: number }): Promise<{ success: true; newBalance: number; forgiven: number; transactionId: number }> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/forgive-debt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return jsonResponse(res, 'Could not forgive the debt.');
+}
+
 // What a payment correction changed. The poly fields come back only for poly fee payments.
 export interface PaymentChangeResult {
     newBalance: number;

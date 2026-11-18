@@ -167,6 +167,11 @@ reports changes back. Saves that finish after another client was opened don't ov
   through an expiration date): the client may owe up to its amount and still attend. It raises the $0.00 needed at the
   first group check-in of the month (every check-in for Chaperon clients) and at the first individual session of the
   month, and lets an assessment begin with up to that much owed after its fee.
+- **Forgive Debt** (`backend/lib/debtForgiveness.js`, `POST /api/clients/:id/forgive-debt`, the Financial Ledger tab's
+  Forgive Debt button, Business Administrators and DEV only): writes off some or all of what a client owes, with a
+  required reason. It is an Adjustment ledger row (fee type Debt Forgiven), so it lowers the balance without counting
+  as a payment on any cash or income report, and goes on the change log and system log. It can't put the account in
+  credit, and is refused if the balance changed while the form was open.
 - **New accounts**: New User refuses an email that already has an account; existing accounts are changed with Edit,
   which signs the person out when their password changes or the account is deactivated.
 

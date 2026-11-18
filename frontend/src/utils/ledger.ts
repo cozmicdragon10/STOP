@@ -72,3 +72,17 @@ export const ledgerBalanceChange = (fin: LedgerFields<'amount' | 'feetype' | 'ty
   const before = !changesBalance ? after : addsToOwed(fin) ? after - amount : after + amount - sessionFeeOf(fin);
   return { before: toDisplayBalance(before), after: toDisplayBalance(after), changesBalance };
 };
+
+// Forgiven debt is an Adjustment row with this fee type: it lowers what's owed but isn't money paid
+export const FORGIVEN_FEE_TYPE = 'Debt Forgiven';
+
+// Why the Forgive Debt form can't be sent yet, or null. owed: what the client owes (stored balance, positive = owes).
+// Mirrors forgivenessProblem in backend/lib/debtForgiveness.js (the server also refuses a balance that changed meanwhile).
+export const forgivenessProblem = ({ amount, reason, owed }: { amount: number | string; reason: string; owed: number | string }): string | null => {
+  const cents = (n: number | string) => Math.round(Number(n) * 100);
+  if (!(cents(owed) > 0)) return 'This client does not owe anything, so there is no debt to forgive.';
+  if (!(cents(amount) > 0)) return 'Enter an amount to forgive, more than $0.00.';
+  if (cents(amount) > cents(owed)) return `You can forgive up to what the client owes, $${Number(owed).toFixed(2)}.`;
+  if (!reason.trim()) return 'A reason is required to forgive debt.';
+  return null;
+};
