@@ -92,12 +92,85 @@
 }
 
 /*
-  Light mode (and Soft, which builds on it). The app is styled with dark slate classes, so instead of restyling every component this flips the
-  slate scale (bg-slate-950 becomes a light page, text-slate-400 becomes a readable gray, and so on) and darkens the
-  pale accent shades that are used as text on dark backgrounds.
+  Themes: Light, Soft, Dim and Dark, chosen separately for three parts of the screen (Settings > Appearance):
+    - Background: the page itself, set as data-theme on <html>. Everything not in the other two parts follows it,
+      including text that sits straight on the page (page titles, "Today" labels).
+    - Windows: the cards and panels, which are the .bg-slate-900 surfaces (data-window-theme on <html>).
+    - Banner & Tabs: the header and main tab bar, marked data-zone="banner" (data-banner-theme on <html>).
+
+  The app is styled with dark slate classes, so a theme swaps palette variables instead of restyling components:
+  light flips the slate scale (bg-slate-950 becomes a light page, text-slate-400 a readable gray) and darkens the
+  pale accent shades used as text. Variables pass down to everything inside an element, so each part only needs its
+  own set. Because a dark window can sit on a light page (and the other way round), every theme sets the same full
+  list of variables; dark sets them back to Tailwind's own values.
+
+  The scope selectors are wrapped in :where() so they add no specificity: later blocks win by order alone.
 */
-:root:is([data-theme="light"], [data-theme="soft"]) {
+
+/* Dark and Dim: Tailwind's own values (Dim lifts the surfaces below) */
+:where(
+  :root[data-theme="dark"], :root[data-theme="dim"],
+  :root:is([data-window-theme="dark"], [data-window-theme="dim"]) .bg-slate-900:not([data-zone], [data-zone] *),
+  :root:is([data-banner-theme="dark"], [data-banner-theme="dim"]) [data-zone="banner"]
+) {
+  color-scheme: dark;
+  --stop-white: #fff;
+
+  --color-slate-50: oklch(98.4% 0.003 247.858);
+  --color-slate-100: oklch(96.8% 0.007 247.896);
+  --color-slate-200: oklch(92.9% 0.013 255.508);
+  --color-slate-300: oklch(86.9% 0.022 252.894);
+  --color-slate-400: oklch(70.4% 0.04 256.788);
+  --color-slate-500: oklch(55.4% 0.046 257.417);
+  --color-slate-600: oklch(44.6% 0.043 257.281);
+  --color-slate-700: oklch(37.2% 0.044 257.287);
+  --color-slate-800: oklch(27.9% 0.041 260.031);
+  --color-slate-900: oklch(20.8% 0.042 265.755);
+  --color-slate-950: oklch(12.9% 0.042 264.695);
+
+  --color-gray-300: oklch(87.2% 0.01 258.338);
+  --color-gray-600: oklch(44.6% 0.03 256.802);
+
+  --color-blue-100: oklch(93.2% 0.032 255.585);
+  --color-blue-200: oklch(88.2% 0.059 254.128);
+  --color-blue-300: oklch(80.9% 0.105 251.813);
+  --color-blue-400: oklch(70.7% 0.165 254.624);
+  --color-blue-950: oklch(28.2% 0.091 267.935);
+  --color-red-200: oklch(88.5% 0.062 18.334);
+  --color-red-300: oklch(80.8% 0.114 19.571);
+  --color-red-400: oklch(70.4% 0.191 22.216);
+  --color-emerald-200: oklch(90.5% 0.093 164.15);
+  --color-emerald-300: oklch(84.5% 0.143 164.978);
+  --color-emerald-400: oklch(76.5% 0.177 163.223);
+  --color-emerald-950: oklch(26.2% 0.051 172.552);
+  --color-amber-200: oklch(92.4% 0.12 95.746);
+  --color-amber-300: oklch(87.9% 0.169 91.605);
+  --color-amber-400: oklch(82.8% 0.189 84.429);
+  --color-sky-200: oklch(90.1% 0.058 230.902);
+  --color-sky-300: oklch(82.8% 0.111 230.318);
+  --color-sky-400: oklch(74.6% 0.16 232.661);
+  --color-violet-100: oklch(94.3% 0.029 294.588);
+  --color-violet-200: oklch(89.4% 0.057 293.283);
+  --color-violet-300: oklch(81.1% 0.111 293.571);
+  --color-rose-300: oklch(81% 0.117 11.638);
+  --color-rose-800: oklch(45.5% 0.188 13.697);
+  --color-rose-900: oklch(41% 0.159 10.272);
+  --color-rose-950: oklch(27.1% 0.105 12.094);
+  --color-green-300: oklch(87.1% 0.15 154.449);
+  --color-green-400: oklch(79.2% 0.209 151.711);
+  --color-purple-300: oklch(82.7% 0.119 306.383);
+  --color-teal-300: oklch(85.5% 0.138 181.071);
+}
+
+/* Light and Soft (Soft lowers the surfaces below) */
+:where(
+  :root[data-theme="light"], :root[data-theme="soft"],
+  :root:is([data-window-theme="light"], [data-window-theme="soft"]) .bg-slate-900:not([data-zone], [data-zone] *),
+  :root:is([data-banner-theme="light"], [data-banner-theme="soft"]) [data-zone="banner"]
+) {
   color-scheme: light;
+  /* White text on these light surfaces turns dark (see the .text-white rule below) */
+  --stop-white: oklch(20.8% 0.042 265.755);
 
   --color-slate-50: oklch(12.9% 0.042 264.695);
   --color-slate-100: oklch(20.8% 0.042 265.755);
@@ -115,7 +188,9 @@
   --color-gray-300: oklch(37.3% 0.034 259.733);
   --color-gray-600: oklch(70.7% 0.022 261.325);
 
+  /* Pale text shades darkened to read on white (200 reads like 800, 300 like 700) */
   --color-blue-100: oklch(37.9% 0.146 265.522);
+  --color-blue-200: oklch(42.4% 0.199 265.638);
   --color-blue-300: oklch(48.8% 0.243 264.376);
   --color-blue-400: oklch(54.6% 0.245 262.881);
   --color-red-200: oklch(44.4% 0.177 26.899);
@@ -124,23 +199,20 @@
   --color-emerald-200: oklch(43.2% 0.095 166.913);
   --color-emerald-300: oklch(50.8% 0.118 165.612);
   --color-emerald-400: oklch(53.5% 0.125 164.5);
+  --color-amber-200: oklch(47.3% 0.137 46.201);
   --color-amber-300: oklch(55.5% 0.163 48.998);
   --color-amber-400: oklch(55.5% 0.163 48.998);
+  --color-sky-200: oklch(44.3% 0.11 240.79);
+  --color-sky-300: oklch(50% 0.134 242.749);
   --color-sky-400: oklch(50% 0.134 242.749);
+  --color-violet-100: oklch(38% 0.189 293.745);
+  --color-violet-200: oklch(43.2% 0.232 292.759);
   --color-violet-300: oklch(49.1% 0.27 292.581);
   --color-rose-300: oklch(51.4% 0.222 16.935);
-
-  /* More pale text shades, darkened the same way (200 reads like 800, 300 like 700) */
-  --color-amber-200: oklch(47.3% 0.137 46.201);
-  --color-blue-200: oklch(42.4% 0.199 265.638);
   --color-green-300: oklch(44.8% 0.119 151.328);
   --color-green-400: oklch(52.7% 0.154 150.069);
   --color-purple-300: oklch(49.6% 0.265 301.924);
-  --color-sky-200: oklch(44.3% 0.11 240.79);
-  --color-sky-300: oklch(50% 0.134 242.749);
   --color-teal-300: oklch(51.1% 0.096 186.391);
-  --color-violet-100: oklch(38% 0.189 293.745);
-  --color-violet-200: oklch(43.2% 0.232 292.759);
 
   /* Very dark shades used as tinted backgrounds and borders become light tints */
   --color-rose-800: oklch(81% 0.117 11.638);
@@ -150,36 +222,12 @@
   --color-blue-950: oklch(93.2% 0.032 255.585);
 }
 
-/* Dark text on bright badges (bg-amber-500 text-slate-950) keeps the original dark slate */
-:root:is([data-theme="light"], [data-theme="soft"]) .text-slate-950 {
-  color: oklch(12.9% 0.042 264.695);
-}
-
-/*
-  White text sits on slate surfaces that are now light, so it turns dark, except on solid colored buttons and badges.
-  ~= matches whole class names only, so faint tints like bg-amber-500/10 (light in this theme) still get dark text.
-*/
-:root:is([data-theme="light"], [data-theme="soft"]) :is(.text-white, .hover\:text-white:hover):not(
-  [class~="bg-blue-500"], [class~="bg-blue-600"],
-  [class~="bg-red-500"], [class~="bg-red-600"], [class~="bg-red-700"], [class~="bg-red-800"],
-  [class~="bg-emerald-500"], [class~="bg-emerald-600"], [class~="bg-emerald-700"],
-  [class~="bg-green-600"], [class~="bg-green-700"],
-  [class~="bg-amber-500"], [class~="bg-amber-600"],
-  [class~="bg-rose-500"], [class~="bg-rose-600"], [class~="bg-rose-700"],
-  [class~="bg-violet-500"], [class~="bg-violet-600"]
+/* Soft: light on gray instead of white. Lower surfaces, and darker secondary text so it still reads on them. */
+:where(
+  :root[data-theme="soft"],
+  :root[data-window-theme="soft"] .bg-slate-900:not([data-zone], [data-zone] *),
+  :root[data-banner-theme="soft"] [data-zone="banner"]
 ) {
-  color: var(--color-slate-100);
-}
-
-:root:is([data-theme="light"], [data-theme="soft"]) .\[color-scheme\:dark\] {
-  color-scheme: light;
-}
-
-/*
-  Soft: light mode on gray instead of white. Every light-mode rule above applies; this only lowers the surfaces
-  (page, cards, borders) to light grays and darkens the secondary text grays so they still read on them.
-*/
-:root[data-theme="soft"] {
   --color-slate-400: oklch(40% 0.04 257);
   --color-slate-500: oklch(47% 0.04 257);
   --color-slate-600: oklch(53% 0.035 257);
@@ -189,12 +237,12 @@
   --color-slate-950: oklch(85.5% 0.015 255);
 }
 
-/*
-  Dim, between dark and light. It keeps dark mode's text and status colors (made for dark backgrounds) and lifts only
-  the surfaces: the page, cards and borders become softer mid grays, and the secondary text grays move up to stay
-  readable on them.
-*/
-:root[data-theme="dim"] {
+/* Dim: dark mode's colors on lifted, mid-gray surfaces, with the secondary text grays moved up to match */
+:where(
+  :root[data-theme="dim"],
+  :root[data-window-theme="dim"] .bg-slate-900:not([data-zone], [data-zone] *),
+  :root[data-banner-theme="dim"] [data-zone="banner"]
+) {
   --color-slate-400: oklch(77% 0.03 257);
   --color-slate-500: oklch(69% 0.03 257);
   --color-slate-600: oklch(56% 0.03 257);
@@ -204,12 +252,41 @@
   --color-slate-950: oklch(30% 0.026 257);
 }
 
+/* White text stays white on solid colored buttons and badges in every theme. ~= matches whole class names only, so
+   faint tints like bg-amber-500/10 (light in light themes) still get the dark text. */
+:is(.text-white, .hover\:text-white:hover):not(
+  [class~="bg-blue-500"], [class~="bg-blue-600"],
+  [class~="bg-red-500"], [class~="bg-red-600"], [class~="bg-red-700"], [class~="bg-red-800"],
+  [class~="bg-emerald-500"], [class~="bg-emerald-600"], [class~="bg-emerald-700"],
+  [class~="bg-green-600"], [class~="bg-green-700"],
+  [class~="bg-amber-500"], [class~="bg-amber-600"],
+  [class~="bg-rose-500"], [class~="bg-rose-600"], [class~="bg-rose-700"],
+  [class~="bg-violet-500"], [class~="bg-violet-600"]
+) {
+  color: var(--stop-white, #fff);
+}
+
+/* Dark text on bright badges (bg-amber-500 text-slate-950) stays dark in every theme */
+.text-slate-950 {
+  color: oklch(12.9% 0.042 264.695);
+}
+
+/* Date pickers and the like follow the theme of the part they're in */
+.\[color-scheme\:dark\] {
+  color-scheme: inherit;
+}
+
 /*
-  Color blind settings. Like light mode, these swap palette colors rather than restyling components, so every status
-  color follows. Status colors were chosen to stay furthest apart under simulated color blindness. Red and rose keep
-  their hue; green, amber and blue move. Light mode needs its own darker text shades, so it gets a second block for each.
+  Color blind settings, for the whole screen. Like the themes, these swap palette colors rather than restyling
+  components, so every status color follows. Status colors were chosen to stay furthest apart under simulated color
+  blindness. Red and rose keep their hue; green, amber and blue move. They come after the themes so they win, and the
+  light themes get a second block for each with darker text shades.
 */
-:root[data-color-vision="red-green"] {
+:where(
+  :root[data-color-vision="red-green"],
+  :root[data-color-vision="red-green"][data-window-theme] .bg-slate-900:not([data-zone], [data-zone] *),
+  :root[data-color-vision="red-green"][data-banner-theme] [data-zone="banner"]
+) {
   --color-blue-100: oklch(93% 0.034 272.788);
   --color-blue-300: oklch(78.5% 0.115 274.713);
   --color-blue-400: oklch(67.3% 0.182 276.935);
@@ -227,7 +304,11 @@
   --color-amber-600: oklch(68.1% 0.162 75.834);
 }
 
-:root[data-color-vision="blue-yellow"] {
+:where(
+  :root[data-color-vision="blue-yellow"],
+  :root[data-color-vision="blue-yellow"][data-window-theme] .bg-slate-900:not([data-zone], [data-zone] *),
+  :root[data-color-vision="blue-yellow"][data-banner-theme] [data-zone="banner"]
+) {
   --color-emerald-200: oklch(93.8% 0.127 124.321);
   --color-emerald-300: oklch(89.7% 0.196 126.665);
   --color-emerald-400: oklch(84.1% 0.238 128.85);
@@ -240,37 +321,16 @@
   --color-amber-600: oklch(59.1% 0.293 322.896);
 }
 
-:root:is([data-theme="light"], [data-theme="soft"])[data-color-vision="red-green"] {
-  --color-blue-100: oklch(39.8% 0.195 277.366);
-  --color-blue-300: oklch(45.7% 0.24 277.023);
-  --color-blue-400: oklch(51.1% 0.262 276.966);
-  --color-emerald-200: oklch(45% 0.085 224.283);
-  --color-emerald-300: oklch(52% 0.105 223.128);
-  --color-emerald-400: oklch(60.9% 0.126 221.723);
-  --color-amber-300: oklch(55.4% 0.135 66.442);
-  --color-amber-400: oklch(55.4% 0.135 66.442);
-  /* Darker red keeps it apart from the amber, which can't get lighter and stay readable on white */
-  --color-red-200: oklch(39.6% 0.141 25.723);
-  --color-red-300: oklch(44.4% 0.177 26.899);
-  --color-red-400: oklch(44.4% 0.177 26.899);
-  --color-emerald-950: oklch(91.7% 0.08 205.041);
-}
-
-:root:is([data-theme="light"], [data-theme="soft"])[data-color-vision="blue-yellow"] {
-  --color-emerald-200: oklch(45.3% 0.124 130.933);
-  --color-emerald-300: oklch(53.2% 0.157 131.589);
-  --color-emerald-400: oklch(53.2% 0.157 131.589);
-  --color-amber-300: oklch(51.8% 0.253 323.949);
-  --color-amber-400: oklch(51.8% 0.253 323.949);
-  --color-emerald-950: oklch(93.8% 0.127 124.321);
-}
-
 /*
-  Custom colors. The four --custom-* colors are set by useTheme from the Admin tab. The picked color is used as is for text
-  on dark backgrounds; the other shades are mixed from it, and light mode darkens the text shades to stay readable on white.
-  Rose follows the problem color here so Delete buttons and errors change with it.
+  Custom colors. The four --custom-* colors are set by useTheme from the Settings tab. The picked color is used as is for
+  text on dark backgrounds; the other shades are mixed from it, and the light themes darken the text shades to stay
+  readable on white. Rose follows the problem color here so Delete buttons and errors change with it.
 */
-:root[data-color-vision="custom"] {
+:where(
+  :root[data-color-vision="custom"],
+  :root[data-color-vision="custom"][data-window-theme] .bg-slate-900:not([data-zone], [data-zone] *),
+  :root[data-color-vision="custom"][data-banner-theme] [data-zone="banner"]
+) {
   --color-emerald-200: color-mix(in oklab, var(--custom-success) 55%, white);
   --color-red-200: color-mix(in oklab, var(--custom-problem) 55%, white);
   --color-blue-100: color-mix(in oklab, var(--custom-info) 35%, white);
@@ -298,7 +358,45 @@
   --color-rose-950: color-mix(in oklab, var(--custom-problem) 20%, black);
 }
 
-:root:is([data-theme="light"], [data-theme="soft"])[data-color-vision="custom"] {
+/* The light themes' darker text shades for each color blind setting */
+:where(
+  :root[data-color-vision="red-green"]:is([data-theme="light"], [data-theme="soft"]),
+  :root[data-color-vision="red-green"]:is([data-window-theme="light"], [data-window-theme="soft"]) .bg-slate-900:not([data-zone], [data-zone] *),
+  :root[data-color-vision="red-green"]:is([data-banner-theme="light"], [data-banner-theme="soft"]) [data-zone="banner"]
+) {
+  --color-blue-100: oklch(39.8% 0.195 277.366);
+  --color-blue-300: oklch(45.7% 0.24 277.023);
+  --color-blue-400: oklch(51.1% 0.262 276.966);
+  --color-emerald-200: oklch(45% 0.085 224.283);
+  --color-emerald-300: oklch(52% 0.105 223.128);
+  --color-emerald-400: oklch(60.9% 0.126 221.723);
+  --color-amber-300: oklch(55.4% 0.135 66.442);
+  --color-amber-400: oklch(55.4% 0.135 66.442);
+  /* Darker red keeps it apart from the amber, which can't get lighter and stay readable on white */
+  --color-red-200: oklch(39.6% 0.141 25.723);
+  --color-red-300: oklch(44.4% 0.177 26.899);
+  --color-red-400: oklch(44.4% 0.177 26.899);
+  --color-emerald-950: oklch(91.7% 0.08 205.041);
+}
+
+:where(
+  :root[data-color-vision="blue-yellow"]:is([data-theme="light"], [data-theme="soft"]),
+  :root[data-color-vision="blue-yellow"]:is([data-window-theme="light"], [data-window-theme="soft"]) .bg-slate-900:not([data-zone], [data-zone] *),
+  :root[data-color-vision="blue-yellow"]:is([data-banner-theme="light"], [data-banner-theme="soft"]) [data-zone="banner"]
+) {
+  --color-emerald-200: oklch(45.3% 0.124 130.933);
+  --color-emerald-300: oklch(53.2% 0.157 131.589);
+  --color-emerald-400: oklch(53.2% 0.157 131.589);
+  --color-amber-300: oklch(51.8% 0.253 323.949);
+  --color-amber-400: oklch(51.8% 0.253 323.949);
+  --color-emerald-950: oklch(93.8% 0.127 124.321);
+}
+
+:where(
+  :root[data-color-vision="custom"]:is([data-theme="light"], [data-theme="soft"]),
+  :root[data-color-vision="custom"]:is([data-window-theme="light"], [data-window-theme="soft"]) .bg-slate-900:not([data-zone], [data-zone] *),
+  :root[data-color-vision="custom"]:is([data-banner-theme="light"], [data-banner-theme="soft"]) [data-zone="banner"]
+) {
   --color-emerald-200: color-mix(in oklab, var(--custom-success) 50%, black);
   --color-emerald-300: color-mix(in oklab, var(--custom-success) 65%, black);
   --color-emerald-400: color-mix(in oklab, var(--custom-success) 75%, black);

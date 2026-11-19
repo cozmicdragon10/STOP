@@ -975,7 +975,7 @@ export default function App() {
     <EmployeeLabelProvider employees={employees}>
     <div className="min-h-dvh bg-slate-950 text-slate-100 flex flex-col">
       {/* Top Header Navigation */}
-      <header className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 md:px-6 md:py-4 flex justify-between items-center gap-4">
+      <header data-zone="banner" className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 md:px-6 md:py-4 flex justify-between items-center gap-4">
         <div className="flex items-center gap-3 min-w-0">
           <button
             type="button"

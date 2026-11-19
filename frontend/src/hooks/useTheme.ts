@@ -26,6 +26,19 @@ export function applyTheme(theme: Theme) {
   document.documentElement.dataset.theme = theme;
 }
 
+// The windows (cards and panels) and the banner & tabs can each have their own theme. Until someone picks one, they
+// follow the background, so everyone's screen looks the same as before these settings existed.
+const WINDOW_THEME_KEY = 'stop-window-theme';
+const BANNER_THEME_KEY = 'stop-banner-theme';
+export const getSavedWindowTheme = () => savedChoice<Theme>(WINDOW_THEME_KEY, THEME_OPTIONS, getSavedTheme());
+export const getSavedBannerTheme = () => savedChoice<Theme>(BANNER_THEME_KEY, THEME_OPTIONS, getSavedTheme());
+export function applyWindowTheme(theme: Theme) {
+  document.documentElement.dataset.windowTheme = theme;
+}
+export function applyBannerTheme(theme: Theme) {
+  document.documentElement.dataset.bannerTheme = theme;
+}
+
 export type ColorVision = 'standard' | 'red-green' | 'blue-yellow' | 'custom';
 
 export const COLOR_VISION_OPTIONS: { value: ColorVision; label: string }[] = [
@@ -178,6 +191,26 @@ export function useTheme() {
       // Not saved (private window, blocked storage); the theme still applies for this visit
     }
   }, []);
+  const [windowTheme, setWindowThemeState] = useState<Theme>(getSavedWindowTheme);
+  const setWindowTheme = useCallback((next: Theme) => {
+    setWindowThemeState(next);
+    applyWindowTheme(next);
+    try {
+      localStorage.setItem(WINDOW_THEME_KEY, next);
+    } catch {
+      // Not saved (private window, blocked storage); the theme still applies for this visit
+    }
+  }, []);
+  const [bannerTheme, setBannerThemeState] = useState<Theme>(getSavedBannerTheme);
+  const setBannerTheme = useCallback((next: Theme) => {
+    setBannerThemeState(next);
+    applyBannerTheme(next);
+    try {
+      localStorage.setItem(BANNER_THEME_KEY, next);
+    } catch {
+      // Not saved (private window, blocked storage); the theme still applies for this visit
+    }
+  }, []);
   const [clientSide, setClientSideState] = useState<ClientSide>(getSavedClientSide);
   const setClientSide = useCallback((next: ClientSide) => {
     setClientSideState(next);
@@ -248,5 +281,5 @@ export function useTheme() {
       // Not saved (private window, blocked storage); the colors still apply for this visit
     }
   }, []);
-  return { theme, setTheme, colorVision, setColorVision, customColors, setCustomColors, fontSize, setFontSize, fontType, setFontType, tabsPosition, setTabsPosition, clientSide, setClientSide, clientTabsPosition, setClientTabsPosition };
+  return { theme, setTheme, windowTheme, setWindowTheme, bannerTheme, setBannerTheme, colorVision, setColorVision, customColors, setCustomColors, fontSize, setFontSize, fontType, setFontType, tabsPosition, setTabsPosition, clientSide, setClientSide, clientTabsPosition, setClientTabsPosition };
 }

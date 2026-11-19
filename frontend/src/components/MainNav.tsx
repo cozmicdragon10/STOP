@@ -25,7 +25,8 @@ export default function MainNav({ items, activeTab, onSelect, user, onLogout }: 
 
   return (
     <>
-      <nav aria-label="Main" className="fixed bottom-0 inset-x-0 tabs-top:sticky tabs-top:top-0 tabs-top:bottom-auto z-40 bg-slate-900 border-t tabs-top:border-t-0 tabs-top:border-b border-slate-800 flex">
+      {/* data-zone="banner": the tab bar and the phone Menu follow the Banner & Tabs theme setting */}
+      <nav aria-label="Main" data-zone="banner" className="fixed bottom-0 inset-x-0 tabs-top:sticky tabs-top:top-0 tabs-top:bottom-auto z-40 bg-slate-900 border-t tabs-top:border-t-0 tabs-top:border-b border-slate-800 flex">
         <BarTabs items={items} activeTab={activeTab} onSelect={select} className="[scrollbar-width:none]" />
         <button
           type="button"
@@ -45,6 +46,7 @@ export default function MainNav({ items, activeTab, onSelect, user, onLogout }: 
             role="dialog"
             aria-modal="true"
             aria-label="Menu"
+            data-zone="banner"
             onClick={e => e.stopPropagation()}
             className="w-full max-h-[85dvh] overflow-y-auto bg-slate-900 border-t border-slate-800 rounded-t-2xl p-4 space-y-4"
           >
