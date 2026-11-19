@@ -75,8 +75,12 @@ const SESSION_FEE_SQL = `CASE WHEN f.Type = 'Payment' AND f.RelatedTransactionId
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 
+// Discharge types a Business Administrator can pick; each becomes the client's program status (Inactive is a pause, not
+// a discharge). routes/clients.js and the frontend's utils/clients.ts keep the same list; test/sharedRules.test.js checks.
+const DISCHARGE_STATUSES = ['Completed', 'Deceased', 'Discharged Supervision', 'Program Failed', 'Revoked', 'Transferred', 'Terminated'];
+
 module.exports = {
-    INDIVIDUAL_SESSION_TYPES, GROUP_ATTENDANCE, NEEDS_OUR_INTAKE, BIP_CHECKIN_BLOCK, bipCheckInBlockMessage, ATTENDED_THIS_MONTH,
+    DISCHARGE_STATUSES, INDIVIDUAL_SESSION_TYPES, GROUP_ATTENDANCE, NEEDS_OUR_INTAKE, BIP_CHECKIN_BLOCK, bipCheckInBlockMessage, ATTENDED_THIS_MONTH,
     INDIVIDUAL_THIS_MONTH, ACTIVE_DEBT_LIMIT,
     MONTHLY_FEE_PHASES, FEE_PERIOD_MONTHS, FEE_ONCE_PER_PERIOD_PROGRAMS, FEE_ALREADY_CHARGED, ACTIVE_FEE_OVERRIDE, SESSION_FEE_SQL, YMD,
 };

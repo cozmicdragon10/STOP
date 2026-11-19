@@ -4,6 +4,9 @@ type ReportAccess = 'all' | 'admins' | 'business';
 export const REPORT_TABS: { id: string; label: string; access: ReportAccess }[] = [
   { id: 'groupIncome', label: 'Group Income Report', access: 'business' },
   { id: 'financialSummary', label: 'Financial Summary', access: 'business' },
+  { id: 'arAging', label: 'AR Aging', access: 'business' },
+  { id: 'census', label: 'Census', access: 'business' },
+  { id: 'outcomes', label: 'Discharge Outcomes', access: 'business' },
   { id: 'cashDeposits', label: 'Cash Deposits', access: 'all' },
   { id: 'poMonthly', label: 'Monthly PO Reports', access: 'admins' },
   { id: 'federalSo', label: 'Federal Clients by Group', access: 'admins' },

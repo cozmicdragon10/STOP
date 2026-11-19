@@ -1579,6 +1579,59 @@ export async function getFinancialSummary(from: string, to: string): Promise<Fin
     return jsonResponse(res, 'Failed to load the financial summary.');
 }
 
+// --- Director's reports (Business Administrators only); utils/directorReports.ts adds them up ---
+// One client who owes money today, with the balance split by how old the charges behind it are (bucket keys)
+export interface AgingClient {
+    clientid: number;
+    balance: Amount;
+    firstname: string;
+    lastname: string;
+    docnumber: string | null;
+    doctype: string | null;
+    programtype: string;
+    programstatus: string;
+    lastattended: string | null; // YYYY-MM-DD
+    lastpayment: string | null; // YYYY-MM-DD
+    [bucket: string]: Amount | string | null | number;
+}
+export interface AgingReport {
+    buckets: { key: string; label: string }[];
+    clients: AgingClient[];
+}
+export async function getArAging(): Promise<AgingReport> {
+    const res = await apiFetch(`${API_BASE}/reports/ar-aging`);
+    return jsonResponse(res, 'Failed to load the accounts receivable aging report.');
+}
+
+export interface CensusRow {
+    month: string; // YYYY-MM
+    programtype: string;
+    enrolled: number;
+    intakes: number;
+    discharged: number;
+    wentinactive: number;
+    seen: number;
+}
+export async function getCensus(from: string, to: string): Promise<CensusRow[]> {
+    const res = await apiFetch(`${API_BASE}/reports/census?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    return jsonResponse(res, 'Failed to load the census.');
+}
+
+export interface OutcomeRow {
+    month: string;
+    programtype: string;
+    type: string; // discharge type, e.g. Completed or Program Failed
+    subcategory: string; // '' when none
+    estimated: boolean; // no discharge record: dated by the client's last day attended
+    count: number;
+    totaldays: number; // days in the program, summed over the withdays discharges that have a start date
+    withdays: number;
+}
+export async function getDischargeOutcomes(from: string, to: string): Promise<OutcomeRow[]> {
+    const res = await apiFetch(`${API_BASE}/reports/discharge-outcomes?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    return jsonResponse(res, 'Failed to load discharge outcomes.');
+}
+
 // Bank deposit of one group session's cash
 export interface GroupDeposit {
     groupid: number;

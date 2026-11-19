@@ -5,10 +5,17 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { isMonthlyFeeClient, feePeriodMonths, FIRST_CHECKIN_MAX_OWED, checkInPaymentRule, minimumCheckInPayment, federalGroupFee } = require('../lib/attendance');
-const { bipCheckInBlockMessage } = require('../lib/sql');
+const { bipCheckInBlockMessage, DISCHARGE_STATUSES } = require('../lib/sql');
 const { POLY_VOUCHER_MAX_BY_PHASE } = require('../lib/poly');
 
 const frontend = (file) => import(pathToFileURL(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', file)).href);
+
+// The director's reports count these as discharges (routes/directorReports.js)
+test('discharge statuses match', async () => {
+    const { DISCHARGE_STATUSES: browser } = await frontend('clients.ts');
+    assert.ok(Array.isArray(DISCHARGE_STATUSES) && DISCHARGE_STATUSES.length > 0);
+    assert.deepEqual([...DISCHARGE_STATUSES].sort(), [...browser].sort());
+});
 
 test('first check-in of the month allows the same amount owed', async () => {
     const { FIRST_CHECKIN_MAX_OWED: browser } = await frontend('balance.ts');

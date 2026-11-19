@@ -46,6 +46,7 @@ app.use(require('./routes/financials'));
 app.use(require('./routes/callins'));
 app.use(require('./routes/polygraphs'));
 app.use(require('./routes/reports'));
+app.use(require('./routes/directorReports'));
 app.use(require('./routes/agentReports'));
 app.use(require('./routes/admin'));
 app.use(require('./routes/agents'));

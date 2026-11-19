@@ -88,6 +88,10 @@ describe('report tabs', () => {
     expect(currentReportFor('cashDeposits', 'Business Administrator')).toBe('cashDeposits');
     expect(currentReportFor('financialSummary', 'Business Administrator')).toBe('financialSummary');
     expect(currentReportFor('financialSummary', 'Office Admin')).toBe('cashDeposits');
+    for (const id of ['arAging', 'census', 'outcomes']) {
+      expect(currentReportFor(id, 'Business Administrator')).toBe(id);
+      expect(currentReportFor(id, 'Office Admin')).toBe('cashDeposits');
+    }
     expect(currentReportFor(null, 'Business Administrator')).toBe('groupIncome');
     expect(currentReportFor('deposit', 'Business Administrator')).toBe('groupIncome');
   });
