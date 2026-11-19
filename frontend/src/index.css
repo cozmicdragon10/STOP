@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* The Admin tab's Layout settings. By default the tab bars sit at the bottom and the client view opens on the right. */
+/* The Admin tab's Layout settings. By default the tab bars sit at the top and the client view opens on the right. */
 @custom-variant tabs-top (:root[data-tabs-position="top"] &);
 @custom-variant client-tabs-top (:root[data-client-tabs-position="top"] &);
 @custom-variant client-left (:root[data-client-side="left"] &);
@@ -128,6 +128,30 @@
   --color-sky-400: oklch(50% 0.134 242.749);
   --color-violet-300: oklch(49.1% 0.27 292.581);
   --color-rose-300: oklch(51.4% 0.222 16.935);
+
+  /* More pale text shades, darkened the same way (200 reads like 800, 300 like 700) */
+  --color-amber-200: oklch(47.3% 0.137 46.201);
+  --color-blue-200: oklch(42.4% 0.199 265.638);
+  --color-green-300: oklch(44.8% 0.119 151.328);
+  --color-green-400: oklch(52.7% 0.154 150.069);
+  --color-purple-300: oklch(49.6% 0.265 301.924);
+  --color-sky-200: oklch(44.3% 0.11 240.79);
+  --color-sky-300: oklch(50% 0.134 242.749);
+  --color-teal-300: oklch(51.1% 0.096 186.391);
+  --color-violet-100: oklch(38% 0.189 293.745);
+  --color-violet-200: oklch(43.2% 0.232 292.759);
+
+  /* Very dark shades used as tinted backgrounds and borders become light tints */
+  --color-rose-800: oklch(81% 0.117 11.638);
+  --color-rose-900: oklch(89.2% 0.058 10.001);
+  --color-rose-950: oklch(94.1% 0.03 12.58);
+  --color-emerald-950: oklch(90.5% 0.093 164.15);
+  --color-blue-950: oklch(93.2% 0.032 255.585);
+}
+
+/* Dark text on bright badges (bg-amber-500 text-slate-950) keeps the original dark slate */
+:root[data-theme="light"] .text-slate-950 {
+  color: oklch(12.9% 0.042 264.695);
 }
 
 /*
@@ -136,10 +160,11 @@
 */
 :root[data-theme="light"] :is(.text-white, .hover\:text-white:hover):not(
   [class~="bg-blue-500"], [class~="bg-blue-600"],
-  [class~="bg-red-500"], [class~="bg-red-600"],
-  [class~="bg-emerald-500"], [class~="bg-emerald-600"],
+  [class~="bg-red-500"], [class~="bg-red-600"], [class~="bg-red-700"], [class~="bg-red-800"],
+  [class~="bg-emerald-500"], [class~="bg-emerald-600"], [class~="bg-emerald-700"],
+  [class~="bg-green-600"], [class~="bg-green-700"],
   [class~="bg-amber-500"], [class~="bg-amber-600"],
-  [class~="bg-rose-500"], [class~="bg-rose-600"],
+  [class~="bg-rose-500"], [class~="bg-rose-600"], [class~="bg-rose-700"],
   [class~="bg-violet-500"], [class~="bg-violet-600"]
 ) {
   color: var(--color-slate-100);
@@ -198,6 +223,7 @@
   --color-red-200: oklch(39.6% 0.141 25.723);
   --color-red-300: oklch(44.4% 0.177 26.899);
   --color-red-400: oklch(44.4% 0.177 26.899);
+  --color-emerald-950: oklch(91.7% 0.08 205.041);
 }
 
 :root[data-theme="light"][data-color-vision="blue-yellow"] {
@@ -206,6 +232,7 @@
   --color-emerald-400: oklch(53.2% 0.157 131.589);
   --color-amber-300: oklch(51.8% 0.253 323.949);
   --color-amber-400: oklch(51.8% 0.253 323.949);
+  --color-emerald-950: oklch(93.8% 0.127 124.321);
 }
 
 /*
@@ -254,4 +281,8 @@
   --color-amber-300: color-mix(in oklab, var(--custom-warning) 70%, black);
   --color-amber-400: color-mix(in oklab, var(--custom-warning) 70%, black);
   --color-rose-300: color-mix(in oklab, var(--custom-problem) 65%, black);
+  --color-emerald-950: color-mix(in oklab, var(--custom-success) 25%, white);
+  --color-rose-800: color-mix(in oklab, var(--custom-problem) 50%, white);
+  --color-rose-900: color-mix(in oklab, var(--custom-problem) 25%, white);
+  --color-rose-950: color-mix(in oklab, var(--custom-problem) 12%, white);
 }
