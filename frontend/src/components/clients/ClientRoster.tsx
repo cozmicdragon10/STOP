@@ -12,7 +12,7 @@ import ColumnPicker from '../ColumnPicker';
 import { useColumnLayout } from '../../hooks/useColumnLayout';
 import {
   PROGRAM_STATUSES, EDITABLE_PROGRAM_STATUSES, PRETRIAL_PROGRAM_TYPES, SO_PROGRAM_TYPES, STATE_FEE_PROGRAM_TYPES, isWholeNumber, formatPhase,
-  DEFAULT_CLIENT_FILTERS, SO_ATTENDANCE_LIMIT_MONTHS, isAttendanceOverdue, isIndividualGroup, GROUP_TYPES_BY_PROGRAM, idText, ID_TYPES } from '../../utils/clients';
+  DEFAULT_CLIENT_FILTERS, SO_ATTENDANCE_LIMIT_MONTHS, isAttendanceOverdue, isIndividualGroup, GROUP_TYPES_BY_PROGRAM, idText, ID_TYPES, REFERRAL_TYPES } from '../../utils/clients';
 import type { ClientFilters } from '../../utils/clients';
 import type { ClientOwnership } from '../../utils/counselor';
 import type { CoveredClient } from '../../api';
@@ -53,7 +53,7 @@ interface Props {
 // New client form state. Program status and program type start at the most common values.
 // Start date defaults to today's local date, computed each time the form is reset.
 const getEmptyNewClient = () => ({
-  firstname: '', middlename: '', lastname: '', doctype: '', docnumber: '', supervisingagent: '',
+  firstname: '', middlename: '', lastname: '', doctype: '', docnumber: '', referredbytype: '', referredby: '', supervisingagent: '',
   programstartdate: new Date().toLocaleDateString('en-CA'),
   // Program type starts blank and must be chosen; phase and treatment fee are filled in from it
   programstatus: 'Active', phase: '', programtype: '', groupid: '', individualgroupid: '',
@@ -470,6 +470,17 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                   {ID_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
                 <input type="text" value={newClient.docnumber} onChange={e => setNewClient({ ...newClient, docnumber: e.target.value })} aria-label="ID # number" className="w-full min-w-0 bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
+              </div>
+            </div>
+            {/* Referred By: who referred them (Criminal Court, DHS, ...) and the details */}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Referred By</label>
+              <div className="flex gap-2">
+                <select value={newClient.referredbytype} onChange={e => setNewClient({ ...newClient, referredbytype: e.target.value })} aria-label="Referred by" className="w-36 shrink-0 bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm">
+                  <option value="">Type</option>
+                  {REFERRAL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <input type="text" value={newClient.referredby} onChange={e => setNewClient({ ...newClient, referredby: e.target.value })} aria-label="Referred by details" className="w-full min-w-0 bg-slate-900 border border-slate-700 rounded p-2 text-white text-sm" />
               </div>
             </div>
             <div>

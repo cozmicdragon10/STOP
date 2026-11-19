@@ -9,4 +9,12 @@ const idText = (client) => {
     return client.doctype ? `${client.doctype} ${number}` : number;
 };
 
-module.exports = { ID_TYPES, idText };
+// Who referred the client (Clients.ReferredByType), with details typed beside it (Clients.ReferredBy). Mirrors
+// frontend utils/clients.ts REFERRAL_TYPES.
+const REFERRAL_TYPES = ['Criminal Court', 'DHS', 'Tribal', 'Self'];
+
+// Referred By as shown: "Criminal Court - Judge Smith", "Self", or just the details
+const referredByText = (client) =>
+    [String(client?.referredbytype ?? '').trim(), String(client?.referredby ?? '').trim()].filter(Boolean).join(' - ');
+
+module.exports = { ID_TYPES, idText, REFERRAL_TYPES, referredByText };

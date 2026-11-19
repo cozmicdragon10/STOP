@@ -8,7 +8,14 @@ const row = (changes = {}) => ({
     programstartdate: new Date(2026, 0, 5), dateofbirth: new Date(1990, 0, 15), sex: 'Male', race: 'White',
     address: '1 Main St', city: 'Tulsa', county: 'Tulsa', state: 'OK', zip: '74103',
     mainphone: '555-0100', altphone: null, emergencycontact: null, emergencycontactphone: null, comments: null,
+    referredbytype: null, referredby: null,
     ...changes,
+});
+
+test('referred by is logged as one field, its kind and details together', () => {
+    assert.deepEqual(clientInfoChanges(row(), row({ referredbytype: 'Criminal Court', referredby: 'Judge Smith' })),
+        [['Referred By', '', 'Criminal Court - Judge Smith']]);
+    assert.deepEqual(clientInfoChanges(row({ referredbytype: 'DHS' }), row({ referredbytype: 'Self' })), [['Referred By', 'DHS', 'Self']]);
 });
 
 test('a middle name change is logged as just the middle name', () => {
@@ -26,7 +33,7 @@ test('every Edit Info field is compared, with dates as MM/DD/YYYY', () => {
         phase: 'Phase 2 - Monthly', programstartdate: new Date(2026, 1, 1), dateofbirth: new Date(1991, 2, 3),
         sex: 'Female', race: 'Other', address: '2 Oak Ave', city: 'OKC', county: 'Oklahoma', state: 'TX', zip: '73102',
         mainphone: '555-0101', altphone: '555-0102', emergencycontact: 'Jane', emergencycontactphone: '555-0103', comments: 'Note',
-        firstname: 'Jon', middlename: 'Paul', lastname: 'Smyth',
+        firstname: 'Jon', middlename: 'Paul', lastname: 'Smyth', referredbytype: 'Tribal', referredby: 'Cherokee Nation',
     });
     const changes = clientInfoChanges(row(), after);
     assert.deepEqual(changes.map(c => c[0]), CLIENT_INFO_FIELDS.map(f => f[0]));

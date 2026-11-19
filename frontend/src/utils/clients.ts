@@ -164,6 +164,12 @@ export const isIndividualGroup = (groupProgram?: string | null) => (groupProgram
 // else the Admin Individual price. Mirrors the batch check-in in backend/routes/attendance.js.
 // A client's ID # (docnumber) isn't always a DOC number; doctype says which kind it is. Mirrors backend lib/clientId.js.
 export const ID_TYPES = ['DOC', 'PACTS', 'Case #', 'DHS', 'OCS'];
+
+// Who referred the client (referredbytype), with details typed beside it (referredby). Mirrors backend lib/clientId.js.
+export const REFERRAL_TYPES = ['Criminal Court', 'DHS', 'Tribal', 'Self'];
+// Referred By as shown: "Criminal Court - Judge Smith", "Self", or just the details
+export const referredByText = (c: { referredbytype?: string | null; referredby?: string | null } | null | undefined) =>
+  [String(c?.referredbytype ?? '').trim(), String(c?.referredby ?? '').trim()].filter(Boolean).join(' - ');
 // The ID # as shown, with its type in front when set: "PACTS 1423371 PB", "DOC 581422", or just the number
 export const idText = (c: { docnumber?: string | null; doctype?: string | null } | null | undefined) => {
   const number = String(c?.docnumber ?? '').trim();

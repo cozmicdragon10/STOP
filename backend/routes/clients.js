@@ -1,7 +1,7 @@
 const express = require('express');
 const { effectiveRole } = require('../lib/roles');
 const { todayLocal } = require('../lib/dates');
-const { ID_TYPES, idText } = require('../lib/clientId');
+const { ID_TYPES, idText, REFERRAL_TYPES } = require('../lib/clientId');
 const { buildDischargeSummaryPdf } = require('../dischargeSummary');
 const { logAction, pool } = require('../db');
 const { activeRoleFor } = require('../lib/access');
@@ -847,7 +847,12 @@ const updateClientInfo = async (req, res) => {
         const updatedBy = req.user?.employeeemail || req.body.updatedBy;
         // Columns the UPDATE sets outright (a blank clears them): only changed when the request sends them
         const sent = ['middlename', 'programstartdate', 'groupid', 'address', 'city', 'county', 'state', 'zip', 'mainphone', 'altphone',
-            'emergencycontact', 'emergencycontactphone', 'comments', 'race', 'dateofbirth', 'sex'].filter(f => req.body[f] !== undefined);
+            'emergencycontact', 'emergencycontactphone', 'comments', 'race', 'dateofbirth', 'sex', 'referredbytype', 'referredby']
+            .filter(f => req.body[f] !== undefined);
+        // Referred By: the kind of referral must be one of the list (blank clears it); the details beside it are free text
+        if (req.body.referredbytype && !REFERRAL_TYPES.includes(req.body.referredbytype)) {
+            return res.status(400).json({ error: `Referred By must be one of: ${REFERRAL_TYPES.join(', ')}.` });
+        }
         // The ID #'s kind (DOC, PACTS, ...): changed only when sent; blank clears it
         if (doctype !== undefined && doctype !== null && doctype !== '' && !ID_TYPES.includes(doctype)) {
             return res.status(400).json({ error: `ID # type must be one of: ${ID_TYPES.join(', ')}.` });
@@ -995,7 +1000,9 @@ const updateClientInfo = async (req, res) => {
                     THEN (CASE WHEN $46::boolean THEN $47::numeric ELSE IndividualCopay END) ELSE NULL END,
                 PolyCopay = CASE WHEN COALESCE($23, ProgramType) = ANY($42::text[])
                     THEN (CASE WHEN $48::boolean THEN $49::numeric ELSE PolyCopay END) ELSE NULL END,
-                DocType = CASE WHEN $43::boolean THEN $44::text ELSE DocType END
+                DocType = CASE WHEN $43::boolean THEN $44::text ELSE DocType END,
+                ReferredByType = CASE WHEN 'referredbytype' = ANY($45::text[]) THEN $50 ELSE ReferredByType END,
+                ReferredBy = CASE WHEN 'referredby' = ANY($45::text[]) THEN $51 ELSE ReferredBy END
             WHERE ClientId = $24`,
             [
                 firstname || null, middlename || null, lastname || null, docnumber || null, supervisingagent || null,
@@ -1019,6 +1026,7 @@ const updateClientInfo = async (req, res) => {
                 sent,
                 copays.individualcopay.sent, copays.individualcopay.amount,
                 copays.polycopay.sent, copays.polycopay.amount,
+                req.body.referredbytype || null, String(req.body.referredby ?? '').trim() || null,
             ]
         );
 
@@ -1123,10 +1131,14 @@ router.post('/api/clients', async (req, res) => {
             programstartdate, programstatus, phase, groupid,
             address, city, county, state, zip,
             mainphone, altphone, emergencycontact, emergencycontactphone,
-            comments, programtype, treatmentfee, vouchers, pretrial, createdBy, individualgroupid, doctype
+            comments, programtype, treatmentfee, vouchers, pretrial, createdBy, individualgroupid, doctype,
+            referredbytype, referredby
         } = req.body;
         if (doctype && !ID_TYPES.includes(doctype)) {
             return res.status(400).json({ error: `ID # type must be one of: ${ID_TYPES.join(', ')}.` });
+        }
+        if (referredbytype && !REFERRAL_TYPES.includes(referredbytype)) {
+            return res.status(400).json({ error: `Referred By must be one of: ${REFERRAL_TYPES.join(', ')}.` });
         }
         const individualGroup = await individualGroupFrom(individualgroupid);
         if (individualGroup.error) return res.status(400).json({ error: individualGroup.error });
@@ -1155,13 +1167,13 @@ router.post('/api/clients', async (req, res) => {
                 ProgramStartDate, ProgramStatus, Phase, GroupId,
                 Address, City, County, State, Zip,
                 MainPhone, AltPhone, EmergencyContact, EmergencyContactPhone,
-                Comments, ProgramType, TreatmentFee, Vouchers, Pretrial, IndividualGroupId, DocType
+                Comments, ProgramType, TreatmentFee, Vouchers, Pretrial, IndividualGroupId, DocType, ReferredByType, ReferredBy
             ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8, $9,
                 $10, $11, $12, $13, $14,
                 $15, $16, $17, $18,
-                $19, COALESCE($20, 'State SO'), COALESCE($21, 0), COALESCE($22, 0), $23, $24, $25
+                $19, COALESCE($20, 'State SO'), COALESCE($21, 0), COALESCE($22, 0), $23, $24, $25, $26, $27
             ) RETURNING ClientId`,
             [
                 firstname.trim(), middlename?.trim() || null, lastname.trim(), docnumber?.trim() || null, supervisingagent?.trim() || null,
@@ -1171,7 +1183,8 @@ router.post('/api/clients', async (req, res) => {
                 comments || null, programtype || null,
                 treatmentfee !== undefined && treatmentfee !== null && treatmentfee !== '' ? Number(treatmentfee) : null,
                 vouchers !== undefined && vouchers !== null && vouchers !== '' ? Number(vouchers) : null,
-                isPretrial, individualGroupId, doctype || null
+                isPretrial, individualGroupId, doctype || null,
+                referredbytype || null, String(referredby ?? '').trim() || null,
             ]
         );
         await logClientChange(pool, {

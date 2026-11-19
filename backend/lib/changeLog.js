@@ -1,4 +1,5 @@
 const { pool } = require('../db');
+const { referredByText } = require('./clientId');
 
 // Every change to a client's account goes on its change log (the Change Log tab): information edits, money, attendance,
 // polygraphs, case notes, attachments and call-ins. Pass the caller's transaction client as db so the entry is saved (or
@@ -54,9 +55,10 @@ const CLIENT_INFO_FIELDS = [
     ['Emergency Contact', c => c.emergencycontact],
     ['Emergency Contact Phone', c => c.emergencycontactphone],
     ['Comments', c => c.comments],
+    ['Referred By', c => referredByText(c)],
 ];
 // Columns clientInfoChanges reads, for the SELECTs before and after an edit
-const CLIENT_INFO_COLUMNS = 'FirstName, MiddleName, LastName, Phase, ProgramStartDate, DateOfBirth, Sex, Race, Address, City, County, State, Zip, MainPhone, AltPhone, EmergencyContact, EmergencyContactPhone, Comments';
+const CLIENT_INFO_COLUMNS = 'FirstName, MiddleName, LastName, Phase, ProgramStartDate, DateOfBirth, Sex, Race, Address, City, County, State, Zip, MainPhone, AltPhone, EmergencyContact, EmergencyContactPhone, Comments, ReferredByType, ReferredBy';
 
 // [change type, old text, new text] for each Edit Info field that differs between two client rows ('' when blank)
 const clientInfoChanges = (before, after) => CLIENT_INFO_FIELDS

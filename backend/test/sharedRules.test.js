@@ -17,6 +17,12 @@ test('discharge statuses match', async () => {
     assert.deepEqual([...DISCHARGE_STATUSES].sort(), [...browser].sort());
 });
 
+// Referred By choices on the client's information (Clients.ReferredByType)
+test('referred by choices match', async () => {
+    const { REFERRAL_TYPES: browser } = await frontend('clients.ts');
+    assert.deepEqual(require('../lib/clientId').REFERRAL_TYPES, browser);
+});
+
 test('first check-in of the month allows the same amount owed', async () => {
     const { FIRST_CHECKIN_MAX_OWED: browser } = await frontend('balance.ts');
     assert.equal(FIRST_CHECKIN_MAX_OWED, browser);

@@ -115,6 +115,9 @@ export interface ClientColumns {
     lastname: string;
     docnumber: string | null;
     doctype?: string | null;
+    // Who referred the client (utils/clients.ts REFERRAL_TYPES) and the details typed beside it
+    referredbytype?: string | null;
+    referredby?: string | null;
     supervisingagent: string | null;
     programstartdate: string;
     lastdateattended: string | null;

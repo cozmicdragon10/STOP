@@ -43,6 +43,7 @@ const changedFields = (expected, current) => {
 
 const CLIENT_FIELD_LABELS = {
     firstname: 'First Name', middlename: 'Middle Name', lastname: 'Last Name', doctype: 'ID # type', docnumber: 'ID #',
+    referredbytype: 'Referred By', referredby: 'Referred By details',
     dateofbirth: 'Date of Birth', sex: 'Sex', race: 'Race', supervisingagent: 'Supervising Agent', programstatus: 'Program Status',
     programstartdate: 'Program Start Date', address: 'Address', city: 'City', county: 'County', state: 'State', zip: 'Zip',
     mainphone: 'Main Phone', altphone: 'Alt Phone', emergencycontact: 'Emergency Contact', emergencycontactphone: 'Emergency Contact Phone',

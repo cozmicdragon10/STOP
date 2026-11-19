@@ -8,7 +8,7 @@ import AgentPicker from '../agents/AgentPicker';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import {
   BUS_PASS_MAX, CHAPERON_PHASES, CLIENT_FIELD_OPTIONS, EDITABLE_PROGRAM_STATUSES, FEDERAL_PROGRAM_TYPES, GROUP_TYPES_BY_PROGRAM, POLY_PROGRAM_TYPES, PRETRIAL_PROGRAM_TYPES, SO_ATTENDANCE_LIMIT_MONTHS, SO_PROGRAM_TYPES,
-  STATE_FEE_PROGRAM_TYPES, copayFieldsFor, copayText, formatPhase, isAttendanceOverdue, isIndividualGroup, isWholeNumber, idText, ID_TYPES } from '../../utils/clients';
+  STATE_FEE_PROGRAM_TYPES, copayFieldsFor, copayText, formatPhase, isAttendanceOverdue, isIndividualGroup, isWholeNumber, idText, ID_TYPES, REFERRAL_TYPES, referredByText } from '../../utils/clients';
 import { SO_PHASES, SO_TREATMENT_FEES, bipTreatmentFee } from '../../utils/soPhases';
 import { formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
 import { ageFromBirthDate, toLocalDay } from '../../utils/dates';
@@ -60,6 +60,7 @@ const PERSONAL_FIELDS = [
   { label: 'Sex', field: 'sex' },
   { label: 'Race', field: 'race' },
   { label: 'Supervising Agent', field: 'supervisingagent' },
+  { label: 'Referred By', field: 'referredby' },
   { label: 'Program Status', field: 'programstatus' },
   { label: 'Program Start Date', field: 'programstartdate' },
   { label: 'Last Date Attended', field: 'lastdateattended' },
@@ -263,6 +264,15 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                   </select>
                   <input type="text" value={form.docnumber || ''} onChange={e => setField('docnumber', e.target.value)} aria-label="ID # number" className={`${inputClass} flex-1 min-w-0`} />
                 </div>
+              ) : editing && field === 'referredby' ? (
+                // Who referred them (Criminal Court, DHS, ...), then the details typed by hand
+                <div className="flex gap-2">
+                  <select value={form.referredbytype || ''} onChange={e => setField('referredbytype', e.target.value)} aria-label="Referred by" className={`${inputClass.replace('w-full ', '')} w-36 shrink-0`}>
+                    <option value="">Type</option>
+                    {REFERRAL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <input type="text" value={form.referredby || ''} onChange={e => setField('referredby', e.target.value)} aria-label="Referred by details" className={`${inputClass} flex-1 min-w-0`} />
+                </div>
               ) : editing && field === 'supervisingagent' ? (
                 <AgentPicker value={form.supervisingagent || ''} onChange={v => setField('supervisingagent', v)} agents={directoryAgents} className={inputClass} />
               ) : editing ? (
@@ -291,6 +301,8 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                         : '—')
                     : field === 'docnumber'
                     ? (idText(client) || '—')
+                    : field === 'referredby'
+                    ? (referredByText(client) || '—')
                     : isDateField(field)
                     ? (client[field] ? new Date(client[field]).toLocaleDateString() : '—')
                     : (client[field] || '—')}
