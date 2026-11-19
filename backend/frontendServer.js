@@ -6,6 +6,7 @@
 // current.txt at it; deploy/rollback.ps1 points it back). Without one, frontend/dist (from `npm run build`) is served.
 // Builds are never renamed or overwritten while being served.
 const express = require('express');
+const compression = require('compression');
 const fs = require('fs');
 const path = require('path');
 
@@ -32,6 +33,9 @@ const frontendApp = (dist, api) => {
     const app = express();
     app.disable('x-powered-by');
     if (api) app.use((req, res, next) => (req.path.startsWith('/api/') ? api(req, res, next) : next()));
+    // Compress the site's own files (the app code shrinks about 4x). Mounted after the /api hand-off, so API responses
+    // are sent exactly as before.
+    app.use(compression());
     // Built files have a content hash in their names, so they can be cached for good
     app.use('/assets', express.static(path.join(dist, 'assets'), { immutable: true, maxAge: '365d', fallthrough: false }));
     // Everything else, index.html above all, is checked on every load so an update reaches everyone on their next reload

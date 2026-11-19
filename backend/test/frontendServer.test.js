@@ -59,3 +59,25 @@ test('nothing to serve gives null', () => {
     const l = layout({});
     assert.equal(currentBuild(l.site, l.dist), null);
 });
+
+test('site files are sent compressed; API responses are not', async () => {
+    const http = require('http');
+    const express = require('express');
+    const { frontendApp } = require('../frontendServer');
+    const { dist } = layout({ fallback: true });
+    fs.mkdirSync(path.join(dist, 'assets'));
+    fs.writeFileSync(path.join(dist, 'assets', 'app.js'), 'console.log("hello");\n'.repeat(500));
+    const api = express();
+    api.get('/api/big', (req, res) => res.json({ text: 'x'.repeat(5000) }));
+    const server = http.createServer(frontendApp(dist, api)).listen(0);
+    const base = `http://localhost:${server.address().port}`;
+    try {
+        const js = await fetch(`${base}/assets/app.js`, { headers: { 'Accept-Encoding': 'gzip' } });
+        assert.equal(js.headers.get('content-encoding'), 'gzip');
+        assert.equal(await js.text(), 'console.log("hello");\n'.repeat(500));
+        const apiRes = await fetch(`${base}/api/big`, { headers: { 'Accept-Encoding': 'gzip' } });
+        assert.equal(apiRes.headers.get('content-encoding'), null);
+    } finally {
+        server.close();
+    }
+});
