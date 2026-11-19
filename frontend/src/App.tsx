@@ -1789,7 +1789,6 @@ export default function App() {
             clients={clients}
             employees={employees}
             role={role}
-            userEmail={user.employeeemail}
             onSuccess={setSuccessMsg}
             onError={setError}
             onGroupsChanged={loadDashboardData}

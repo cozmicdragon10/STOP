@@ -796,15 +796,6 @@ export async function deleteGroup(groupId: number) {
     return body as { success: true; message: string };
 }
 
-export async function assignClientToGroup(groupId: number, clientId: number, assignedBy: string): Promise<{ success: true }> {
-    const res = await apiFetch(`${API_BASE}/groups/${groupId}/assign`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId, assignedBy }),
-    });
-    return jsonResponse(res, 'Could not assign the client.');
-}
-
 export interface BatchAttendanceEntry {
     client: number;
     groupFee: number;

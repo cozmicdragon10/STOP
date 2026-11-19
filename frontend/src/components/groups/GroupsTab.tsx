@@ -1,11 +1,11 @@
 import { Fragment, useRef, useState } from 'react';
 import { SlidersHorizontal, X } from 'lucide-react';
-import { EditConflictError, assignClientToGroup, createGroup, deleteGroup, getGroupClients, getGroups, updateGroup } from '../../api';
+import { EditConflictError, createGroup, deleteGroup, getGroupClients, getGroups, updateGroup } from '../../api';
 import ScheduleSelect from '../ScheduleSelect';
 import { BY_APPOINTMENT } from '../../utils/schedule';
 import { DEFAULT_GROUP_FILTERS } from '../../utils/filters';
 import { formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
-import { OBSERVER_ROLES, POLY_GROUP_TYPE, allowsByAppointment, clientFitsGroup, formatPhase, groupLeadLabel, isChaperonGroup, isDrugTestGroup, isPolyGroup, idText } from '../../utils/clients';
+import { OBSERVER_ROLES, POLY_GROUP_TYPE, allowsByAppointment, formatPhase, groupLeadLabel, isChaperonGroup, isDrugTestGroup, isPolyGroup, idText } from '../../utils/clients';
 import { toLocalDay } from '../../utils/dates';
 
 interface DirectoryGroup {
@@ -51,7 +51,6 @@ interface Props {
   // Supplies the counselor choices
   employees: Employee[];
   role: string;
-  userEmail: string;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
   // Reload groups and clients after a group is created, changed, deleted, or gets a client
@@ -95,9 +94,9 @@ const groupSection = (g: { programtype?: string | null }): GroupSection => {
 
 const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 
-// The Group Directory: filters, sorting, the New Group form, and the Roster / Assign Clients / Group Details panel
+// The Group Directory: filters, sorting, the New Group form, and the Roster / Group Details panel
 // that opens under a group's row
-export default function GroupsTab({ groups, clients, employees, role, userEmail, onSuccess, onError, onGroupsChanged, onOpenClient }: Props) {
+export default function GroupsTab({ groups, clients, employees, role, onSuccess, onError, onGroupsChanged, onOpenClient }: Props) {
   // Group details (and new groups) are changed by Business Administrators and Office Admins; counselors see them read-only
   const canEditGroupDetails = role === 'Business Administrator' || role === 'Office Admin';
   const canDeleteGroups = role === 'Business Administrator';
@@ -107,8 +106,7 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
   const [groupRoster, setGroupRoster] = useState<RosterClient[]>([]);
   // The Roster lists only active clients, matching the Assigned Clients count in the directory
   const activeRoster = groupRoster.filter(c => c.programstatus === 'Active');
-  const [assignClientSearch, setAssignClientSearch] = useState('');
-  const [groupTab, setGroupTab] = useState<'roster' | 'assign' | 'schedule'>('roster');
+  const [groupTab, setGroupTab] = useState<'roster' | 'schedule'>('roster');
   const [editGroupName, setEditGroupName] = useState('');
   const [editCounselor, setEditCounselor] = useState('');
   const [editSchedule, setEditSchedule] = useState('');
@@ -281,7 +279,6 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
       setSelectedGroupDetail(null);
       setGroupRoster([]);
       setGroupTab('roster');
-      setAssignClientSearch('');
       onGroupsChanged();
     } catch (err) {
       onError(errorText(err, 'Error deleting group.'));
@@ -290,27 +287,13 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
     }
   };
 
-  const handleAssignClient = async (clientId: number) => {
-    if (!selectedGroupDetail) return;
-    try {
-      await assignClientToGroup(selectedGroupDetail.groupid, clientId, userEmail);
-      await loadRoster(selectedGroupDetail.groupid);
-      setAssignClientSearch('');
-      onSuccess('Client reassigned to group successfully!');
-      onGroupsChanged();
-    } catch (err) {
-      onError(errorText(err, 'Could not assign the client.'));
-    }
-  };
-
-  // Roster, Assign Clients, and Group Details for the open group. Shown under the group's row.
+  // Roster and Group Details for the open group. Shown under the group's row.
   const renderGroupDetailPanel = () => selectedGroupDetail && (
     <div ref={groupDetailRef} className="p-4 md:p-6 space-y-4 text-left scroll-mt-4">
       <div className="flex flex-wrap justify-between items-center gap-3 border-b border-slate-800 pb-4">
         <h3 className="text-lg font-bold text-white">Managing: {selectedGroupDetail.groupname}</h3>
         <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800">
           <button onClick={() => setGroupTab('roster')} className={`px-3 py-1 rounded text-xs font-semibold ${groupTab === 'roster' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Roster</button>
-          <button onClick={() => setGroupTab('assign')} className={`px-3 py-1 rounded text-xs font-semibold ${groupTab === 'assign' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Assign Clients</button>
           <button onClick={() => setGroupTab('schedule')} className={`px-3 py-1 rounded text-xs font-semibold ${groupTab === 'schedule' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Group Details</button>
         </div>
         <div className="flex items-center gap-2">
@@ -358,51 +341,6 @@ export default function GroupsTab({ groups, clients, employees, role, userEmail,
               </table>
             </div>
           )}
-        </div>
-      )}
-
-      {groupTab === 'assign' && (
-        <div className="space-y-3">
-          <div className="flex flex-wrap justify-between items-center gap-2">
-            <p className="text-xs text-slate-400 uppercase font-semibold">Assign Client to this Group</p>
-            <input
-              type="search"
-              value={assignClientSearch}
-              onChange={(e) => setAssignClientSearch(e.target.value)}
-              placeholder="Search client name or ID #..."
-              className="bg-slate-950 border border-slate-700 rounded px-3 py-1.5 text-white text-xs w-64 max-w-full"
-            />
-          </div>
-          {(() => {
-            const assignedClientIds = new Set(groupRoster.map(c => c.clientid));
-            // Active clients whose program fits the group (BIP to BIP groups, SO to SO groups) and who aren't in it yet
-            const unassignedClients = clients.filter(c => !assignedClientIds.has(c.clientid)
-              && c.programstatus === 'Active'
-              && clientFitsGroup(c.programtype, selectedGroupDetail.programtype));
-            const searchTerm = assignClientSearch.trim().toLowerCase();
-            const filteredClients = searchTerm
-              ? unassignedClients.filter(c => [
-                  c.firstname, c.lastname, `${c.firstname} ${c.lastname}`, `${c.lastname}, ${c.firstname}`, idText(c)
-                ].some(v => String(v ?? '').toLowerCase().includes(searchTerm)))
-              : unassignedClients;
-
-            return (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4">
-                {filteredClients.length > 0 ? (
-                  filteredClients.map(c => (
-                    <div key={c.clientid} className="bg-slate-950 border border-slate-800 p-3 rounded-lg flex justify-between items-center gap-2 text-xs">
-                      <span>{c.lastname}, {c.firstname}{c.docnumber ? ` (${idText(c)})` : ''}</span>
-                      <button onClick={() => handleAssignClient(c.clientid)} className="bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded">Assign</button>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-xs text-slate-500 italic md:col-span-2">
-                    {searchTerm ? 'No clients match your search.' : `No other active${selectedGroupDetail.programtype && GROUP_SECTIONS.find(s => s.key === groupSection(selectedGroupDetail))!.clientProgram ? ` ${GROUP_SECTIONS.find(s => s.key === groupSection(selectedGroupDetail))!.clientProgram}` : ''} clients to assign.`}
-                  </p>
-                )}
-              </div>
-            );
-          })()}
         </div>
       )}
 
