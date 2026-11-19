@@ -4,12 +4,12 @@ export type Theme = 'dark' | 'light';
 
 const STORAGE_KEY = 'stop-theme';
 
-// The saved choice for this browser; dark is the default
+// The saved choice for this browser; light is the default
 export function getSavedTheme(): Theme {
   try {
-    return localStorage.getItem(STORAGE_KEY) === 'light' ? 'light' : 'dark';
+    return localStorage.getItem(STORAGE_KEY) === 'dark' ? 'dark' : 'light';
   } catch {
-    return 'dark';
+    return 'light';
   }
 }
 
@@ -129,8 +129,8 @@ export type TabsPosition = (typeof TABS_POSITION_OPTIONS)[number]['value'];
 
 const TABS_POSITION_KEY = 'stop-tabs-position';
 
-// The saved choice for this browser; bottom is the default
-export const getSavedTabsPosition = () => savedChoice<TabsPosition>(TABS_POSITION_KEY, TABS_POSITION_OPTIONS, 'bottom');
+// The saved choice for this browser; top is the default
+export const getSavedTabsPosition = () => savedChoice<TabsPosition>(TABS_POSITION_KEY, TABS_POSITION_OPTIONS, 'top');
 
 // index.css and the tabs-top: classes move the tab bars when <html data-tabs-position="top"> is set
 export function applyTabsPosition(tabsPosition: TabsPosition) {
@@ -147,9 +147,9 @@ export type ClientSide = (typeof CLIENT_SIDE_OPTIONS)[number]['value'];
 const CLIENT_SIDE_KEY = 'stop-client-side';
 const CLIENT_TABS_POSITION_KEY = 'stop-client-tabs-position';
 
-// The saved choices for this browser; the client view opens on the right with its tabs at the bottom by default
+// The saved choices for this browser; the client view opens on the right with its tabs at the top by default
 export const getSavedClientSide = () => savedChoice<ClientSide>(CLIENT_SIDE_KEY, CLIENT_SIDE_OPTIONS, 'right');
-export const getSavedClientTabsPosition = () => savedChoice<TabsPosition>(CLIENT_TABS_POSITION_KEY, TABS_POSITION_OPTIONS, 'bottom');
+export const getSavedClientTabsPosition = () => savedChoice<TabsPosition>(CLIENT_TABS_POSITION_KEY, TABS_POSITION_OPTIONS, 'top');
 
 // The client-left:, client-full:, and client-tabs-top: classes change the client view when these are set on <html>
 export function applyClientSide(clientSide: ClientSide) {
