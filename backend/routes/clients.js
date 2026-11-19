@@ -14,6 +14,7 @@ const { ACTIVE_DEBT_LIMIT, ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN
 const { BUS_PASS_MAX, FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
 const { COPAY_FIELDS, copayText } = require('../lib/copays');
 const { FEDERAL_UNITS_SQL, FEDERAL_UNIT_REFILLS_SQL, LAST_DRUG_TEST_SQL, saveClientFederalUnits, saveClientUnitRefills, unitsProblem } = require('../lib/federalUnits');
+const { findMissedGroups, phaseEveryMonths } = require('../lib/missedGroups');
 
 const router = express.Router();
 
@@ -397,6 +398,69 @@ router.get('/api/clients/:id/group-cancellations', async (req, res) => {
             [id]
         );
         res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Group meetings the client was expected at and didn't check in to (lib/missedGroups.js), newest first, for the
+// Attendance tab's missed count and list.
+router.get('/api/clients/:id/missed-groups', async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const clientRes = await pool.query(
+            `SELECT c.GroupId, c.ProgramStatus, c.Phase, to_char(c.ProgramStartDate, 'YYYY-MM-DD') AS ProgramStart, g.GroupName
+             FROM Clients c LEFT JOIN Groups g ON g.GroupId = c.GroupId WHERE c.ClientId = $1`,
+            [id]
+        );
+        const client = clientRes.rows[0];
+        if (!client) return res.status(404).json({ error: 'Client not found.' });
+        const [attRes, callInRes, logRes] = await Promise.all([
+            pool.query(`SELECT "Group" AS group, to_char(Date, 'YYYY-MM-DD') AS date, Type AS type FROM Attendance WHERE Client = $1`, [id]),
+            pool.query(
+                `SELECT to_char(COALESCE(CallInDate, Date::date, CreatedOn::date), 'YYYY-MM-DD') AS date, CallInReason AS reason
+                 FROM EventLog WHERE Client = $1 AND Type = 'Call-In'`,
+                [id]
+            ),
+            pool.query(
+                `SELECT ChangeType, NewValue, to_char(ChangedOn, 'YYYY-MM-DD') AS date FROM ClientChangeLog
+                 WHERE ClientId = $1 AND ChangeType IN ('Group', 'Program Status', 'Phase') ORDER BY ChangedOn, ChangeId`,
+                [id]
+            ),
+        ]);
+        const attendance = attRes.rows;
+        const groupIds = [...new Set([client.groupid, ...attendance.filter(a => a.type === 'Group').map(a => a.group)].filter(Boolean))];
+        if (groupIds.length === 0) return res.json([]);
+        const heldRes = await pool.query(
+            `SELECT DISTINCT "Group" AS group, to_char(Date, 'YYYY-MM-DD') AS date FROM Attendance WHERE Type = 'Group' AND "Group" = ANY($1::int[])`,
+            [groupIds]
+        );
+        const assigned = client.groupname
+            ? [...logRes.rows].reverse().find(r => r.changetype === 'Group' && r.newvalue === client.groupname)
+            : null;
+        // Phase 2/3/4 clients are counted by month / quarter / half year from when they moved into that phase
+        const everyMonths = phaseEveryMonths(client.phase);
+        const phaseLog = everyMonths ? [...logRes.rows].reverse().find(r => r.changetype === 'Phase' && r.newvalue === client.phase) : null;
+        const missed = findMissedGroups({
+            everyMonths,
+            phaseSince: phaseLog?.date || null,
+            attendance,
+            held: heldRes.rows,
+            callIns: callInRes.rows,
+            currentGroup: client.groupid,
+            assignedOn: assigned?.date || null,
+            programStart: client.programstart,
+            currentStatus: client.programstatus,
+            statusChanges: logRes.rows.filter(r => r.changetype === 'Program Status').map(r => ({ date: r.date, status: r.newvalue })),
+            today: todayLocal(),
+        });
+        if (missed.length === 0) return res.json([]);
+        const groupsRes = await pool.query('SELECT GroupId, GroupName, Schedule FROM Groups WHERE GroupId = ANY($1::int[])', [groupIds]);
+        const groups = new Map(groupsRes.rows.map(g => [g.groupid, g]));
+        res.json(missed.map(m => ({
+            groupid: m.group, groupname: groups.get(m.group)?.groupname || `Group ${m.group}`, groupschedule: groups.get(m.group)?.schedule || null,
+            date: m.date, calledin: m.calledIn, callinreason: m.callInReason, everymonths: m.everyMonths || null,
+        })));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

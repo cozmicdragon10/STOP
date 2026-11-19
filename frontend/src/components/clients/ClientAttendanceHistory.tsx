@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useUnsavedForm } from '../../hooks/useUnsavedForm';
-import { CalendarDays, CalendarX, List, Printer, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { CalendarDays, CalendarX, List, Printer, SlidersHorizontal, Trash2, UserX } from 'lucide-react';
 import ClientAttendanceCalendar from './ClientAttendanceCalendar';
 import { printAttendanceReceipt } from '../../utils/receipt';
-import { deleteAttendance, getClient, getClientAttendance, getClientFinancials, getClientGroupCancellations, type GroupCancellation } from '../../api';
+import { deleteAttendance, getClient, getClientAttendance, getClientFinancials, getClientGroupCancellations, getClientMissedGroups, type GroupCancellation, type MissedGroup } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
 import MonthHeader from './MonthHeader';
 import { EMPTY_ATTENDANCE_FILTERS, groupByMonth, sortedUnique, toggleInSet } from '../../utils/filters';
 import { attendanceBalanceChange, formatMoney, signedMoney } from '../../utils/ledger';
 import { formatBalance } from '../../utils/balance';
 import { formatLogMonthDay, formatLogYear, localYmd } from '../../utils/dates';
+import { missedGroupLabel, missedGroupSummary } from '../../utils/missedGroups';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- attendance and ledger rows are untyped throughout App */
 export interface AttendanceDeleted {
@@ -117,16 +118,31 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
   }, [clientId]);
   const cancellations = cancelled.clientId === clientId ? cancelled.rows : [];
 
+  // Group meetings the client was expected at and didn't check in to (worked out on the server). Loaded again when the
+  // attendance changes, since a check-in or a deletion changes what was missed.
+  const [missedLoad, setMissedLoad] = useState<{ clientId: number; rows: MissedGroup[] }>({ clientId: 0, rows: [] });
+  useEffect(() => {
+    let current = true;
+    getClientMissedGroups(clientId)
+      .then(rows => { if (current) setMissedLoad({ clientId, rows }); })
+      // The sessions still show without them
+      .catch(() => {});
+    return () => { current = false; };
+  }, [clientId, attendance]);
+  const missedGroups = missedLoad.clientId === clientId ? missedLoad.rows : [];
+  const missedTotals = missedGroupSummary(missedGroups);
+
   const search = filters.search.trim().toLowerCase();
   // Rows of either kind; a cancellation's date is read as local midnight (a bare YYYY-MM-DD would be read as UTC)
   /* eslint-disable @typescript-eslint/no-explicit-any -- attendance rows are untyped throughout App */
   const rows: any[] = [
     ...attendance,
     ...cancellations.map(c => ({ ...c, cancellation: true, type: 'Group Cancelled', date: `${c.date}T00:00:00`, comments: c.reason })),
+    ...missedGroups.map(m => ({ ...m, missed: true, missedLabel: missedGroupLabel(m), type: 'Missed', date: `${m.date}T00:00:00`, comments: m.callinreason })),
   ];
   /* eslint-enable @typescript-eslint/no-explicit-any */
   const shown = rows.filter(a => {
-    if (a.cancellation && filters.payment) return false;
+    if ((a.cancellation || a.missed) && filters.payment) return false;
     const day = localYmd(a.date);
     const paid = Number(a.accountpaid || 0) > 0;
     if (filters.group && (a.groupname || 'Group Session') !== filters.group) return false;
@@ -143,8 +159,9 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
   });
   // Filters set but hidden are counted on the button so they aren't forgotten
   const activeFilterCount = [filters.search.trim(), filters.group, filters.type, filters.payment, filters.from, filters.to].filter(Boolean).length;
-  const shownSessions = shown.filter(a => !a.cancellation).length;
-  const shownCancelled = shown.length - shownSessions;
+  const shownSessions = shown.filter(a => !a.cancellation && !a.missed).length;
+  const shownCancelled = shown.filter(a => a.cancellation).length;
+  const shownMissed = shown.filter(a => a.missed).length;
 
   return (
     <div className="space-y-3">
@@ -176,8 +193,30 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
         <span className="ml-auto text-xs text-slate-500">
           {shownSessions === attendance.length ? `${attendance.length} sessions` : `Showing ${shownSessions} of ${attendance.length}`}
           {shownCancelled > 0 && ` · ${shownCancelled} group${shownCancelled === 1 ? '' : 's'} cancelled`}
+          {shownMissed > 0 && ` · ${shownMissed === missedTotals.total ? '' : `${shownMissed} of `}${missedTotals.total} missed`}
         </span>
       </div>
+      {missedTotals.total > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-red-500/5 border border-red-500/30 px-4 py-2.5 rounded-xl text-sm">
+          <UserX size={16} className="text-red-400 shrink-0" />
+          <p className="text-white font-semibold">
+            Missed Groups: <span className="text-red-300">{missedTotals.total}</span>
+          </p>
+          <p className="text-xs text-slate-400">
+            {missedTotals.noShows} no-show{missedTotals.noShows === 1 ? '' : 's'} · {missedTotals.calledIn} called in
+            {missedTotals.last90 > 0 && <> · <span className="text-red-300 font-semibold">{missedTotals.last90}</span> in the last 90 days</>}
+            {missedTotals.latest && <> · last missed {formatLogMonthDay(`${missedTotals.latest}T00:00:00`)}, {formatLogYear(`${missedTotals.latest}T00:00:00`)}</>}
+          </p>
+          <button
+            type="button"
+            onClick={() => setFilters(f => ({ ...f, type: f.type === 'Missed' ? '' : 'Missed' }))}
+            aria-pressed={filters.type === 'Missed'}
+            className={`ml-auto px-3 py-1.5 rounded-lg text-xs font-semibold border ${filters.type === 'Missed' ? 'bg-red-600 border-red-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+          >
+            {filters.type === 'Missed' ? 'Show All' : 'Show Only Missed'}
+          </button>
+        </div>
+      )}
       {showFilters && (
         <RecordFilterBar
           search={filters.search}
@@ -208,21 +247,48 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
       )}
       {view === 'calendar' && <ClientAttendanceCalendar key={clientId} rows={shown} />}
       {view === 'list' && groupByMonth(shown, filters.sort).map(month => {
-        const sessions = month.rows.filter(att => !att.cancellation);
+        const sessions = month.rows.filter(att => !att.cancellation && !att.missed);
         const totals = sessions.reduce((t, att) => {
           const c = attendanceBalanceChange(att);
           return { fee: t.fee + c.fee, paid: t.paid + c.paid, change: t.change + (c.after - c.before) };
         }, { fee: 0, paid: 0, change: 0 });
         const monthChange = Math.round(totals.change * 100) / 100;
+        const monthMissed = month.rows.filter(att => att.missed).length;
         const collapsed = collapsedMonths.has(month.key);
         return (
           <div key={month.key} className="space-y-2">
             <MonthHeader label={month.label} count={sessions.length} noun="session" collapsed={collapsed} onToggle={() => setCollapsedMonths(prev => toggleInSet(prev, month.key))}>
+              {monthMissed > 0 && <span className="text-red-400 font-semibold">{monthMissed} missed</span>}
+              {sessions.length > 0 && <>
               <span className="text-slate-500">Fees <span className="text-red-400 font-semibold">{signedMoney(totals.fee)}</span></span>
               <span className="text-slate-500">Paid <span className="text-emerald-400 font-semibold">{signedMoney(totals.paid)}</span></span>
               <span className="text-slate-500">Change <span className={`font-semibold ${monthChange > 0 ? 'text-emerald-400' : monthChange < 0 ? 'text-red-400' : 'text-slate-400'}`}>{monthChange > 0 ? '+' : ''}{signedMoney(monthChange)}</span></span>
+              </>}
             </MonthHeader>
             {!collapsed && month.rows.map(att => {
+              // A missed group meeting: expected and not checked in (no fee, payment or balance)
+              if (att.missed) return (
+                <div key={`missed-${att.groupid}-${localYmd(att.date)}`} className="bg-red-500/5 border border-red-500/30 px-4 py-2.5 rounded-xl text-sm">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <div className="shrink-0 w-16 border-r border-slate-800 pr-4">
+                      <p className="font-bold text-white leading-tight">{formatLogMonthDay(att.date)}</p>
+                      <p className="text-[0.6875rem] text-slate-500">{formatLogYear(att.date)}</p>
+                    </div>
+                    <div className="flex-1 min-w-[10rem]">
+                      <p className="font-semibold text-white truncate">
+                        {att.groupname}
+                        {att.groupschedule && <span className="ml-2 text-xs font-normal text-slate-400">{att.groupschedule}</span>}
+                      </p>
+                      <p className="text-xs text-slate-400 truncate">
+                        {att.missedLabel}{att.calledin ? ` · Called in${att.callinreason ? `: ${att.callinreason}` : ''}` : ''}
+                      </p>
+                    </div>
+                    <span className={`shrink-0 inline-flex items-center gap-1.5 border px-2 py-1 rounded-lg text-xs font-semibold ${att.calledin ? 'bg-orange-500/15 text-orange-300 border-orange-500/30' : 'bg-red-500/15 text-red-300 border-red-500/30'}`}>
+                      <UserX size={13} /> {att.calledin ? 'Missed (Called In)' : 'Missed'}
+                    </span>
+                  </div>
+                </div>
+              );
               // A cancelled group meeting: why there's no check-in that week (no fee, payment or balance)
               if (att.cancellation) return (
                 <div key={`cancel-${att.changeid}`} className="bg-amber-500/5 border border-amber-500/30 px-4 py-2.5 rounded-xl text-sm">

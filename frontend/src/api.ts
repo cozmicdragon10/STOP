@@ -2034,6 +2034,22 @@ export async function getClientGroupCancellations(clientId: number): Promise<Gro
     return jsonResponse(res, 'Failed to load cancelled groups.');
 }
 
+// Group meetings the client was expected at and didn't check in to, newest first (backend/lib/missedGroups.js). A Phase
+// 2/3/4 client's miss is a month / quarter / half year with no group check-in (everymonths), dated its last day.
+export interface MissedGroup {
+    groupid: number;
+    date: string; // YYYY-MM-DD
+    groupname: string;
+    groupschedule: string | null;
+    calledin: boolean;
+    callinreason: string | null;
+    everymonths: number | null;
+}
+export async function getClientMissedGroups(clientId: number): Promise<MissedGroup[]> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/missed-groups`);
+    return jsonResponse(res, 'Failed to load missed groups.');
+}
+
 // Newest first
 export async function getClientFinancials(clientId: number): Promise<FinancialTransaction[]> {
     const res = await apiFetch(`${API_BASE}/clients/${clientId}/financials`);
