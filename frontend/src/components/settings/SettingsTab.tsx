@@ -1,7 +1,9 @@
-import { Moon, Sun } from 'lucide-react';
-import { CLIENT_SIDE_OPTIONS, COLOR_VISION_OPTIONS, DEFAULT_CUSTOM_COLORS, FONT_SIZE_OPTIONS, FONT_TYPE_OPTIONS, TABS_POSITION_OPTIONS, useTheme, type ClientSide, type ColorVision, type FontSize, type FontType, type StatusColor, type TabsPosition } from '../../hooks/useTheme';
+import { CloudMoon, Moon, Sun, SunDim } from 'lucide-react';
+import { CLIENT_SIDE_OPTIONS, COLOR_VISION_OPTIONS, DEFAULT_CUSTOM_COLORS, FONT_SIZE_OPTIONS, FONT_TYPE_OPTIONS, TABS_POSITION_OPTIONS, THEME_OPTIONS, useTheme, type ClientSide, type ColorVision, type FontSize, type FontType, type StatusColor, type TabsPosition } from '../../hooks/useTheme';
 
 // The Appearance preview badges. They use the palette classes, so they show whichever color setting is active.
+const THEME_ICONS = { light: Sun, soft: SunDim, dim: CloudMoon, dark: Moon };
+
 const STATUS_CHIPS: { key: StatusColor; label: string; className: string }[] = [
   { key: 'success', label: 'Paid / Assigned', className: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' },
   { key: 'warning', label: 'Warning', className: 'bg-amber-500/20 text-amber-400 border-amber-500/30' },
@@ -11,22 +13,31 @@ const STATUS_CHIPS: { key: StatusColor; label: string; className: string }[] = [
 
 // The Settings tab, open to every role: each person's own appearance and layout, remembered on their computer
 export default function SettingsTab() {
-  const { theme, toggleTheme, colorVision, setColorVision, customColors, setCustomColors, fontSize, setFontSize, fontType, setFontType, tabsPosition, setTabsPosition, clientSide, setClientSide, clientTabsPosition, setClientTabsPosition } = useTheme();
+  const { theme, setTheme, colorVision, setColorVision, customColors, setCustomColors, fontSize, setFontSize, fontType, setFontType, tabsPosition, setTabsPosition, clientSide, setClientSide, clientTabsPosition, setClientTabsPosition } = useTheme();
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl space-y-4 self-start">
-        <div className="flex justify-between items-center gap-3 border-b border-slate-800 pb-3">
+        <div className="flex flex-wrap justify-between items-center gap-3 border-b border-slate-800 pb-3">
           <h2 className="text-lg font-bold text-white">Appearance</h2>
-          <button
-            type="button"
-            onClick={toggleTheme}
-            title="Click to switch theme"
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 py-1.5 rounded font-semibold text-xs shrink-0"
-          >
-            {theme === 'dark' ? <Moon size={14} /> : <Sun size={14} />} {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
-          </button>
+          <div role="group" aria-label="Theme" className="flex bg-slate-800 border border-slate-700 rounded-lg p-0.5 shrink-0">
+            {THEME_OPTIONS.map(o => {
+              const Icon = THEME_ICONS[o.value];
+              const active = theme === o.value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => setTheme(o.value)}
+                  aria-pressed={active}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold text-xs ${active ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'}`}
+                >
+                  <Icon size={14} /> {o.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
-        <p className="text-xs text-slate-400">Click the button to switch between dark and light mode. Your choice is remembered on this computer.</p>
+        <p className="text-xs text-slate-400">Light, Soft (light on gray), Dim (dark on softer gray), or Dark. Your choice is remembered on this computer.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label htmlFor="font-size" className="block text-xs text-slate-400 uppercase mb-1">Font Size</label>
@@ -82,8 +93,8 @@ export default function SettingsTab() {
           </div>
           <p className="text-xs text-slate-400 mt-3">
             {colorVision === 'custom'
-              ? 'Click a color square to choose that status color. Remembered on this computer, like dark mode.'
-              : 'Changes the green, amber and blue used across the app so statuses are easier to tell apart. Remembered on this computer, like dark mode.'}
+              ? 'Click a color square to choose that status color. Remembered on this computer, like the theme.'
+              : 'Changes the green, amber and blue used across the app so statuses are easier to tell apart. Remembered on this computer, like the theme.'}
           </p>
         </div>
       </div>
@@ -127,7 +138,7 @@ export default function SettingsTab() {
             </select>
           </div>
         </div>
-        <p className="text-xs text-slate-400">Left and right only show on wide screens; on smaller ones the client view fills the screen. Remembered on this device, like dark mode.</p>
+        <p className="text-xs text-slate-400">Left and right only show on wide screens; on smaller ones the client view fills the screen. Remembered on this device, like the theme.</p>
       </div>
     </div>
   );

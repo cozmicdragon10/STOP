@@ -1,19 +1,27 @@
 import { useCallback, useState } from 'react';
 
-export type Theme = 'dark' | 'light';
+// Lightest to darkest. Soft is light mode on gray instead of white; Dim is dark mode's colors on lifted, mid-gray surfaces.
+export const THEME_OPTIONS = [
+  { value: 'light', label: 'Light' },
+  { value: 'soft', label: 'Soft' },
+  { value: 'dim', label: 'Dim' },
+  { value: 'dark', label: 'Dark' },
+] as const;
+export type Theme = (typeof THEME_OPTIONS)[number]['value'];
 
 const STORAGE_KEY = 'stop-theme';
 
 // The saved choice for this browser; light is the default
 export function getSavedTheme(): Theme {
   try {
-    return localStorage.getItem(STORAGE_KEY) === 'dark' ? 'dark' : 'light';
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return THEME_OPTIONS.find(o => o.value === saved)?.value ?? 'light';
   } catch {
     return 'light';
   }
 }
 
-// index.css swaps the color palette when <html data-theme="light"> is set
+// index.css swaps the color palette when <html data-theme="light">, "soft" or "dim" is set
 export function applyTheme(theme: Theme) {
   document.documentElement.dataset.theme = theme;
 }
@@ -160,7 +168,16 @@ export function applyClientTabsPosition(clientTabsPosition: TabsPosition) {
 }
 
 export function useTheme() {
-  const [theme, setTheme] = useState<Theme>(getSavedTheme);
+  const [theme, setThemeState] = useState<Theme>(getSavedTheme);
+  const setTheme = useCallback((next: Theme) => {
+    setThemeState(next);
+    applyTheme(next);
+    try {
+      localStorage.setItem(STORAGE_KEY, next);
+    } catch {
+      // Not saved (private window, blocked storage); the theme still applies for this visit
+    }
+  }, []);
   const [clientSide, setClientSideState] = useState<ClientSide>(getSavedClientSide);
   const setClientSide = useCallback((next: ClientSide) => {
     setClientSideState(next);
@@ -231,17 +248,5 @@ export function useTheme() {
       // Not saved (private window, blocked storage); the colors still apply for this visit
     }
   }, []);
-  const toggleTheme = useCallback(() => {
-    setTheme(prev => {
-      const next: Theme = prev === 'dark' ? 'light' : 'dark';
-      applyTheme(next);
-      try {
-        localStorage.setItem(STORAGE_KEY, next);
-      } catch {
-        // Not saved (private window, blocked storage); the switch still applies for this visit
-      }
-      return next;
-    });
-  }, []);
-  return { theme, toggleTheme, colorVision, setColorVision, customColors, setCustomColors, fontSize, setFontSize, fontType, setFontType, tabsPosition, setTabsPosition, clientSide, setClientSide, clientTabsPosition, setClientTabsPosition };
+  return { theme, setTheme, colorVision, setColorVision, customColors, setCustomColors, fontSize, setFontSize, fontType, setFontType, tabsPosition, setTabsPosition, clientSide, setClientSide, clientTabsPosition, setClientTabsPosition };
 }

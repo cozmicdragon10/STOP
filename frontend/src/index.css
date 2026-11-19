@@ -92,11 +92,11 @@
 }
 
 /*
-  Light mode. The app is styled with dark slate classes, so instead of restyling every component this flips the
+  Light mode (and Soft, which builds on it). The app is styled with dark slate classes, so instead of restyling every component this flips the
   slate scale (bg-slate-950 becomes a light page, text-slate-400 becomes a readable gray, and so on) and darkens the
   pale accent shades that are used as text on dark backgrounds.
 */
-:root[data-theme="light"] {
+:root:is([data-theme="light"], [data-theme="soft"]) {
   color-scheme: light;
 
   --color-slate-50: oklch(12.9% 0.042 264.695);
@@ -151,7 +151,7 @@
 }
 
 /* Dark text on bright badges (bg-amber-500 text-slate-950) keeps the original dark slate */
-:root[data-theme="light"] .text-slate-950 {
+:root:is([data-theme="light"], [data-theme="soft"]) .text-slate-950 {
   color: oklch(12.9% 0.042 264.695);
 }
 
@@ -159,7 +159,7 @@
   White text sits on slate surfaces that are now light, so it turns dark, except on solid colored buttons and badges.
   ~= matches whole class names only, so faint tints like bg-amber-500/10 (light in this theme) still get dark text.
 */
-:root[data-theme="light"] :is(.text-white, .hover\:text-white:hover):not(
+:root:is([data-theme="light"], [data-theme="soft"]) :is(.text-white, .hover\:text-white:hover):not(
   [class~="bg-blue-500"], [class~="bg-blue-600"],
   [class~="bg-red-500"], [class~="bg-red-600"], [class~="bg-red-700"], [class~="bg-red-800"],
   [class~="bg-emerald-500"], [class~="bg-emerald-600"], [class~="bg-emerald-700"],
@@ -171,8 +171,37 @@
   color: var(--color-slate-100);
 }
 
-:root[data-theme="light"] .\[color-scheme\:dark\] {
+:root:is([data-theme="light"], [data-theme="soft"]) .\[color-scheme\:dark\] {
   color-scheme: light;
+}
+
+/*
+  Soft: light mode on gray instead of white. Every light-mode rule above applies; this only lowers the surfaces
+  (page, cards, borders) to light grays and darkens the secondary text grays so they still read on them.
+*/
+:root[data-theme="soft"] {
+  --color-slate-400: oklch(40% 0.04 257);
+  --color-slate-500: oklch(47% 0.04 257);
+  --color-slate-600: oklch(53% 0.035 257);
+  --color-slate-700: oklch(74% 0.025 255);
+  --color-slate-800: oklch(81.5% 0.018 255);
+  --color-slate-900: oklch(90.5% 0.012 255);
+  --color-slate-950: oklch(85.5% 0.015 255);
+}
+
+/*
+  Dim, between dark and light. It keeps dark mode's text and status colors (made for dark backgrounds) and lifts only
+  the surfaces: the page, cards and borders become softer mid grays, and the secondary text grays move up to stay
+  readable on them.
+*/
+:root[data-theme="dim"] {
+  --color-slate-400: oklch(77% 0.03 257);
+  --color-slate-500: oklch(69% 0.03 257);
+  --color-slate-600: oklch(56% 0.03 257);
+  --color-slate-700: oklch(47.5% 0.03 257);
+  --color-slate-800: oklch(40.5% 0.03 257);
+  --color-slate-900: oklch(35% 0.028 257);
+  --color-slate-950: oklch(30% 0.026 257);
 }
 
 /*
@@ -211,7 +240,7 @@
   --color-amber-600: oklch(59.1% 0.293 322.896);
 }
 
-:root[data-theme="light"][data-color-vision="red-green"] {
+:root:is([data-theme="light"], [data-theme="soft"])[data-color-vision="red-green"] {
   --color-blue-100: oklch(39.8% 0.195 277.366);
   --color-blue-300: oklch(45.7% 0.24 277.023);
   --color-blue-400: oklch(51.1% 0.262 276.966);
@@ -227,7 +256,7 @@
   --color-emerald-950: oklch(91.7% 0.08 205.041);
 }
 
-:root[data-theme="light"][data-color-vision="blue-yellow"] {
+:root:is([data-theme="light"], [data-theme="soft"])[data-color-vision="blue-yellow"] {
   --color-emerald-200: oklch(45.3% 0.124 130.933);
   --color-emerald-300: oklch(53.2% 0.157 131.589);
   --color-emerald-400: oklch(53.2% 0.157 131.589);
@@ -269,7 +298,7 @@
   --color-rose-950: color-mix(in oklab, var(--custom-problem) 20%, black);
 }
 
-:root[data-theme="light"][data-color-vision="custom"] {
+:root:is([data-theme="light"], [data-theme="soft"])[data-color-vision="custom"] {
   --color-emerald-200: color-mix(in oklab, var(--custom-success) 50%, black);
   --color-emerald-300: color-mix(in oklab, var(--custom-success) 65%, black);
   --color-emerald-400: color-mix(in oklab, var(--custom-success) 75%, black);
