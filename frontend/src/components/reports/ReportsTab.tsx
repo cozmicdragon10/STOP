@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { getAgentReport, getDepositReport } from '../../api';
+import { getDepositReport } from '../../api';
 import { reportTabsFor, currentReportFor } from '../../utils/reports';
 import { PROGRAM_STATUSES } from '../../utils/clients';
-import { formatBalanceLabeled } from '../../utils/balance';
 import GroupIncomeReport from './GroupIncomeReport';
 import GroupCashDepositReport from './GroupCashDepositReport';
 import UserCashDepositReport from './UserCashDepositReport';
@@ -23,16 +22,6 @@ interface Props {
   onOpenClientId: (clientId: number) => void;
 }
 
-interface AgentReportRow {
-  clientid: number;
-  firstname: string;
-  lastname: string;
-  supervisingagent: string | null;
-  totalattended: number | string;
-  lastpolydate: string | null;
-  accountbalance: number | string | null;
-}
-
 interface DepositReport {
   totalRevenue: number;
   totalCharges: number;
@@ -42,7 +31,6 @@ interface DepositReport {
 export default function ReportsTab({ user, clients, groups, onOpenClient, onOpenClientId }: Props) {
   // The report tab last picked; null until one is picked (the role's first report shows)
   const [reportTab, setReportTab] = useState<string | null>(null);
-  const [agentReportData, setAgentReportData] = useState<AgentReportRow[] | null>(null);
   const [depositReportData, setDepositReportData] = useState<DepositReport | null>(null);
   const [reportsError, setReportsError] = useState('');
   // Cash Deposits: cash taken at group sessions, or cash payments users took outside a group
@@ -54,32 +42,21 @@ export default function ReportsTab({ user, clients, groups, onOpenClient, onOpen
   const pickReport = (id: string) => {
     if (id === currentReport) return;
     setReportsError('');
-    setAgentReportData(null);
     setDepositReportData(null);
     setReportTab(id);
   };
 
-  // The agent and deposit reports are fetched fresh each time their tab is shown
+  // The deposit report is fetched fresh each time its tab is shown
   useEffect(() => {
-    if (currentReport !== 'agent' && currentReport !== 'deposit') return;
+    if (currentReport !== 'deposit') return;
     let cancelled = false;
-    if (currentReport === 'agent') {
-      getAgentReport()
-        .then(data => {
-          if (cancelled) return;
-          if (!Array.isArray(data)) throw new Error();
-          setAgentReportData(data);
-        })
-        .catch(() => { if (!cancelled) setReportsError('Failed to load the weekly agent report.'); });
-    } else {
-      getDepositReport()
-        .then(data => {
-          if (cancelled) return;
-          if (typeof data?.totalRevenue !== 'number' || typeof data?.totalCharges !== 'number') throw new Error();
-          setDepositReportData(data);
-        })
-        .catch(() => { if (!cancelled) setReportsError('Failed to load the monthly deposit report.'); });
-    }
+    getDepositReport()
+      .then(data => {
+        if (cancelled) return;
+        if (typeof data?.totalRevenue !== 'number' || typeof data?.totalCharges !== 'number') throw new Error();
+        setDepositReportData(data);
+      })
+      .catch(() => { if (!cancelled) setReportsError('Failed to load the monthly deposit report.'); });
     return () => { cancelled = true; };
   }, [currentReport]);
 
@@ -131,23 +108,6 @@ export default function ReportsTab({ user, clients, groups, onOpenClient, onOpen
       {currentReport === 'poMonthly' && <MonthlyPoReports userEmail={user.employeeemail} onOpenClient={onOpenClientId} />}
 
       {currentReport === 'userActivity' && <UserActivityReport userEmail={user.employeeemail} onOpenClient={onOpenClientId} />}
-
-      {currentReport === 'agent' && !reportsError && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
-          <h3 className="font-semibold text-white mb-4">Weekly Supervising Agent Summary</h3>
-          <table className="stack-table w-full text-left border-collapse text-xs">
-            <thead><tr className="bg-slate-800/50 text-slate-400 uppercase"><th className="p-3">Client</th><th className="p-3">Agent</th><th className="p-3">Attended Sessions</th><th className="p-3">Last Poly</th><th className="p-3">Balance</th></tr></thead>
-            <tbody className="divide-y divide-slate-800 text-sm">
-              {agentReportData?.map(r => (
-                <tr key={r.clientid}><td className="p-3 font-medium text-white">{r.lastname}, {r.firstname}</td><td data-label="Agent" className="p-3 text-slate-300">{r.supervisingagent}</td><td data-label="Attended Sessions" className="p-3">{r.totalattended}</td><td data-label="Last Poly" className="p-3 text-slate-400">{r.lastpolydate ? new Date(r.lastpolydate).toLocaleDateString() : 'None'}</td><td data-label="Balance" className="p-3 font-semibold text-slate-200">{formatBalanceLabeled(r.accountbalance)}</td></tr>
-              ))}
-              {(!agentReportData || agentReportData.length === 0) && (
-                <tr><td colSpan={5} className="p-6 text-center text-slate-500 text-sm">{agentReportData ? 'No clients to report.' : 'Loading…'}</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
 
       {currentReport === 'deposit' && !depositReportData && !reportsError && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl text-center text-slate-500 text-sm">Loading…</div>

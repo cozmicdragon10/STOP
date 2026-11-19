@@ -1514,25 +1514,6 @@ export async function submitPolygraphResult(data: {
     return jsonResponse(res, 'Error completing polygraph slot.');
 }
 
-export interface AgentReportRow {
-    clientid: number;
-    firstname: string;
-    lastname: string;
-    docnumber: string | null;
-    doctype?: string | null;
-    supervisingagent: string | null;
-    accountbalance: Money | null;
-    // A count, sent as text
-    totalattended: string;
-    lastpolydate: string | null;
-    lastpolyresult: string | null;
-}
-
-export async function getAgentReport(): Promise<AgentReportRow[]> {
-    const res = await apiFetch(`${API_BASE}/reports/agent`);
-    return jsonResponse(res, 'Failed to load the weekly agent report.');
-}
-
 export interface GroupReportRow {
     attendanceid: number;
     groupid: number | null;

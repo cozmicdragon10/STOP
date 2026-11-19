@@ -80,13 +80,14 @@ describe('case notes', () => {
 describe('report tabs', () => {
   it('limits Counselors to the all-roles reports', () => {
     expect(reportTabsFor('Counselor').map(t => t.id)).toEqual(['cashDeposits']);
-    expect(currentReportFor('agent', 'Counselor')).toBe('cashDeposits');
+    expect(currentReportFor('deposit', 'Counselor')).toBe('cashDeposits');
   });
 
   it('keeps the picked report when the role can see it', () => {
     expect(currentReportFor('counselorClients', 'Office Admin')).toBe('counselorClients');
     expect(currentReportFor('deposit', 'Business Administrator')).toBe('deposit');
-    expect(currentReportFor(null, 'Business Administrator')).toBe('agent');
+    expect(currentReportFor(null, 'Business Administrator')).toBe('deposit');
+    expect(currentReportFor('agent', 'Business Administrator')).toBe('deposit');
   });
 
   it('keeps the business-only reports from Office Admins', () => {

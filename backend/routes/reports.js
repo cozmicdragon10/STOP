@@ -7,24 +7,8 @@ const { SESSION_FEE_SQL, YMD } = require('../lib/sql');
 const { withResponsible, OPEN_GROUP_ADMIN_ROLES } = require('../lib/cashResponsibility');
 
 const router = express.Router();
-// The Weekly Agent, Monthly Deposit, and Group Income reports are for Business Administrators only
+// The Monthly Deposit and Group Income reports are for Business Administrators only
 const businessOnly = requireRole('Business Administrator');
-
-router.get('/api/reports/agent', businessOnly, async (req, res) => {
-    try {
-        const query = `
-            SELECT c.ClientId, c.FirstName, c.LastName, c.DOCNumber, c.DocType, c.SupervisingAgent, c.AccountBalance,
-            (SELECT COUNT(*) FROM Attendance WHERE Client = c.ClientId) AS TotalAttended,
-            (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPolyDate,
-            (SELECT Results FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPolyResult
-            FROM Clients c ORDER BY c.SupervisingAgent, c.LastName;
-        `;
-        const result = await pool.query(query);
-        res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
 
 // Every attendance row in the date range (YYYY-MM-DD, inclusive) with its group and client; the page totals them per group
 router.get('/api/reports/groups', businessOnly, async (req, res) => {

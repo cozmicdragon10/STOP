@@ -44,7 +44,7 @@ test('a Counselor cannot book, open, reschedule, cancel or record polygraphs', (
 test('a Counselor cannot edit agents, groups, prices, or reports beyond cash deposits', () => {
     for (const [m, p] of [['POST', '/api/agents'], ['PUT', '/api/agents/3'], ['DELETE', '/api/agents/3'],
         ['PUT', '/api/groups/3'], ['POST', '/api/groups'], ['DELETE', '/api/groups/3'],
-        ['PUT', '/api/program-fees/X'], ['POST', '/api/federal-units'], ['GET', '/api/reports/agent'],
+        ['PUT', '/api/program-fees/X'], ['POST', '/api/federal-units'], ['GET', '/api/reports/groups'],
         ['GET', '/api/reports/group-deposits'], ['GET', '/api/admin/logs'], ['GET', '/api/notes/pending'],
         ['POST', '/api/notes/9/review'], ['GET', '/api/dev/info']]) {
         assert.ok(!isCounselorAllowed(m, p), `${m} ${p} should be refused`);
