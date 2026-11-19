@@ -1669,7 +1669,15 @@ export default function App() {
                                   <ul className="divide-y divide-slate-800">
                                     {c.entries.map(e => (
                                       <li key={e.client} className="flex justify-between gap-2 py-1.5">
-                                        <span className="text-slate-200 truncate">{e.name}</span>
+                                        {/* Opens the client's account */}
+                                        <button
+                                          type="button"
+                                          onClick={() => openClientById(e.client)}
+                                          className="text-left text-slate-200 hover:text-blue-400 hover:underline truncate"
+                                          title={`Open ${e.name}'s account`}
+                                        >
+                                          {e.name}
+                                        </button>
                                         <span className="text-slate-400 shrink-0">{Number(e.accountPaid) > 0 ? `$${Number(e.accountPaid).toFixed(2)} ${e.paymentMethod || ''}`.trim() : 'No payment'}</span>
                                       </li>
                                     ))}

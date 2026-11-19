@@ -1862,14 +1862,17 @@ export interface PoReportAgent {
 
 export interface PoReportMonth {
     month: string;
+    // The last month of the range (the same as month for one month)
+    toMonth?: string;
     agents: PoReportAgent[];
     // Active clients with no supervising agent, so they get no report
     noAgent: { clientid: number; firstname: string; lastname: string; docnumber: string | null; doctype?: string | null }[];
 }
 
-// month is YYYY-MM
-export async function getPoReportMonth(month: string): Promise<PoReportMonth> {
-    const res = await apiFetch(`${API_BASE}/reports/po-monthly?month=${encodeURIComponent(month)}`);
+// month is YYYY-MM, the first month; toMonth the last month of a range (left out or the same: one month)
+const toMonthParam = (toMonth?: string) => (toMonth ? `&toMonth=${encodeURIComponent(toMonth)}` : '');
+export async function getPoReportMonth(month: string, toMonth?: string): Promise<PoReportMonth> {
+    const res = await apiFetch(`${API_BASE}/reports/po-monthly?month=${encodeURIComponent(month)}${toMonthParam(toMonth)}`);
     return jsonResponse(res, 'Failed to load the monthly PO reports.');
 }
 
@@ -1883,17 +1886,17 @@ async function fileResponse(res: Response, fallback: string, type: string): Prom
 }
 
 // One client's monthly report PDF
-export async function fetchPoClientReport(clientId: number, month: string): Promise<Blob> {
-    const res = await apiFetch(`${API_BASE}/reports/po-monthly/client/${clientId}/pdf?month=${encodeURIComponent(month)}`);
+export async function fetchPoClientReport(clientId: number, month: string, toMonth?: string): Promise<Blob> {
+    const res = await apiFetch(`${API_BASE}/reports/po-monthly/client/${clientId}/pdf?month=${encodeURIComponent(month)}${toMonthParam(toMonth)}`);
     return fileResponse(res, 'Could not make the client report.', 'application/pdf');
 }
 
 // An unsent Outlook draft (.eml) to the agent with each active client's PDF attached, and its file name. Nothing is sent.
-export async function createPoReportDraft(month: string, agent: string, user: string): Promise<{ blob: Blob; fileName: string }> {
+export async function createPoReportDraft(month: string, agent: string, user: string, toMonth?: string): Promise<{ blob: Blob; fileName: string }> {
     const res = await apiFetch(`${API_BASE}/reports/po-monthly/draft`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month, agent, user }),
+        body: JSON.stringify({ month, toMonth, agent, user }),
     });
     const blob = await fileResponse(res, 'Could not make the Outlook draft.', 'message/rfc822');
     const fileName = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'PO Reports.eml';

@@ -6,8 +6,21 @@ const PDFDocument = require('pdfkit');
 const { LETTERHEAD, formatDate } = require('./dischargeSummary');
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-// '2026-10' -> 'October 2026'
-const monthLabel = (month) => `${MONTHS[Number(month.slice(5, 7)) - 1]} ${month.slice(0, 4)}`;
+// A report period: one month ('2026-10') or a range of months ('2026-08..2026-10', routes/agentReports.js)
+const isRange = (month) => String(month).includes('..');
+// '2026-10' -> 'October 2026'; '2026-08..2026-10' -> 'August - October 2026'; '2026-11..2027-01' -> 'November 2026 - January 2027'
+const monthLabel = (month) => {
+    const one = (m) => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
+    if (!isRange(month)) return one(month);
+    const [from, to] = month.split('..');
+    return from.slice(0, 4) === to.slice(0, 4)
+        ? `${MONTHS[Number(from.slice(5, 7)) - 1]} - ${one(to)}`
+        : `${one(from)} - ${one(to)}`;
+};
+// "month" for one month, "period" for a range, as in "No attendance recorded this period."
+const periodWord = (month) => (isRange(month) ? 'period' : 'month');
+// The report's title: a range isn't a monthly report
+const reportTitle = (month) => (isRange(month) ? 'Progress Report' : 'Monthly Progress Report');
 
 // Attendance types that count as a session the client attended; Call-In is a called-in absence and
 // Closure/Holiday mean the group didn't meet
@@ -22,6 +35,12 @@ const withCredentials = (name, credentials) => (name && credentials ? `${name}, 
 // Drug test clients are seen by an observer, not a therapist
 const DRUG_TEST_PROGRAM_TYPES = ['Fed Drug Test'];
 const staffTitle = (client) => (DRUG_TEST_PROGRAM_TYPES.includes(client.programtype) ? 'Observer' : 'Therapist');
+// The client's phase as printed: BIP clients store their week number there ("Week 12"); blank is N/A
+const phaseText = (client) => {
+    const phase = String(client.phase ?? '').trim();
+    if (!phase) return '';
+    return client.programtype === 'BIP' && /^\d+$/.test(phase) ? `Week ${phase}` : phase;
+};
 
 // '14:30' -> '2:30 PM'
 const formatTime = (hhmm) => {
@@ -42,7 +61,7 @@ const buildClientReportPdf = (info) => new Promise((resolve, reject) => {
     const doc = new PDFDocument({
         size: 'LETTER', bufferPages: true,
         margins: { top: 60, bottom: 60, left: 72, right: 72 },
-        info: { Title: `Monthly Progress Report - ${name} - ${monthLabel(month)}` },
+        info: { Title: `${reportTitle(month)} - ${name} - ${monthLabel(month)}` },
     });
     const chunks = [];
     doc.on('data', chunk => chunks.push(chunk));
@@ -58,9 +77,10 @@ const buildClientReportPdf = (info) => new Promise((resolve, reject) => {
     doc.font('Times-BoldItalic').fontSize(22).text(LETTERHEAD.name, { align: 'center' });
     doc.font('Times-BoldItalic').fontSize(13).text(LETTERHEAD.program, { align: 'center' });
     doc.font('Times-Roman').fontSize(11).text(LETTERHEAD.address, { align: 'center' });
-    doc.text(LETTERHEAD.phones, { align: 'center' });
+    // Phone only: the PO reports don't list the fax
+    doc.text(LETTERHEAD.phone, { align: 'center' });
     doc.moveDown(1.2);
-    doc.font('Times-Bold').fontSize(14).text('Monthly Progress Report', { align: 'center', underline: true });
+    doc.font('Times-Bold').fontSize(14).text(reportTitle(month), { align: 'center', underline: true });
     doc.font('Times-Roman').fontSize(12).text(monthLabel(month), { align: 'center' });
     doc.moveDown(1.2);
 
@@ -78,10 +98,11 @@ const buildClientReportPdf = (info) => new Promise((resolve, reject) => {
         doc.moveDown(0.3);
     };
     fieldRow([['Participant', name], ['ID #', idText(client)]]);
-    fieldRow([['Program', client.programtype], ['Program Start Date', formatDate(client.programstartdate)]]);
+    fieldRow([['Program', client.programtype], ['Phase', phaseText(client)]]);
+    fieldRow([['Program Start Date', formatDate(client.programstartdate)], ['Status', client.programstatus]]);
     const attends = !NO_ATTENDANCE_PROGRAM_TYPES.includes(client.programtype);
     if (attends) fieldRow([['Group', client.groupname], [staffTitle(client), withCredentials(client.counselor, client.counselorcredentials)]]);
-    fieldRow([['Supervising Agent', client.supervisingagent], ['Status', client.programstatus]]);
+    fieldRow([['Supervising Agent', client.supervisingagent]]);
     doc.moveDown(0.8);
 
     const heading = (text) => {
@@ -113,6 +134,27 @@ const buildClientReportPdf = (info) => new Promise((resolve, reject) => {
         doc.moveDown(0.6);
     };
 
+    // Polygraphs come first, then attendance
+    heading('Polygraphs');
+    if (!client.takespolygraphs) {
+        line('Polygraphs are not required for this client.');
+        doc.moveDown(0.6);
+    } else {
+        if (polygraphs.length > 0) {
+            table(
+                [{ label: 'Date', share: 0.2 }, { label: 'Type', share: 0.4 }, { label: 'Result', share: 0.4 }],
+                polygraphs.map(p => [formatDate(p.date), p.type, p.results])
+            );
+        } else {
+            line(`Last polygraph: ${formatDate(client.lastpoly)}`);
+        }
+        const next = client.nextpoly;
+        line(next
+            ? `Next scheduled polygraph: ${formatDate(next.date)}${next.time ? ` at ${formatTime(next.time)}` : ''}${next.location ? `, ${next.location}` : ''}`
+            : 'Next scheduled polygraph: None scheduled');
+        doc.moveDown(0.8);
+    }
+
     // Attendance (not for programs that don't attend groups)
     if (attends) {
         heading('Attendance');
@@ -128,38 +170,16 @@ const buildClientReportPdf = (info) => new Promise((resolve, reject) => {
                 attendance.map(a => [formatDate(a.date), a.groupname || '', ATTENDANCE_LABELS[a.type] || a.type])
             );
         } else {
-            line('No attendance recorded this month.');
+            line(`No attendance recorded this ${periodWord(month)}.`);
             doc.moveDown(0.6);
         }
-    }
-
-    // Polygraphs
-    heading('Polygraphs');
-    if (!client.takespolygraphs) {
-        line('Polygraphs are not required for this client.');
-        doc.moveDown(0.6);
-    } else {
-        if (polygraphs.length > 0) {
-            table(
-                [{ label: 'Date', share: 0.2 }, { label: 'Type', share: 0.4 }, { label: 'Result', share: 0.4 }],
-                polygraphs.map(p => [formatDate(p.date), p.type, p.results])
-            );
-        } else {
-            line(`No polygraph this month. Last polygraph: ${formatDate(client.lastpoly)}.`);
-            doc.moveDown(0.3);
-        }
-        const next = client.nextpoly;
-        line(next
-            ? `Next scheduled polygraph: ${formatDate(next.date)}${next.time ? ` at ${formatTime(next.time)}` : ''}${next.location ? `, ${next.location}` : ''}`
-            : 'Next scheduled polygraph: None scheduled');
-        doc.moveDown(0.8);
     }
 
     // Case notes: therapist notes, and call-in notes (absences and group closures)
     heading('Case Notes');
     const title = staffTitle(client);
     if (notes.length === 0) {
-        line(`No ${title.toLowerCase()} or call-in notes this month.`);
+        line(`No ${title.toLowerCase()} or call-in notes this ${periodWord(month)}.`);
     }
     notes.forEach(n => {
         doc.font('Times-Roman').fontSize(11);
@@ -203,12 +223,12 @@ const base64Lines = (buf) => buf.toString('base64').replace(/.{1,76}/g, '$&\r\n'
 const reportFileName = (client, month) =>
     `${safeFileName(`${client.lastname}, ${client.firstname}${idText(client) ? ` - ${idText(client)}` : ''} - ${monthLabel(month)}`)}.pdf`;
 
-const draftSubject = (month) => `Monthly Client Reports - ${monthLabel(month)}`;
+const draftSubject = (month) => `${isRange(month) ? 'Client Reports' : 'Monthly Client Reports'} - ${monthLabel(month)}`;
 
 const draftBody = ({ agentName, month, clients }) => [
     `${agentName},`,
     '',
-    `Attached are the ${monthLabel(month)} monthly progress reports for the following client${clients.length === 1 ? '' : 's'} under your supervision:`,
+    `Attached are the ${monthLabel(month)} ${isRange(month) ? '' : 'monthly '}progress reports for the following client${clients.length === 1 ? '' : 's'} under your supervision:`,
     '',
     ...clients.map(c => `  - ${c.lastname}, ${c.firstname}${idText(c) ? ` (${idText(c)})` : ''}`),
     '',
@@ -216,7 +236,7 @@ const draftBody = ({ agentName, month, clients }) => [
     '',
     LETTERHEAD.name,
     LETTERHEAD.program,
-    LETTERHEAD.phones,
+    LETTERHEAD.phone,
 ].join('\r\n');
 
 // draft: { to: { name, email }, month, clients, attachments: [{ fileName, data }] } -> Buffer of the .eml file

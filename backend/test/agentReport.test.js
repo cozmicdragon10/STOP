@@ -82,3 +82,27 @@ test('a draft for an agent with no email leaves To blank for Outlook to fill in'
     const eml = buildDraftEml({ to: { name: 'José Núñez', email: null }, month: '2026-10', clients: [client], attachments: [] }).toString('utf8');
     assert.match(eml, /^To: $/m);
 });
+
+test('the PO email lists the office phone without the fax', () => {
+    const eml = buildDraftEml({ to: { name: 'Agent Smith', email: 'agent@example.org' }, month: '2026-10', clients: [client], attachments: [] }).toString('utf8');
+    const body = Buffer.from(/base64\r\n\r\n([\s\S]+?)\r\n--/.exec(eml)[1].replace(/\r\n/g, ''), 'base64').toString('utf8');
+    assert.match(body, /\(405\) 601-8042/);
+    assert.doesNotMatch(body, /fax/i);
+});
+
+test('a range of months is labeled as one period', () => {
+    assert.equal(monthLabel('2026-08..2026-10'), 'August - October 2026');
+    assert.equal(monthLabel('2026-11..2027-01'), 'November 2026 - January 2027');
+    assert.equal(draftFileName('Agent Smith', '2026-08..2026-10'), 'PO Reports - Agent Smith - August - October 2026.eml');
+    assert.equal(reportFileName(client, '2026-08..2026-10'), 'Client, Test - DOC 12345 - August - October 2026.pdf');
+});
+
+test('the report period covers whole months from the first to the last', () => {
+    const { reportPeriod } = require('../routes/agentReports');
+    assert.deepEqual(reportPeriod('2026-10'), { period: '2026-10', start: '2026-10-01', endMonth: '2026-10-01', range: '[2026-10-01,2026-11-01)' });
+    assert.deepEqual(reportPeriod('2026-08', '2026-10'), { period: '2026-08..2026-10', start: '2026-08-01', endMonth: '2026-10-01', range: '[2026-08-01,2026-11-01)' });
+    assert.equal(reportPeriod('2026-11', '2027-01').range, '[2026-11-01,2027-02-01)');
+    assert.match(reportPeriod('2026-10', '2026-08').error, /after the first month/);
+    assert.match(reportPeriod('2024-01', '2026-01').error, /24 months or fewer/);
+    assert.match(reportPeriod('2026-13').error, /YYYY-MM/);
+});

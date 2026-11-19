@@ -32,9 +32,12 @@ const saveFile = (blob: Blob, fileName: string) => {
 // Monthly reports to supervising agents: a PDF per active client, grouped by agent into an unsent Outlook draft.
 // Nothing is emailed from here; the draft opens in Outlook and someone checks it and presses Send.
 export default function MonthlyPoReports({ userEmail, onOpenClient }: Props) {
+  // The report period: From (month) through To (toMonth). Both start on last month, a one-month report.
   const [month, setMonth] = useState(lastMonth);
-  // The month the data (or load error) is for; another month shows Loading until it arrives
-  const [loaded, setLoaded] = useState<{ month: string; data: PoReportMonth | null; error: string } | null>(null);
+  const [toMonth, setToMonth] = useState(lastMonth);
+  const period = `${month}..${toMonth}`;
+  // The period the data (or load error) is for; another period shows Loading until it arrives
+  const [loaded, setLoaded] = useState<{ period: string; data: PoReportMonth | null; error: string } | null>(null);
   // Bumped to reload the month in place (after a draft is made, so its "Draft made" shows)
   const [refresh, setRefresh] = useState(0);
   // Errors from viewing a PDF or making a draft
@@ -46,17 +49,20 @@ export default function MonthlyPoReports({ userEmail, onOpenClient }: Props) {
   // The agent whose draft is being made
   const [drafting, setDrafting] = useState<string | null>(null);
 
-  const validMonth = /^\d{4}-\d{2}$/.test(month);
+  const validMonth = /^\d{4}-\d{2}$/.test(month) && /^\d{4}-\d{2}$/.test(toMonth) && toMonth >= month;
   useEffect(() => {
     if (!validMonth) return;
     let cancelled = false;
-    getPoReportMonth(month)
-      .then(d => { if (!cancelled) setLoaded({ month, data: d, error: '' }); })
-      .catch(err => { if (!cancelled) setLoaded({ month, data: null, error: errorText(err, 'Failed to load the monthly PO reports.') }); });
+    getPoReportMonth(month, toMonth)
+      .then(d => { if (!cancelled) setLoaded({ period, data: d, error: '' }); })
+      .catch(err => { if (!cancelled) setLoaded({ period, data: null, error: errorText(err, 'Failed to load the monthly PO reports.') }); });
     return () => { cancelled = true; };
-  }, [month, validMonth, refresh]);
-  const data = loaded?.month === month ? loaded.data : null;
-  const loadError = loaded?.month === month ? loaded.error : '';
+  }, [month, toMonth, period, validMonth, refresh]);
+  const data = loaded?.period === period ? loaded.data : null;
+  const loadError = loaded?.period === period ? loaded.error : '';
+  // Moving From past To moves To with it (and To before From moves From), so the range always runs forward
+  const changeFrom = (value: string) => { setMonth(value); if (value && value > toMonth) setToMonth(value); };
+  const changeTo = (value: string) => { setToMonth(value); if (value && value < month) setMonth(value); };
   const reload = useCallback(() => setRefresh(n => n + 1), []);
 
   const toggle = (name: string) => setExpanded(prev => {
@@ -70,7 +76,7 @@ export default function MonthlyPoReports({ userEmail, onOpenClient }: Props) {
     // Opened before the fetch so the browser doesn't treat it as a blocked popup
     const viewer = window.open('', '_blank');
     try {
-      const url = URL.createObjectURL(await fetchPoClientReport(clientId, month));
+      const url = URL.createObjectURL(await fetchPoClientReport(clientId, month, toMonth));
       if (viewer) viewer.location.href = url; else window.open(url, '_blank');
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (err) {
@@ -83,7 +89,7 @@ export default function MonthlyPoReports({ userEmail, onOpenClient }: Props) {
     setError('');
     setDrafting(agent.name);
     try {
-      const { blob, fileName } = await createPoReportDraft(month, agent.name, userEmail);
+      const { blob, fileName } = await createPoReportDraft(month, agent.name, userEmail, toMonth);
       saveFile(blob, fileName);
       reload();
     } catch (err) {
@@ -110,16 +116,29 @@ export default function MonthlyPoReports({ userEmail, onOpenClient }: Props) {
             <h3 className="font-semibold text-white">Monthly PO Reports</h3>
             <p className="text-xs text-slate-400 mt-1">A PDF for each active client, grouped into one Outlook draft per supervising agent.</p>
           </div>
-          <label className="text-xs text-slate-400 ml-auto">
-            Report month
-            <input
-              type="month"
-              value={month}
-              max={todayLocal().slice(0, 7)}
-              onChange={e => setMonth(e.target.value)}
-              className="block mt-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white"
-            />
-          </label>
+          {/* A range of months makes one report per client covering all of them; the same month in both is one month */}
+          <div className="ml-auto flex items-end gap-2">
+            <label className="text-xs text-slate-400">
+              From
+              <input
+                type="month"
+                value={month}
+                max={todayLocal().slice(0, 7)}
+                onChange={e => changeFrom(e.target.value)}
+                className="block mt-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white"
+              />
+            </label>
+            <label className="text-xs text-slate-400">
+              To
+              <input
+                type="month"
+                value={toMonth}
+                max={todayLocal().slice(0, 7)}
+                onChange={e => changeTo(e.target.value)}
+                className="block mt-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white"
+              />
+            </label>
+          </div>
         </div>
 
         <div className="flex gap-2 items-start text-xs text-sky-200 bg-sky-500/10 border border-sky-500/30 rounded-lg p-3">
@@ -246,7 +265,7 @@ export default function MonthlyPoReports({ userEmail, onOpenClient }: Props) {
           );
         })}
       </div>
-      {data && <p className="text-xs text-slate-500">Reports for {monthLabel(data.month)}. "Draft made" means the Outlook draft was downloaded, not that it was sent.</p>}
+      {data && <p className="text-xs text-slate-500">Reports for {month === toMonth ? monthLabel(month) : `${monthLabel(month)} – ${monthLabel(toMonth)}`}. "Draft made" means the Outlook draft was downloaded, not that it was sent.</p>}
     </div>
   );
 }

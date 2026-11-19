@@ -7,6 +7,8 @@ const LETTERHEAD = {
     program: 'Cognitive Restructuring Program',
     address: '300 N Meridian Ave, Oklahoma City OK  73107',
     phones: '(405) 601-8042  /  Fax  (405) 602-0769',
+    // The office phone without the fax, for the PO reports and their email
+    phone: '(405) 601-8042',
 };
 
 // Dates print as MM/DD/YYYY; DATE columns arrive as midnight local time, so local getters keep the right day
