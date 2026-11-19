@@ -4,6 +4,8 @@ const { OPEN_GROUP_ADMIN_ROLES, openGroupViewer } = require('../lib/access');
 const { coveringCounselorFor } = require('../lib/cashResponsibility');
 const { cashDiscardProblem, keepPrintedMarks, printedEntries, printedReceiptProblem } = require('../lib/printedReceipts');
 const { clientsWithoutUnits, drugTestedOn, noUnitsMessage } = require('../lib/federalUnits');
+const { addAttendanceNote, bipWeekAt, noteAuthor, noteBody, replaceNoteBody } = require('../lib/attendanceNotes');
+const { logClientChange } = require('../lib/changeLog');
 
 const router = express.Router();
 
@@ -45,11 +47,16 @@ router.get('/api/closed-groups', async (req, res) => {
                     MIN(COALESCE(a.OpenedBy, a.CreatedBy)) AS OpenedBy, MIN(a.CreatedBy) AS ClosedBy, MAX(a.CreatedOn) AS ClosedOn,
                     json_agg(json_build_object(
                         'client', a.Client, 'name', c.LastName || ', ' || c.FirstName,
-                        'groupFee', a.GroupFee, 'accountPaid', a.AccountPaid, 'paymentMethod', a.PaymentMethod
+                        'groupFee', a.GroupFee, 'accountPaid', a.AccountPaid, 'paymentMethod', a.PaymentMethod,
+                        'attendanceId', a.AttendanceId, 'programType', c.ProgramType, 'note', n.Comments
                     ) ORDER BY c.LastName, c.FirstName) AS Entries
              FROM Attendance a
              JOIN Groups g ON g.GroupId = a."Group"
              JOIN Clients c ON c.ClientId = a.Client
+             -- The Therapist note made from this attendance's comment (lib/attendanceNotes.js), if any
+             LEFT JOIN LATERAL (
+                 SELECT Comments FROM Notes WHERE AttendanceId = a.AttendanceId ORDER BY NoteId DESC LIMIT 1
+             ) n ON TRUE
              WHERE a.Type = 'Group'
              GROUP BY a."Group", g.GroupName, g.Counselor, a.Date, a.SessionNumber
              HAVING $1::boolean
@@ -60,9 +67,96 @@ router.get('/api/closed-groups', async (req, res) => {
              LIMIT 100`,
             [isAdmin, viewer.employeeemail, viewer.displayname || '']
         );
-        res.json(result.rows);
+        // Each client's note is shown without its heading (the BIP week or attendance number, group, and date)
+        res.json(result.rows.map(row => ({
+            ...row,
+            entries: row.entries.map(e => ({ ...e, note: e.note === null ? null : noteBody(e.note) })),
+        })));
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// Update Attendance Notes on a closed group: adds, changes, or removes the Therapist note made from each client's
+// attendance comment (lib/attendanceNotes.js). Allowed to anyone who can see the closed group (as above). Each change
+// sends the note's text as it was shown (original); if someone changed it since, nothing is saved (409).
+// notes: [{ attendanceId, text, original }] where original is null when the client had no note.
+router.put('/api/closed-groups/notes', async (req, res) => {
+    const { group, date, sessionNumber, notes } = req.body || {};
+    const sessionNum = Number(sessionNumber) > 0 ? Math.floor(Number(sessionNumber)) : 1;
+    if (!Array.isArray(notes) || notes.length === 0) return res.status(400).json({ error: 'No notes were changed.' });
+    const user = req.user?.employeeemail;
+    const db = await pool.connect();
+    try {
+        const viewer = await openGroupViewer(user);
+        if (!viewer) return res.status(403).json({ error: 'Only an active employee can update attendance notes.' });
+        await db.query('BEGIN');
+        const rowsRes = await db.query(
+            `SELECT a.AttendanceId, a.Client, COALESCE(a.OpenedBy, a.CreatedBy) AS OpenedBy, a.CoveredBy,
+                    g.GroupName, g.Counselor, c.LastName || ', ' || c.FirstName AS Name
+             FROM Attendance a JOIN Groups g ON g.GroupId = a."Group" JOIN Clients c ON c.ClientId = a.Client
+             WHERE a."Group" = $1 AND a.Date = $2::date AND a.SessionNumber = $3 AND a.Type = 'Group'`,
+            [group, date, sessionNum]
+        );
+        const rows = rowsRes.rows;
+        if (rows.length === 0) throw Object.assign(new Error('That closed group session was not found.'), { status: 404 });
+        const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+        const canSee = viewer.role === 'Business Administrator'
+            || (!!viewer.displayname && same(rows[0].counselor, viewer.displayname))
+            || rows.some(r => same(r.openedby, viewer.employeeemail) || same(r.coveredby, viewer.employeeemail));
+        if (!canSee) throw Object.assign(new Error('You can only update notes for closed groups you can see.'), { status: 403 });
+
+        const byId = new Map(rows.map(r => [r.attendanceid, r]));
+        const coveredBy = rows.find(r => r.coveredby)?.coveredby || null;
+        let author = null;
+        const done = { added: 0, updated: 0, removed: 0 };
+        for (const item of notes) {
+            const row = byId.get(Number(item.attendanceId));
+            if (!row) throw Object.assign(new Error('A client on this update is not in that group session.'), { status: 400 });
+            const text = String(item.text ?? '').trim();
+            const original = item.original === null || item.original === undefined ? null : String(item.original).trim();
+            const existing = (await db.query(
+                'SELECT * FROM Notes WHERE AttendanceId = $1 ORDER BY NoteId DESC LIMIT 1 FOR UPDATE', [row.attendanceid]
+            )).rows[0];
+            const current = existing ? noteBody(existing.comments).trim() : null;
+            if (current !== original) {
+                throw Object.assign(new Error(`Not saved: ${row.name}'s note was changed on another screen while you were editing. `
+                    + 'Close this window and open it again to see the latest notes.'), { status: 409 });
+            }
+            if (text === (current ?? '')) continue;
+            if (existing && !text) {
+                await db.query('DELETE FROM Notes WHERE NoteId = $1', [existing.noteid]);
+                await logClientChange(db, {
+                    clientId: row.client, changedBy: user, changeType: 'Case Note', newValue: 'Deleted',
+                    details: `Therapist note from group attendance removed: ${existing.comments}`,
+                });
+                done.removed++;
+            } else if (existing) {
+                const comments = replaceNoteBody(existing.comments, text);
+                await db.query('UPDATE Notes SET Comments = $1, EditedBy = $2, EditedOn = NOW() WHERE NoteId = $3', [comments, user, existing.noteid]);
+                await logClientChange(db, {
+                    clientId: row.client, changedBy: user, changeType: 'Case Note', newValue: 'Edited',
+                    details: `Therapist note from group attendance. Was: ${existing.comments} Now: ${comments}`,
+                });
+                done.updated++;
+            } else {
+                author = author || await noteAuthor(db, { coveredBy, groupCounselor: row.counselor, closedBy: user });
+                await addAttendanceNote(db, {
+                    clientId: row.client, attendanceId: row.attendanceid, date, sessionNumber: sessionNum, groupName: row.groupname,
+                    bipWeek: await bipWeekAt(db, { clientId: row.client, attendanceId: row.attendanceid, date }),
+                    individual: false, text, author, closedBy: user,
+                });
+                done.added++;
+            }
+        }
+        await db.query('COMMIT');
+        await logAction(user, 'Update Attendance Notes', `${rows[0].groupname} ${date} session ${sessionNum}: ${done.added} added, ${done.updated} updated, ${done.removed} removed`);
+        res.json(done);
+    } catch (err) {
+        await db.query('ROLLBACK');
+        res.status(err.status || 500).json({ error: err.message });
+    } finally {
+        db.release();
     }
 });
 

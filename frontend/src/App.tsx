@@ -26,6 +26,8 @@ import type {
 import DeviceAccess from './components/device/DeviceAccess';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
+import ClosedGroupNotesDialog from './components/attendance/ClosedGroupNotesDialog';
+import CashHeldPanel from './components/attendance/CashHeldPanel';
 import { balanceWord, formatBalance, formatBalanceLabeled, toDisplayBalance } from './utils/balance';
 import { applyProgramFees } from './utils/soPhases';
 import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
@@ -213,7 +215,8 @@ export default function App() {
   const [openGroups, setOpenGroups] = useState<OpenGroupSession[]>([]);
   const [openGroupsError, setOpenGroupsError] = useState('');
   // Closed group sessions shown on the panel's Closed tab; the expanded one lists its clients
-  const [groupPanelTab, setGroupPanelTab] = useState<'open' | 'closed'>('open');
+  // Open groups, closed groups, or the group cash being held (Total Cash Deposit)
+  const [groupPanelTab, setGroupPanelTab] = useState<'open' | 'closed' | 'cash'>('open');
   const [closedGroups, setClosedGroups] = useState<ClosedGroupSession[]>([]);
   const [closedGroupsError, setClosedGroupsError] = useState('');
   const [expandedClosedGroup, setExpandedClosedGroup] = useState<string | null>(null);
@@ -221,6 +224,8 @@ export default function App() {
   const [resumeRequest, setResumeRequest] = useState<OpenGroupSession | null>(null);
   // Closed group picked in the Closed Groups panel for missed check-ins (Business Administrators)
   const [missedCheckInRequest, setMissedCheckInRequest] = useState<ClosedGroupSession | null>(null);
+  // Closed group whose Update Attendance Notes window is open
+  const [closedGroupNotes, setClosedGroupNotes] = useState<ClosedGroupSession | null>(null);
 
   // Group check-in panel; on phones the Open Groups list sits below it, so picking a group scrolls back up to it
   const checkInPanelRef = useRef<HTMLDivElement>(null);
@@ -1618,21 +1623,23 @@ export default function App() {
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl min-w-0">
               <div>
                 <div className="flex items-center justify-between gap-2 mb-1">
-                  <h3 className="font-semibold text-white flex items-center gap-2"><ClipboardCheck size={18} className="text-blue-400" /> {groupPanelTab === 'open' ? 'Open Groups' : 'Closed Groups'}</h3>
+                  <h3 className="font-semibold text-white flex items-center gap-2"><ClipboardCheck size={18} className="text-blue-400" /> {groupPanelTab === 'open' ? 'Open Groups' : groupPanelTab === 'closed' ? 'Closed Groups' : 'Total Cash Deposit'}</h3>
                   <div className="flex bg-slate-950 border border-slate-800 rounded-lg p-0.5">
-                    {(['open', 'closed'] as const).map(t => (
+                    {(['open', 'closed', 'cash'] as const).map(t => (
                       <button
                         key={t}
                         type="button"
                         onClick={() => setGroupPanelTab(t)}
                         className={`px-3 py-1 rounded text-xs font-semibold transition ${groupPanelTab === t ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
                       >
-                        {t === 'open' ? `Open${openGroups.length ? ` (${openGroups.length})` : ''}` : 'Closed'}
+                        {t === 'open' ? `Open${openGroups.length ? ` (${openGroups.length})` : ''}` : t === 'closed' ? 'Closed' : 'Cash'}
                       </button>
                     ))}
                   </div>
                 </div>
-                {groupPanelTab === 'closed' ? (
+                {groupPanelTab === 'cash' ? (
+                  <CashHeldPanel isAdmin={role === 'Business Administrator'} onSuccess={setSuccessMsg} onError={setError} />
+                ) : groupPanelTab === 'closed' ? (
                   <>
                     <p className="text-xs text-slate-400 leading-relaxed mb-4">{role === 'Business Administrator' ? 'Recently closed group sessions.' : 'Recently closed group sessions for groups you counsel or opened.'} Select one to see who attended.</p>
                     {closedGroupsError ? (
@@ -1683,6 +1690,13 @@ export default function App() {
                                       Add Missed Check-In
                                     </button>
                                   )}
+                                  <button
+                                    type="button"
+                                    onClick={() => setClosedGroupNotes(c)}
+                                    className="mt-2 w-full bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 rounded py-1.5 font-semibold"
+                                  >
+                                    Update Attendance Notes
+                                  </button>
                                 </div>
                               )}
                             </li>
@@ -1994,6 +2008,24 @@ export default function App() {
             employees={employees}
             user={user}
             onDone={message => { setBipIntakePrompt(null); if (message) setSuccessMsg(message); }}
+          />
+        )}
+        {closedGroupNotes && (
+          <ClosedGroupNotesDialog
+            session={closedGroupNotes}
+            onClose={() => setClosedGroupNotes(null)}
+            onSaved={async message => {
+              const edited = closedGroupNotes.entries.map(e => e.client);
+              setClosedGroupNotes(null);
+              setSuccessMsg(message);
+              loadOpenGroups();
+              // An open account of a client in that group shows the changed note on Case Notes
+              const open = openClientIdRef.current;
+              if (open !== null && edited.includes(open)) {
+                const notes = await getClientNotes(open);
+                if (openClientIdRef.current === open) setClientNotes(notes);
+              }
+            }}
           />
         )}
       </main>

@@ -51,6 +51,8 @@ const ALLOWED = [
     ['PUT', /^\/api\/open-groups$/],
     ['DELETE', /^\/api\/open-groups\/\d+$/],
     ['GET', /^\/api\/closed-groups$/],
+    // Update Attendance Notes on a closed group they can see (routes/openGroups.js checks which)
+    ['PUT', /^\/api\/closed-groups\/notes$/],
     ['GET', /^\/api\/my-sessions$/],
     ['POST', /^\/api\/attendance\/batch$/],
     ['GET', /^\/api\/individual-sessions\/(open|closed)$/],
@@ -76,6 +78,9 @@ const ALLOWED = [
     // Cash Deposits: the group cash they're holding and marking dropped off
     ['GET', /^\/api\/reports\/(user|group)-cash-deposits$/],
     ['PUT', /^\/api\/reports\/(user|group)-cash-deposits$/],
+    // Closed Groups > Cash: the group cash they hold, and dropping it off (routes/reports.js keeps them to their own)
+    ['GET', /^\/api\/reports\/group-cash-held$/],
+    ['POST', /^\/api\/reports\/group-cash-held\/drop-off$/],
 ];
 
 const isCounselorAllowed = (method, path) => ALLOWED.some(([m, re]) => m === method && re.test(path));

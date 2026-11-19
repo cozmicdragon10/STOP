@@ -7,13 +7,15 @@ interface Props {
   subtitle?: string;
   // While saving, Escape and clicking outside don't close it
   busy?: boolean;
+  // false: a click outside the box doesn't close it (forms that would lose what was typed); X and Escape still do
+  closeOnOutsideClick?: boolean;
   onClose: () => void;
   children: ReactNode;
 }
 
 // A centered pop-up over a dimmed page, like the app's other dialogs (BusPassDialog). Escape or a click outside closes
 // it. Content isn't clipped, so a client search list can hang below its box.
-export default function PopupDialog({ title, subtitle, busy = false, onClose, children }: Props) {
+export default function PopupDialog({ title, subtitle, busy = false, closeOnOutsideClick = true, onClose, children }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const titleId = useId();
 
@@ -32,7 +34,7 @@ export default function PopupDialog({ title, subtitle, busy = false, onClose, ch
   return (
     // z-[60]: above the client account panel (z-50), which a call-in dialog opens over. A box taller than the window
     // scrolls with the page (m-auto centers it when it fits) instead of being cut off.
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex overflow-y-auto z-[60] p-4" onClick={() => { if (!busy) onClose(); }}>
+    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex overflow-y-auto z-[60] p-4" onClick={() => { if (!busy && closeOnOutsideClick) onClose(); }}>
       <div
         ref={box}
         role="dialog"

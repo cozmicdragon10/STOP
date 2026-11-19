@@ -447,6 +447,8 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
           title={mode === 'open' ? 'Open Availability' : editing?.status === 'Open' ? 'Change Open Time' : 'Reschedule Assessment'}
           subtitle={mode === 'open' ? 'Opens a time with no client. A client can be assigned to it from the calendar.' : undefined}
           busy={saving}
+          // Locked: a stray click outside would lose the counselor, time, and location entered
+          closeOnOutsideClick={false}
           onClose={closeForm}>
           <div className="space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

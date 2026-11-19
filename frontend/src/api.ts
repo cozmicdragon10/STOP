@@ -876,7 +876,65 @@ export interface ClosedGroupSession {
     openedby: string | null;
     closedby: string | null;
     closedon: string | null;
-    entries: { client: number; name: string; groupFee: number; accountPaid: number; paymentMethod: string | null }[];
+    // note: the client's Therapist note from this attendance, without its heading (null when none)
+    entries: {
+        client: number; name: string; groupFee: number; accountPaid: number; paymentMethod: string | null;
+        attendanceId: number; programType: string | null; note: string | null;
+    }[];
+}
+
+// A closed group session whose cash hasn't been dropped off: held by responsible (an email; responsiblename for display)
+export interface HeldGroupCash {
+    groupid: number;
+    groupname: string;
+    sessiondate: string;
+    sessionnumber: number;
+    closedon: string | null;
+    cash: number | string;
+    responsible: string;
+    responsiblename: string;
+}
+
+// Closed Groups > Cash: the group cash this user holds (Business Administrators: everyone's)
+export async function getHeldGroupCash(): Promise<HeldGroupCash[]> {
+    const res = await apiFetch(`${API_BASE}/reports/group-cash-held`);
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'Failed to load the cash held.');
+    return body;
+}
+
+// Drop Off Deposit: checks off all these sessions' cash as dropped off on depositDate (all or nothing). cash is each
+// session's amount as shown; if one changed since, nothing is saved and this throws with the server's message.
+export async function dropOffHeldGroupCash(data: {
+    depositDate: string;
+    sessions: { groupId: number; sessionDate: string; sessionNumber: number; cash: number }[];
+}): Promise<{ count: number; total: number }> {
+    const res = await apiFetch(`${API_BASE}/reports/group-cash-held/drop-off`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'Failed to record the drop-off.');
+    return body;
+}
+
+// Update Attendance Notes on a closed group. Each change sends the note as it was shown (original, null when the client
+// had none); if one was changed on another screen meanwhile, nothing is saved and this throws with the server's message.
+export async function updateClosedGroupNotes(data: {
+    group: number; date: string; sessionNumber: number;
+    notes: { attendanceId: number; text: string; original: string | null }[];
+}): Promise<{ added: number; updated: number; removed: number }> {
+    const res = await apiFetch(`${API_BASE}/closed-groups/notes`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+        throw new Error(body.error || 'Failed to update the attendance notes.');
+    }
+    return body;
 }
 
 // Only the closed sessions this user may see: Business Administrators see all; others see their groups' and the ones they opened

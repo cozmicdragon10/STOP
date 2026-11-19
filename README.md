@@ -154,9 +154,10 @@ reports changes back. Saves that finish after another client was opened don't ov
   drop-off check-off follow this.
 - **Group check-in comments** (`backend/lib/attendanceNotes.js`): a comment typed for a client on the Review &
   Comments screen is not saved on the attendance. When the group closes it goes on the client's case notes as a
-  Therapist note, labeled with the client's BIP week (BIP clients) or attendance count (everyone else), the group and
-  the date. It is written as the covering counselor, else the group's usual counselor, else whoever closed the group.
-  An approved make-up is still marked on the attendance.
+  Therapist note labeled "Attendance" (BIP clients: their BIP week) with the group and the date the group took place.
+  It is written as the covering counselor, else the group's usual counselor, else whoever closed the group. An
+  approved make-up is still marked on the attendance. The note is linked to the attendance (Notes.AttendanceId), so
+  Update Attendance Notes on a closed group can add, change, or remove it later.
 - **Poly fee payment corrections** (`backend/lib/poly.js`): adjusting, refunding, or disputing a poly fee payment
   moves poly fee paid, which never goes below $0. Booking a polygraph spends the poly fee (paid resets to $0), so
   taking money back after that is owed on the account balance instead.

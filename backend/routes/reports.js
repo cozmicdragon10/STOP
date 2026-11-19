@@ -225,6 +225,93 @@ router.put('/api/reports/group-cash-deposits', async (req, res) => {
     }
 });
 
+// --- TOTAL CASH DEPOSIT (Closed Groups panel, Cash tab) ---
+// Every closed group session whose cash hasn't been dropped off yet, whatever its date: the cash each employee is
+// holding (lib/cashResponsibility.js). Business Administrators see everyone's; others see their own.
+const heldSessionsSql = (where, adminRolesParam) => `
+    SELECT s.GroupId, s.GroupName, to_char(s.Date, 'YYYY-MM-DD') AS SessionDate, s.SessionNumber, s.ClosedOn,
+           s.Cash, s.Responsible, COALESCE(s.ResponsibleName, s.Responsible) AS ResponsibleName
+    FROM (${withResponsible(closedSessionsSql(`(a."Group", a.Date, a.SessionNumber) IN (
+        SELECT "Group", Date, SessionNumber FROM Attendance
+        WHERE "Group" IS NOT NULL AND PaymentMethod = 'Cash' AND AccountPaid > 0 AND ${where})`), adminRolesParam)}) s
+    LEFT JOIN GroupDeposits d ON d.GroupId = s.GroupId AND d.SessionDate = s.Date AND d.SessionNumber = s.SessionNumber
+    WHERE s.Cash > 0 AND d.DepositId IS NULL`;
+
+router.get('/api/reports/group-cash-held', async (req, res) => {
+    try {
+        const viewer = await openGroupViewer(req.user?.employeeemail);
+        if (!viewer) return res.json([]);
+        const result = await pool.query(
+            `SELECT * FROM (${heldSessionsSql('TRUE', '$1')}) h
+             WHERE $2::boolean OR LOWER(h.Responsible) = LOWER($3)
+             ORDER BY h.ResponsibleName, h.SessionDate, h.GroupName, h.SessionNumber`,
+            [OPEN_GROUP_ADMIN_ROLES, viewer.role === 'Business Administrator', viewer.employeeemail]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Drop Off Deposit: checks off every listed session's cash as dropped off at the bank on depositDate, all or nothing.
+// sessions: [{ groupId, sessionDate, sessionNumber, cash }] as shown (and printed). The employee responsible for each
+// session's cash or a Business Administrator can do it. If any session's cash changed or was already dropped off since
+// the list was shown, nothing is saved (409) so the deposit matches the printed receipt.
+router.post('/api/reports/group-cash-held/drop-off', async (req, res) => {
+    const { sessions, depositDate } = req.body || {};
+    if (!Array.isArray(sessions) || sessions.length === 0) return res.status(400).json({ error: 'There is no cash to drop off.' });
+    if (!YMD.test(String(depositDate || ''))) return res.status(400).json({ error: 'Enter the date the deposit was dropped off.' });
+    const db = await pool.connect();
+    try {
+        const viewer = await openGroupViewer(req.user?.employeeemail);
+        if (!viewer) throw Object.assign(new Error('Only active employees can drop off deposits.'), { status: 403 });
+        const isAdmin = viewer.role === 'Business Administrator';
+        await db.query('BEGIN');
+        let total = 0;
+        const lines = [];
+        for (const s of sessions) {
+            const session = Number(s.sessionNumber) || 1;
+            if (!s.groupId || !YMD.test(String(s.sessionDate || ''))) throw Object.assign(new Error('A group session is missing its group or date.'), { status: 400 });
+            // Locks the session's deposit slot so two people can't drop the same cash off at once
+            await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`group-deposit:${s.groupId}:${s.sessionDate}:${session}`]);
+            const info = (await db.query(
+                withResponsible(closedSessionsSql('a."Group" = $1 AND a.Date = $2 AND a.SessionNumber = $3'), '$4'),
+                [s.groupId, s.sessionDate, session, OPEN_GROUP_ADMIN_ROLES]
+            )).rows[0];
+            if (!info) throw Object.assign(new Error('A group session on this deposit was not found. Refresh and try again.'), { status: 404 });
+            const label = `${info.groupname} ${s.sessionDate}${session > 1 ? ` #${session}` : ''}`;
+            if (!isAdmin && String(info.responsible || '').toLowerCase() !== String(viewer.employeeemail).toLowerCase()) {
+                throw Object.assign(new Error(`You are not responsible for the cash from ${label}.`), { status: 403 });
+            }
+            const cash = Number(info.cash);
+            if (Math.abs(cash - Number(s.cash)) >= 0.005) {
+                throw Object.assign(new Error(`Not saved: the cash for ${label} is now $${cash.toFixed(2)}, not $${Number(s.cash).toFixed(2)}. `
+                    + 'Refresh the list and print the receipt again.'), { status: 409 });
+            }
+            const inserted = await db.query(
+                `INSERT INTO GroupDeposits (GroupId, SessionDate, SessionNumber, AmountDeposited, DepositDate, RecordedBy)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT (GroupId, SessionDate, SessionNumber) DO NOTHING RETURNING DepositId`,
+                [s.groupId, s.sessionDate, session, cash.toFixed(2), depositDate, viewer.employeeemail]
+            );
+            if (inserted.rows.length === 0) {
+                throw Object.assign(new Error(`Not saved: the cash for ${label} was already dropped off. Refresh the list.`), { status: 409 });
+            }
+            total += cash;
+            lines.push(`${label} $${cash.toFixed(2)}`);
+        }
+        await db.query('COMMIT');
+        await logAction(viewer.employeeemail, 'Group Deposit Dropped Off',
+            `$${total.toFixed(2)} cash from ${lines.length} group session(s) dropped off at the bank on ${depositDate}: ${lines.join('; ')}.`, 'Audit');
+        res.json({ count: lines.length, total: Math.round(total * 100) / 100 });
+    } catch (err) {
+        await db.query('ROLLBACK').catch(() => {});
+        res.status(err.status || 500).json({ error: err.message });
+    } finally {
+        db.release();
+    }
+});
+
 // --- USER CASH DEPOSIT REPORT ---
 // Cash payments taken outside a group session (no check-in, or an assessment or individual session check-in), with
 // whether the cash was dropped off at the bank. The employee who entered the payment holds the cash. Business

@@ -246,3 +246,27 @@ export const printReceipt = (r: Omit<Receipt, 'newBalance'> & { newBalance?: num
     ${r.notes?.trim() ? `<p class="small">Notes: ${escapeHtml(r.notes.trim())}</p>` : ''}
   `, onError, r.transactionIds);
 };
+
+// A cash deposit receipt: the group cash one employee is holding, session by session, with the total to drop off at the
+// bank and lines to sign when it's handed over (Closed Groups > Cash)
+export const printCashDepositReceipt = (
+  r: { heldBy: string; sessions: { groupName: string; sessionDate: string; sessionNumber: number; cash: number }[] },
+  onError: (message: string) => void,
+) => {
+  const total = r.sessions.reduce((t, s) => t + s.cash, 0);
+  const rows = r.sessions.map(s => `<tr><td class="wrap">${escapeHtml(s.groupName)}${s.sessionNumber > 1 ? ` (#${s.sessionNumber})` : ''}<br>`
+    + `<span class="tag">${escapeHtml(shortDate(s.sessionDate))}</span></td><td class="r">${money(s.cash)}</td></tr>`).join('');
+  printReceiptPage('Cash Deposit', `
+    <p><b>Cash held by:</b> ${escapeHtml(r.heldBy)}</p>
+    <p><b>Group sessions:</b> ${r.sessions.length}</p>
+    <hr>
+    <table>
+      ${rows}
+      <tr class="total"><td>Total cash</td><td class="r">${money(total)}</td></tr>
+    </table>
+    <hr>
+    <p class="small">Dropped off by: ______________________</p>
+    <p class="small">Received by: ________________________</p>
+    <p class="small">Date: ______________</p>
+  `, onError);
+};

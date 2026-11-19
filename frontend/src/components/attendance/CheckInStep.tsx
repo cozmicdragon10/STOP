@@ -5,7 +5,6 @@ import { SO_PHASES, SO_TREATMENT_FEES } from '../../utils/soPhases';
 import { bipCheckInBlockLabel, bipCheckInBlockMessage } from '../../utils/bip';
 import { drugTestedOn, outOfUnits, unitCodeFor, unitCodeLabel, unitsLeft } from '../../utils/federalUnits';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
-import { idText } from '../../utils/clients';
 
 // The Comments from the client's account, under their name: up to two lines, with the whole comment on hover
 const AccountComment = ({ text }: { text?: string | null }) => {
@@ -74,7 +73,7 @@ function RosterRow({ client, checked, attended, onOpenClient, groupProgram, sess
             {bipCheckInBlockLabel(client.bipcheckinblock)}
           </span>
         )}
-        <p className="text-xs text-slate-400 sm:ml-auto">ID # {idText(client) || '—'} · Bal {formatBalanceLabeled(client.accountbalance)}</p>
+        <p className="text-xs text-slate-400 sm:ml-auto">Bal {formatBalanceLabeled(client.accountbalance)}</p>
         <AccountComment text={client.comments} />
       </div>
       {canCheckIn && (

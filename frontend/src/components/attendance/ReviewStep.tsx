@@ -143,8 +143,8 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint,
           className={`${inputClass} mt-1 resize-y`}
         />
         <span className="block text-xs text-slate-500 mt-1">
-          Added to the client's case notes as a Therapist note when the group closes, labeled with their
-          {client.programtype === 'BIP' ? ' BIP week' : ' attendance number'}.
+          Added to the client's case notes as a Therapist note when the group closes, labeled with
+          {client.programtype === 'BIP' ? ' their BIP week,' : ''} the group and the date.
         </span>
       </label>
     </article>
