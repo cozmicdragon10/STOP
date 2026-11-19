@@ -130,15 +130,22 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint,
         </label>
       )}
 
+      {entry.makeup && (
+        <p className="text-xs font-semibold text-amber-400">Approved make-up attendance</p>
+      )}
       <label className="block">
-        <span className="text-xs text-slate-400 uppercase font-semibold tracking-wide">Notes</span>
+        <span className="text-xs text-slate-400 uppercase font-semibold tracking-wide">Therapist note</span>
         <textarea
           rows={2}
           value={entry.comments}
           onChange={e => onChange({ comments: e.target.value })}
-          placeholder="Participation notes, attendance flags, late arrival..."
+          placeholder="Participation, late arrival, concerns..."
           className={`${inputClass} mt-1 resize-y`}
         />
+        <span className="block text-xs text-slate-500 mt-1">
+          Added to the client's case notes as a Therapist note when the group closes, labeled with their
+          {client.programtype === 'BIP' ? ' BIP week' : ' attendance number'}.
+        </span>
       </label>
     </article>
   );
@@ -211,7 +218,7 @@ export default function ReviewStep({ group, wf, createdBy, canPickCover, onSucce
       <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
         <button
           type="button"
-          onClick={wf.finishCheckIn}
+          onClick={() => wf.finishCheckIn()}
           disabled={wf.submitting || wf.session.length === 0}
           className="bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 font-semibold px-6 py-2.5 rounded-lg text-sm disabled:opacity-40 disabled:cursor-not-allowed"
         >

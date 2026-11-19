@@ -5,6 +5,7 @@ const { requireRole } = require('../lib/auth');
 const { coveringCounselorFor } = require('../lib/cashResponsibility');
 const { logClientChange } = require('../lib/changeLog');
 const { printedReceiptProblem } = require('../lib/printedReceipts');
+const { addAttendanceNote, noteAuthor, splitEntryComments } = require('../lib/attendanceNotes');
 const { INDIVIDUAL_SESSION_TYPES } = require('../lib/sql');
 const { UNIT_PROGRAMS, returnSessionUnits, useSessionUnits } = require('../lib/federalUnits');
 const { FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
@@ -83,7 +84,7 @@ router.post('/api/attendance/batch', async (req, res) => {
         if (closedEarlierRes.rows.length > 0 && req.user?.role !== 'Business Administrator') {
             throw Object.assign(new Error('This group session was closed before this week. Only a Business Administrator can add missed check-ins to it.'), { status: 403 });
         }
-        const groupRes = await clientDb.query('SELECT ProgramType, Counselor FROM Groups WHERE GroupId = $1', [group]);
+        const groupRes = await clientDb.query('SELECT ProgramType, Counselor, GroupName FROM Groups WHERE GroupId = $1', [group]);
         const groupType = String(groupRes.rows[0]?.programtype || '').trim().toUpperCase();
         // Polys groups don't take attendance: their clients are polygraphed, not checked in
         if (groupType === 'POLY') {
@@ -124,8 +125,11 @@ router.post('/api/attendance/batch', async (req, res) => {
         }
         const results = [];
         for (const entry of entries) {
-            const { attendanceId, newBalance, polyVoucherAwarded, feeCharged, feeReason } = await recordAttendance(clientDb, {
-                ...entry, group, date, sessionNumber: sessionNum, type: individual ? 'Individual' : 'Group', createdBy, paid: true, awardNdiVoucher: isSoGroup,
+            // The comment typed on the review screen becomes a Therapist case note (added below); only the approved
+            // make-up flag is kept on the attendance
+            const { attendanceComment, noteText } = splitEntryComments(entry);
+            const { attendanceId, newBalance, polyVoucherAwarded, feeCharged, feeReason, bipWeek } = await recordAttendance(clientDb, {
+                ...entry, comments: attendanceComment, group, date, sessionNumber: sessionNum, type: individual ? 'Individual' : 'Group', createdBy, paid: true, awardNdiVoucher: isSoGroup,
                 ...(individual ? {
                     groupFee: copays.has(Number(entry.client)) ? copays.get(Number(entry.client)) : individual.fee,
                     feeType: copays.has(Number(entry.client)) ? 'Individual Copay' : 'Individual Fee', sessionTypeId: individual.sessionTypeId,
@@ -142,7 +146,7 @@ router.post('/api/attendance/batch', async (req, res) => {
             // The fee is worked out from the account when saving; a sheet shown with a different fee is reported back
             const feeSent = Math.round(Number(entry.groupFee || 0) * 100) / 100;
             const feeChange = feeCharged !== feeSent ? { feeSent, feeCharged, feeReason } : null;
-            results.push({ client: entry.client, attendanceId, newBalance, polyVoucherAwarded, feeChange });
+            results.push({ client: entry.client, attendanceId, newBalance, polyVoucherAwarded, feeChange, bipWeek, noteText });
         }
         // Closing the group clears its saved open sheet for this session. Who opened it is kept on the attendance rows
         // so the closed group stays visible to them; a group closed without being opened first was opened by the closer.
@@ -161,11 +165,24 @@ router.post('/api/attendance/batch', async (req, res) => {
             'UPDATE Attendance SET OpenedBy = $1, CoveredBy = $2 WHERE AttendanceId = ANY($3::int[])',
             [openedBy, covering, results.map(r => r.attendanceId)]
         );
+        // Each comment goes on the client's case notes as a Therapist note from the session's counselor (the covering
+        // counselor, else the group's usual counselor), saying which attendance it is about (lib/attendanceNotes.js)
+        const closedBy = req.user?.employeeemail || createdBy;
+        if (results.some(r => r.noteText)) {
+            const author = await noteAuthor(clientDb, { coveredBy: covering, groupCounselor: groupRes.rows[0]?.counselor, closedBy });
+            for (const r of results) {
+                await addAttendanceNote(clientDb, {
+                    clientId: Number(r.client), attendanceId: r.attendanceId, date: date || new Date().toLocaleDateString('en-CA'),
+                    sessionNumber: sessionNum, groupName: groupRes.rows[0]?.groupname || `Group ${group}`, bipWeek: r.bipWeek,
+                    individual: Boolean(individual), text: r.noteText, author, closedBy,
+                });
+            }
+        }
         const names = await clientDb.query('SELECT ClientId, LastName || \', \' || FirstName AS Name FROM Clients WHERE ClientId = ANY($1::int[])', [clientIds]);
         const nameOf = Object.fromEntries(names.rows.map(r => [r.clientid, r.name]));
         const feeChanges = results.filter(r => r.feeChange).map(r => ({ client: r.client, name: nameOf[Number(r.client)], ...r.feeChange }));
         await clientDb.query('COMMIT');
-        res.status(201).json({ success: true, count: results.length, results, polyVouchersAwarded: results.filter(r => r.polyVoucherAwarded).length, feeChanges });
+        res.status(201).json({ success: true, count: results.length, results: results.map(({ noteText, bipWeek, ...r }) => r), notesAdded: results.filter(r => r.noteText).length, polyVouchersAwarded: results.filter(r => r.polyVoucherAwarded).length, feeChanges });
     } catch (error) {
         await clientDb.query('ROLLBACK');
         res.status(error.status || 500).json({ error: error.message });

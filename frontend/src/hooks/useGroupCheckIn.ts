@@ -78,7 +78,10 @@ export interface SessionEntry {
   // Account balance as of check-in, including any card payment already saved
   balance: number;
   voucher: boolean;
+  // Added to the client's case notes as a Therapist note when the group closes (not saved on the attendance)
   comments: string;
+  // Confirmed as an approved make-up (a BIP client who already attended that week); marked on the attendance
+  makeup?: boolean;
   // An attendance receipt was printed for this client. The client can't be removed from the session, and the open group
   // can't be discarded, so the attendance saved when the group closes matches the receipt (the server enforces this too).
   receiptPrinted?: boolean;
@@ -147,7 +150,11 @@ const weekStartOf = (ymd: string) => {
   return localYmd(d);
 };
 
-const MAKEUP_COMMENT = 'Approved make-up attendance';
+// Check-in lists (roster, attendance sheet, check-in dialog) are in alphabetical order by last name, then first name
+export const byClientName = (a: Pick<ClientRecord, 'lastname' | 'firstname'>, b: Pick<ClientRecord, 'lastname' | 'firstname'>) =>
+  (a.lastname ?? '').localeCompare(b.lastname ?? '', undefined, { sensitivity: 'base' })
+  || (a.firstname ?? '').localeCompare(b.firstname ?? '', undefined, { sensitivity: 'base' });
+export const sortEntriesByName = (entries: SessionEntry[]) => [...entries].sort((a, b) => byClientName(a.client, b.client));
 
 // True when a BIP client already attended during the current calendar week (Sunday through Saturday).
 // Assessments don't count, so the group roster's lastgroupattended is used when present.
@@ -182,14 +189,13 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   const [roster, setRoster] = useState<ClientRecord[]>([]);
   const [rosterStatus, setRosterStatus] = useState<RosterStatus>('idle');
   const [rosterError, setRosterError] = useState('');
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [session, setSession] = useState<SessionEntry[]>([]);
   const [submitting, setSubmitting] = useState(false);
   // Date of the session on the sheet. Set when an open group is resumed so it closes on the day it was held; null means today.
   const [sessionDate, setSessionDate] = useState<string | null>(null);
-  // Clients waiting on the check-in details dialog. fromSelection tells confirm whether to clear the roster selection.
+  // Clients waiting on the check-in details dialog.
   // makeupIds are clients confirmed as approved make-ups for this week.
-  const [pendingCheckIn, setPendingCheckIn] = useState<{ clients: ClientRecord[]; fromSelection: boolean; makeupIds: Set<number> } | null>(null);
+  const [pendingCheckIn, setPendingCheckIn] = useState<{ clients: ClientRecord[]; makeupIds: Set<number> } | null>(null);
   // Clients who already attended this session of the group; a client can attend a session only once
   const [attendedIds, setAttendedIds] = useState<Set<number>>(() => new Set());
   // Which session of the group on the session date this sheet is for (1 = the day's first)
@@ -222,8 +228,6 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     [roster, checkedInIds, attendedIds, individualFee, groupProgram, sessionDate]
   );
 
-  const allSelected = selectableRoster.length > 0 && selectableRoster.every(c => selectedIds.has(c.clientid));
-
   // date is the session date (YYYY-MM-DD). session is the session the sheet is for; when omitted (a group was just picked)
   // and the group already has a closed session that week, the user is asked whether this is a new session.
   const loadRoster = useCallback(async (id: number, date: string, session?: number) => {
@@ -241,7 +245,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
         throw new Error(serverError || 'Unexpected response from server.');
       }
       // Only Active clients are listed for check-in (Manage Group still shows everyone assigned)
-      setRoster((data as ClientRecord[]).filter(c => c.programstatus === 'Active'));
+      setRoster((data as ClientRecord[]).filter(c => c.programstatus === 'Active').sort(byClientName));
       const closed = sessions.filter(s => s.closed);
       if (session === undefined && closed.length > 0) {
         // Sessions come oldest first, so the last closed one is the most recent this week
@@ -276,7 +280,6 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     setRoster([]);
     setRosterStatus('idle');
     setRosterError('');
-    setSelectedIds(new Set());
     setSession([]);
     setSessionDate(null);
     setPendingCheckIn(null);
@@ -329,21 +332,27 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     clearWorkflow();
     setGroupId(open.groupid);
     setSessionDate(open.sessiondate);
-    setSession(open.entries);
+    setSession(sortEntriesByName(open.entries));
     setView('review');
     setSessionNumber(openSession);
     setCoveredBy(open.coveredby ?? null);
     loadRoster(open.groupid, open.sessiondate, openSession);
   };
 
-  // Finish Check-In: saves the sheet as an open group so it can be closed later, then clears the screen
-  const finishCheckIn = async () => {
+  // Saves the sheet as an open group so it can be closed later. Finish Check-In (thenReview) then goes on to the Review &
+  // Comments screen to add comments and close the group; Save for Later clears the screen.
+  const finishCheckIn = async ({ thenReview = false }: { thenReview?: boolean } = {}) => {
     if (groupId === null || session.length === 0) return;
     setSubmitting(true);
     try {
       await saveOpenGroup({ group: groupId, date: sessionDate ?? todayLocal(), sessionNumber, entries: session, createdBy, coveredBy });
-      notify.onSuccess(`Check-in saved for ${session.length} client(s). Close the group from Open Groups when you're ready.`);
-      clearWorkflow();
+      if (thenReview) {
+        notify.onSuccess(`Check-in saved for ${session.length} client(s). Add comments and close the group, or Save for Later.`);
+        setView('review');
+      } else {
+        notify.onSuccess(`Check-in saved for ${session.length} client(s). Close the group from Open Groups when you're ready.`);
+        clearWorkflow();
+      }
       notify.onOpenGroupsChanged?.();
     } catch (err: unknown) {
       notify.onError(err instanceof Error && err.message ? err.message : 'Failed to save the check-in. Your entries are still here; try again.');
@@ -373,29 +382,13 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     else loadRoster(groupId, sessionDate ?? todayLocal(), sessionNumber);
   };
 
-  const toggleSelect = (clientId: number) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      if (next.has(clientId)) {
-        next.delete(clientId);
-      } else {
-        next.add(clientId);
-      }
-      return next;
-    });
-  };
-
-  const toggleSelectAll = () => {
-    setSelectedIds(allSelected ? new Set() : new Set(selectableRoster.map(c => c.clientid)));
-  };
-
   // Adds clients to the sheet. Skips anyone already on it, so repeat calls are safe.
-  const addToSession = useCallback((entries: { client: ClientRecord; terms: CheckInTerms; comments?: string }[]) => {
+  const addToSession = useCallback((entries: { client: ClientRecord; terms: CheckInTerms; makeup?: boolean }[]) => {
     setSession(prev => {
       const onSheet = new Set(prev.map(e => e.client.clientid));
       const fresh = entries
         .filter(({ client }) => !onSheet.has(client.clientid))
-        .map<SessionEntry>(({ client, terms, comments }) => ({
+        .map<SessionEntry>(({ client, terms, makeup }) => ({
           client,
           fee: terms.fee,
           payment: terms.payment,
@@ -403,23 +396,21 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
           cardPaid: terms.cardPaid,
           balance: terms.balance,
           voucher: terms.voucher,
-          comments: comments ?? '',
+          comments: '',
+          ...(makeup ? { makeup: true } : {}),
         }));
-      return fresh.length ? [...prev, ...fresh] : prev;
+      return fresh.length ? sortEntriesByName([...prev, ...fresh]) : prev;
     });
   }, []);
 
-  // Both check-in paths open the details dialog first; nothing reaches the sheet until it is confirmed.
-  const checkInSelected = () => {
-    const picked = selectableRoster.filter(c => selectedIds.has(c.clientid));
-    if (picked.length === 0) return;
-    const { approved, makeupIds } = confirmMakeups(picked);
-    if (approved.length === 0) {
-      // Every pick was denied; drop them from the selection so they aren't checked in by accident
-      setSelectedIds(new Set());
-      return;
-    }
-    setPendingCheckIn({ clients: approved, fromSelection: true, makeupIds });
+  // The Check In button on one roster row: opens the details dialog for just that client. Both check-in paths open the
+  // dialog first; nothing reaches the sheet until it is confirmed.
+  const checkInOne = (clientId: number) => {
+    const client = selectableRoster.find(c => c.clientid === clientId);
+    if (!client) return;
+    const { approved, makeupIds } = confirmMakeups([client]);
+    if (approved.length === 0) return;
+    setPendingCheckIn({ clients: approved, makeupIds });
   };
 
   const addExternalClients = (clients: ClientRecord[]) => {
@@ -449,21 +440,19 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     if (fresh.length === 0) return;
     const { approved, makeupIds } = confirmMakeups(fresh);
     if (approved.length === 0) return;
-    setPendingCheckIn({ clients: approved, fromSelection: false, makeupIds });
+    setPendingCheckIn({ clients: [...approved].sort(byClientName), makeupIds });
   };
 
   // terms holds each client's payment, method, and voucher from the dialog, keyed by client id.
   const confirmCheckIn = (terms: Record<number, PaymentTerms>) => {
     if (!pendingCheckIn) return;
-    const { clients, fromSelection, makeupIds } = pendingCheckIn;
+    const { clients, makeupIds } = pendingCheckIn;
     addToSession(clients.map(client => ({
       client,
       terms: { ...terms[client.clientid], fee: individualFee !== null ? individualSessionFee(client, individualFee) : clientFee(client) },
-      // Approved make-ups are noted on the attendance record
-      comments: makeupIds.has(client.clientid) ? MAKEUP_COMMENT : undefined,
+      // Approved make-ups are marked on the attendance record
+      makeup: makeupIds.has(client.clientid),
     })));
-    // Only a roster check-in clears the roster selection; external additions never touch it.
-    if (fromSelection) setSelectedIds(new Set());
     setPendingCheckIn(null);
     notify.onSuccess(`Checked in ${clients.length} client(s).`);
   };
@@ -530,6 +519,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
           paymentMethod: e.paymentMethod,
           voucherUsed: e.voucher,
           comments: e.comments.trim(),
+          makeup: e.makeup,
           durationBand: e.durationBand,
         })),
       });
@@ -540,7 +530,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
       const feeChanges = (res.feeChanges ?? [])
         .map(f => ` ${f.name} was charged $${f.feeCharged.toFixed(2)}, not $${f.feeSent.toFixed(2)} (${f.feeReason}).`)
         .join('');
-      notify.onSuccess(`Attendance saved for ${res.count} client(s).${awarded}${feeChanges}`);
+      const notes = res.notesAdded ? ` ${res.notesAdded} comment(s) added to case notes as Therapist notes.` : '';
+      notify.onSuccess(`Attendance saved for ${res.count} client(s).${notes}${awarded}${feeChanges}`);
       clearWorkflow();
       notify.onSaved?.();
       notify.onOpenGroupsChanged?.();
@@ -563,11 +554,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     rosterError,
     reloadRoster,
     selectableRoster,
-    selectedIds,
-    toggleSelect,
-    toggleSelectAll,
-    allSelected,
-    checkInSelected,
+    checkInOne,
     checkedInIds,
     attendedIds,
     addExternalClients,

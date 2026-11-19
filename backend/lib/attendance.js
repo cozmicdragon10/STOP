@@ -280,8 +280,9 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
             + (comments ? ` ${comments}` : ''),
     });
 
-    // feeCharged and feeReason: what the account was charged and why, for telling the user when it differs from what was sent
-    return { attendanceId, newBalance, polyVoucherAwarded, feeCharged: feeNum, feeReason };
+    // feeCharged and feeReason: what the account was charged and why, for telling the user when it differs from what was sent.
+    // bipWeek: a BIP client's week number counting this attendance (null for everyone else)
+    return { attendanceId, newBalance, polyVoucherAwarded, feeCharged: feeNum, feeReason, bipWeek: newPhase };
 };
 
 // The Individual price on the Admin price list that an INDIVIDUAL group check-in charges: the active Individual entry

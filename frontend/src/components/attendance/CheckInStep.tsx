@@ -25,16 +25,17 @@ const buttonBase = 'px-4 py-2 rounded-lg text-sm font-semibold transition disabl
 const primaryButton = `${buttonBase} bg-blue-600 hover:bg-blue-500 text-white`;
 const secondaryButton = `${buttonBase} bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700`;
 
-function RosterRow({ client, checked, attended, selected, onToggle, onOpenClient, groupProgram, sessionDate }: {
+function RosterRow({ client, checked, attended, onOpenClient, groupProgram, sessionDate, canCheckIn, onCheckIn }: {
   client: ClientRecord;
+  // The client can be checked in now (not on the sheet, not attended, not blocked); shows the row's Check In button
+  canCheckIn: boolean;
+  onCheckIn: () => void;
   // The group's program type (sets the units code) and the session date (YYYY-MM-DD)
   groupProgram: string | null;
   sessionDate: string;
   checked: boolean;
   // Already attended this group today, so cannot be checked in again
   attended: boolean;
-  selected: boolean;
-  onToggle: () => void;
   onOpenClient: () => void;
 }) {
   // A BIP client still waiting on their intake or reinstate assessment can't be checked in
@@ -44,22 +45,13 @@ function RosterRow({ client, checked, attended, selected, onToggle, onOpenClient
   const testedToday = !checked && !attended && !unitsBlocked && drugTestedOn(client, groupProgram, sessionDate);
   const bipBlocked = (!checked && !attended && !!client.bipcheckinblock) || unitsBlocked || testedToday;
   const tone = checked
-    ? 'border-emerald-500/30 bg-emerald-500/5 opacity-70 cursor-default'
+    ? 'border-emerald-500/30 bg-emerald-500/5 opacity-70'
     : attended || bipBlocked
-      ? 'border-slate-800 bg-slate-950 opacity-50 cursor-not-allowed'
-    : selected
-      ? 'border-blue-500 bg-blue-500/10 cursor-pointer'
-      : 'border-slate-700 bg-slate-950 hover:border-slate-500 cursor-pointer';
+      ? 'border-slate-800 bg-slate-950 opacity-50'
+      : 'border-slate-700 bg-slate-950';
 
   return (
-    <label className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition ${tone}`}>
-      <input
-        type="checkbox"
-        checked={checked || (selected && !attended && !bipBlocked)}
-        disabled={checked || attended || bipBlocked}
-        onChange={onToggle}
-        className="accent-blue-500"
-      />
+    <div className={`flex items-center gap-3 px-3 py-2 rounded-lg border transition ${tone}`}>
       <div className="min-w-0 flex-1 flex flex-wrap items-baseline gap-x-3">
         <p className="text-sm font-medium text-white truncate">{client.lastname}, {client.firstname}</p>
         {checked && <span className="text-[0.625rem] font-semibold uppercase text-emerald-400">Checked in</span>}
@@ -85,17 +77,26 @@ function RosterRow({ client, checked, attended, selected, onToggle, onOpenClient
         <p className="text-xs text-slate-400 sm:ml-auto">ID # {idText(client) || '—'} · Bal {formatBalanceLabeled(client.accountbalance)}</p>
         <AccountComment text={client.comments} />
       </div>
-      {/* Inside the row's label, so it must not also tick the checkbox */}
+      {canCheckIn && (
+        <button
+          type="button"
+          onClick={onCheckIn}
+          className="shrink-0 cursor-pointer text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-md px-3 py-1.5"
+          aria-label={`Check in ${client.lastname}, ${client.firstname}`}
+        >
+          Check In
+        </button>
+      )}
       <button
         type="button"
-        onClick={e => { e.preventDefault(); e.stopPropagation(); onOpenClient(); }}
+        onClick={onOpenClient}
         className="shrink-0 cursor-pointer text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-md p-1.5"
         aria-label={`Open ${client.lastname}, ${client.firstname}'s account`}
         title="Open account"
       >
         <UserRound size={14} />
       </button>
-    </label>
+    </div>
   );
 }
 
@@ -112,9 +113,7 @@ function RosterSkeleton() {
 export default function CheckInStep({ group, wf, onOpenSearch, onOpenClient }: Props) {
   // SO groups show the phase fee schedule for State, Federal and Voluntary SO clients
   const showPhaseFees = ['SO', 'FED SO'].includes((group.programtype || '').trim().toUpperCase());
-  const selectableSelected = wf.selectableRoster.filter(c => wf.selectedIds.has(c.clientid)).length;
-  const rosterReady = wf.rosterStatus === 'ready';
-  const canToggleAll = rosterReady && wf.selectableRoster.length > 0;
+  const selectableIds = new Set(wf.selectableRoster.map(c => c.clientid));
 
   return (
     <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-5 shadow-xl">
@@ -125,19 +124,11 @@ export default function CheckInStep({ group, wf, onOpenSearch, onOpenClient }: P
         </p>
       </header>
 
-      {/* Toolbar: bulk selection + check-in actions */}
-      <div className="flex flex-wrap gap-2 items-center justify-between">
-        <button type="button" onClick={wf.toggleSelectAll} disabled={!canToggleAll} className={secondaryButton}>
-          {wf.allSelected ? 'Deselect All' : 'Select All'}
+      {/* Clients in this group are checked in with the Check In button on their row */}
+      <div className="flex flex-wrap gap-2 items-center justify-end">
+        <button type="button" onClick={onOpenSearch} className={`${secondaryButton} flex items-center gap-2`}>
+          <Search size={14} /> Check In Client From Another Group
         </button>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={onOpenSearch} className={`${secondaryButton} flex items-center gap-2`}>
-            <Search size={14} /> Check In Client From Another Group
-          </button>
-          <button type="button" onClick={wf.checkInSelected} disabled={selectableSelected === 0} className={primaryButton}>
-            Check In Selected{selectableSelected > 0 ? ` (${selectableSelected})` : ''}
-          </button>
-        </div>
       </div>
 
       {/* Each client is charged the treatment fee on their own account; this is the reference schedule for SO groups */}
@@ -178,10 +169,10 @@ export default function CheckInStep({ group, wf, onOpenSearch, onOpenClient }: P
                 client={c}
                 checked={wf.checkedInIds.has(c.clientid)}
                 attended={wf.attendedIds.has(c.clientid)}
-                selected={wf.selectedIds.has(c.clientid)}
                 groupProgram={wf.groupProgram}
                 sessionDate={wf.sessionDate ?? todayLocal()}
-                onToggle={() => wf.toggleSelect(c.clientid)}
+                canCheckIn={selectableIds.has(c.clientid)}
+                onCheckIn={() => wf.checkInOne(c.clientid)}
                 onOpenClient={() => onOpenClient(c.clientid)}
               />
             ))}
@@ -227,7 +218,7 @@ export default function CheckInStep({ group, wf, onOpenSearch, onOpenClient }: P
       </div>
 
       <div className="flex justify-end pt-2 border-t border-slate-800">
-        <button type="button" onClick={wf.finishCheckIn} disabled={wf.session.length === 0 || wf.submitting} className={`${primaryButton} flex items-center gap-2`}>
+        <button type="button" onClick={() => wf.finishCheckIn({ thenReview: true })} disabled={wf.session.length === 0 || wf.submitting} className={`${primaryButton} flex items-center gap-2`}>
           <Save size={14} /> {wf.submitting ? 'Saving...' : 'Finish Check-In'}
         </button>
       </div>

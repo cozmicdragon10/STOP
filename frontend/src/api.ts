@@ -802,7 +802,10 @@ export interface BatchAttendanceEntry {
     accountPaid: number;
     paymentMethod: 'Cash' | 'Credit Card';
     voucherUsed: boolean;
+    // Goes on the client's case notes as a Therapist note naming the BIP week or attendance count (backend lib/attendanceNotes.js)
     comments: string;
+    // An approved make-up attendance; marked on the attendance itself
+    makeup?: boolean;
     // Federal SO clients: how long they attended, which sets the 6022 / 6012 units used (utils/federalUnits.ts)
     durationBand?: string;
 }
@@ -832,6 +835,8 @@ export async function submitBatchAttendance(data: BatchAttendancePayload) {
     // feeChanges: clients the server charged a different fee than the sheet showed (it works the fee out from the account), and why.
     return body as {
         success: true; count: number; polyVouchersAwarded: number;
+        // How many comments were added to case notes as Therapist notes
+        notesAdded?: number;
         results: { client: number; attendanceId: number; newBalance: number; polyVoucherAwarded: boolean }[];
         feeChanges?: { client: number; name: string; feeSent: number; feeCharged: number; feeReason: string }[];
     };
