@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react';
-import { getDepositReport } from '../../api';
+import { useState } from 'react';
 import { reportTabsFor, currentReportFor } from '../../utils/reports';
 import { PROGRAM_STATUSES } from '../../utils/clients';
 import GroupIncomeReport from './GroupIncomeReport';
@@ -22,43 +21,18 @@ interface Props {
   onOpenClientId: (clientId: number) => void;
 }
 
-interface DepositReport {
-  totalRevenue: number;
-  totalCharges: number;
-}
-
 // The Reports tab: a row of report tabs (filtered by role) and the picked report
 export default function ReportsTab({ user, clients, groups, onOpenClient, onOpenClientId }: Props) {
   // The report tab last picked; null until one is picked (the role's first report shows)
   const [reportTab, setReportTab] = useState<string | null>(null);
-  const [depositReportData, setDepositReportData] = useState<DepositReport | null>(null);
-  const [reportsError, setReportsError] = useState('');
   // Cash Deposits: cash taken at group sessions, or cash payments users took outside a group
   const [cashTab, setCashTab] = useState<'group' | 'user'>('group');
 
   const currentReport = currentReportFor(reportTab, user.role);
 
-  // Switching reports clears the last one's results and error, so the new one shows Loading until it arrives
   const pickReport = (id: string) => {
-    if (id === currentReport) return;
-    setReportsError('');
-    setDepositReportData(null);
-    setReportTab(id);
+    if (id !== currentReport) setReportTab(id);
   };
-
-  // The deposit report is fetched fresh each time its tab is shown
-  useEffect(() => {
-    if (currentReport !== 'deposit') return;
-    let cancelled = false;
-    getDepositReport()
-      .then(data => {
-        if (cancelled) return;
-        if (typeof data?.totalRevenue !== 'number' || typeof data?.totalCharges !== 'number') throw new Error();
-        setDepositReportData(data);
-      })
-      .catch(() => { if (!cancelled) setReportsError('Failed to load the monthly deposit report.'); });
-    return () => { cancelled = true; };
-  }, [currentReport]);
 
   return (
     <div className="space-y-6">
@@ -75,8 +49,6 @@ export default function ReportsTab({ user, clients, groups, onOpenClient, onOpen
           </button>
         ))}
       </div>
-
-      {reportsError && <p className="text-xs text-red-400">{reportsError}</p>}
 
       {currentReport === 'groupIncome' && <GroupIncomeReport userEmail={user.employeeemail} canRecordDeposits={user.role === 'Business Administrator'} />}
 
@@ -108,20 +80,6 @@ export default function ReportsTab({ user, clients, groups, onOpenClient, onOpen
       {currentReport === 'poMonthly' && <MonthlyPoReports userEmail={user.employeeemail} onOpenClient={onOpenClientId} />}
 
       {currentReport === 'userActivity' && <UserActivityReport userEmail={user.employeeemail} onOpenClient={onOpenClientId} />}
-
-      {currentReport === 'deposit' && !depositReportData && !reportsError && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl text-center text-slate-500 text-sm">Loading…</div>
-      )}
-
-      {currentReport === 'deposit' && depositReportData && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl space-y-4">
-          <h3 className="font-semibold text-white">Monthly Deposit Summary</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-center">
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800"><p className="text-xs text-slate-400">Total Revenue Collected</p><p className="text-2xl font-bold text-emerald-400">${depositReportData.totalRevenue.toFixed(2)}</p></div>
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800"><p className="text-xs text-slate-400">Total Charges Assessed</p><p className="text-2xl font-bold text-amber-400">${depositReportData.totalCharges.toFixed(2)}</p></div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

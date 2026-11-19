@@ -1746,18 +1746,6 @@ export async function setGroupCashDroppedOff(data: GroupSessionRef & { droppedOf
     return jsonResponse(res, 'Failed to update the deposit.');
 }
 
-// All-time payments (less refunds and disputes) and charges, with the 50 latest transactions
-export interface DepositReport {
-    totalRevenue: number;
-    totalCharges: number;
-    recentTransactions: FinancialTransaction[];
-}
-
-export async function getDepositReport(): Promise<DepositReport> {
-    const res = await apiFetch(`${API_BASE}/reports/deposit`);
-    return jsonResponse(res, 'Failed to load the monthly deposit report.');
-}
-
 export async function getEmployees(): Promise<Employee[]> {
     const res = await apiFetch(`${API_BASE}/admin/employees`);
     return jsonResponse(res, 'Failed to load employees.');

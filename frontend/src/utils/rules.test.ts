@@ -85,14 +85,14 @@ describe('report tabs', () => {
 
   it('keeps the picked report when the role can see it', () => {
     expect(currentReportFor('counselorClients', 'Office Admin')).toBe('counselorClients');
-    expect(currentReportFor('deposit', 'Business Administrator')).toBe('deposit');
-    expect(currentReportFor(null, 'Business Administrator')).toBe('deposit');
-    expect(currentReportFor('agent', 'Business Administrator')).toBe('deposit');
+    expect(currentReportFor('cashDeposits', 'Business Administrator')).toBe('cashDeposits');
+    expect(currentReportFor(null, 'Business Administrator')).toBe('groupIncome');
+    expect(currentReportFor('deposit', 'Business Administrator')).toBe('groupIncome');
   });
 
   it('keeps the business-only reports from Office Admins', () => {
     expect(reportTabsFor('Office Admin').map(t => t.id)).toEqual(['cashDeposits', 'poMonthly', 'federalSo', 'counselorClients', 'userActivity']);
-    expect(currentReportFor('deposit', 'Office Admin')).toBe('cashDeposits');
+    expect(currentReportFor('groupIncome', 'Office Admin')).toBe('cashDeposits');
   });
 });
 

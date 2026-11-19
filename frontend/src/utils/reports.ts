@@ -2,7 +2,6 @@
 // or 'business' (Business Administrators only). The server checks the business-only reports too.
 type ReportAccess = 'all' | 'admins' | 'business';
 export const REPORT_TABS: { id: string; label: string; access: ReportAccess }[] = [
-  { id: 'deposit', label: 'Monthly Deposit Report', access: 'business' },
   { id: 'groupIncome', label: 'Group Income Report', access: 'business' },
   { id: 'cashDeposits', label: 'Cash Deposits', access: 'all' },
   { id: 'poMonthly', label: 'Monthly PO Reports', access: 'admins' },
