@@ -86,6 +86,8 @@ describe('report tabs', () => {
   it('keeps the picked report when the role can see it', () => {
     expect(currentReportFor('counselorClients', 'Office Admin')).toBe('counselorClients');
     expect(currentReportFor('cashDeposits', 'Business Administrator')).toBe('cashDeposits');
+    expect(currentReportFor('financialSummary', 'Business Administrator')).toBe('financialSummary');
+    expect(currentReportFor('financialSummary', 'Office Admin')).toBe('cashDeposits');
     expect(currentReportFor(null, 'Business Administrator')).toBe('groupIncome');
     expect(currentReportFor('deposit', 'Business Administrator')).toBe('groupIncome');
   });

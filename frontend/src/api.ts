@@ -1531,6 +1531,54 @@ export async function getGroupReport(from: string, to: string): Promise<GroupRep
     return jsonResponse(res, 'Failed to load the group report.');
 }
 
+// --- Financial Summary report (Business Administrators only); utils/financialReport.ts adds it up ---
+type Amount = string | number;
+export interface FinancialLedgerRow {
+    month: string; // YYYY-MM
+    type: string; // Payment, Charge, Adjustment, Refund, Dispute, Dispute Won (or Voucher on old rows)
+    feetype: string; // '' when none was saved
+    paymentmethod: string; // '' when none was saved
+    atcheckin: boolean;
+    count: number;
+    amount: Amount;
+}
+export interface FinancialAttendanceRow {
+    month: string;
+    type: string;
+    fundedby: '' | 'DHS Invoice' | 'Voucher';
+    count: number;
+    fees: Amount;
+    fundedprice: Amount;
+    importedpaid: Amount;
+}
+export interface FinancialCashTotals {
+    cash: Amount;
+    deposited: Amount;
+    held: Amount;
+    heldcount: number;
+}
+export interface FinancialBalanceRow {
+    programstatus: string;
+    clients: number;
+    owing: number;
+    owed: Amount;
+    incredit: number;
+    credit: Amount;
+}
+export interface FinancialSummaryData {
+    ledger: FinancialLedgerRow[];
+    attendance: FinancialAttendanceRow[];
+    groupCash: FinancialCashTotals & { sessions: number };
+    userCash: FinancialCashTotals & { payments: number };
+    balances: FinancialBalanceRow[];
+}
+
+// from and to are YYYY-MM-DD, inclusive
+export async function getFinancialSummary(from: string, to: string): Promise<FinancialSummaryData> {
+    const res = await apiFetch(`${API_BASE}/reports/financial-summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    return jsonResponse(res, 'Failed to load the financial summary.');
+}
+
 // Bank deposit of one group session's cash
 export interface GroupDeposit {
     groupid: number;

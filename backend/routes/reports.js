@@ -340,4 +340,88 @@ router.get('/api/reports/user-activity', async (req, res) => {
     }
 });
 
+// --- FINANCIAL SUMMARY REPORT ---
+// Every money total for the company over a date range (YYYY-MM-DD, inclusive), by month, plus what clients owe today.
+// Business Administrators only. The page (utils/financialReport.ts) adds the pieces up:
+//   ledger      FinancialTransactions by month, type, fee type, method, and whether the row belongs to a check-in.
+//               Charge rows tied to a check-in repeat the check-in's fee, so the page counts fees from attendance instead.
+//   attendance  check-in fees (Attendance.GroupFee) by month and type, and assessments a DHS invoice or voucher covers.
+//               ImportedPaid is what was paid at check-ins imported from the old system (no CreatedBy), which have no
+//               ledger rows (import/importAttendance.js), so the page adds it to what was collected.
+//   cash        cash taken at group sessions and outside them, and how much of it is checked off as deposited
+//   balances    every client's account balance today, by program status (not limited to the range). Poly fees are left
+//               out: they are paid ahead toward the next polygraph, not owed.
+router.get('/api/reports/financial-summary', businessOnly, async (req, res) => {
+    try {
+        const { from, to } = req.query;
+        if (!YMD.test(String(from || '')) || !YMD.test(String(to || '')) || from > to) {
+            return res.status(400).json({ error: 'A start and end date (YYYY-MM-DD) are required.' });
+        }
+        const [ledger, attendance, groupCash, userCash, balances] = await Promise.all([
+            pool.query(
+                `SELECT to_char(f.Date, 'YYYY-MM') AS Month, f.Type, COALESCE(f.FeeType, '') AS FeeType,
+                        COALESCE(f.PaymentMethod, '') AS PaymentMethod, (f.AttendanceId IS NOT NULL) AS AtCheckIn,
+                        COUNT(*)::int AS Count, COALESCE(SUM(f.Amount), 0) AS Amount
+                 FROM FinancialTransactions f
+                 WHERE f.Date >= $1::date AND f.Date < $2::date + 1
+                 GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 2, 3, 4`,
+                [from, to]
+            ),
+            pool.query(
+                `SELECT to_char(a.Date, 'YYYY-MM') AS Month, COALESCE(a.Type, 'Group') AS Type, COALESCE(a.FundedBy, '') AS FundedBy,
+                        COUNT(*)::int AS Count, COALESCE(SUM(a.GroupFee), 0) AS Fees, COALESCE(SUM(a.FundedPrice), 0) AS FundedPrice,
+                        COALESCE(SUM(a.AccountPaid) FILTER (WHERE a.CreatedBy IS NULL), 0) AS ImportedPaid
+                 FROM Attendance a
+                 WHERE a.Date BETWEEN $1 AND $2
+                 GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`,
+                [from, to]
+            ),
+            pool.query(
+                `SELECT COUNT(*)::int AS Sessions, COALESCE(SUM(s.Cash), 0) AS Cash,
+                        COALESCE(SUM(d.AmountDeposited), 0) AS Deposited,
+                        COALESCE(SUM(s.Cash) FILTER (WHERE d.DepositId IS NULL), 0) AS Held,
+                        COUNT(*) FILTER (WHERE d.DepositId IS NULL)::int AS HeldCount
+                 FROM (SELECT a."Group" AS GroupId, a.Date, a.SessionNumber,
+                              COALESCE(SUM(a.AccountPaid) FILTER (WHERE a.PaymentMethod = 'Cash'), 0) AS Cash
+                       FROM Attendance a
+                       WHERE a."Group" IS NOT NULL AND a.Date BETWEEN $1 AND $2
+                       GROUP BY 1, 2, 3) s
+                 LEFT JOIN GroupDeposits d ON d.GroupId = s.GroupId AND d.SessionDate = s.Date AND d.SessionNumber = s.SessionNumber
+                 WHERE s.Cash > 0 OR d.DepositId IS NOT NULL`,
+                [from, to]
+            ),
+            pool.query(
+                `SELECT COUNT(*)::int AS Payments, COALESCE(SUM(f.Amount), 0) AS Cash,
+                        COALESCE(SUM(f.Amount) FILTER (WHERE d.TransactionId IS NOT NULL), 0) AS Deposited,
+                        COALESCE(SUM(f.Amount) FILTER (WHERE d.TransactionId IS NULL), 0) AS Held,
+                        COUNT(*) FILTER (WHERE d.TransactionId IS NULL)::int AS HeldCount
+                 FROM FinancialTransactions f
+                 LEFT JOIN Attendance a ON a.AttendanceId = f.AttendanceId
+                 LEFT JOIN CashPaymentDeposits d ON d.TransactionId = f.TransactionId
+                 WHERE f.Type = 'Payment' AND f.PaymentMethod = 'Cash' AND a."Group" IS NULL
+                   AND f.Date >= $1::date AND f.Date < $2::date + 1`,
+                [from, to]
+            ),
+            pool.query(
+                `SELECT COALESCE(c.ProgramStatus, 'Unknown') AS ProgramStatus, COUNT(*)::int AS Clients,
+                        COUNT(*) FILTER (WHERE c.AccountBalance > 0)::int AS Owing,
+                        COALESCE(SUM(c.AccountBalance) FILTER (WHERE c.AccountBalance > 0), 0) AS Owed,
+                        COUNT(*) FILTER (WHERE c.AccountBalance < 0)::int AS InCredit,
+                        COALESCE(-SUM(c.AccountBalance) FILTER (WHERE c.AccountBalance < 0), 0) AS Credit
+                 FROM Clients c
+                 GROUP BY 1 ORDER BY 1`
+            ),
+        ]);
+        res.json({
+            ledger: ledger.rows,
+            attendance: attendance.rows,
+            groupCash: groupCash.rows[0],
+            userCash: userCash.rows[0],
+            balances: balances.rows,
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 module.exports = router;

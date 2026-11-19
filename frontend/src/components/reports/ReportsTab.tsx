@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { reportTabsFor, currentReportFor } from '../../utils/reports';
 import { PROGRAM_STATUSES } from '../../utils/clients';
+import FinancialReport from './FinancialReport';
 import GroupIncomeReport from './GroupIncomeReport';
 import GroupCashDepositReport from './GroupCashDepositReport';
 import UserCashDepositReport from './UserCashDepositReport';
@@ -49,6 +50,8 @@ export default function ReportsTab({ user, clients, groups, onOpenClient, onOpen
           </button>
         ))}
       </div>
+
+      {currentReport === 'financialSummary' && <FinancialReport />}
 
       {currentReport === 'groupIncome' && <GroupIncomeReport userEmail={user.employeeemail} canRecordDeposits={user.role === 'Business Administrator'} />}
 
