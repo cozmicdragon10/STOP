@@ -252,6 +252,18 @@
   --color-slate-950: oklch(30% 0.026 257);
 }
 
+/* Text with no color class of its own inherits the color worked out for the part it sits in. Without this, a light
+   window on a dark page would inherit the page's near-white text (the app root's text-slate-100). In the base layer
+   so a text-* class on the window itself still wins. */
+@layer base {
+  :where(
+    :root[data-window-theme] .bg-slate-900:not([data-zone], [data-zone] *),
+    :root[data-banner-theme] [data-zone="banner"]
+  ) {
+    color: var(--color-slate-100);
+  }
+}
+
 /* White text stays white on solid colored buttons and badges in every theme. ~= matches whole class names only, so
    faint tints like bg-amber-500/10 (light in light themes) still get the dark text. */
 :is(.text-white, .hover\:text-white:hover):not(
