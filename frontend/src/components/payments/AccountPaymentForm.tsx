@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { submitAccountPayment } from '../../api';
 import ClientPicker from '../ClientPicker';
 import CardPaymentFields from './CardPaymentFields';
+import OtherPaymentFields from './OtherPaymentFields';
+import { PAYMENT_METHODS, paymentMethodProblem, paymentMethodText, type PaymentMethod } from '../../utils/paymentMethods';
+import { useUserRole } from '../../hooks/useUserRole';
 import { emptyCardBilling } from './cardBilling';
 import { formatBalance, toDisplayBalance } from '../../utils/balance';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
@@ -26,7 +29,11 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
   const [clientId, setClientId] = useState('');
   const [amountInput, setAmountInput] = useState('');
   const [comments, setComments] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Credit Card'>('Cash');
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('Cash');
+  // Other payments: the kind (Check, DHS, ...) and an optional reference #
+  const [subtype, setSubtype] = useState('');
+  const [reference, setReference] = useState('');
+  const role = useUserRole();
   const [cardBilling, setCardBilling] = useState(emptyCardBilling);
   const [saving, setSaving] = useState(false);
   // Set only after a payment is saved to the account; drives the receipt printout
@@ -34,24 +41,33 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
 
   const amount = Number(amountInput) || 0;
   const client = clients.find(c => c.clientid === Number(clientId));
-  // A client blocked from card payments pays cash, whatever was picked for the client before
-  const payWith = cardBlocked(client) ? 'Cash' : paymentMethod;
+  // A client blocked from card payments pays cash if a card was picked for the client before
+  const payWith: PaymentMethod = cardBlocked(client) && paymentMethod === 'Credit Card' ? 'Cash' : paymentMethod;
+  const methodProblem = paymentMethodProblem(payWith, subtype, role);
+  const methodText = paymentMethodText(payWith, subtype, reference);
   const currentBalance = Number(client?.accountbalance || 0);
   const balanceAfter = currentBalance - amount;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!clientId || amount <= 0) return;
+    if (methodProblem) {
+      onError(methodProblem);
+      return;
+    }
     setSaving(true);
     setLastPayment(null);
     try {
-      const res = await submitAccountPayment({ client: Number(clientId), amount, comments, createdBy: userEmail, paymentMethod: payWith });
-      onSuccess(`${payWith} payment recorded! Updated Balance: ${formatBalance(res.newBalance)}`);
+      const res = await submitAccountPayment({ client: Number(clientId), amount, comments, createdBy: userEmail, paymentMethod: payWith,
+        paymentSubtype: payWith === 'Other' ? subtype : null, paymentReference: payWith === 'Other' ? reference.trim() || null : null });
+      onSuccess(`${methodText} payment recorded! Updated Balance: ${formatBalance(res.newBalance)}`);
       setLastPayment({
         clientName: client ? `${client.lastname}, ${client.firstname}` : `Client #${clientId}`,
         docNumber: idText(client),
         amount,
         method: payWith,
+        paymentSubtype: payWith === 'Other' ? subtype : null,
+        paymentReference: payWith === 'Other' ? reference.trim() || null : null,
         notes: comments,
         newBalance: Number(res.newBalance),
         transactionIds: res.transactionIds,
@@ -77,8 +93,8 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
 
         <div>
           <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Payment Method</label>
-          <div className="grid grid-cols-2 gap-3">
-            {(['Cash', 'Credit Card'] as const).map(method => (
+          <div className="grid grid-cols-3 gap-3">
+            {PAYMENT_METHODS.map(method => (
               <button
                 key={method}
                 type="button"
@@ -91,6 +107,16 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
             ))}
           </div>
           {cardBlocked(client) && <p className="text-xs text-amber-400 mt-1.5">{cardBlockedText(client)}</p>}
+          {payWith === 'Other' && (
+            <div className="mt-3">
+              <OtherPaymentFields
+                subtype={subtype}
+                reference={reference}
+                onChange={patch => { if (patch.subtype !== undefined) setSubtype(patch.subtype); if (patch.reference !== undefined) setReference(patch.reference); }}
+                inputClass="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm"
+              />
+            </div>
+          )}
         </div>
 
         {payWith === 'Credit Card' && (
@@ -130,7 +156,7 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
 
         <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
           <button type="button" onClick={() => lastPayment && printReceipt(lastPayment, onError)} disabled={!lastPayment} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">Print Receipt</button>
-          <button type="submit" disabled={saving} className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">Process Payment</button>
+          <button type="submit" disabled={saving || methodProblem !== null} className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">Process Payment</button>
         </div>
       </form>
 

@@ -6,6 +6,7 @@ import type { UserActivityRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { escapeHtml } from '../../utils/receipt';
 import { idText } from '../../utils/clients';
+import { paymentMethodText } from '../../utils/paymentMethods';
 
 interface Props {
   userEmail: string;
@@ -113,7 +114,7 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
       <p class="sub">${escapeHtml(from)} to ${escapeHtml(to)}${filterText ? ` · ${escapeHtml(filterText)}` : ''} · ${payments.length} payments (net ${money(netPayments)}), ${notes.length} notes · Printed ${new Date().toLocaleString()}</p>
       <table><thead><tr><th>Time</th><th>Entered By</th><th>Kind</th><th>Type</th><th>Client</th><th class="r">Amount</th><th>Method</th><th>Comments</th></tr></thead><tbody>
         ${days.map(({ day, rows: list }) => `<tr><td colspan="8" class="day">${escapeHtml(dayLabel(day))} <span>${escapeHtml(daySummary(list))}</span></td></tr>${list.map(r => `<tr><td>${escapeHtml(formatTime(r.enteredon))}</td><td>${escapeHtml(enteredByOf(r))}</td><td>${r.kind}</td><td>${escapeHtml(r.detail || '')}</td>
-          <td>${escapeHtml(clientOf(r))}</td><td class="r">${r.kind === 'Payment' ? escapeHtml(money(signedAmount(r))) : ''}</td><td>${escapeHtml(r.paymentmethod || '')}</td><td>${escapeHtml(r.comments || '')}</td></tr>`).join('')}`).join('')}
+          <td>${escapeHtml(clientOf(r))}</td><td class="r">${r.kind === 'Payment' ? escapeHtml(money(signedAmount(r))) : ''}</td><td>${escapeHtml(paymentMethodText(r.paymentmethod, r.paymentsubtype, r.paymentreference))}</td><td>${escapeHtml(r.comments || '')}</td></tr>`).join('')}`).join('')}
       </tbody></table>
     </body></html>`);
     win.document.close();
@@ -188,6 +189,7 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
               <option value="">All</option>
               <option value="Cash">Cash</option>
               <option value="Credit Card">Credit Card</option>
+              <option value="Other">Other (check, money order, ...)</option>
             </select>
           </label>
         )}
@@ -242,7 +244,7 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
                   {r.kind === 'Payment' && (
                     <>
                       <span className={signedAmount(r) < 0 ? 'text-red-400' : 'text-emerald-400'}>{money(signedAmount(r))}</span>
-                      <span className="block text-[0.6875rem] text-slate-500">{[r.paymentmethod, r.feetype].filter(Boolean).join(' · ')}</span>
+                      <span className="block text-[0.6875rem] text-slate-500">{[paymentMethodText(r.paymentmethod, r.paymentsubtype, r.paymentreference), r.feetype].filter(Boolean).join(' · ')}</span>
                     </>
                   )}
                 </td>

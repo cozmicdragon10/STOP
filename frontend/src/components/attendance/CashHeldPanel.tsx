@@ -85,7 +85,7 @@ export default function CashHeldPanel({ isAdmin, onSuccess, onError }: Props) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-slate-400 leading-relaxed">
-        Cash from closed groups that hasn't been dropped off at the bank{isAdmin ? ', by who is holding it' : ''}. Print the receipt to go
+        Cash, checks, money orders and cashier's checks from closed groups that haven't been dropped off at the bank{isAdmin ? ', by who is holding it' : ''}. Print the receipt to go
         with the cash, then press Drop Off Deposit when it's dropped off.
       </p>
       {holders.length === 0 ? (
@@ -94,7 +94,7 @@ export default function CashHeldPanel({ isAdmin, onSuccess, onError }: Props) {
         <>
           {isAdmin && holders.length > 1 && (
             <p className="flex justify-between text-sm font-semibold text-white bg-slate-950 border border-slate-800 rounded-lg px-3 py-2">
-              <span>Total cash held</span><span>{money(grandTotal)}</span>
+              <span>Total cash &amp; checks held</span><span>{money(grandTotal)}</span>
             </p>
           )}
           <ul className="space-y-3 max-h-[32rem] overflow-y-auto pr-1">

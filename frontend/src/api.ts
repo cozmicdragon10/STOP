@@ -1,4 +1,5 @@
 import type { SessionEntry } from './hooks/useGroupCheckIn';
+import type { PaymentMethod } from './utils/paymentMethods';
 import type { BipCheckInBlock } from './utils/bip';
 
 // The built site calls the API on its own address (the server answers /api on the site's port too; see
@@ -264,6 +265,9 @@ export interface ClientAttendance {
     createdby: string | null;
     createdon: string | null;
     paymentmethod: string | null;
+    // Other payments (utils/paymentMethods.ts): the kind and reference #
+    paymentsubtype?: string | null;
+    paymentreference?: string | null;
     sessionnumber: number;
     openedby: string | null;
     sessiontypeid: number | null;
@@ -285,6 +289,9 @@ export interface FinancialTransaction {
     finalbalance: Money;
     comments: string | null;
     paymentmethod: string | null;
+    // Other payments (utils/paymentMethods.ts): the kind and reference #
+    paymentsubtype?: string | null;
+    paymentreference?: string | null;
     attendanceid: number | null;
     originalamount: Money | null;
     adjustedby: string | null;
@@ -803,7 +810,10 @@ export interface BatchAttendanceEntry {
     client: number;
     groupFee: number;
     accountPaid: number;
-    paymentMethod: 'Cash' | 'Credit Card';
+    paymentMethod: PaymentMethod;
+    // Other payments: the kind (Check, DHS, ...) and an optional reference #
+    paymentSubtype?: string | null;
+    paymentReference?: string | null;
     voucherUsed: boolean;
     // Goes on the client's case notes as a Therapist note naming the BIP week or attendance count (backend lib/attendanceNotes.js)
     comments: string;
@@ -882,6 +892,7 @@ export interface ClosedGroupSession {
     // note: the client's Therapist note from this attendance, without its heading (null when none)
     entries: {
         client: number; name: string; groupFee: number; accountPaid: number; paymentMethod: string | null;
+        paymentSubtype?: string | null; paymentReference?: string | null;
         attendanceId: number; programType: string | null; note: string | null;
     }[];
 }
@@ -1021,6 +1032,9 @@ export interface CompletedAssessment {
     fee: string | number | null;
     paid: string | number | null;
     paymentmethod: string | null;
+    // Other payments (utils/paymentMethods.ts): the kind and reference #
+    paymentsubtype?: string | null;
+    paymentreference?: string | null;
 }
 
 export interface OpenAssessment {
@@ -1180,6 +1194,9 @@ export interface ClosedIndividualSession {
     fee: string | number;
     payment: string | number;
     paymentmethod: string | null;
+    // Other payments (utils/paymentMethods.ts): the kind and reference #
+    paymentsubtype?: string | null;
+    paymentreference?: string | null;
     paidonopen: string | number;
     provider: string | null;
     comments: string | null;
@@ -1213,6 +1230,9 @@ export interface AssessmentInProgress {
     fee: string | number;
     paid: string | number;
     paymentmethod: string | null;
+    // Other payments (utils/paymentMethods.ts): the kind and reference #
+    paymentsubtype?: string | null;
+    paymentreference?: string | null;
     openedby: string | null;
     begunby: string | null;
     assessmentstatus: 'In Progress' | 'Completed';
@@ -1379,6 +1399,9 @@ export interface TransactionRow {
     finalbalance: Money | null;
     comments: string | null;
     paymentmethod: string | null;
+    // Other payments (utils/paymentMethods.ts): the kind and reference #
+    paymentsubtype?: string | null;
+    paymentreference?: string | null;
     attendanceid: number | null;
     originalamount: Money | null;
     adjustedby: string | null;
@@ -1407,7 +1430,7 @@ export async function lookupTransaction(id: number): Promise<TransactionLookup> 
     return jsonResponse(res, 'Failed to look up the transaction.');
 }
 
-export async function submitAccountPayment(data: { client: number; amount: number; comments: string; createdBy: string; paymentMethod: 'Cash' | 'Credit Card'; applyToPolyFee?: boolean }): Promise<AccountPaymentResult> {
+export async function submitAccountPayment(data: { client: number; amount: number; comments: string; createdBy: string; paymentMethod: PaymentMethod; paymentSubtype?: string | null; paymentReference?: string | null; applyToPolyFee?: boolean }): Promise<AccountPaymentResult> {
     const res = await apiFetch(`${API_BASE}/financials/payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1582,7 +1605,8 @@ export interface GroupReportRow {
     groupfee: string | number;
     accountpaid: string | number;
     // null when nothing was paid, or for older rows the payment ledger couldn't match
-    paymentmethod: 'Cash' | 'Credit Card' | null;
+    paymentmethod: PaymentMethod | null;
+    paymentsubtype?: string | null;
     voucherused: boolean;
     clientid: number;
     firstname: string;
@@ -1779,6 +1803,10 @@ export interface UserCashDepositRow {
     amount: string | number;
     feetype: string | null;
     comments: string | null;
+    // Cash, or Other with its kind (Check, Money Order, Cashier's Check) and reference #
+    paymentmethod?: string | null;
+    paymentsubtype?: string | null;
+    paymentreference?: string | null;
     // The employee who took the payment and holds the cash; null for payments from before this was recorded
     enteredby: string | null;
     enteredbyname: string | null;
@@ -1826,6 +1854,9 @@ export interface UserActivityRow {
     detail: string;
     amount: string | number | null;
     paymentmethod: string | null;
+    // Other payments (utils/paymentMethods.ts): the kind and reference #
+    paymentsubtype?: string | null;
+    paymentreference?: string | null;
     feetype: string | null;
     comments: string | null;
     editedby: string | null;

@@ -6,6 +6,7 @@ const { cashDiscardProblem, keepPrintedMarks, printedEntries, printedReceiptProb
 const { clientsWithoutUnits, drugTestedOn, noUnitsMessage } = require('../lib/federalUnits');
 const { addAttendanceNote, bipWeekAt, noteAuthor, noteBody, replaceNoteBody } = require('../lib/attendanceNotes');
 const { logClientChange } = require('../lib/changeLog');
+const { paymentMethodProblem } = require('../lib/paymentMethods');
 
 const router = express.Router();
 
@@ -48,6 +49,7 @@ router.get('/api/closed-groups', async (req, res) => {
                     json_agg(json_build_object(
                         'client', a.Client, 'name', c.LastName || ', ' || c.FirstName,
                         'groupFee', a.GroupFee, 'accountPaid', a.AccountPaid, 'paymentMethod', a.PaymentMethod,
+                        'paymentSubtype', a.PaymentSubtype, 'paymentReference', a.PaymentReference,
                         'attendanceId', a.AttendanceId, 'programType', c.ProgramType, 'note', n.Comments
                     ) ORDER BY c.LastName, c.FirstName) AS Entries
              FROM Attendance a
@@ -187,6 +189,17 @@ router.put('/api/open-groups', async (req, res) => {
         const savedEntries = existing.rows[0]?.entries ?? [];
         const problem = printedReceiptProblem(savedEntries, entries);
         if (problem) return res.status(409).json({ error: problem });
+        // Other payments on the sheet: the kind must be known, and only a Business Administrator adds Direct Deposit, Tribal
+        // or DHS (one already on the saved sheet unchanged is kept when someone else saves it)
+        for (const e of entries) {
+            if (!(Number(e.payment) > 0)) continue;
+            const methodProblem = paymentMethodProblem({ method: e.paymentMethod, subtype: e.paymentSubtype, role: req.user?.role });
+            if (!methodProblem) continue;
+            const saved = savedEntries.find(s => Number(s.client?.clientid) === Number(e.client?.clientid));
+            const unchanged = saved && saved.paymentMethod === e.paymentMethod && saved.paymentSubtype === e.paymentSubtype
+                && !paymentMethodProblem({ method: e.paymentMethod, subtype: e.paymentSubtype, role: 'Business Administrator' });
+            if (!unchanged) return res.status(methodProblem.startsWith('Only') ? 403 : 400).json({ error: `${e.client?.lastname}, ${e.client?.firstname}: ${methodProblem}` });
+        }
         // A Federal SO client newly put on the sheet needs units left for this group (6022 group, 6012 individual)
         const savedIds = new Set(savedEntries.map(e => Number(e.client?.clientid)));
         const added = entries.map(e => Number(e.client?.clientid)).filter(id => id && !savedIds.has(id));

@@ -1,4 +1,5 @@
 import type { PaymentMethod } from '../hooks/useGroupCheckIn';
+import { paymentMethodText } from './paymentMethods';
 import { formatBalance } from './balance';
 import { formatDisplayTime } from './dates';
 import { getEmployees, getPolySummary } from '../api';
@@ -9,6 +10,9 @@ export interface Receipt {
   docNumber: string;
   amount: number;
   method: PaymentMethod;
+  // Other payments: the kind (Check, DHS, ...) and reference #, printed as the method ("Check #1042")
+  paymentSubtype?: string | null;
+  paymentReference?: string | null;
   newBalance: number;
   // The balance just before this payment (stored sign). Left out, it's worked out from newBalance: the part of the
   // payment that went to the account (not the poly fee) is added back.
@@ -235,7 +239,7 @@ export const printReceipt = (r: Omit<Receipt, 'newBalance'> & { newBalance?: num
     </table>
     <hr>
     <table>
-      ${row('Payment method', escapeHtml(r.method))}
+      ${row('Payment method', escapeHtml(paymentMethodText(r.method, r.paymentSubtype, r.paymentReference)))}
       ${r.appliedTo ? row('Applied to', escapeHtml(r.appliedTo)) : ''}
       ${balanceBefore !== undefined ? row('Balance before', balanceText(balanceBefore)) : ''}
       ${row('Amount paid', `+${money(r.amount)}`)}
@@ -262,7 +266,7 @@ export const printCashDepositReceipt = (
     <hr>
     <table>
       ${rows}
-      <tr class="total"><td>Total cash</td><td class="r">${money(total)}</td></tr>
+      <tr class="total"><td>Total cash &amp; checks</td><td class="r">${money(total)}</td></tr>
     </table>
     <hr>
     <p class="small">Dropped off by: ______________________</p>

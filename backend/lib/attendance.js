@@ -1,4 +1,5 @@
 const { assertCardAllowed } = require('./cardBlock');
+const { paymentDetails, paymentMethodProblem, paymentMethodText } = require('./paymentMethods');
 const { dateText, dollars, logClientChange } = require('./changeLog');
 const { moneyText } = require('./moneyFields');
 const { todayLocal } = require('./dates');
@@ -83,7 +84,9 @@ const federalGroupFee = (programType, copay, attendedThisMonth) => {
 // An Assessment or Individual type is charged its full fee and leaves the monthly fee rules and BIP weeks alone.
 // paymentComments: added after the standard text on the payment's ledger row
 // sessionTypeId and provider: the price list entry and the counselor of an individual session (Attendance.SessionTypeId, Provider)
-const recordAttendance = async (db, { client, group, date, sessionNumber, paid, groupFee, accountPaid, paymentMethod, voucherUsed, type, comments, createdBy, awardNdiVoucher, feeType = 'Group Fee', paymentComments = '', sessionTypeId = null, provider = null }) => {
+// paymentSubtype and paymentReference: an Other payment's kind (Check, DHS, ...) and reference # (lib/paymentMethods.js).
+// Who may record which kind is checked by the routes, which know the user's role.
+const recordAttendance = async (db, { client, group, date, sessionNumber, paid, groupFee, accountPaid, paymentMethod, paymentSubtype = null, paymentReference = null, voucherUsed, type, comments, createdBy, awardNdiVoucher, feeType = 'Group Fee', paymentComments = '', sessionTypeId = null, provider = null }) => {
     const isIndividualSession = INDIVIDUAL_SESSION_TYPES.includes(type);
     // Money must be real amounts: a payment that isn't a number would skip the first check-in limit and leave the balance NaN
     for (const [label, value] of [['payment', accountPaid], ['fee', groupFee]]) {
@@ -209,25 +212,27 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
     const paidNum = Number(accountPaid || 0);
     const newBalance = oldBalance - paidNum + feeNum;
 
-    // Every payment needs a method (Cash or Credit Card). Group check-ins and individual sessions take cards through
-    // POST /api/financials/payment, so the payment stands whether or not the attendance is ever recorded.
-    if (paidNum > 0 && !['Cash', 'Credit Card'].includes(paymentMethod)) {
-        throw new Error(`Choose a payment method for the payment on client ${client}: Cash or Credit Card.`);
+    // Every payment needs a method (Cash, Credit Card, or Other with its kind). Group check-ins and individual sessions
+    // take cards through POST /api/financials/payment, so the payment stands whether or not the attendance is ever recorded.
+    if (paidNum > 0) {
+        const methodProblem = paymentMethodProblem({ method: paymentMethod, subtype: paymentSubtype, role: 'Business Administrator' });
+        if (methodProblem) throw Object.assign(new Error(`${clientRes.rows[0].lastname}, ${clientRes.rows[0].firstname}: ${methodProblem}`), { status: 400 });
     }
     if (paidNum > 0 && paymentMethod === 'Credit Card') await assertCardAllowed(db, client);
+    const { subtype, reference } = paidNum > 0 ? paymentDetails({ method: paymentMethod, subtype: paymentSubtype, reference: paymentReference }) : { subtype: null, reference: null };
 
     const attRes = await db.query(
-        `INSERT INTO Attendance (Client, "Group", Date, Paid, GroupFee, AccountPaid, AccountTotal, VoucherUsed, Type, Comments, CreatedBy, PaymentMethod, SessionNumber, SessionTypeId, Provider)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) RETURNING AttendanceId;`,
-        [client, group || null, sessionDate, paid, feeNum, paidNum, newBalance, voucherUsed, type, comments || null, createdBy, paidNum > 0 ? paymentMethod : null, sessionNum, sessionTypeId, provider]
+        `INSERT INTO Attendance (Client, "Group", Date, Paid, GroupFee, AccountPaid, AccountTotal, VoucherUsed, Type, Comments, CreatedBy, PaymentMethod, SessionNumber, SessionTypeId, Provider, PaymentSubtype, PaymentReference)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17) RETURNING AttendanceId;`,
+        [client, group || null, sessionDate, paid, feeNum, paidNum, newBalance, voucherUsed, type, comments || null, createdBy, paidNum > 0 ? paymentMethod : null, sessionNum, sessionTypeId, provider, subtype, reference]
     );
 
     const attendanceId = attRes.rows[0].attendanceid;
     if (paidNum > 0) {
         await db.query(
-            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, AttendanceId, EnteredBy)
-             VALUES ($1, NOW(), 'Payment', $2, $7, $3, $4, $5, $6, $8)`,
-            [client, paidNum, newBalance, `Payment applied during ${type} session on ${sessionDate}.${paymentComments ? ` ${paymentComments}` : ''}`, paymentMethod, attendanceId, feeType, createdBy || null]
+            `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, AttendanceId, EnteredBy, PaymentSubtype, PaymentReference)
+             VALUES ($1, NOW(), 'Payment', $2, $7, $3, $4, $5, $6, $8, $9, $10)`,
+            [client, paidNum, newBalance, `Payment applied during ${type} session on ${sessionDate}.${paymentComments ? ` ${paymentComments}` : ''}`, paymentMethod, attendanceId, feeType, createdBy || null, subtype, reference]
         );
     } else if (feeNum > 0) {
         await db.query(
@@ -270,7 +275,7 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         ? (await db.query('SELECT GroupName FROM Groups WHERE GroupId = $1', [group])).rows[0]?.groupname || `Group ${group}`
         : null;
     const charged = `fee ${dollars(feeNum)}${feeReason ? ` (${feeReason})` : ''}`;
-    const payment = paidNum > 0 ? `paid ${dollars(paidNum)} ${paymentMethod}` : 'no payment';
+    const payment = paidNum > 0 ? `paid ${dollars(paidNum)} ${paymentMethodText(paymentMethod, subtype, reference)}` : 'no payment';
     await logClientChange(db, {
         clientId: client, changedBy: createdBy, changeType: 'Attendance Added',
         oldValue: moneyText('accountbalance', oldBalance), newValue: moneyText('accountbalance', newBalance),

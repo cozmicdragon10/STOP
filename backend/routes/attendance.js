@@ -6,6 +6,7 @@ const { coveringCounselorFor } = require('../lib/cashResponsibility');
 const { logClientChange } = require('../lib/changeLog');
 const { printedReceiptProblem } = require('../lib/printedReceipts');
 const { addAttendanceNote, noteAuthor, splitEntryComments } = require('../lib/attendanceNotes');
+const { paymentMethodProblem, paymentMethodText } = require('../lib/paymentMethods');
 const { INDIVIDUAL_SESSION_TYPES } = require('../lib/sql');
 const { UNIT_PROGRAMS, returnSessionUnits, useSessionUnits } = require('../lib/federalUnits');
 const { FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
@@ -69,6 +70,13 @@ router.post('/api/attendance/batch', async (req, res) => {
     // Card payments are applied to the account when processed at check-in, so closing a group never records one
     if (entries.some(e => e.paymentMethod === 'Credit Card' && Number(e.accountPaid) > 0)) {
         return res.status(400).json({ error: 'A card payment on this sheet was not processed. Process it at check-in, or remove the client and check them in again.' });
+    }
+
+    // Other payments: the kind must be known, and Direct Deposit, Tribal and DHS are for Business Administrators only
+    for (const e of entries) {
+        if (!(Number(e.accountPaid) > 0)) continue;
+        const problem = paymentMethodProblem({ method: e.paymentMethod, subtype: e.paymentSubtype, role: req.user?.role });
+        if (problem) return res.status(problem.startsWith('Only') ? 403 : 400).json({ error: problem });
     }
 
     const clientDb = await pool.connect();
@@ -386,7 +394,7 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
         );
 
         const session = att.sessionnumber > 1 ? ` (session ${att.sessionnumber})` : '';
-        const paid = money(att.accountpaid) > 0 ? `paid $${money(att.accountpaid).toFixed(2)}${att.paymentmethod ? ` ${att.paymentmethod}` : ''}` : 'no payment';
+        const paid = money(att.accountpaid) > 0 ? `paid $${money(att.accountpaid).toFixed(2)}${att.paymentmethod ? ` ${paymentMethodText(att.paymentmethod, att.paymentsubtype, att.paymentreference)}` : ''}` : 'no payment';
         const voucherText = {
             removed: ' The poly fee voucher it earned was removed.',
             kept: ' The poly fee voucher it earned was kept (attended again later that month).',

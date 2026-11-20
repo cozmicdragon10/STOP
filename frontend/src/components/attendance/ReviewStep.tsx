@@ -8,6 +8,7 @@ import ClientPaymentDialog from '../payments/ClientPaymentDialog';
 import CoveringCounselorPicker from './CoveringCounselorPicker';
 import { bandsFor, needsDuration, unitCodeFor, unitCodeLabel, unitsLeft } from '../../utils/federalUnits';
 import { idText } from '../../utils/clients';
+import { paymentMethodText } from '../../utils/paymentMethods';
 
 interface Props {
   group: GroupRecord;
@@ -92,7 +93,7 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint,
         </div>
         {entry.payment > 0 && (
           <div className="flex justify-between">
-            <span className="text-slate-400">Paid at check-in ({entry.paymentMethod})</span>
+            <span className="text-slate-400">Paid at check-in ({paymentMethodText(entry.paymentMethod, entry.paymentSubtype, entry.paymentReference)})</span>
             <span className="text-emerald-400">{formatBalance(-entry.payment)}</span>
           </div>
         )}
@@ -193,7 +194,7 @@ export default function ReviewStep({ group, wf, createdBy, canPickCover, onSucce
               provider: wf.coveredBy || group.counselor || null,
               fee: entry.fee,
               payments: [
-                { label: 'Paid at check-in', amount: entry.payment, method: entry.paymentMethod },
+                { label: 'Paid at check-in', amount: entry.payment, method: paymentMethodText(entry.paymentMethod, entry.paymentSubtype, entry.paymentReference) },
                 { label: 'Card paid at check-in', amount: entry.cardPaid, method: 'Credit Card', alreadyApplied: true },
               ],
               balanceBefore: updatedBalances[entry.client.clientid] ?? entry.balance,
@@ -242,6 +243,8 @@ export default function ReviewStep({ group, wf, createdBy, canPickCover, onSucce
             fee: paymentEntry?.fee ?? 0,
             payment: paymentEntry?.payment ?? 0,
             paymentMethod: paymentEntry?.paymentMethod ?? 'Cash',
+            paymentSubtype: paymentEntry?.paymentSubtype ?? null,
+            paymentReference: paymentEntry?.paymentReference ?? null,
             cardPaid: paymentEntry?.cardPaid ?? 0,
           }}
           createdBy={createdBy}

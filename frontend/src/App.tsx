@@ -70,6 +70,8 @@ import MaxDebtOverridePanel from './components/clients/MaxDebtOverridePanel';
 import PolyFeeOverridePanel from './components/clients/PolyFeeOverridePanel';
 import PendingNotesButton from './components/clients/PendingNotesButton';
 import EmployeeLabelProvider from './components/EmployeeLabelProvider';
+import { UserRoleContext } from './hooks/useUserRole';
+import { paymentMethodText } from './utils/paymentMethods';
 import MainNav from './components/MainNav';
 import BarTabs from './components/BarTabs';
 import type { NavItem } from './components/BarTabs';
@@ -978,6 +980,7 @@ export default function App() {
 
   return (
     <EmployeeLabelProvider employees={employees}>
+    <UserRoleContext.Provider value={role}>
     <div className="min-h-dvh bg-slate-950 text-slate-100 flex flex-col">
       {/* Top Header Navigation */}
       <header data-zone="banner" className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 md:px-6 md:py-4 flex justify-between items-center gap-4">
@@ -1678,7 +1681,7 @@ export default function App() {
                                         >
                                           {e.name}
                                         </button>
-                                        <span className="text-slate-400 shrink-0">{Number(e.accountPaid) > 0 ? `$${Number(e.accountPaid).toFixed(2)} ${e.paymentMethod || ''}`.trim() : 'No payment'}</span>
+                                        <span className="text-slate-400 shrink-0">{Number(e.accountPaid) > 0 ? `$${Number(e.accountPaid).toFixed(2)} ${paymentMethodText(e.paymentMethod, e.paymentSubtype, e.paymentReference)}`.trim() : 'No payment'}</span>
                                       </li>
                                     ))}
                                   </ul>
@@ -2038,6 +2041,7 @@ export default function App() {
         )}
       </main>
     </div>
+    </UserRoleContext.Provider>
     </EmployeeLabelProvider>
   );
 }

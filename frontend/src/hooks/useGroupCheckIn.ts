@@ -7,6 +7,7 @@ import { bipCheckInBlockMessage } from '../utils/bip';
 import type { BipCheckInBlock } from '../utils/bip';
 import { drugTestedOn, needsDuration, outOfUnits, unitCodeFor, unitCodeLabel } from '../utils/federalUnits';
 import { federalGroupFee, individualSessionFee } from '../utils/clients';
+import type { PaymentMethod } from '../utils/paymentMethods';
 
 export interface ClientRecord {
   clientid: number;
@@ -65,14 +66,18 @@ export interface GroupRecord {
 
 // One row on the attendance sheet. Money fields are per client so the
 // review step can adjust any single client without touching the others.
-export type PaymentMethod = 'Cash' | 'Credit Card';
+// Cash, Credit Card, or Other (utils/paymentMethods.ts)
+export type { PaymentMethod };
 
 export interface SessionEntry {
   client: ClientRecord;
   fee: number;
-  // Cash or voucher payment taken at check-in; recorded when the group closes
+  // Cash or Other (check, money order, ...) payment taken at check-in; recorded when the group closes
   payment: number;
   paymentMethod: PaymentMethod;
+  // Other payments: the kind (Check, DHS, ...) and an optional reference #
+  paymentSubtype?: string | null;
+  paymentReference?: string | null;
   // Card payment taken at check-in; already saved to the account, so it is not recorded again on close
   cardPaid: number;
   // Account balance as of check-in, including any card payment already saved
@@ -93,6 +98,8 @@ export interface CheckInTerms {
   fee: number;
   payment: number;
   paymentMethod: PaymentMethod;
+  paymentSubtype?: string | null;
+  paymentReference?: string | null;
   voucher: boolean;
   cardPaid: number;
   balance: number;
@@ -393,6 +400,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
           fee: terms.fee,
           payment: terms.payment,
           paymentMethod: terms.paymentMethod,
+          paymentSubtype: terms.paymentMethod === 'Other' ? terms.paymentSubtype ?? null : null,
+          paymentReference: terms.paymentMethod === 'Other' ? terms.paymentReference ?? null : null,
           cardPaid: terms.cardPaid,
           balance: terms.balance,
           voucher: terms.voucher,
@@ -517,6 +526,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
           groupFee: e.fee,
           accountPaid: e.payment,
           paymentMethod: e.paymentMethod,
+          paymentSubtype: e.paymentMethod === 'Other' ? e.paymentSubtype ?? null : null,
+          paymentReference: e.paymentMethod === 'Other' ? e.paymentReference ?? null : null,
           voucherUsed: e.voucher,
           comments: e.comments.trim(),
           makeup: e.makeup,

@@ -11,6 +11,7 @@ import { attendanceBalanceChange, formatMoney, signedMoney } from '../../utils/l
 import { formatBalance } from '../../utils/balance';
 import { formatLogMonthDay, formatLogYear, localYmd } from '../../utils/dates';
 import { missedGroupLabel, missedGroupSummary } from '../../utils/missedGroups';
+import { paymentMethodText } from '../../utils/paymentMethods';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- attendance and ledger rows are untyped throughout App */
 export interface AttendanceDeleted {
@@ -57,7 +58,7 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
       fee: c.fee,
       payments: [
         { label: 'Paid when the session was opened', amount: paidOnOpen, method: 'Cash', alreadyApplied: true },
-        { label: paidOnOpen > 0 ? 'Paid when the session was closed' : 'Payment', amount: c.paid, method: att.paymentmethod },
+        { label: paidOnOpen > 0 ? 'Paid when the session was closed' : 'Payment', amount: c.paid, method: att.paymentmethod ? paymentMethodText(att.paymentmethod, att.paymentsubtype, att.paymentreference) : null },
       ],
       // attendanceBalanceChange gives the shown sign; the receipt takes the stored one
       balanceBefore: -c.before, balanceAfter: -c.after, clientId,

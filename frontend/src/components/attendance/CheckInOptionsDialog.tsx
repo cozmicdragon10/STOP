@@ -7,6 +7,9 @@ import { FEDERAL_PROGRAM_TYPES, federalGroupFee, individualSessionFee, idText } 
 import { printReceipt, type Receipt } from '../../utils/receipt';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import CardPaymentFields from '../payments/CardPaymentFields';
+import OtherPaymentFields from '../payments/OtherPaymentFields';
+import { PAYMENT_METHODS, paymentMethodProblem } from '../../utils/paymentMethods';
+import { useUserRole } from '../../hooks/useUserRole';
 import { emptyCardBilling, type CardBilling } from '../payments/cardBilling';
 
 interface Props {
@@ -26,13 +29,15 @@ interface Props {
 interface Row {
   payment: string;
   paymentMethod: PaymentMethod;
+  // Other payments: the kind (Check, DHS, ...) and an optional reference #
+  paymentSubtype: string;
+  paymentReference: string;
   voucher: boolean;
   card: CardBilling;
   processing: boolean;
   receipt: Receipt | null;
 }
 
-const PAYMENT_METHODS: PaymentMethod[] = ['Cash', 'Credit Card'];
 
 // Explains the fee line: where it comes from, or why nothing is charged
 const feeLabel = (c: ClientRecord, fee: number): string => {
@@ -57,7 +62,8 @@ const feeLabel = (c: ClientRecord, fee: number): string => {
 // how much the client may owe.
 const alreadyThisMonth = (c: ClientRecord, individual: boolean) => Boolean(individual ? c.individualthismonth : c.attendedthismonth);
 const amountStillOwedToCheckIn = (c: ClientRecord, row: Row, fee: number, individual: boolean): number => {
-  const cashNow = row.paymentMethod === 'Cash' && !row.receipt ? (parsePayment(row) ?? 0) : 0;
+  // Cash and Other (check, money order, ...) payments are taken now and recorded when the group closes
+  const cashNow = row.paymentMethod !== 'Credit Card' && !row.receipt ? (parsePayment(row) ?? 0) : 0;
   const balance = row.receipt ? row.receipt.newBalance : Number(c.accountbalance || 0);
   return Math.max(0, Math.round((minimumCheckInPayment(checkInPaymentRule(c.programtype), balance, fee, alreadyThisMonth(c, individual), c.maxowed) - cashNow) * 100) / 100);
 };
@@ -80,10 +86,14 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
   const individual = individualFee !== null;
   const [rows, setRows] = useState<Record<number, Row>>(() =>
     Object.fromEntries(clients.map(c => [c.clientid, {
-      payment: '', paymentMethod: 'Cash' as PaymentMethod, voucher: false, card: emptyCardBilling, processing: false, receipt: null,
+      payment: '', paymentMethod: 'Cash' as PaymentMethod, paymentSubtype: '', paymentReference: '', voucher: false, card: emptyCardBilling, processing: false, receipt: null,
     }]))
   );
   const [step, setStep] = useState(0);
+  const role = useUserRole();
+  // An Other payment with an amount needs its kind, one this role may record
+  const otherProblem = (row: Row) => ((parsePayment(row) ?? 0) > 0 && !row.receipt
+    ? paymentMethodProblem(row.paymentMethod, row.paymentSubtype, role) : null);
 
   const updateRow = (clientId: number, patch: Partial<Row>) => {
     setRows(prev => ({ ...prev, [clientId]: { ...prev[clientId], ...patch } }));
@@ -129,7 +139,7 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
 
   const invalid = clients.some(c => {
     const row = rows[c.clientid];
-    return (!row.receipt && parsePayment(row) === null) || cardNotProcessed(row);
+    return (!row.receipt && parsePayment(row) === null) || cardNotProcessed(row) || otherProblem(row) !== null;
   });
   // Clients whose balance is too far behind for their first check-in of the month
   const feeFor = (c: ClientRecord) => (individual ? individualSessionFee(c, individualFee) : clientFee(c));
@@ -143,6 +153,8 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
       return [c.clientid, {
         payment,
         paymentMethod: row.paymentMethod,
+        paymentSubtype: row.paymentMethod === 'Other' ? row.paymentSubtype : null,
+        paymentReference: row.paymentMethod === 'Other' ? row.paymentReference.trim() || null : null,
         voucher: row.voucher,
         cardPaid: row.receipt ? row.receipt.amount : 0,
         // Card payments are already saved, so the balance here already reflects them
@@ -173,7 +185,8 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
   // "$0.00 or better", or the most they may owe under a Max Debt Override
   const allowedText = hasDebtLimit ? `owing at most $${allowedOwed(c.maxowed).toFixed(2)} (Max Debt Override)` : `${formatBalance(FIRST_CHECKIN_MAX_OWED)} or better`;
   const cardPending = cardNotProcessed(row);
-  const canContinue = rowValid && stillOwed === 0 && !cardPending && !row.processing;
+  const methodProblem = otherProblem(row);
+  const canContinue = rowValid && stillOwed === 0 && !cardPending && !row.processing && !methodProblem;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="check-in-options-title">
@@ -223,7 +236,7 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
               </label>
               <div className="flex flex-col gap-1">
                 Payment Method
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-3 gap-1.5">
                   {PAYMENT_METHODS.map(method => (
                     <button
                       key={method}
@@ -263,6 +276,20 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
               </div>
             </div>
 
+            {row.paymentMethod === 'Other' && !locked && (
+              <div className="mt-3">
+                <OtherPaymentFields
+                  subtype={row.paymentSubtype}
+                  reference={row.paymentReference}
+                  onChange={patch => updateRow(c.clientid, {
+                    ...(patch.subtype !== undefined ? { paymentSubtype: patch.subtype } : {}),
+                    ...(patch.reference !== undefined ? { paymentReference: patch.reference } : {}),
+                  })}
+                  inputClass={inputClass}
+                />
+              </div>
+            )}
+
             {row.paymentMethod === 'Credit Card' && (
               <div className="mt-3 space-y-3">
                 <CardPaymentFields value={row.card} onChange={card => updateRow(c.clientid, { card })} />
@@ -291,9 +318,11 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
         </div>
 
         <footer className="p-5 border-t border-slate-800 flex flex-wrap justify-between items-center gap-3">
-          <p className={`text-xs ${!rowValid || stillOwed > 0 || cardPending ? 'text-red-400' : 'text-slate-500'}`}>
+          <p className={`text-xs ${!rowValid || stillOwed > 0 || cardPending || methodProblem ? 'text-red-400' : 'text-slate-500'}`}>
             {!rowValid
               ? 'Enter a payment of 0 or more.'
+              : methodProblem
+                ? methodProblem
               : stillOwed > 0
                 ? `${c.lastname}, ${c.firstname} must pay at least the minimum payment before checking in.`
                 : cardPending

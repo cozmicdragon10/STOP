@@ -17,6 +17,21 @@ test('discharge statuses match', async () => {
     assert.deepEqual([...DISCHARGE_STATUSES].sort(), [...browser].sort());
 });
 
+// Payment methods: the Other kinds, which are held like cash, and which only Business Administrators record
+test('payment methods and Other payment kinds match', async () => {
+    const browser = await frontend('paymentMethods.ts');
+    const server = require('../lib/paymentMethods');
+    for (const list of ['PAYMENT_METHODS', 'OTHER_PAYMENT_TYPES', 'HELD_OTHER_TYPES', 'ADMIN_ONLY_OTHER_TYPES']) {
+        assert.deepEqual([...server[list]], [...browser[list]], list);
+    }
+    for (const role of ['Business Administrator', 'Office Admin', 'Counselor']) {
+        for (const subtype of [...server.OTHER_PAYMENT_TYPES, 'Bitcoin', null]) {
+            assert.equal(Boolean(server.paymentMethodProblem({ method: 'Other', subtype, role })), Boolean(browser.paymentMethodProblem('Other', subtype, role)), `${role} ${subtype}`);
+        }
+    }
+    assert.equal(server.paymentMethodText('Other', 'Check', '1042'), browser.paymentMethodText('Other', 'Check', '1042'));
+});
+
 // Referred By choices on the client's information (Clients.ReferredByType)
 test('referred by choices match', async () => {
     const { REFERRAL_TYPES: browser } = await frontend('clients.ts');

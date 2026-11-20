@@ -6,6 +6,9 @@ import { printReceipt, type Receipt } from '../../utils/receipt';
 import { takesPolygraphs } from '../../utils/polygraph';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import CardPaymentFields from './CardPaymentFields';
+import OtherPaymentFields from './OtherPaymentFields';
+import { PAYMENT_METHODS, paymentMethodProblem, paymentMethodText } from '../../utils/paymentMethods';
+import { useUserRole } from '../../hooks/useUserRole';
 import { emptyCardBilling, type CardBilling } from './cardBilling';
 import { FEDERAL_PROGRAM_TYPES, idText } from '../../utils/clients';
 
@@ -14,7 +17,7 @@ interface Props {
   // Account balance as shown on the review screen (stored sign: positive = owes)
   balance: number;
   // What the check-in did for this client; recorded when the group closes. Omitted outside a group check-in.
-  checkIn?: { fee: number; payment: number; paymentMethod: PaymentMethod; cardPaid: number };
+  checkIn?: { fee: number; payment: number; paymentMethod: PaymentMethod; paymentSubtype?: string | null; paymentReference?: string | null; cardPaid: number };
   // Start of the ledger comment when no notes are entered, e.g. "Payment after group"
   noteLabel?: string;
   // Optional starting values and an explanation shown at the top, e.g. when a payment is needed to schedule a polygraph
@@ -31,7 +34,6 @@ interface Props {
   onProcessed: (newBalance: number, polyFeePaid: number, polyFeeVoucher: number) => void;
 }
 
-const PAYMENT_METHODS: PaymentMethod[] = ['Cash', 'Credit Card'];
 const inputClass = 'w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm';
 const NO_CHECK_IN = { fee: 0, payment: 0, paymentMethod: 'Cash' as PaymentMethod, cardPaid: 0 };
 
@@ -40,6 +42,10 @@ const NO_CHECK_IN = { fee: 0, payment: 0, paymentMethod: 'Cash' as PaymentMethod
 export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHECK_IN, noteLabel = 'Payment after group', initialAmount, initialApplyToPolyFee = false, lockApplyToPolyFee = false, notice, createdBy, onClose, onSuccess, onError, onProcessed }: Props) {
   const [amount, setAmount] = useState(initialAmount ? initialAmount.toFixed(2) : '');
   const [method, setMethod] = useState<PaymentMethod>('Cash');
+  // Other payments: the kind (Check, DHS, ...) and an optional reference #
+  const [subtype, setSubtype] = useState('');
+  const [reference, setReference] = useState('');
+  const role = useUserRole();
   const [notes, setNotes] = useState('');
   const [card, setCard] = useState<CardBilling>(emptyCardBilling);
   const [processing, setProcessing] = useState(false);
@@ -48,6 +54,9 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
 
   const parsedAmount = amount.trim() === '' ? 0 : Number(amount);
   const validAmount = Number.isFinite(parsedAmount) && parsedAmount > 0;
+  const methodProblem = paymentMethodProblem(method, subtype, role);
+  // "Cash", "Credit Card", or "Check #1042"
+  const methodText = paymentMethodText(method, subtype, reference);
 
   // Poly fee option is offered only when the client record carries poly fee figures; BIP, Fed Drug Test and Chaperon clients
   // don't take polygraphs, and federal clients pay a Polygraph Copay on the account instead of a poly fee
@@ -72,14 +81,20 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
       onError('Enter a payment amount greater than $0.00.');
       return;
     }
+    if (methodProblem) {
+      onError(methodProblem);
+      return;
+    }
     setProcessing(true);
     try {
       const res = await submitAccountPayment({
         client: client.clientid,
         amount: parsedAmount,
-        comments: notes.trim() || `${noteLabel} (${method}).`,
+        comments: notes.trim() || `${noteLabel} (${methodText}).`,
         createdBy,
         paymentMethod: method,
+        paymentSubtype: method === 'Other' ? subtype : null,
+        paymentReference: method === 'Other' ? reference.trim() || null : null,
         applyToPolyFee,
       });
       const polyApplied = Number(res.polyApplied);
@@ -89,6 +104,8 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
         docNumber: idText(client),
         amount: parsedAmount,
         method,
+        paymentSubtype: method === 'Other' ? subtype : null,
+        paymentReference: method === 'Other' ? reference.trim() || null : null,
         newBalance: Number(res.newBalance),
         transactionIds: res.transactionIds,
         processedBy: createdBy,
@@ -97,7 +114,7 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
         polyFeePaid: newPolyPaid,
         polyFee,
       });
-      onSuccess(`${method} payment recorded for ${client.firstname} ${client.lastname}.`);
+      onSuccess(`${methodText} payment recorded for ${client.firstname} ${client.lastname}.`);
       onProcessed(Number(res.newBalance), newPolyPaid, Number(res.polyFeeVoucher ?? client.polyfeevoucher ?? 0));
     } catch (err: unknown) {
       onError(err instanceof Error && err.message ? err.message : 'Payment could not be processed.');
@@ -120,7 +137,7 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
           )}
           <div>
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Payment Method</label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
               {PAYMENT_METHODS.map(m => (
                 <button
                   key={m}
@@ -134,6 +151,17 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
               ))}
             </div>
             {cardBlocked(client) && <p className="text-xs text-amber-400 mt-1.5">{cardBlockedText(client)}</p>}
+            {method === 'Other' && (
+              <div className="mt-3">
+                <OtherPaymentFields
+                  subtype={subtype}
+                  reference={reference}
+                  disabled={receipt !== null}
+                  onChange={patch => { if (patch.subtype !== undefined) setSubtype(patch.subtype); if (patch.reference !== undefined) setReference(patch.reference); }}
+                  inputClass={inputClass}
+                />
+              </div>
+            )}
           </div>
 
           <div>
@@ -196,7 +224,7 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
             )}
             {checkIn.payment > 0 && (
               <div className="flex justify-between">
-                <span className="text-slate-400">Paid at check-in ({checkIn.paymentMethod})</span>
+                <span className="text-slate-400">Paid at check-in ({paymentMethodText(checkIn.paymentMethod, checkIn.paymentSubtype, checkIn.paymentReference)})</span>
                 <span className="text-emerald-400">{formatBalance(-checkIn.payment)}</span>
               </div>
             )}
@@ -233,7 +261,7 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
           <button
             type="button"
             onClick={processPayment}
-            disabled={processing || receipt !== null || !validAmount}
+            disabled={processing || receipt !== null || !validAmount || methodProblem !== null}
             className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {processing ? 'Processing...' : 'Process Payment'}

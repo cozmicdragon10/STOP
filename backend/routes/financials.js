@@ -8,6 +8,7 @@ const { FORGIVEN_FEE_TYPE, forgivenessEditProblem, forgivenessProblem } = requir
 const { dollars, logClientChange } = require('../lib/changeLog');
 const { moneyText } = require('../lib/moneyFields');
 const { polyVoucherMax, changePolyFeePaid, countPolyFeeFill, splitPolyPaidChange, voucherChangeText } = require('../lib/poly');
+const { paymentDetails, paymentMethodProblem, paymentMethodText } = require('../lib/paymentMethods');
 
 const router = express.Router();
 
@@ -15,12 +16,15 @@ router.post('/api/financials/payment', async (req, res) => {
     const clientDb = await pool.connect();
     try {
         await clientDb.query('BEGIN');
-        const { client, amount, comments, createdBy, paymentMethod, applyToPolyFee } = req.body;
-        const allowedMethods = ['Cash', 'Credit Card'];
-        if (!allowedMethods.includes(paymentMethod)) {
+        const { client, amount, comments, createdBy, paymentMethod, paymentSubtype, paymentReference, applyToPolyFee } = req.body;
+        // Cash, Credit Card, or Other with its kind; Direct Deposit, Tribal and DHS are for Business Administrators only
+        const methodProblem = paymentMethodProblem({ method: paymentMethod, subtype: paymentSubtype, role: req.user?.role });
+        if (methodProblem) {
             await clientDb.query('ROLLBACK');
-            return res.status(400).json({ error: 'Choose a payment method: Cash or Credit Card.' });
+            return res.status(methodProblem.startsWith('Only') ? 403 : 400).json({ error: methodProblem });
         }
+        const { subtype, reference } = paymentDetails({ method: paymentMethod, subtype: paymentSubtype, reference: paymentReference });
+        const methodText = paymentMethodText(paymentMethod, subtype, reference);
         if (!(Number(amount) > 0)) {
             await clientDb.query('ROLLBACK');
             return res.status(400).json({ error: 'Payment amount must be greater than zero.' });
@@ -48,17 +52,17 @@ router.post('/api/financials/payment', async (req, res) => {
         if (polyAmount > 0) {
             // The poly fee is tracked separately, so the account balance is unchanged by this row
             const saved = await clientDb.query(
-                `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, EnteredBy)
-                 VALUES ($1, NOW(), 'Payment', $2, 'Poly Fee', $3, $4, $5, $6) RETURNING TransactionId`,
-                [client, polyAmount, oldBalance, comment, paymentMethod, createdBy || null]
+                `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, EnteredBy, PaymentSubtype, PaymentReference)
+                 VALUES ($1, NOW(), 'Payment', $2, 'Poly Fee', $3, $4, $5, $6, $7, $8) RETURNING TransactionId`,
+                [client, polyAmount, oldBalance, comment, paymentMethod, createdBy || null, subtype, reference]
             );
             transactionIds.push(saved.rows[0].transactionid);
         }
         if (accountAmount > 0) {
             const saved = await clientDb.query(
-                `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, EnteredBy)
-                 VALUES ($1, NOW(), 'Payment', $2, 'Account Payment', $3, $4, $5, $6) RETURNING TransactionId`,
-                [client, accountAmount, newBalance, comment, paymentMethod, createdBy || null]
+                `INSERT INTO FinancialTransactions (Client, Date, Type, Amount, FeeType, FinalBalance, Comments, PaymentMethod, EnteredBy, PaymentSubtype, PaymentReference)
+                 VALUES ($1, NOW(), 'Payment', $2, 'Account Payment', $3, $4, $5, $6, $7, $8) RETURNING TransactionId`,
+                [client, accountAmount, newBalance, comment, paymentMethod, createdBy || null, subtype, reference]
             );
             transactionIds.push(saved.rows[0].transactionid);
         }
@@ -81,7 +85,7 @@ router.post('/api/financials/payment', async (req, res) => {
         await logClientChange(clientDb, {
             clientId: client, changedBy: createdBy, changeType: 'Payment',
             oldValue: moneyText('accountbalance', oldBalance), newValue: moneyText('accountbalance', newBalance),
-            details: `${dollars(payAmount)} ${paymentMethod} payment (receipt ${transactionIds.join(', ')}).${split}${filled} ${comment}`.trim(),
+            details: `${dollars(payAmount)} ${methodText} payment (receipt ${transactionIds.join(', ')}).${split}${filled} ${comment}`.trim(),
         });
 
         await clientDb.query('COMMIT');
@@ -98,7 +102,8 @@ router.post('/api/financials/payment', async (req, res) => {
 // Admin > Transaction Lookup: one ledger row by the ID printed on its receipt, with its client, the check-in it was
 // taken at, and any rows tied to it (refunds, disputes). Office Admins and Business Administrators only.
 const LOOKUP_COLUMNS = `f.TransactionId, f.Client, f.Date, f.Type, f.Amount, f.FeeType, f.FinalBalance, f.Comments, f.PaymentMethod,
-    f.AttendanceId, f.OriginalAmount, f.AdjustedBy, f.AdjustedOn, f.AdjustmentReason, f.RelatedTransactionId, f.DisputeStatus, f.EnteredBy`;
+    f.AttendanceId, f.OriginalAmount, f.AdjustedBy, f.AdjustedOn, f.AdjustmentReason, f.RelatedTransactionId, f.DisputeStatus, f.EnteredBy,
+    f.PaymentSubtype, f.PaymentReference`;
 router.get('/api/transactions/:id', async (req, res) => {
     try {
         if (!OPEN_GROUP_ADMIN_ROLES.includes(req.user?.role)) {
@@ -393,12 +398,14 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
             await db.query('ROLLBACK');
             return res.status(404).json({ error: 'That ledger entry no longer exists.' });
         }
-        // Payments saved before the method was recorded were all cash; adjusting one records it as Cash.
-        // Credit card payments are corrected with a refund or dispute instead.
-        if (tx.type !== 'Payment' || (tx.paymentmethod && tx.paymentmethod !== 'Cash')) {
+        // Cash and Other payments (check, money order, ...) are adjusted here and keep their method. Payments saved before the
+        // method was recorded were all cash; adjusting one records it as Cash. Credit card payments are corrected with a
+        // refund or dispute instead.
+        if (tx.type !== 'Payment' || (tx.paymentmethod && !['Cash', 'Other'].includes(tx.paymentmethod))) {
             await db.query('ROLLBACK');
-            return res.status(400).json({ error: 'Only cash payments can be adjusted.' });
+            return res.status(400).json({ error: 'Only cash and other (check, money order, ...) payments can be adjusted.' });
         }
+        const methodLabel = paymentMethodText(tx.paymentmethod || 'Cash', tx.paymentsubtype, tx.paymentreference);
         const clientRes = await db.query('SELECT AccountBalance FROM Clients WHERE ClientId = $1 FOR UPDATE', [tx.client]);
         const isPoly = tx.feetype === 'Poly Fee';
 
@@ -416,7 +423,7 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
             const { poly, newBalance, owedOnAccount } = await applyPolyPaidChange(db, tx.client, delta, (toAccount) => shiftBalanceFrom(db, tx, toAccount, null));
             const scheduledPolygraph = await scheduledPolygraphFor(db, tx.client);
             await db.query(
-                `UPDATE FinancialTransactions SET Amount = $1, PaymentMethod = 'Cash', OriginalAmount = COALESCE(OriginalAmount, $2), AdjustedBy = $3,
+                `UPDATE FinancialTransactions SET Amount = $1, PaymentMethod = COALESCE(PaymentMethod, 'Cash'), OriginalAmount = COALESCE(OriginalAmount, $2), AdjustedBy = $3,
                      AdjustedOn = NOW(), AdjustmentReason = $4
                  WHERE TransactionId = $5`,
                 [newAmount, oldAmount, user, why, tx.transactionid]
@@ -427,10 +434,10 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
                 changeType: 'Payment Adjusted',
                 oldValue: `$${oldAmount.toFixed(2)}`,
                 newValue: `$${newAmount.toFixed(2)}`,
-                details: `Cash Poly Fee payment from ${paidOn}: ${why}. Poly fee paid now $${poly.polyFeePaid.toFixed(2)}.${voucherChangeText(poly)}${owedOnAccountText(owedOnAccount)}${scheduledPolygraphText(scheduledPolygraph)}`,
+                details: `${methodLabel} Poly Fee payment from ${paidOn}: ${why}. Poly fee paid now $${poly.polyFeePaid.toFixed(2)}.${voucherChangeText(poly)}${owedOnAccountText(owedOnAccount)}${scheduledPolygraphText(scheduledPolygraph)}`,
             });
             await db.query('COMMIT');
-            await logAction(user, 'Payment Adjusted', `Client ID ${tx.client}: cash poly fee payment ${tx.transactionid} from ${paidOn} changed from $${oldAmount.toFixed(2)} to $${newAmount.toFixed(2)}: ${why}.${voucherChangeText(poly)}${owedOnAccountText(owedOnAccount)}${scheduledPolygraphText(scheduledPolygraph)}`);
+            await logAction(user, 'Payment Adjusted', `Client ID ${tx.client}: ${methodLabel} poly fee payment ${tx.transactionid} from ${paidOn} changed from $${oldAmount.toFixed(2)} to $${newAmount.toFixed(2)}: ${why}.${voucherChangeText(poly)}${owedOnAccountText(owedOnAccount)}${scheduledPolygraphText(scheduledPolygraph)}`);
             return res.json({
                 success: true, newBalance: newBalance ?? Number(clientRes.rows[0].accountbalance), attendanceUpdated: false,
                 ...poly, owedOnAccount, scheduledPolygraph,
@@ -446,7 +453,7 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
             );
         }
         await db.query(
-            `UPDATE FinancialTransactions SET Amount = $1, PaymentMethod = 'Cash', OriginalAmount = COALESCE(OriginalAmount, $2), AdjustedBy = $3,
+            `UPDATE FinancialTransactions SET Amount = $1, PaymentMethod = COALESCE(PaymentMethod, 'Cash'), OriginalAmount = COALESCE(OriginalAmount, $2), AdjustedBy = $3,
                  AdjustedOn = NOW(), AdjustmentReason = $4, AttendanceId = COALESCE(AttendanceId, $5)
              WHERE TransactionId = $6`,
             [newAmount, oldAmount, user, why, attendanceId || null, tx.transactionid]
@@ -457,11 +464,11 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
             changeType: 'Payment Adjusted',
             oldValue: `$${oldAmount.toFixed(2)}`,
             newValue: `$${newAmount.toFixed(2)}`,
-            details: `Cash ${tx.feetype || 'payment'} from ${paidOn}: ${why}`,
+            details: `${methodLabel} ${tx.feetype || 'payment'} from ${paidOn}: ${why}`,
         });
 
         await db.query('COMMIT');
-        await logAction(user, 'Payment Adjusted', `Client ID ${tx.client}: cash payment ${tx.transactionid} from ${paidOn} changed from $${oldAmount.toFixed(2)} to $${newAmount.toFixed(2)}: ${why}`);
+        await logAction(user, 'Payment Adjusted', `Client ID ${tx.client}: ${methodLabel} payment ${tx.transactionid} from ${paidOn} changed from $${oldAmount.toFixed(2)} to $${newAmount.toFixed(2)}: ${why}`);
         res.json({ success: true, newBalance, attendanceUpdated: Boolean(attendanceId) });
     } catch (err) {
         await db.query('ROLLBACK');

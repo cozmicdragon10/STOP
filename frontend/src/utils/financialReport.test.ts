@@ -65,7 +65,7 @@ describe('summarizeFinancials', () => {
 
   it('adds payments from imported old-system check-ins as method not recorded', () => {
     const s = summarizeFinancials(data({ attendance: [att('Group', 30, { month: '2025-01', importedpaid: '30' })] }), '2025-01-01', '2025-02-28');
-    expect(s.payments).toEqual([{ label: OLD_SYSTEM_LABEL, count: 0, cash: 0, card: 0, unrecorded: 30, total: 30 }]);
+    expect(s.payments).toEqual([{ label: OLD_SYSTEM_LABEL, count: 0, cash: 0, card: 0, other: 0, unrecorded: 30, total: 30 }]);
     expect(s.months.map(m => [m.month, m.collected])).toEqual([['2025-01', 30], ['2025-02', 0]]);
   });
 

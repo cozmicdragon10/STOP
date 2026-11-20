@@ -82,13 +82,13 @@ const printHtml = (s: FinancialSummary, range: string) => {
       <div>Owed by Clients Today<b>${money(s.balanceTotals.owed)}</b></div>
     </div>
     <h2>Money Collected</h2>
-    <table><thead><tr><th>Fee Type</th><th class="r">Count</th><th class="r">Cash</th><th class="r">Credit Card</th><th class="r">Not Recorded</th><th class="r">Total</th></tr></thead><tbody>
+    <table><thead><tr><th>Fee Type</th><th class="r">Count</th><th class="r">Cash</th><th class="r">Credit Card</th><th class="r">Other</th><th class="r">Not Recorded</th><th class="r">Total</th></tr></thead><tbody>
     ${[...s.payments, s.paymentTotals].map((p, i, all) => `<tr${i === all.length - 1 ? ' class="tot"' : ''}><td>${escapeHtml(p.label)}</td><td class="r">${p.count || ''}</td>
-      <td class="r">${money(p.cash)}</td><td class="r">${money(p.card)}</td><td class="r">${money(p.unrecorded)}</td><td class="r">${money(p.total)}</td></tr>`).join('')}
-    <tr><td>Less refunds</td><td class="r">${s.refunds.count}</td><td></td><td></td><td></td><td class="r">${money(-s.refunds.amount)}</td></tr>
-    <tr><td>Less chargebacks</td><td class="r">${s.disputes.count}</td><td></td><td></td><td></td><td class="r">${money(-s.disputes.amount)}</td></tr>
-    <tr><td>Plus disputes won back</td><td class="r">${s.disputesWon.count}</td><td></td><td></td><td></td><td class="r">${money(s.disputesWon.amount)}</td></tr>
-    <tr class="tot"><td>Net collected</td><td></td><td></td><td></td><td></td><td class="r">${money(s.netCollected)}</td></tr>
+      <td class="r">${money(p.cash)}</td><td class="r">${money(p.card)}</td><td class="r">${money(p.other)}</td><td class="r">${money(p.unrecorded)}</td><td class="r">${money(p.total)}</td></tr>`).join('')}
+    <tr><td>Less refunds</td><td class="r">${s.refunds.count}</td><td></td><td></td><td></td><td></td><td class="r">${money(-s.refunds.amount)}</td></tr>
+    <tr><td>Less chargebacks</td><td class="r">${s.disputes.count}</td><td></td><td></td><td></td><td></td><td class="r">${money(-s.disputes.amount)}</td></tr>
+    <tr><td>Plus disputes won back</td><td class="r">${s.disputesWon.count}</td><td></td><td></td><td></td><td></td><td class="r">${money(s.disputesWon.amount)}</td></tr>
+    <tr class="tot"><td>Net collected</td><td></td><td></td><td></td><td></td><td></td><td class="r">${money(s.netCollected)}</td></tr>
     </tbody></table>
     <h2>Charged to Client Accounts</h2><table><thead><tr><th>Item</th><th class="r">Count</th><th class="r">Amount</th></tr></thead><tbody>${amountRows(s.charges, s.chargeTotal)}</tbody></table>
     <h2>Credits and Debt Forgiven</h2><table><thead><tr><th>Item</th><th class="r">Count</th><th class="r">Amount</th></tr></thead><tbody>${amountRows(s.credits, s.creditTotal)}</tbody></table>
@@ -199,19 +199,19 @@ export default function FinancialReport() {
             <table className="w-full text-sm">
               <thead><tr className="text-left border-b border-slate-800">
                 <th className={th}>Fee Type</th><th className={`${th} ${r}`}>Count</th><th className={`${th} ${r}`}>Cash</th>
-                <th className={`${th} ${r}`}>Credit Card</th><th className={`${th} ${r}`}>Not Recorded</th><th className={`${th} ${r}`}>Total</th>
+                <th className={`${th} ${r}`}>Credit Card</th><th className={`${th} ${r}`}>Other</th><th className={`${th} ${r}`}>Not Recorded</th><th className={`${th} ${r}`}>Total</th>
               </tr></thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                {s.payments.length === 0 && <tr><td colSpan={6} className={`${td} text-slate-500`}>No payments in this range.</td></tr>}
+                {s.payments.length === 0 && <tr><td colSpan={7} className={`${td} text-slate-500`}>No payments in this range.</td></tr>}
                 {s.payments.map(p => (
                   <tr key={p.label}>
                     <td className={td}>{p.label}</td><td className={`${td} ${r}`}>{p.count || ''}</td><td className={`${td} ${r}`}>{money(p.cash)}</td>
-                    <td className={`${td} ${r}`}>{money(p.card)}</td><td className={`${td} ${r}`}>{money(p.unrecorded)}</td><td className={`${td} ${r}`}>{money(p.total)}</td>
+                    <td className={`${td} ${r}`}>{money(p.card)}</td><td className={`${td} ${r}`}>{money(p.other)}</td><td className={`${td} ${r}`}>{money(p.unrecorded)}</td><td className={`${td} ${r}`}>{money(p.total)}</td>
                   </tr>
                 ))}
                 <tr className="font-semibold text-white">
                   <td className={td}>Total payments</td><td className={`${td} ${r}`}>{s.paymentTotals.count}</td><td className={`${td} ${r}`}>{money(s.paymentTotals.cash)}</td>
-                  <td className={`${td} ${r}`}>{money(s.paymentTotals.card)}</td><td className={`${td} ${r}`}>{money(s.paymentTotals.unrecorded)}</td><td className={`${td} ${r}`}>{money(s.paymentTotals.total)}</td>
+                  <td className={`${td} ${r}`}>{money(s.paymentTotals.card)}</td><td className={`${td} ${r}`}>{money(s.paymentTotals.other)}</td><td className={`${td} ${r}`}>{money(s.paymentTotals.unrecorded)}</td><td className={`${td} ${r}`}>{money(s.paymentTotals.total)}</td>
                 </tr>
                 {[
                   { label: 'Less refunds', line: s.refunds, sign: -1 },
@@ -219,7 +219,7 @@ export default function FinancialReport() {
                   { label: 'Plus disputes won back', line: s.disputesWon, sign: 1 },
                 ].map(x => (
                   <tr key={x.label} className="text-slate-300">
-                    <td className={td}>{x.label}</td><td className={`${td} ${r}`}>{x.line.count}</td><td colSpan={3} /><td className={`${td} ${r}`}>{money(x.sign * x.line.amount)}</td>
+                    <td className={td}>{x.label}</td><td className={`${td} ${r}`}>{x.line.count}</td><td colSpan={4} /><td className={`${td} ${r}`}>{money(x.sign * x.line.amount)}</td>
                   </tr>
                 ))}
               </tbody>

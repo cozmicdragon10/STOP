@@ -5,6 +5,8 @@ const { requireRole } = require('../lib/auth');
 const { groupNameFor } = require('../lib/changeLog');
 const { YMD } = require('../lib/sql');
 const { withResponsible, OPEN_GROUP_ADMIN_ROLES } = require('../lib/cashResponsibility');
+// Money someone holds until it's dropped off at the bank: cash, and checks / money orders / cashier's checks
+const { HELD_PAYMENT_SQL, paymentMethodText } = require('../lib/paymentMethods');
 
 const router = express.Router();
 // The Group Income report is for Business Administrators only
@@ -67,7 +69,7 @@ router.put('/api/reports/group-deposits', async (req, res) => {
         const session = Number(sessionNumber) || 1;
         const cash = await pool.query(
             `SELECT COALESCE(SUM(AccountPaid), 0) AS cash FROM Attendance
-             WHERE "Group" = $1 AND Date = $2 AND SessionNumber = $3 AND PaymentMethod = 'Cash'`,
+             WHERE "Group" = $1 AND Date = $2 AND SessionNumber = $3 AND ${HELD_PAYMENT_SQL()}`,
             [groupId, sessionDate, session]
         );
         const result = await pool.query(
@@ -124,7 +126,7 @@ const closedSessionsSql = (where) => `
     SELECT a."Group" AS GroupId, g.GroupName, g.Counselor, a.Date, a.SessionNumber,
            MIN(COALESCE(a.OpenedBy, a.CreatedBy)) AS OpenedBy, MAX(a.CoveredBy) AS CoveredBy,
            MAX(a.CreatedOn) AS ClosedOn, COUNT(*)::int AS Attendance,
-           COALESCE(SUM(a.AccountPaid) FILTER (WHERE a.PaymentMethod = 'Cash'), 0) AS Cash
+           COALESCE(SUM(a.AccountPaid) FILTER (WHERE ${HELD_PAYMENT_SQL('a.')}), 0) AS Cash
     FROM Attendance a
     JOIN Groups g ON g.GroupId = a."Group"
     WHERE ${where}
@@ -233,7 +235,7 @@ const heldSessionsSql = (where, adminRolesParam) => `
            s.Cash, s.Responsible, COALESCE(s.ResponsibleName, s.Responsible) AS ResponsibleName
     FROM (${withResponsible(closedSessionsSql(`(a."Group", a.Date, a.SessionNumber) IN (
         SELECT "Group", Date, SessionNumber FROM Attendance
-        WHERE "Group" IS NOT NULL AND PaymentMethod = 'Cash' AND AccountPaid > 0 AND ${where})`), adminRolesParam)}) s
+        WHERE "Group" IS NOT NULL AND ${HELD_PAYMENT_SQL()} AND AccountPaid > 0 AND ${where})`), adminRolesParam)}) s
     LEFT JOIN GroupDeposits d ON d.GroupId = s.GroupId AND d.SessionDate = s.Date AND d.SessionNumber = s.SessionNumber
     WHERE s.Cash > 0 AND d.DepositId IS NULL`;
 
@@ -318,6 +320,7 @@ router.post('/api/reports/group-cash-held/drop-off', async (req, res) => {
 // Administrators see every payment; everyone else sees the ones they entered.
 const userCashSql = (where) => `
     SELECT f.TransactionId, f.Date AS PaidOn, f.Amount, f.FeeType, f.Comments, f.EnteredBy, ee.DisplayName AS EnteredByName,
+           f.PaymentMethod, f.PaymentSubtype, f.PaymentReference,
            c.ClientId, c.FirstName, c.LastName, c.DOCNumber, c.DocType,
            to_char(d.DepositDate, 'YYYY-MM-DD') AS DepositDate, d.RecordedBy, er.DisplayName AS RecordedByName, d.RecordedOn
     FROM FinancialTransactions f
@@ -326,7 +329,7 @@ const userCashSql = (where) => `
     LEFT JOIN CashPaymentDeposits d ON d.TransactionId = f.TransactionId
     LEFT JOIN EmployeeRoles ee ON LOWER(ee.EmployeeEmail) = LOWER(f.EnteredBy)
     LEFT JOIN EmployeeRoles er ON LOWER(er.EmployeeEmail) = LOWER(d.RecordedBy)
-    WHERE f.Type = 'Payment' AND f.PaymentMethod = 'Cash' AND a."Group" IS NULL AND ${where}`;
+    WHERE f.Type = 'Payment' AND ${HELD_PAYMENT_SQL('f.')} AND a."Group" IS NULL AND ${where}`;
 
 router.get('/api/reports/user-cash-deposits', async (req, res) => {
     try {
@@ -361,7 +364,7 @@ router.put('/api/reports/user-cash-deposits', async (req, res) => {
         if (!isAdmin && String(payment.enteredby || '').toLowerCase() !== String(viewer.employeeemail).toLowerCase()) {
             return res.status(403).json({ error: 'You can only check off cash payments you took.' });
         }
-        const what = `$${Number(payment.amount).toFixed(2)} cash payment from ${payment.lastname}, ${payment.firstname} (payment ${transactionId})`;
+        const what = `$${Number(payment.amount).toFixed(2)} ${paymentMethodText(payment.paymentmethod || 'Cash', payment.paymentsubtype, payment.paymentreference)} payment from ${payment.lastname}, ${payment.firstname} (payment ${transactionId})`;
 
         if (droppedOff) {
             if (!YMD.test(String(depositDate || ''))) {
@@ -406,12 +409,13 @@ router.get('/api/reports/user-activity', async (req, res) => {
             `SELECT x.*, c.FirstName, c.LastName, c.DOCNumber, c.DocType, e.DisplayName AS EnteredByName, ed.DisplayName AS EditedByName
              FROM (
                  SELECT 'Payment' AS Kind, f.TransactionId AS Id, f.Client, f.Date AS EnteredOn, f.EnteredBy,
-                        f.Type AS Detail, f.Amount, f.PaymentMethod, f.FeeType, f.Comments, NULL::varchar AS EditedBy, NULL::timestamp AS EditedOn
+                        f.Type AS Detail, f.Amount, f.PaymentMethod, f.FeeType, f.Comments, NULL::varchar AS EditedBy, NULL::timestamp AS EditedOn,
+                        f.PaymentSubtype, f.PaymentReference
                  FROM FinancialTransactions f
                  WHERE f.Type IN ('Payment', 'Refund', 'Dispute', 'Dispute Won') AND f.Date >= $1::date AND f.Date < $2::date + 1
                  UNION ALL
                  SELECT 'Note', n.NoteId, n.Client, n.Date, n."User",
-                        n.Category, NULL, NULL, NULL, n.Comments, n.EditedBy, n.EditedOn
+                        n.Category, NULL, NULL, NULL, n.Comments, n.EditedBy, n.EditedOn, NULL, NULL
                  FROM Notes n
                  WHERE n.Date >= $1::date AND n.Date < $2::date + 1
              ) x
@@ -469,7 +473,7 @@ router.get('/api/reports/financial-summary', businessOnly, async (req, res) => {
                         COALESCE(SUM(s.Cash) FILTER (WHERE d.DepositId IS NULL), 0) AS Held,
                         COUNT(*) FILTER (WHERE d.DepositId IS NULL)::int AS HeldCount
                  FROM (SELECT a."Group" AS GroupId, a.Date, a.SessionNumber,
-                              COALESCE(SUM(a.AccountPaid) FILTER (WHERE a.PaymentMethod = 'Cash'), 0) AS Cash
+                              COALESCE(SUM(a.AccountPaid) FILTER (WHERE ${HELD_PAYMENT_SQL('a.')}), 0) AS Cash
                        FROM Attendance a
                        WHERE a."Group" IS NOT NULL AND a.Date BETWEEN $1 AND $2
                        GROUP BY 1, 2, 3) s
@@ -485,7 +489,7 @@ router.get('/api/reports/financial-summary', businessOnly, async (req, res) => {
                  FROM FinancialTransactions f
                  LEFT JOIN Attendance a ON a.AttendanceId = f.AttendanceId
                  LEFT JOIN CashPaymentDeposits d ON d.TransactionId = f.TransactionId
-                 WHERE f.Type = 'Payment' AND f.PaymentMethod = 'Cash' AND a."Group" IS NULL
+                 WHERE f.Type = 'Payment' AND ${HELD_PAYMENT_SQL('f.')} AND a."Group" IS NULL
                    AND f.Date >= $1::date AND f.Date < $2::date + 1`,
                 [from, to]
             ),

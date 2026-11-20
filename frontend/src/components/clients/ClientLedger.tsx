@@ -13,6 +13,7 @@ import { formatDisplayTime, localYmd } from '../../utils/dates';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { polyVoucherMax, slotSummary } from '../../utils/polygraph';
 import { idText } from '../../utils/clients';
+import { paymentMethodText, type PaymentMethod } from '../../utils/paymentMethods';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client, ledger, and slot rows are untyped throughout App */
 export interface LedgerRefresh {
@@ -51,7 +52,7 @@ interface Props {
 type PaymentActionKind = 'adjust' | 'forgive-change' | 'forgive-undo' | CardPaymentAction;
 const isForgiveAction = (kind: PaymentActionKind) => kind === 'forgive-change' || kind === 'forgive-undo';
 
-const ACTION_TITLES: Record<PaymentActionKind, string> = { adjust: 'Adjust cash payment', 'forgive-change': 'Change the amount forgiven', 'forgive-undo': 'Undo this forgiveness: the client owes it again', refund: 'Refund', dispute: 'Dispute (owed again until won)', 'dispute-won': 'Dispute won: apply the payment again', 'dispute-lost': 'Dispute lost' };
+const ACTION_TITLES: Record<PaymentActionKind, string> = { adjust: 'Adjust payment', 'forgive-change': 'Change the amount forgiven', 'forgive-undo': 'Undo this forgiveness: the client owes it again', refund: 'Refund', dispute: 'Dispute (owed again until won)', 'dispute-won': 'Dispute won: apply the payment again', 'dispute-lost': 'Dispute lost' };
 const ACTION_SUBMIT_LABELS: Record<PaymentActionKind, string> = { adjust: 'Save Adjustment', 'forgive-change': 'Save Change', 'forgive-undo': 'Undo Forgiveness', refund: 'Record Refund', dispute: 'Record Dispute', 'dispute-won': 'Mark Won', 'dispute-lost': 'Mark Lost' };
 
 // The Financial Ledger tab of a client's account: entries by month, and (Business Administrators) corrections to a
@@ -101,7 +102,9 @@ export default function ClientLedger({ client, role, userEmail, financials, high
       docNumber: idText(client),
       amount: Number(fin.amount),
       // Payments saved before the method was recorded were all cash
-      method: fin.paymentmethod || 'Cash',
+      method: (fin.paymentmethod || 'Cash') as PaymentMethod,
+      paymentSubtype: fin.paymentsubtype ?? null,
+      paymentReference: fin.paymentreference ?? null,
       newBalance: fin.finalbalance === null || fin.finalbalance === undefined ? undefined : Number(fin.finalbalance),
       // A poly fee payment leaves the account balance as it was; any other payment lowered it by its amount
       balanceBefore: fin.finalbalance === null || fin.finalbalance === undefined ? undefined
@@ -449,7 +452,8 @@ export default function ClientLedger({ client, role, userEmail, financials, high
               const badge = charge ? 'Fee' : fin.type === 'Payment' ? 'Payment' : undone ? 'Undone' : forgiven ? 'Forgiven' : fin.type;
               const isPoly = fin.feetype === 'Poly Fee';
               // Payments saved before the method was recorded were all cash
-              const canAdjust = isAdmin && fin.type === 'Payment' && (!fin.paymentmethod || fin.paymentmethod === 'Cash');
+              // Cash and Other (check, money order, ...) payments are adjusted; card payments are refunded or disputed
+              const canAdjust = isAdmin && fin.type === 'Payment' && (!fin.paymentmethod || fin.paymentmethod === 'Cash' || fin.paymentmethod === 'Other');
               const card = fin.type === 'Payment' && fin.paymentmethod === 'Credit Card' ? cardPaymentStatus(fin, financials) : null;
               const disputeOpen = fin.disputestatus === 'Open';
               const action = paymentAction?.id === fin.transactionid ? paymentAction : null;
@@ -474,7 +478,7 @@ export default function ClientLedger({ client, role, userEmail, financials, high
                         {fin.feetype || fin.type}
                         <span className={`ml-2 align-middle text-[0.625rem] uppercase tracking-wide px-2 py-0.5 rounded border ${undone ? 'text-slate-400 bg-slate-800 border-slate-700' : tone.badge}`}>{badge}</span>
                         {!charge && fin.paymentmethod && (
-                          <span className="ml-2 align-middle text-[0.625rem] uppercase tracking-wide bg-slate-800 text-slate-300 px-2 py-0.5 rounded">{fin.paymentmethod}</span>
+                          <span className="ml-2 align-middle text-[0.625rem] uppercase tracking-wide bg-slate-800 text-slate-300 px-2 py-0.5 rounded">{paymentMethodText(fin.paymentmethod, fin.paymentsubtype, fin.paymentreference)}</span>
                         )}
                         {fin.disputestatus && (
                           <span className={`ml-2 align-middle text-[0.625rem] uppercase tracking-wide px-2 py-0.5 rounded border ${disputeOpen ? 'text-amber-400 bg-amber-500/10 border-amber-500/30' : fin.disputestatus === 'Won' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' : 'text-red-400 bg-red-500/10 border-red-500/30'}`}>Dispute {fin.disputestatus}</span>

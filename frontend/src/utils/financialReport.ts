@@ -8,7 +8,8 @@ import type { FinancialSummaryData } from '../api';
 //   Credits    Adjustment rows: debt forgiven and polygraph copays credited back. They lower balances without money.
 //   Funded     assessments a DHS invoice or voucher covers: billed to them, not to the client's account.
 
-export interface MethodLine { label: string; count: number; cash: number; card: number; unrecorded: number; total: number }
+// other: checks, money orders, Direct Deposit, Tribal, DHS (utils/paymentMethods.ts)
+export interface MethodLine { label: string; count: number; cash: number; card: number; other: number; unrecorded: number; total: number }
 export interface AmountLine { label: string; count: number; amount: number }
 export interface MonthTotals { month: string; charged: number; credits: number; collected: number; refunded: number; net: number }
 export interface CashLine { label: string; cash: number; deposited: number; held: number; heldCount: number }
@@ -52,8 +53,8 @@ export const monthsBetween = (from: string, to: string): string[] => {
   return out;
 };
 
-const methodKey = (method: string): 'cash' | 'card' | 'unrecorded' =>
-  method === 'Cash' ? 'cash' : method === 'Credit Card' ? 'card' : 'unrecorded';
+const methodKey = (method: string): 'cash' | 'card' | 'other' | 'unrecorded' =>
+  method === 'Cash' ? 'cash' : method === 'Credit Card' ? 'card' : method === 'Other' ? 'other' : 'unrecorded';
 
 // Adds amount to the line with that label, making it if needed
 const addTo = (map: Map<string, AmountLine>, label: string, count: number, amount: number) => {
@@ -74,7 +75,7 @@ export function summarizeFinancials(data: FinancialSummaryData, from: string, to
 
   const payments = new Map<string, MethodLine>();
   const pay = (label: string, method: string, count: number, amount: number) => {
-    const line = payments.get(label) ?? { label, count: 0, cash: 0, card: 0, unrecorded: 0, total: 0 };
+    const line = payments.get(label) ?? { label, count: 0, cash: 0, card: 0, other: 0, unrecorded: 0, total: 0 };
     line.count += count;
     line[methodKey(method)] = cents(line[methodKey(method)] + amount);
     line.total = cents(line.total + amount);
@@ -130,9 +131,9 @@ export function summarizeFinancials(data: FinancialSummaryData, from: string, to
 
   const paymentLines = [...payments.values()].sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
   const paymentTotals = paymentLines.reduce<MethodLine>((t, l) => ({
-    label: 'Total payments', count: t.count + l.count, cash: cents(t.cash + l.cash), card: cents(t.card + l.card),
+    label: 'Total payments', count: t.count + l.count, cash: cents(t.cash + l.cash), card: cents(t.card + l.card), other: cents(t.other + l.other),
     unrecorded: cents(t.unrecorded + l.unrecorded), total: cents(t.total + l.total),
-  }), { label: 'Total payments', count: 0, cash: 0, card: 0, unrecorded: 0, total: 0 });
+  }), { label: 'Total payments', count: 0, cash: 0, card: 0, other: 0, unrecorded: 0, total: 0 });
 
   const monthList = [...months.values()].sort((a, b) => a.month.localeCompare(b.month));
   for (const m of monthList) m.net = cents(m.collected - m.refunded);
@@ -184,11 +185,11 @@ export function financialCsv(s: FinancialSummary, from: string, to: string): str
     return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
   };
   const rows: (string | number)[][] = [['Financial Summary', `${from} to ${to}`], []];
-  rows.push(['Money Collected', 'Count', 'Cash', 'Credit Card', 'Not Recorded', 'Total']);
-  for (const p of [...s.payments, s.paymentTotals]) rows.push([p.label, p.count, p.cash.toFixed(2), p.card.toFixed(2), p.unrecorded.toFixed(2), p.total.toFixed(2)]);
-  for (const l of [s.refunds, s.disputes]) rows.push([`Less ${l.label.toLowerCase()}`, l.count, '', '', '', (-l.amount).toFixed(2)]);
-  rows.push([`Plus ${s.disputesWon.label.toLowerCase()}`, s.disputesWon.count, '', '', '', s.disputesWon.amount.toFixed(2)]);
-  rows.push(['Net collected', '', '', '', '', s.netCollected.toFixed(2)], []);
+  rows.push(['Money Collected', 'Count', 'Cash', 'Credit Card', 'Other', 'Not Recorded', 'Total']);
+  for (const p of [...s.payments, s.paymentTotals]) rows.push([p.label, p.count, p.cash.toFixed(2), p.card.toFixed(2), p.other.toFixed(2), p.unrecorded.toFixed(2), p.total.toFixed(2)]);
+  for (const l of [s.refunds, s.disputes]) rows.push([`Less ${l.label.toLowerCase()}`, l.count, '', '', '', '', (-l.amount).toFixed(2)]);
+  rows.push([`Plus ${s.disputesWon.label.toLowerCase()}`, s.disputesWon.count, '', '', '', '', s.disputesWon.amount.toFixed(2)]);
+  rows.push(['Net collected', '', '', '', '', '', s.netCollected.toFixed(2)], []);
   const section = (title: string, lines: AmountLine[], total: number) => {
     rows.push([title, 'Count', 'Amount']);
     for (const l of lines) rows.push([l.label, l.count, l.amount.toFixed(2)]);

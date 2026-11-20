@@ -4,6 +4,7 @@ import { lookupTransaction } from '../../api';
 import type { TransactionLookup as Found, TransactionRow } from '../../api';
 import { formatBalance } from '../../utils/balance';
 import { idText } from '../../utils/clients';
+import { paymentMethodText } from '../../utils/paymentMethods';
 
 const money = (n: string | number | null) => `$${Number(n || 0).toFixed(2)}`;
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '');
@@ -12,7 +13,7 @@ const day = (iso: string | null) => {
   const [y, m, d] = (iso || '').slice(0, 10).split('-');
   return y && m && d ? `${m}/${d}/${y}` : '';
 };
-const describe = (t: TransactionRow) => `${t.type}${t.feetype ? ` · ${t.feetype}` : ''}${t.paymentmethod ? ` · ${t.paymentmethod}` : ''}`;
+const describe = (t: TransactionRow) => `${t.type}${t.feetype ? ` · ${t.feetype}` : ''}${t.paymentmethod ? ` · ${paymentMethodText(t.paymentmethod, t.paymentsubtype, t.paymentreference)}` : ''}`;
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -80,7 +81,7 @@ export default function TransactionLookup({ onOpen }: { onOpen: (clientId: numbe
             <Field label="Type" value={found.type} />
             <Field label="Applied to" value={found.feetype || ''} />
             <Field label="Amount" value={money(found.amount)} />
-            <Field label="Payment method" value={found.paymentmethod || ''} />
+            <Field label="Payment method" value={paymentMethodText(found.paymentmethod, found.paymentsubtype, found.paymentreference)} />
             <Field label="Balance after" value={found.finalbalance === null ? '' : formatBalance(found.finalbalance)} />
             <Field label="Entered by" value={found.enteredby || ''} />
             <Field label="Dispute status" value={found.disputestatus || ''} />

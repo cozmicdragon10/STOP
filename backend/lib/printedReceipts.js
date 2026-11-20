@@ -17,14 +17,16 @@ const cashDiscardProblem = (entries) => {
     const withCash = cashEntries(entries);
     if (!withCash.length) return null;
     const list = withCash.map(e => `${nameOf(e)} ($${(cents(e.payment) / 100).toFixed(2)})`).join(', ');
-    return `Cash was entered at this check-in for ${list}. It's only recorded when the group closes, so discarding would lose `
-        + 'the record of it. Close the group, or if no cash was actually taken, open the check-in and set those payments to $0 first.';
+    return `A cash or other (check, money order, ...) payment was entered at this check-in for ${list}. It's only recorded when the group closes, so discarding would lose `
+        + 'the record of it. Close the group, or if nothing was actually taken, open the check-in and set those payments to $0 first.';
 };
 
 // Fee, check-in payment, and payment method as printed. Open sheet entries use fee/payment/paymentMethod/cardPaid; the
 // batch sent to close the group uses groupFee/accountPaid/paymentMethod and has no card payment (already on the account).
-const sheetTerms = (e) => ({ fee: cents(e.fee), paid: cents(e.payment), method: cents(e.payment) > 0 ? e.paymentMethod : null, card: cents(e.cardPaid) });
-const batchTerms = (e) => ({ fee: cents(e.groupFee), paid: cents(e.accountPaid), method: cents(e.accountPaid) > 0 ? e.paymentMethod : null });
+// An Other payment's kind (Check, DHS, ...) is part of its method, so a printed check can't become a different kind.
+const methodOf = (e) => (e.paymentMethod === 'Other' ? `Other: ${e.paymentSubtype || ''}` : e.paymentMethod);
+const sheetTerms = (e) => ({ fee: cents(e.fee), paid: cents(e.payment), method: cents(e.payment) > 0 ? methodOf(e) : null, card: cents(e.cardPaid) });
+const batchTerms = (e) => ({ fee: cents(e.groupFee), paid: cents(e.accountPaid), method: cents(e.accountPaid) > 0 ? methodOf(e) : null });
 
 // Returns an error message when `next` leaves out or changes a client whose receipt was printed in `saved`, or null.
 // closing: next is the batch that closes the group rather than a re-saved open sheet.

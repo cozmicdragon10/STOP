@@ -6,6 +6,7 @@ import type { GroupDeposit, GroupReportRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { escapeHtml } from '../../utils/receipt';
 import { idText } from '../../utils/clients';
+import { paymentMethodText } from '../../utils/paymentMethods';
 import { errorMessage } from '../../utils/errors';
 
 interface GroupTotals {
@@ -19,6 +20,8 @@ interface GroupTotals {
   collected: number;
   cash: number;
   card: number;
+  // Other payments: checks, money orders, Direct Deposit, Tribal, DHS (utils/paymentMethods.ts)
+  other: number;
   // Paid at check-in before the payment method was saved on attendance, and not matchable to the ledger
   unrecorded: number;
 }
@@ -62,7 +65,7 @@ const totalsFor = (key: string, rows: GroupReportRow[]): GroupTotals => {
     key, name: rows[0].groupname, counselor: rows[0].counselor, rows,
     sessions: new Set(rows.map(sessionKey)).size,
     clients: new Set(rows.map(r => r.clientid)).size,
-    charged: 0, collected: 0, cash: 0, card: 0, unrecorded: 0,
+    charged: 0, collected: 0, cash: 0, card: 0, other: 0, unrecorded: 0,
   };
   for (const r of rows) {
     const paid = Number(r.accountpaid) || 0;
@@ -70,6 +73,7 @@ const totalsFor = (key: string, rows: GroupReportRow[]): GroupTotals => {
     totals.collected += paid;
     if (r.paymentmethod === 'Cash') totals.cash += paid;
     else if (r.paymentmethod === 'Credit Card') totals.card += paid;
+    else if (r.paymentmethod === 'Other') totals.other += paid;
     else totals.unrecorded += paid;
   }
   return totals;
@@ -134,11 +138,13 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
   const counselorNames = Array.from(new Set(groups.map(counselorOf))).sort((a, b) => a.localeCompare(b));
   const groupOptions = counselorFilter ? groups.filter(g => counselorOf(g) === counselorFilter) : groups;
   const shown = groupFilter ? groupOptions.filter(g => g.key === groupFilter) : groupOptions;
-  const sum = (field: 'charged' | 'collected' | 'cash' | 'card' | 'unrecorded') => shown.reduce((t, g) => t + g[field], 0);
+  const sum = (field: 'charged' | 'collected' | 'cash' | 'card' | 'other' | 'unrecorded') => shown.reduce((t, g) => t + g[field], 0);
   const attendanceCount = shown.reduce((t, g) => t + g.rows.length, 0);
   // Attendance with no group isn't a group
   const groupCount = shown.filter(g => g.key !== 'none').length;
   const anyUnrecorded = shown.some(g => g.unrecorded > 0);
+  // The Other column shows only when something was paid that way
+  const anyOther = shown.some(g => g.other > 0);
 
   const toggle = (key: string) => setExpanded(prev => {
     const next = new Set(prev);
@@ -195,13 +201,13 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
   const counselorTotals = Array.from(
     shown.reduce((m, g) => m.set(counselorOf(g), [...(m.get(counselorOf(g)) || []), g]), new Map<string, GroupTotals[]>())
   ).map(([name, list]) => {
-    const total = (field: 'sessions' | 'charged' | 'collected' | 'cash' | 'card' | 'unrecorded') => list.reduce((t, g) => t + g[field], 0);
+    const total = (field: 'sessions' | 'charged' | 'collected' | 'cash' | 'card' | 'other' | 'unrecorded') => list.reduce((t, g) => t + g[field], 0);
     const deposit = sumDeposits(list.map(depositSummary));
     return {
       name, groups: list.length, sessions: total('sessions'),
       attendance: list.reduce((t, g) => t + g.rows.length, 0),
       clients: new Set(list.flatMap(g => g.rows.map(r => r.clientid))).size,
-      charged: total('charged'), collected: total('collected'), cash: total('cash'), card: total('card'), unrecorded: total('unrecorded'),
+      charged: total('charged'), collected: total('collected'), cash: total('cash'), card: total('card'), other: total('other'), unrecorded: total('unrecorded'),
       deposit,
     };
   }).sort((a, b) => a.name.localeCompare(b.name));
@@ -279,16 +285,16 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
     const groupName = [counselorFilter, groupFilter ? shown[0]?.name ?? 'Selected group' : 'All Groups'].filter(Boolean).join(' · ');
     const counselorRows = counselorTotals.map(c => `<tr>
       <td>${escapeHtml(c.name)}</td><td class="r">${c.groups}</td><td class="r">${c.sessions}</td><td class="r">${c.attendance}</td><td class="r">${c.clients}</td>
-      <td class="r">${money(c.charged)}</td><td class="r">${money(c.collected)}</td><td class="r">${money(c.cash)}</td><td class="r">${money(c.card)}</td>
+      <td class="r">${money(c.charged)}</td><td class="r">${money(c.collected)}</td><td class="r">${money(c.cash)}</td><td class="r">${money(c.card)}</td>${anyOther ? `<td class="r">${money(c.other)}</td>` : ''}
       ${anyUnrecorded ? `<td class="r">${money(c.unrecorded)}</td>` : ''}
       <td class="r">${money(c.deposit.deposited)}</td><td>${escapeHtml(depositStatusText(c.deposit))}</td></tr>`).join('');
-    const cols = anyUnrecorded ? 11 : 10;
+    const cols = 10 + (anyUnrecorded ? 1 : 0) + (anyOther ? 1 : 0);
     const groupRows = shown.map(g => `
       <tr class="group">
         <td>${escapeHtml(g.name)}</td><td>${escapeHtml(g.counselor || '—')}</td>
         <td class="r">${g.sessions}</td><td class="r">${g.rows.length}</td><td class="r">${g.clients}</td>
         <td class="r">${money(g.charged)}</td><td class="r">${money(g.collected)}</td>
-        <td class="r">${money(g.cash)}</td><td class="r">${money(g.card)}</td>
+        <td class="r">${money(g.cash)}</td><td class="r">${money(g.card)}</td>${anyOther ? `<td class="r">${money(g.other)}</td>` : ''}
         ${anyUnrecorded ? `<td class="r">${money(g.unrecorded)}</td>` : ''}
         <td>${escapeHtml(depositStatusText(depositSummary(g)))}</td>
       </tr>
@@ -298,7 +304,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
           <td class="indent">${escapeHtml(sessionLabel(g, attendees))}</td><td></td><td></td>
           <td class="r">${attendees.length}</td><td class="r">${s.clients}</td>
           <td class="r">${money(s.charged)}</td><td class="r">${money(s.collected)}</td>
-          <td class="r">${money(s.cash)}</td><td class="r">${money(s.card)}</td>
+          <td class="r">${money(s.cash)}</td><td class="r">${money(s.card)}</td>${anyOther ? `<td class="r">${money(s.other)}</td>` : ''}
           ${anyUnrecorded ? `<td class="r">${money(s.unrecorded)}</td>` : ''}
           <td>${escapeHtml(sessionDepositText(g, key, attendees))}</td>
         </tr>`;
@@ -312,10 +318,10 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
             const paid = Number(r.accountpaid) || 0;
             return `<tr><td>${escapeHtml(`${r.lastname}, ${r.firstname}`)}</td><td>${escapeHtml(idText(r) || '—')}</td>
               <td>${escapeHtml(r.type)}${r.voucherused ? ' · Voucher' : ''}</td><td class="r">${money(Number(r.groupfee) || 0)}</td>
-              <td class="r">${money(paid)}</td><td>${paid > 0 ? escapeHtml(r.paymentmethod || 'Not recorded') : '—'}</td></tr>`;
+              <td class="r">${money(paid)}</td><td>${paid > 0 ? escapeHtml(r.paymentmethod ? paymentMethodText(r.paymentmethod, r.paymentsubtype) : 'Not recorded') : '—'}</td></tr>`;
           }).join('')}
           </tbody><tfoot><tr><td colspan="3">Session Total</td><td class="r">${money(s.charged)}</td><td class="r">${money(s.collected)}</td>
-          <td>Cash ${money(s.cash)} · CC ${money(s.card)}${s.unrecorded > 0 ? ` · Unrecorded ${money(s.unrecorded)}` : ''}</td></tr></tfoot></table>`;
+          <td>Cash ${money(s.cash)} · CC ${money(s.card)}${s.other > 0 ? ` · Other ${money(s.other)}` : ''}${s.unrecorded > 0 ? ` · Unrecorded ${money(s.unrecorded)}` : ''}</td></tr></tfoot></table>`;
       }).join('')}</td></tr>` : ''}`).join('');
 
     win.document.write(`<!doctype html><html><head><title>Group Income Report ${escapeHtml(range)}</title>
@@ -340,21 +346,21 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
       <p class="muted">Printed ${escapeHtml(new Date().toLocaleString())}</p>
       <div class="summary">
         <div>Fees Charged<b>${money(sum('charged'))}</b></div><div>Total Collected<b>${money(sum('collected'))}</b></div>
-        <div>Cash<b>${money(sum('cash'))}</b></div><div>Credit Card<b>${money(sum('card'))}</b></div>
+        <div>Cash<b>${money(sum('cash'))}</b></div><div>Credit Card<b>${money(sum('card'))}</b></div>${anyOther ? `<div>Other<b>${money(sum('other'))}</b></div>` : ''}
         <div>Cash Deposited<b>${money(depositTotals.deposited)}</b>${escapeHtml(depositStatusText(depositTotals))}</div>
         <div>Groups<b>${groupCount}</b></div><div>Attendance<b>${attendanceCount}</b></div>
       </div>
-      ${anyUnrecorded ? `<p class="note">${money(sum('unrecorded'))} was collected at check-ins saved before the payment method was recorded; it is in Total Collected but not under Cash or Credit Card.</p>` : ''}
+      ${anyUnrecorded ? `<p class="note">${money(sum('unrecorded'))} was collected at check-ins saved before the payment method was recorded; it is in Total Collected but not under Cash, Credit Card, or Other.</p>` : ''}
       ${counselorRows ? `<h2>By Counselor</h2>
       <table class="main counselors"><thead><tr>
         <th>Counselor</th><th class="r">Groups</th><th class="r">Sessions</th><th class="r">Attendance</th><th class="r">Clients</th>
-        <th class="r">Fees Charged</th><th class="r">Collected</th><th class="r">Cash</th><th class="r">Credit Card</th>
+        <th class="r">Fees Charged</th><th class="r">Collected</th><th class="r">Cash</th><th class="r">Credit Card</th>${anyOther ? '<th class="r">Other</th>' : ''}
         ${anyUnrecorded ? '<th class="r">Unrecorded</th>' : ''}<th class="r">Deposited</th><th>Deposit</th>
       </tr></thead><tbody>${counselorRows}</tbody></table>
       <h2>By Group</h2>` : ''}
       <table class="main"><thead><tr>
         <th>Group</th><th>Counselor</th><th class="r">Sessions</th><th class="r">Attendance</th><th class="r">Clients</th>
-        <th class="r">Fees Charged</th><th class="r">Collected</th><th class="r">Cash</th><th class="r">Credit Card</th>
+        <th class="r">Fees Charged</th><th class="r">Collected</th><th class="r">Cash</th><th class="r">Credit Card</th>${anyOther ? '<th class="r">Other</th>' : ''}
         ${anyUnrecorded ? '<th class="r">Unrecorded</th>' : ''}<th>Deposit</th>
       </tr></thead><tbody>
       ${groupRows || `<tr><td colspan="${cols}">No attendance in this date range.</td></tr>`}
@@ -450,6 +456,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
           { label: 'Total Collected', value: money(sum('collected')), tone: 'text-emerald-400' },
           { label: 'Cash', value: money(sum('cash')), tone: 'text-white' },
           { label: 'Credit Card', value: money(sum('card')), tone: 'text-white' },
+          ...(anyOther ? [{ label: 'Other', value: money(sum('other')), tone: 'text-white' }] : []),
           {
             label: 'Cash Deposited', value: money(depositTotals.deposited), tone: 'text-white',
             note: depositStatusText(depositTotals), noteTone: depositTotals.pending > 0 ? 'text-amber-400' : varianceTone(depositTotals.variance),
@@ -489,6 +496,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
                   <th className="p-3 text-right">Collected</th>
                   <th className="p-3 text-right">Cash</th>
                   <th className="p-3 text-right">Credit Card</th>
+                  {anyOther && <th className="p-3 text-right">Other</th>}
                   {anyUnrecorded && <th className="p-3 text-right">Unrecorded</th>}
                   <th className="p-3 text-right">Deposited</th>
                   <th className="p-3">Deposit</th>
@@ -511,6 +519,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
                     <td className="p-3 text-right font-semibold text-emerald-400">{money(c.collected)}</td>
                     <td className="p-3 text-right">{money(c.cash)}</td>
                     <td className="p-3 text-right">{money(c.card)}</td>
+                    {anyOther && <td className="p-3 text-right">{money(c.other)}</td>}
                     {anyUnrecorded && <td className="p-3 text-right text-slate-400">{money(c.unrecorded)}</td>}
                     <td className="p-3 text-right">{money(c.deposit.deposited)}</td>
                     <td className={`p-3 text-xs font-semibold whitespace-nowrap ${c.deposit.pending > 0 ? 'text-amber-400' : c.deposit.recorded > 0 ? varianceTone(c.deposit.variance) : 'text-slate-500'}`}>
@@ -537,6 +546,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
               <th className="p-3 text-right">Collected</th>
               <th className="p-3 text-right">Cash</th>
               <th className="p-3 text-right">Credit Card</th>
+                  {anyOther && <th className="p-3 text-right">Other</th>}
               {anyUnrecorded && <th className="p-3 text-right">Unrecorded</th>}
               <th className="p-3">Deposit</th>
             </tr>
@@ -556,6 +566,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
                   <td className="p-3 text-right font-semibold text-emerald-400">{money(g.collected)}</td>
                   <td className="p-3 text-right">{money(g.cash)}</td>
                   <td className="p-3 text-right">{money(g.card)}</td>
+                  {anyOther && <td className="p-3 text-right">{money(g.other)}</td>}
                   {anyUnrecorded && <td className="p-3 text-right text-slate-400">{money(g.unrecorded)}</td>}
                   {(() => {
                     const d = depositSummary(g);
@@ -584,7 +595,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
                 </tr>
                 {expanded.has(g.key) && (
                   <tr>
-                    <td colSpan={anyUnrecorded ? 11 : 10} className="p-0 bg-slate-950/60">
+                    <td colSpan={10 + (anyUnrecorded ? 1 : 0) + (anyOther ? 1 : 0)} className="p-0 bg-slate-950/60">
                       <div className="p-4 space-y-4">
                         {sessionsOf(g).map(([key, attendees]) => {
                           const session = totalsFor(key, attendees);
@@ -621,7 +632,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
                                       <td className="py-1.5 pr-3">{r.type}{r.voucherused ? ' · Voucher' : ''}</td>
                                       <td className="py-1.5 pr-3 text-right">{money(Number(r.groupfee) || 0)}</td>
                                       <td className="py-1.5 pr-3 text-right">{money(paid)}</td>
-                                      <td className="py-1.5">{paid > 0 ? (r.paymentmethod || 'Not recorded') : '—'}</td>
+                                      <td className="py-1.5">{paid > 0 ? (r.paymentmethod ? paymentMethodText(r.paymentmethod, r.paymentsubtype) : 'Not recorded') : '—'}</td>
                                     </tr>
                                   );
                                 })}
@@ -633,6 +644,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
                                   <td className="py-2 pr-3 text-right text-emerald-400">{money(session.collected)}</td>
                                   <td className="py-2 text-slate-300 font-normal">
                                     Cash {money(session.cash)} · CC {money(session.card)}
+                                    {session.other > 0 && <> · Other {money(session.other)}</>}
                                     {session.unrecorded > 0 && <span className="text-slate-500"> · Unrecorded {money(session.unrecorded)}</span>}
                                   </td>
                                 </tr>
@@ -709,12 +721,12 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
             ))}
             {status !== 'loading' && shown.length === 0 && (
               <tr>
-                <td colSpan={anyUnrecorded ? 11 : 10} className="p-6 text-center text-slate-500 text-sm">No attendance in this date range.</td>
+                <td colSpan={10 + (anyUnrecorded ? 1 : 0) + (anyOther ? 1 : 0)} className="p-6 text-center text-slate-500 text-sm">No attendance in this date range.</td>
               </tr>
             )}
             {status === 'loading' && (
               <tr>
-                <td colSpan={anyUnrecorded ? 11 : 10} className="p-6 text-center text-slate-500 text-sm">Loading…</td>
+                <td colSpan={10 + (anyUnrecorded ? 1 : 0) + (anyOther ? 1 : 0)} className="p-6 text-center text-slate-500 text-sm">Loading…</td>
               </tr>
             )}
           </tbody>
