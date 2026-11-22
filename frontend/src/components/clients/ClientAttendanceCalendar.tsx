@@ -4,7 +4,7 @@ import { localYmd } from '../../utils/dates';
 import { signedMoney } from '../../utils/ledger';
 import { monthGrid, shiftMonth } from '../../utils/counselor';
 import { TONE_CHIP, dayCellClass, dayChipsClass, dayWhen, type CalendarTone } from '../../utils/calendar';
-import { clientCalendarEntries, hasUpcoming, phaseAttendanceNote, type ClientCalendarData, type ClientCalendarEntry } from '../../utils/clientCalendar';
+import { clientCalendarEntries, groupCheckInDays, hasUpcoming, phaseAttendanceNote, type ClientCalendarData, type ClientCalendarEntry } from '../../utils/clientCalendar';
 import { CalendarLegend, DayNumber, KindIcon, type CalendarKind } from '../calendar/CalendarKey';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- attendance rows are untyped throughout App */
@@ -53,9 +53,6 @@ const rowChip = (r: any): Chip => {
 };
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-// Attendance types that mean the client came to group that week (a meeting that day isn't still "coming up")
-const GROUP_CHECK_IN_TYPES = new Set(['Group', 'Make-Up']);
-
 // The client's calendar: what they attended, the group meetings they missed or that were cancelled, and what's coming
 // up (their group's next meetings, booked assessments and polygraphs). Opens on this month when something is coming up,
 // else on the month of the newest session.
@@ -75,7 +72,7 @@ export default function ClientAttendanceCalendar({ rows, schedule, filtered }: P
   for (const r of rows) addChip(localYmd(r.date), rowChip(r));
 
   // Then the schedule: upcoming group meetings, booked times, polygraphs
-  const checkedInDays = new Set(rows.filter(r => !r.cancellation && !r.missed && GROUP_CHECK_IN_TYPES.has(r.type)).map(r => localYmd(r.date)));
+  const checkedInDays = groupCheckInDays(rows);
   const shownChangeIds = new Set<number>(rows.filter(r => r.cancellation).map(r => Number(r.changeid)));
   const scheduled: Map<string, ClientCalendarEntry[]> = shownSchedule ? clientCalendarEntries(shownSchedule, month, checkedInDays, shownChangeIds) : new Map();
   for (const [day, entries] of scheduled) {
