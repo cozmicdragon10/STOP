@@ -1,6 +1,6 @@
 // A client's ID # (Clients.DOCNumber) and what kind of number it is (Clients.DocType). Not every client's number is a
 // DOC number: federal clients have PACTS numbers, BIP clients often court case numbers. Mirrors frontend utils/clients.ts.
-const ID_TYPES = ['DOC', 'PACTS', 'Case #', 'DHS', 'OCS'];
+const ID_TYPES = ['DOC', 'PACTS', 'Case #', 'DHS', 'OCS', 'Other'];
 
 // The ID # as shown, with its kind in front when set: "PACTS 1423371 PB", "DOC 581422", or just the number
 const idText = (client) => {

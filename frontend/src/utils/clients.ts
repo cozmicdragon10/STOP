@@ -163,7 +163,7 @@ export const isIndividualGroup = (groupProgram?: string | null) => (groupProgram
 // What one client is charged for an individual session: federal clients pay their Individual Copay (nothing when blank), everyone
 // else the Admin Individual price. Mirrors the batch check-in in backend/routes/attendance.js.
 // A client's ID # (docnumber) isn't always a DOC number; doctype says which kind it is. Mirrors backend lib/clientId.js.
-export const ID_TYPES = ['DOC', 'PACTS', 'Case #', 'DHS', 'OCS'];
+export const ID_TYPES = ['DOC', 'PACTS', 'Case #', 'DHS', 'OCS', 'Other'];
 
 // Who referred the client (referredbytype), with details typed beside it (referredby). Mirrors backend lib/clientId.js.
 export const REFERRAL_TYPES = ['Criminal Court', 'DHS', 'Tribal', 'Self'];
