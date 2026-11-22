@@ -3,11 +3,13 @@ import { DAY_TO_DAY_RANGES, RANGE_LABEL, activeRange, dateRange, type RangeKey }
 
 // Buttons beside a report's From/To boxes that fill both in one click ("This Week", "Last Month", ...). The range the
 // dates are showing is lit up, so it's clear what the report covers.
-export default function QuickRanges({ from, to, onPick, ranges = DAY_TO_DAY_RANGES }: {
+export default function QuickRanges({ from, to, onPick, ranges = DAY_TO_DAY_RANGES, compact = false }: {
   from: string;
   to: string;
   onPick: (from: string, to: string) => void;
   ranges?: RangeKey[];
+  // Smaller, to sit beside smaller boxes (a client's record filters)
+  compact?: boolean;
 }) {
   const today = todayLocal();
   const active = activeRange(ranges, from, to, today);
@@ -21,7 +23,7 @@ export default function QuickRanges({ from, to, onPick, ranges = DAY_TO_DAY_RANG
             type="button"
             aria-pressed={on}
             onClick={() => { const r = dateRange(key, today); onPick(r.from, r.to); }}
-            className={`h-9 px-3 rounded text-xs font-semibold border transition ${on ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'}`}>
+            className={`${compact ? 'h-8 px-2.5 rounded-lg text-[0.6875rem]' : 'h-9 px-3 rounded text-xs'} font-semibold border transition ${on ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'}`}>
             {RANGE_LABEL[key]}
           </button>
         );

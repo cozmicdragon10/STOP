@@ -1,4 +1,9 @@
 import { X } from 'lucide-react';
+import QuickRanges from '../reports/QuickRanges';
+import type { RangeKey } from '../../utils/dateRanges';
+
+// A client's history runs for years, so months and years rather than days and weeks
+const CLIENT_RECORD_RANGES: RangeKey[] = ['thisMonth', 'lastMonth', 'thisYear', 'lastYear'];
 
 export interface RecordFilterSelect {
   label: string;
@@ -27,7 +32,8 @@ interface Props {
   onClear: () => void;
 }
 
-// Search, dropdown filters, date range, and sort for a client's record lists (case notes, financial ledger)
+// Search, dropdown filters, date range (with quick picks), and sort for a client's record lists (attendance, case notes,
+// financial ledger)
 export default function RecordFilterBar({ search, onSearch, searchPlaceholder, selects, from, to, onFrom, onTo, sort, onSort, sortOptions, shown, total, onClear }: Props) {
   const active = !!(search.trim() || from || to || selects.some(s => s.value));
   const control = 'block mt-1 h-8 bg-slate-950 border border-slate-700 rounded-lg px-2.5 text-xs text-slate-200';
@@ -52,6 +58,7 @@ export default function RecordFilterBar({ search, onSearch, searchPlaceholder, s
         <label className="text-[0.6875rem] text-slate-400">To
           <input type="date" value={to} min={from || undefined} onChange={(e) => onTo(e.target.value)} className={control} />
         </label>
+        <QuickRanges from={from} to={to} onPick={(f, t) => { onFrom(f); onTo(t); }} ranges={CLIENT_RECORD_RANGES} compact />
         <label className="text-[0.6875rem] text-slate-400">Sort
           <select value={sort} onChange={(e) => onSort(e.target.value)} className={control}>
             {sortOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
