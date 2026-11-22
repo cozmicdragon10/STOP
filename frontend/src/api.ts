@@ -1536,7 +1536,7 @@ export async function getPolygraphSlots({ background = false } = {}): Promise<Po
 }
 
 // polygrapher is the examiner's employee email; date (YYYY-MM-DD) and time (HH:MM) must be in the future
-export async function createPolygraphSlot(data: { location: string; address: string; date: string; time: string; polygrapher: string; type: string; comments: string; slots: number }): Promise<{ success: true; slotId: number }> {
+export async function createPolygraphSlot(data: { location: string; address: string; date: string; time: string; polygrapher: string; comments: string; slots: number }): Promise<{ success: true; slotId: number }> {
     const res = await apiFetch(`${API_BASE}/polygraphs/slots`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

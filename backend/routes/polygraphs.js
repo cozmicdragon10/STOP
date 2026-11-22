@@ -73,7 +73,8 @@ router.get('/api/polygraphs/slots', async (req, res) => {
 // Business Administrators and Polygraphers open slots, as on the Polygraphs tab
 router.post('/api/polygraphs/slots', requireRole('Business Administrator', 'Polygrapher'), async (req, res) => {
     try {
-        const { location, address, date, time, polygrapher, type, comments, slots } = req.body;
+        // No poly type here: it is chosen when a client is assigned to the slot
+        const { location, address, date, time, polygrapher, comments, slots } = req.body;
 
         // The examiner must be an active Polygrapher
         const examinerRes = await pool.query(
@@ -114,9 +115,9 @@ router.post('/api/polygraphs/slots', requireRole('Business Administrator', 'Poly
         }
 
         const result = await pool.query(
-            `INSERT INTO PolygraphSlots (Location, Address, Date, Time, Polygrapher, Type, Comments, SlotsAvailable)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING SlotId`,
-            [location, address, date, time, polygrapher, type, comments, slots || 1]
+            `INSERT INTO PolygraphSlots (Location, Address, Date, Time, Polygrapher, Comments, SlotsAvailable)
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING SlotId`,
+            [location, address, date, time, polygrapher, comments, slots || 1]
         );
         res.status(201).json({ success: true, slotId: result.rows[0].slotid });
     } catch (err) {
@@ -538,8 +539,8 @@ router.post('/api/polygraphs/slots/:slotId/open', async (req, res) => {
             return res.json({ success: true, reopened: false, message: 'Reservation cancelled. The appointment time has passed, so the slot was closed instead of reopened.' });
         }
 
-        // Mark slot as not filled (Open)
-        await db.query('UPDATE PolygraphSlots SET IsFilled = FALSE WHERE SlotId = $1', [slotId]);
+        // Mark slot as not filled (Open); the next booking picks its own poly type
+        await db.query('UPDATE PolygraphSlots SET IsFilled = FALSE, Type = NULL WHERE SlotId = $1', [slotId]);
 
         await db.query('COMMIT');
         res.json({ success: true, reopened: true, message: 'Reservation removed. Slot is now open for scheduling.' });

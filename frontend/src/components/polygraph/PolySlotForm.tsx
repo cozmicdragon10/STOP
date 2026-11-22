@@ -18,22 +18,14 @@ interface Props {
   onCreated: () => void;
 }
 
-const SLOT_TYPES: [string, string][] = [
-  ['Maintenance', 'Maintenance'],
-  ['Instant', 'Instant Poly'],
-  ['Sexual History', 'Sexual History'],
-  ['Specific', 'Specific Issue'],
-  ['Monitoring', 'Monitoring'],
-];
-
 // Poly Admin: creates one appointment slot. Business Administrators and Polygraphers only.
+// The poly type isn't picked here; it is chosen when a client is assigned to the slot.
 export default function PolySlotForm({ role, employees, onSuccess, onError, onCreated }: Props) {
   const [polyLocation, setPolyLocation] = useState('Oklahoma City Office');
   const [polyAddress, setPolyAddress] = useState('123 Main St, OKC');
   const [polyDate, setPolyDate] = useState(() => getLocalDateString());
   const [polyTime, setPolyTime] = useState(() => getDefaultPolyTime());
   const [polyExaminer, setPolyExaminer] = useState('');
-  const [polyType, setPolyType] = useState('Maintenance');
   const [saving, setSaving] = useState(false);
 
   const canCreate = role === 'Business Administrator' || role === 'Polygrapher';
@@ -64,7 +56,6 @@ export default function PolySlotForm({ role, employees, onSuccess, onError, onCr
         date: polyDate,
         time: polyTime,
         polygrapher: polyExaminer,
-        type: polyType,
         comments: 'Scheduled Slot',
         slots: 1
       });
@@ -155,12 +146,6 @@ export default function PolySlotForm({ role, employees, onSuccess, onError, onCr
           {activePolygraphers.length === 0 && (
             <p className="text-xs text-amber-400 mt-1">No active polygraphers. Add or reactivate one under Admin.</p>
           )}
-        </div>
-        <div>
-          <label className="block text-xs text-slate-400 uppercase mb-1">Slot Type</label>
-          <select value={polyType} onChange={(e) => setPolyType(e.target.value)} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm">
-            {SLOT_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-          </select>
         </div>
       </div>
       <button type="submit" disabled={saving} className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2.5 rounded-lg text-sm">
