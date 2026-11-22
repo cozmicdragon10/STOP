@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { CalendarClock, CalendarDays, List, RotateCcw, Trash2 } from 'lucide-react';
+import { CalendarClock, CalendarDays, List, RotateCcw, Search, Trash2 } from 'lucide-react';
 import ClientPicker from '../ClientPicker';
 import { formatDisplayTime, getLocalDateString, localYmd } from '../../utils/dates';
 import { cancelReservationHint, cancelReservationLabel } from '../../utils/polygraph';
+import { matchesAllWords } from '../../utils/search';
 import { TONE_CHIP } from '../../utils/calendar';
 import { CalendarLegend } from '../calendar/CalendarKey';
 import MonthCalendar from '../calendar/MonthCalendar';
@@ -71,7 +72,7 @@ const VIEW_KEY = 'stop.polySchedule.view';
 // Poly Schedule: every slot as a card, listed by day or picked from a month calendar. Business Administrators assign
 // clients to open slots and delete open or closed ones; any assigned reservation can be cancelled. Business
 // Administrators and Polygraphers can reschedule open and assigned slots.
-export default function PolySchedule({ slots, filtersActive, role, assignableClients, highlightedSlotId, examinerName, choices, onAssign, onCancelReservation, onReschedule, onDelete }: Props) {
+export default function PolySchedule({ slots: allSlots, filtersActive, role, assignableClients, highlightedSlotId, examinerName, choices, onAssign, onCancelReservation, onReschedule, onDelete }: Props) {
   const [view, setViewState] = useState<View>(() => {
     try { return localStorage.getItem(VIEW_KEY) === 'calendar' ? 'calendar' : 'list'; } catch { return 'list'; }
   });
@@ -82,6 +83,22 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
   // Month shown ('YYYY-MM') and day picked ('YYYY-MM-DD') in the calendar; null until someone picks one
   const [month, setMonth] = useState<string | null>(null);
   const [pickedDay, setPickedDay] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const searching = search.trim() !== '';
+  // Every word typed must match the slot's location, address, date, time, examiner, status, client, or poly type
+  const slots = allSlots.filter(slot => matchesAllWords(search, [
+    slot.location,
+    slot.address,
+    new Date(slot.date).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
+    new Date(slot.date).toLocaleDateString(),
+    formatDisplayTime(slot.time),
+    examinerName(slot.polygrapher || ''),
+    slot.status === 'Assigned' || slot.status === 'Closed' ? slot.status : 'Open',
+    slot.status === 'Assigned' ? slot.assignedClientName : null,
+    slot.status === 'Assigned' ? slot.type : null,
+  ]));
+  // Says why nothing is shown: the search, the Filters panel, or both
+  const noMatchReason = searching ? `match "${search.trim()}"${filtersActive ? ' and these filters' : ''}` : filtersActive ? 'match these filters' : '';
 
   const canReschedule = role === 'Business Administrator' || role === 'Polygrapher';
   const rescheduleButton = (slotId: number) => canReschedule && (
@@ -97,7 +114,9 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
   const [seenHighlight, setSeenHighlight] = useState<number | null>(null);
   if (highlightedSlotId !== seenHighlight) {
     setSeenHighlight(highlightedSlotId);
-    const target = highlightedSlotId === null ? undefined : slots.find(s => s.slotid === highlightedSlotId);
+    const target = highlightedSlotId === null ? undefined : allSlots.find(s => s.slotid === highlightedSlotId);
+    // Clear the search so the opened slot isn't hidden by it
+    if (target) setSearch('');
     if (target && view === 'calendar') {
       const day = localYmd(target.date);
       setMonth(day.slice(0, 7));
@@ -266,9 +285,22 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
           {toggleButton('calendar', 'Calendar', CalendarDays)}
         </div>
       </div>
+      {allSlots.length > 0 && (
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search location, date, examiner, client, or status (open, assigned, closed)..."
+            aria-label="Search polygraph slots"
+            className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 pl-9 text-white text-xs placeholder-slate-500"
+          />
+        </div>
+      )}
       {view === 'list' ? (
         slots.length === 0 ? (
-          <p className="text-xs text-slate-500 italic">{filtersActive ? 'No slots match these filters.' : 'No available slots scheduled.'}</p>
+          <p className="text-xs text-slate-500 italic">{noMatchReason ? `No slots ${noMatchReason}.` : 'No available slots scheduled.'}</p>
         ) : (
           <div className="space-y-6">
             {days.map(daySection)}
@@ -282,7 +314,7 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
               today={today}
               onMonth={goToMonth}
               onToday={() => { setMonth(today.slice(0, 7)); setPickedDay(today); }}
-              summary={monthSlotCount === 0 ? (filtersActive ? 'No slots match these filters this month' : 'No slots this month') : `${monthSlotCount} ${monthSlotCount === 1 ? 'slot' : 'slots'} this month`}
+              summary={monthSlotCount === 0 ? (noMatchReason ? `No slots ${noMatchReason} this month` : 'No slots this month') : `${monthSlotCount} ${monthSlotCount === 1 ? 'slot' : 'slots'} this month`}
               pickedDay={shownDay}
               onPickDay={setPickedDay}
               dayLabel={day => {
@@ -304,7 +336,7 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
             />
           </div>
           {shownDayEntry ? daySection(shownDayEntry) : shownDay ? (
-            <p className="text-xs text-slate-500 italic">No slots on {new Date(year, monthNumber - 1, Number(shownDay.slice(8))).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}{filtersActive ? ' that match these filters' : ''}.</p>
+            <p className="text-xs text-slate-500 italic">No slots on {new Date(year, monthNumber - 1, Number(shownDay.slice(8))).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}{noMatchReason ? ` that ${noMatchReason}` : ''}.</p>
           ) : null}
         </div>
       )}

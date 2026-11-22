@@ -3,6 +3,7 @@ import { CheckCircle2, RotateCcw, Search } from 'lucide-react';
 import { deletePolygraphSlot, submitPolygraphResult } from '../../api';
 import { POLY_INCENTIVE_OVERRIDE_RESULTS, cancelReservationHint, cancelReservationLabel } from '../../utils/polygraph';
 import { formatDisplayTime, getLocalDateString } from '../../utils/dates';
+import { matchesAllWords } from '../../utils/search';
 
 export interface AssignedPolySlot {
   slotid: number;
@@ -52,12 +53,8 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
 
   const scheduledText = (slot: AssignedPolySlot) => `${new Date(slot.date).toLocaleDateString()} @ ${formatDisplayTime(slot.time)}`;
   // Every word typed must match the client, type, location, scheduled date/time, or examiner
-  const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const visibleSlots = words.length === 0 ? slots : slots.filter(slot => {
-    const haystack = [slot.assignedClientName, slot.type, slot.location, scheduledText(slot), examinerName(slot.polygrapher || '')]
-      .join(' ').toLowerCase();
-    return words.every(w => haystack.includes(w));
-  });
+  const visibleSlots = slots.filter(slot =>
+    matchesAllWords(search, [slot.assignedClientName, slot.type, slot.location, scheduledText(slot), examinerName(slot.polygrapher || '')]));
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
