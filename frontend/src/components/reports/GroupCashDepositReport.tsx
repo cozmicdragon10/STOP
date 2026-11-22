@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
+import QuickRanges from './QuickRanges';
 import { getGroupCashDeposits, setGroupCashDroppedOff } from '../../api';
 import type { GroupCashDepositRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
@@ -148,6 +149,7 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
           <label className="text-xs text-slate-400">To
             <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded px-2 text-white text-xs" />
           </label>
+          <QuickRanges from={from} to={to} onPick={(f, t) => { setFrom(f); setTo(t); }} />
           <label className="text-xs text-slate-400">Status
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded px-2 text-white text-xs">
               <option value="all">All</option>

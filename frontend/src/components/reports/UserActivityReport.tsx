@@ -7,6 +7,7 @@ import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { escapeHtml } from '../../utils/receipt';
 import { idText } from '../../utils/clients';
 import { paymentMethodText } from '../../utils/paymentMethods';
+import QuickRanges from './QuickRanges';
 
 interface Props {
   userEmail: string;
@@ -93,8 +94,6 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
       noteCount ? `${noteCount} note${noteCount === 1 ? '' : 's'}` : '',
     ].filter(Boolean).join(' · ');
   };
-  const today = todayLocal();
-  const showingToday = from === today && to === today;
 
   const openClient = (r: UserActivityRow) => {
     if (r.client) onOpenClient(r.client);
@@ -148,14 +147,7 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
         <label className="text-xs text-slate-400">To
           <input type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} className={select} />
         </label>
-        <button
-          type="button"
-          onClick={() => { setFrom(today); setTo(today); }}
-          aria-pressed={showingToday}
-          className={`h-9 px-3 rounded text-xs font-semibold border transition ${showingToday ? 'bg-blue-600 border-blue-600 text-white' : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200'}`}
-        >
-          Today
-        </button>
+        <QuickRanges from={from} to={to} onPick={(f, t) => { setFrom(f); setTo(t); }} />
         <div className="text-xs text-slate-400">Show
           <div className="mt-1 flex h-9 bg-slate-950 p-1 rounded-lg border border-slate-700">
             {([['', 'All'], ['Payment', 'Payments'], ['Note', 'Notes']] as const).map(([value, label]) => (

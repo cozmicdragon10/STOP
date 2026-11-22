@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import QuickRanges from './QuickRanges';
 import type { ReactNode } from 'react';
 import { Download, Printer } from 'lucide-react';
 import { getFinancialSummary } from '../../api';
@@ -13,23 +14,6 @@ const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toLocaleString('
 const monthLabel = (month: string) =>
   new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, 1).toLocaleDateString([], { month: 'short', year: 'numeric' });
 const formatDate = (ymd: string) => new Date(`${ymd}T00:00:00`).toLocaleDateString();
-const pad = (n: number) => String(n).padStart(2, '0');
-const lastDayOf = (y: number, m: number) => new Date(y, m, 0).getDate();
-
-// Quick date ranges, from today
-const presets = (): { label: string; from: string; to: string }[] => {
-  const today = todayLocal();
-  const y = Number(today.slice(0, 4));
-  const m = Number(today.slice(5, 7));
-  const [ly, lm] = m === 1 ? [y - 1, 12] : [y, m - 1];
-  return [
-    { label: 'This Month', from: `${today.slice(0, 8)}01`, to: today },
-    { label: 'Last Month', from: `${ly}-${pad(lm)}-01`, to: `${ly}-${pad(lm)}-${lastDayOf(ly, lm)}` },
-    { label: 'This Year', from: `${y}-01-01`, to: today },
-    { label: 'Last Year', from: `${y - 1}-01-01`, to: `${y - 1}-12-31` },
-  ];
-};
-
 const th = 'py-2 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400';
 const td = 'py-2 px-3';
 const r = 'text-right tabular-nums';
@@ -165,9 +149,7 @@ export default function FinancialReport() {
           <label className="text-xs text-slate-400">To
             <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded px-2 text-white text-xs" />
           </label>
-          {presets().map(p => (
-            <button key={p.label} type="button" className={button} onClick={() => { setFrom(p.from); setTo(p.to); }}>{p.label}</button>
-          ))}
+          <QuickRanges from={from} to={to} onPick={(f, t) => { setFrom(f); setTo(t); }} ranges={['thisMonth', 'lastMonth', 'thisYear', 'lastYear']} />
           <button type="button" onClick={print} disabled={status !== 'ready'} className={`${button} flex items-center gap-1.5`}><Printer size={14} /> Print</button>
           <button type="button" onClick={download} disabled={status !== 'ready'} title="Download for Excel" className={`${button} flex items-center gap-1.5`}><Download size={14} /> CSV</button>
         </div>

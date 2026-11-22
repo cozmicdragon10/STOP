@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
+import QuickRanges from './QuickRanges';
 import { CheckCircle2, ChevronDown, ChevronRight, Landmark, Pencil, Printer, Trash2 } from 'lucide-react';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { deleteGroupDeposit, getGroupDeposits, getGroupReport, saveGroupDeposit } from '../../api';
@@ -406,14 +407,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
             />
             Single Day
           </label>
-          <button
-            type="button"
-            onClick={() => { setSingleDay(false); setFrom(firstOfMonth()); setTo(todayLocal()); }}
-            title="The 1st of this month through today"
-            className="h-9 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 rounded text-xs font-semibold"
-          >
-            This Month
-          </button>
+          <QuickRanges from={from} to={to} onPick={(f, t) => { setSingleDay(false); setFrom(f); setTo(t); }} />
           <label className="text-xs text-slate-400">Counselor
             <select value={counselorFilter} onChange={(e) => { setCounselorFilter(e.target.value); setGroupFilter(''); }} className="block mt-1 h-9 bg-slate-950 border border-slate-700 rounded px-2 text-white text-xs">
               <option value="">All Counselors</option>
