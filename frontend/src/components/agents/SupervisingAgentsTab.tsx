@@ -320,8 +320,9 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
                     </div>
                   )}
                 </div>
-                {r.agent?.phone && <a href={`tel:${r.agent.phone}`} onClick={(e) => e.stopPropagation()} className="mt-1 flex w-fit max-w-full items-center gap-2 min-h-10 text-sm text-blue-400"><Phone size={14} className="shrink-0" />{r.agent.phone}</a>}
-                {r.agent?.email && <a href={`mailto:${r.agent.email}`} onClick={(e) => e.stopPropagation()} className="flex w-fit max-w-full items-center gap-2 min-h-10 text-sm text-blue-400 break-all"><Mail size={14} className="shrink-0" />{r.agent.email}</a>}
+                {/* Plain text here, so a tap anywhere on the agent opens them; the card that opens has the call and email links */}
+                {r.agent?.phone && <p className="mt-1 flex items-center gap-2 text-sm text-slate-300"><Phone size={14} className="shrink-0 text-slate-500" />{r.agent.phone}</p>}
+                {r.agent?.email && <p className="mt-1 flex items-center gap-2 text-sm text-slate-300 break-all"><Mail size={14} className="shrink-0 text-slate-500" />{r.agent.email}</p>}
               </li>
             );
           })}
@@ -357,8 +358,8 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
                     </td>
                     <td className="p-3 text-slate-300 text-xs">{r.agent?.agenttype || <span className="text-slate-600">—</span>}</td>
                     <td className="p-3 text-slate-300 text-xs">{r.agent?.location || <span className="text-slate-600">—</span>}</td>
-                    <td className="p-3 text-slate-300 text-xs whitespace-nowrap">{r.agent?.phone ? <a href={`tel:${r.agent.phone}`} onClick={(e) => e.stopPropagation()} className="hover:text-blue-400">{r.agent.phone}</a> : <span className="text-slate-600">—</span>}</td>
-                    <td className="p-3 text-slate-300 text-xs min-w-[12rem]">{r.agent?.email ? <a href={`mailto:${r.agent.email}`} onClick={(e) => e.stopPropagation()} className="hover:text-blue-400 break-all">{r.agent.email}</a> : <span className="text-slate-600">—</span>}</td>
+                    <td className="p-3 text-slate-300 text-xs whitespace-nowrap">{r.agent?.phone || <span className="text-slate-600">—</span>}</td>
+                    <td className="p-3 text-slate-300 text-xs min-w-[12rem] break-all">{r.agent?.email || <span className="text-slate-600">—</span>}</td>
                     <td className="p-3 text-right"><span className="bg-slate-800 text-slate-200 px-2 py-0.5 rounded font-semibold text-xs">{current}</span></td>
                     {canEdit && (
                       <td className="p-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
