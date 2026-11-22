@@ -1798,6 +1798,7 @@ export default function App() {
             <AssessmentsIndividualsTab
               active={activeTab === 'sessions'}
               clients={clients}
+              groups={groups}
               employees={employees}
               user={user}
               onSuccess={setSuccessMsg}

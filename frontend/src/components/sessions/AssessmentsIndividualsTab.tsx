@@ -3,6 +3,7 @@ import { ClipboardList, Hourglass, MessageSquare, PlayCircle, Trash2 } from 'luc
 import AssessmentCalendar from './AssessmentCalendar';
 import AssessmentBeginForm from './AssessmentBeginForm';
 import AssessmentWorkspace from './AssessmentWorkspace';
+import type { AssignGroupOption } from './AssignGroupPrompt';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import {
   deleteOpenIndividualSession, getAssessmentsInProgress, getClosedIndividualSessions, getOpenIndividualSessions, getSessionTypes,
@@ -24,6 +25,10 @@ interface TabClient {
   assessor?: string | null;
   // Max Debt Override in effect (how much they may owe after an assessment begins)
   maxowed?: number | string | null;
+  // For the Assign to a Group question after a BIP intake assessment is completed
+  groupid?: number | null;
+  phase?: string | null;
+  treatmentfee?: number | string | null;
 }
 
 interface Employee {
@@ -37,6 +42,8 @@ interface Props {
   // True while the tab is showing; the lists and price list reload each time it is shown
   active: boolean;
   clients: TabClient[];
+  // Offered after a BIP Intake, BIP Reinstate or DV Assessment is completed
+  groups: AssignGroupOption[];
   employees: Employee[];
   user: { employeeemail: string; displayname?: string; role?: string };
   onSuccess: (message: string) => void;
@@ -57,7 +64,7 @@ const formatDay = (ymd: string) => (ymd === todayLocal() ? 'Today' : new Date(`$
 
 // Assessments: scheduled on the calendar, begun once the payment is taken (the attendance is recorded that day), then
 // worked on by the counselor (notes, as often as needed, for days or weeks) until it is completed.
-export default function AssessmentsIndividualsTab({ active, clients, employees, user, onSuccess, onError, onSaved }: Props) {
+export default function AssessmentsIndividualsTab({ active, clients, groups, employees, user, onSuccess, onError, onSaved }: Props) {
   const employeeLabel = useEmployeeLabel();
   const isAdmin = ASSESSMENT_ADMIN_ROLES.includes(user.role || '');
   const [view, setView] = useState<View>({ kind: 'calendar' });
@@ -169,8 +176,10 @@ export default function AssessmentsIndividualsTab({ active, clients, employees, 
             attendanceId={view.attendanceId}
             user={user}
             clients={clients}
+            groups={groups}
             onBack={() => setView({ kind: 'calendar' })}
             onChanged={loadLists}
+            onClientChanged={onSaved}
             onSuccess={onSuccess}
             onError={onError}
           />

@@ -6,14 +6,23 @@ import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { LONG_OPEN_DAYS, NOTE_MAX, PAPERWORK_KINDS, daysOpenText, paperworkLabel, worksOnAssessment } from '../../utils/assessmentWork';
 import { printAttendanceReceipt } from '../../utils/receipt';
 import { idText } from '../../utils/clients';
+import AssignGroupPrompt from './AssignGroupPrompt';
+import type { AssignGroupOption } from './AssignGroupPrompt';
 
 interface Props {
   attendanceId: number;
   user: { employeeemail: string; displayname?: string; role?: string };
-  clients: { clientid: number; docnumber?: string | null; doctype?: string | null }[];
+  clients: {
+    clientid: number; docnumber?: string | null; doctype?: string | null;
+    groupid?: number | null; programtype?: string | null; phase?: string | null; treatmentfee?: number | string | null;
+  }[];
+  // Offered after a BIP Intake, BIP Reinstate or DV Assessment is completed
+  groups: AssignGroupOption[];
   onBack: () => void;
   // A note was added or the assessment completed: the lists refresh
   onChanged: () => void;
+  // The client was assigned to a group: client records refresh
+  onClientChanged?: () => void;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
 }
@@ -25,7 +34,7 @@ const stamp = (iso: string) => new Date(iso).toLocaleString([], { dateStyle: 'me
 
 // One assessment being worked on: what was paid, its notes (newest first), adding a note, and completing it. The
 // counselor adds notes as often as needed while it stays open (more sessions, waiting on results or other providers).
-export default function AssessmentWorkspace({ attendanceId, user, clients, onBack, onChanged, onSuccess, onError }: Props) {
+export default function AssessmentWorkspace({ attendanceId, user, clients, groups, onBack, onChanged, onClientChanged, onSuccess, onError }: Props) {
   const employeeLabel = useEmployeeLabel();
   const [detail, setDetail] = useState<AssessmentDetail | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -37,6 +46,8 @@ export default function AssessmentWorkspace({ attendanceId, user, clients, onBac
   const [lastNote, setLastNote] = useState('');
   const [completeError, setCompleteError] = useState('');
   const [savingComplete, setSavingComplete] = useState(false);
+  // After a BIP Intake, BIP Reinstate or DV Assessment is completed: offer to put the client in a group
+  const [askGroup, setAskGroup] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -83,6 +94,7 @@ export default function AssessmentWorkspace({ attendanceId, user, clients, onBac
       await completeAssessment(attendanceId, { paperworkCompleted: paperwork, comments: lastNote.trim(), user: user.employeeemail });
       onSuccess(`${detail.sessiontypename} completed for ${detail.lastname}, ${detail.firstname}.`);
       setCompleting(false);
+      if (needsPaperwork && clients.some(c => c.clientid === detail.clientid)) setAskGroup(true);
       await load();
       onChanged();
     } catch (err) {
@@ -106,6 +118,7 @@ export default function AssessmentWorkspace({ attendanceId, user, clients, onBac
   };
 
   const input = 'w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm';
+  const groupClient = askGroup && detail ? clients.find(c => c.clientid === detail.clientid) : undefined;
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl space-y-5">
@@ -233,6 +246,19 @@ export default function AssessmentWorkspace({ attendanceId, user, clients, onBac
           )}
           {inProgress && !canWork && <p className="text-xs text-slate-500 italic">Only {detail.provider || 'its counselor'} or an administrator can add notes or complete this assessment.</p>}
         </>
+      )}
+
+      {detail && groupClient && (
+        <AssignGroupPrompt
+          assessmentName={detail.sessiontypename}
+          client={{ ...groupClient, name: `${detail.lastname}, ${detail.firstname}` }}
+          groups={groups}
+          user={user}
+          onDone={(message) => {
+            setAskGroup(false);
+            if (message) { onSuccess(message); onClientChanged?.(); }
+          }}
+        />
       )}
     </div>
   );

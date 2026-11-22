@@ -14,6 +14,7 @@ import { formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
 import { ageFromBirthDate, toLocalDay } from '../../utils/dates';
 import { polyVoucherMax, takesPolygraphs } from '../../utils/polygraph';
 import { UNIT_FIELDS, editPayload, rebaseOrigins, recordOrigins, sameFieldValue } from '../../utils/clientEdits';
+import { joinGroupFee } from '../../utils/groupAssignment';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client and group rows are untyped throughout App */
 interface Props {
@@ -440,7 +441,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                 // Joining a group (e.g. after an assessment) sets the treatment fee to the price list's group fee for the
                 // program; an assessment's price comes from its assessment type, not this fee
                 update(f => {
-                  const fee = groupid && !f.groupid ? standardTreatmentFee(f.programtype, f.phase) : null;
+                  const fee = joinGroupFee(f.groupid, groupid, f.programtype, f.phase);
                   return { groupid, ...(fee !== null ? { treatmentfee: fee } : {}) };
                 });
               }} className={inputClass}>
