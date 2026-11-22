@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { CalendarClock, CalendarDays, List, RotateCcw, Search, Trash2 } from 'lucide-react';
 import ClientPicker from '../ClientPicker';
 import { formatDisplayTime, getLocalDateString, localYmd } from '../../utils/dates';
@@ -7,6 +7,7 @@ import { matchesAllWords } from '../../utils/search';
 import { TONE_CHIP } from '../../utils/calendar';
 import { CalendarLegend } from '../calendar/CalendarKey';
 import MonthCalendar from '../calendar/MonthCalendar';
+import { revealPanel } from '../../utils/layout';
 
 export interface ScheduleSlot {
   slotid: number;
@@ -83,6 +84,12 @@ export default function PolySchedule({ slots: allSlots, filtersActive, role, ass
   // Month shown ('YYYY-MM') and day picked ('YYYY-MM-DD') in the calendar; null until someone picks one
   const [month, setMonth] = useState<string | null>(null);
   const [pickedDay, setPickedDay] = useState<string | null>(null);
+  // The picked day's slots show under the calendar, often below the bottom of the screen; picking a day scrolls to them
+  const dayDetailsRef = useRef<HTMLDivElement>(null);
+  const pickDay = (day: string) => {
+    setPickedDay(day);
+    requestAnimationFrame(() => revealPanel(dayDetailsRef.current));
+  };
   const [search, setSearch] = useState('');
   const searching = search.trim() !== '';
   // Every word typed must match the slot's location, address, date, time, examiner, status, client, or poly type
@@ -316,7 +323,7 @@ export default function PolySchedule({ slots: allSlots, filtersActive, role, ass
               onToday={() => { setMonth(today.slice(0, 7)); setPickedDay(today); }}
               summary={monthSlotCount === 0 ? (noMatchReason ? `No slots ${noMatchReason} this month` : 'No slots this month') : `${monthSlotCount} ${monthSlotCount === 1 ? 'slot' : 'slots'} this month`}
               pickedDay={shownDay}
-              onPickDay={setPickedDay}
+              onPickDay={pickDay}
               dayLabel={day => {
                 const c = slotCounts(day);
                 const summary = c.total ? [c.open && `${c.open} open`, c.assigned && `${c.assigned} assigned`, c.closed && `${c.closed} closed`].filter(Boolean).join(', ') : 'no slots';
@@ -335,9 +342,11 @@ export default function PolySchedule({ slots: allSlots, filtersActive, role, ass
               legend={<CalendarLegend tones={['available', 'booked', 'closed']} labels={{ available: 'Open slot', booked: 'Client assigned', closed: 'Closed, not used' }} />}
             />
           </div>
-          {shownDayEntry ? daySection(shownDayEntry) : shownDay ? (
-            <p className="text-xs text-slate-500 italic">No slots on {new Date(year, monthNumber - 1, Number(shownDay.slice(8))).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}{noMatchReason ? ` that ${noMatchReason}` : ''}.</p>
-          ) : null}
+          <div ref={dayDetailsRef}>
+            {shownDayEntry ? daySection(shownDayEntry) : shownDay ? (
+              <p className="text-xs text-slate-500 italic">No slots on {new Date(year, monthNumber - 1, Number(shownDay.slice(8))).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}{noMatchReason ? ` that ${noMatchReason}` : ''}.</p>
+            ) : null}
+          </div>
         </div>
       )}
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getGroupScheduleChanges, getMySessions } from '../../api';
 import type { GroupScheduleChange, MyAssessment, MyClosedSession, MyOpenSession } from '../../api';
 import { dayKey, monthOfDate, myGroupIds, scheduledDatesIn } from '../../utils/counselor';
@@ -9,6 +9,7 @@ import AssessmentTimePanel, { type PanelClient } from './AssessmentTimePanel';
 import { TONE_CHIP, chipsInOrder, type CalendarTone } from '../../utils/calendar';
 import { CalendarLegend, KindIcon } from '../calendar/CalendarKey';
 import MonthCalendar from '../calendar/MonthCalendar';
+import { revealPanel } from '../../utils/layout';
 
 interface GroupRow {
   groupid: number | string;
@@ -101,6 +102,7 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
   const [notice, setNotice] = useState('');
   // The day clicked on the calendar; its full list shows under the calendar. Defaults to today in the current month.
   const [pickedDay, setPickedDay] = useState<string | null>(null);
+  const dayDetailsRef = useRef<HTMLElement>(null);
   // The assessment time being assigned, rescheduled or cancelled; sessionsKey reloads the month after a change
   const [selectedAppt, setSelectedAppt] = useState<MyAssessment | null>(null);
   const [sessionsKey, setSessionsKey] = useState(0);
@@ -208,6 +210,12 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
     ? [...(byDay.get(shownDay) ?? [])].sort((a, b) => (a.sort || '99').localeCompare(b.sort || '99') || a.name.localeCompare(b.name))
     : [];
   const pickDay = (day: string) => { setPickedDay(day); setNotice(''); };
+  // Clicking a day's box: its list shows under the calendar, often below the bottom of the screen, so scroll to it.
+  // (Clicking a group or time on the calendar opens its dialog instead, so the page stays put.)
+  const pickDayAndShow = (day: string) => {
+    pickDay(day);
+    requestAnimationFrame(() => revealPanel(dayDetailsRef.current));
+  };
   const assessments = sessions?.assessments ?? [];
 
   const listed = [
@@ -241,7 +249,7 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
           onMonth={setMonth}
           summary={sessions ? `${plural(listed.length, 'session')} · ${plural(assessments.length, 'assessment time')}` : 'Loading…'}
           pickedDay={shownDay}
-          onPickDay={pickDay}
+          onPickDay={pickDayAndShow}
           cellClassName="min-h-24"
           minWidthClassName="min-w-[560px]"
           dayLabel={day => {
@@ -284,7 +292,7 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
       </div>
 
       {shownDay && (
-        <section aria-label={`Everything on ${longDate(shownDay)}`} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+        <section ref={dayDetailsRef} aria-label={`Everything on ${longDate(shownDay)}`} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-800 flex flex-wrap items-baseline justify-between gap-2">
             <h4 className="text-sm font-semibold text-white">
               {new Date(`${shownDay}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}

@@ -1,4 +1,6 @@
+import { useRef } from 'react';
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { revealPanel } from '../utils/layout';
 
 interface Props {
   page: number;
@@ -19,33 +21,40 @@ const pageNumbers = (page: number, pageCount: number): (number | null)[] => {
 };
 
 // Page controls under a list. Hidden when everything fits on one page.
+// They sit at the bottom of the list's card; changing page from down there brings the card's top (the first rows) back
+// into view instead of leaving you at the end of the new page.
 export default function Pagination({ page, pageCount, pageSize, total, onPageChange, noun = 'items' }: Props) {
+  const navRef = useRef<HTMLElement>(null);
   if (pageCount <= 1) return null;
+  const goTo = (p: number) => {
+    onPageChange(p);
+    requestAnimationFrame(() => revealPanel(navRef.current?.parentElement ?? null));
+  };
   const first = (page - 1) * pageSize + 1;
   const last = Math.min(page * pageSize, total);
   const arrow = 'p-1.5 rounded border border-slate-700 bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 disabled:opacity-40 disabled:pointer-events-none';
   return (
-    <nav aria-label="Pages" className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-t border-slate-800 text-xs">
+    <nav ref={navRef} aria-label="Pages" className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-t border-slate-800 text-xs">
       <span className="text-slate-400">Showing {first}–{last} of {total} {noun}</span>
       {/* Phones keep the arrows and the current page; the other page numbers don't fit at a tappable size */}
       <div className="flex items-center justify-center gap-1 w-full sm:w-auto">
-        <button type="button" onClick={() => onPageChange(1)} disabled={page === 1} title="First page" className={arrow}><ChevronsLeft size={14} /></button>
-        <button type="button" onClick={() => onPageChange(page - 1)} disabled={page === 1} title="Previous page" className={arrow}><ChevronLeft size={14} /></button>
+        <button type="button" onClick={() => goTo(1)} disabled={page === 1} title="First page" className={arrow}><ChevronsLeft size={14} /></button>
+        <button type="button" onClick={() => goTo(page - 1)} disabled={page === 1} title="Previous page" className={arrow}><ChevronLeft size={14} /></button>
         {pageNumbers(page, pageCount).map((p, i) => p === null ? (
           <span key={`gap-${i}`} className="max-sm:hidden px-1.5 text-slate-500">…</span>
         ) : (
           <button
             key={p}
             type="button"
-            onClick={() => onPageChange(p)}
+            onClick={() => goTo(p)}
             aria-current={p === page ? 'page' : undefined}
             className={`min-w-[2rem] px-2 py-1 rounded border font-semibold ${p === page ? 'bg-blue-600 border-blue-600 text-white' : 'max-sm:hidden bg-slate-800 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700'}`}
           >
             {p}
           </button>
         ))}
-        <button type="button" onClick={() => onPageChange(page + 1)} disabled={page === pageCount} title="Next page" className={arrow}><ChevronRight size={14} /></button>
-        <button type="button" onClick={() => onPageChange(pageCount)} disabled={page === pageCount} title="Last page" className={arrow}><ChevronsRight size={14} /></button>
+        <button type="button" onClick={() => goTo(page + 1)} disabled={page === pageCount} title="Next page" className={arrow}><ChevronRight size={14} /></button>
+        <button type="button" onClick={() => goTo(pageCount)} disabled={page === pageCount} title="Last page" className={arrow}><ChevronsRight size={14} /></button>
       </div>
     </nav>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CalendarClock, CalendarPlus, ClipboardPlus, RotateCcw, UserPlus, XCircle } from 'lucide-react';
 import ClientPicker from '../ClientPicker';
 import AssessmentTimePanel from '../home/AssessmentTimePanel';
@@ -8,6 +8,7 @@ import { assessmentPickList } from '../../utils/counselor';
 import { TONE_CHIP } from '../../utils/calendar';
 import { CalendarLegend } from '../calendar/CalendarKey';
 import MonthCalendar from '../calendar/MonthCalendar';
+import { revealPanel } from '../../utils/layout';
 import {
   assignAssessmentSlot, cancelAssessmentAppointment, cancelOpenAssessmentTimes, getAssessmentAppointments,
   openAssessmentSlot, unassignAssessmentSlot, updateAssessmentAppointment,
@@ -71,6 +72,12 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
   const me = user.displayname || '';
   const [month, setMonth] = useState(today.slice(0, 7));
   const [pickedDay, setPickedDay] = useState<string>(today);
+  // The picked day's times show under the calendar, often below the bottom of the screen; picking a day scrolls to them
+  const dayDetailsRef = useRef<HTMLElement>(null);
+  const pickDay = (day: string) => {
+    setPickedDay(day);
+    requestAnimationFrame(() => revealPanel(dayDetailsRef.current));
+  };
   const [appointments, setAppointments] = useState<AssessmentAppointment[]>([]);
   const [loadError, setLoadError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
@@ -519,7 +526,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
           onToday={() => { setMonth(today.slice(0, 7)); setPickedDay(today); }}
           summary={monthOpen + monthScheduled === 0 ? 'Nothing open or scheduled this month' : `${monthOpen} open · ${monthScheduled} scheduled`}
           pickedDay={pickedDay}
-          onPickDay={setPickedDay}
+          onPickDay={pickDay}
           dayLabel={day => {
             const entries = byDay.get(day) ?? [];
             const open = entries.filter(a => a.status === 'Open').length;
@@ -541,7 +548,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
       </div>
 
       {pickedDay && (
-        <section aria-label={longDay(pickedDay)} className="space-y-3">
+        <section ref={dayDetailsRef} aria-label={longDay(pickedDay)} className="space-y-3">
           <div className="flex items-baseline justify-between gap-2 border-b border-slate-800 pb-1.5">
             <h4 className="text-sm font-semibold text-white">{longDay(pickedDay)}</h4>
             {pickedDay >= today && (

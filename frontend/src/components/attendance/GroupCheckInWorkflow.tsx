@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import GroupPicker from './GroupPicker';
 import { Check } from 'lucide-react';
 import { todayLocal, useGroupCheckIn } from '../../hooks/useGroupCheckIn';
@@ -133,6 +133,15 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
     setGroupProgram(group?.programtype ?? null);
   }, [group?.programtype, setGroupProgram]);
   const currentStep = wf.groupId === null ? 1 : wf.view === 'review' ? 3 : 2;
+  // Moving on to Check In or Review scrolls that step to the top of the screen: picking a group otherwise leaves the
+  // roster below the fold, and Finish Check-In (at the bottom of a long roster) would leave you partway down Review
+  const stepPanelRef = useRef<HTMLDivElement>(null);
+  const shownStep = useRef(currentStep);
+  useEffect(() => {
+    if (currentStep === shownStep.current) return;
+    shownStep.current = currentStep;
+    if (currentStep > 1) stepPanelRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }, [currentStep]);
   const searchableClients = group ? filterSearchableClients(clients, group.programtype, group.groupname) : [];
 
   // Saved entries keep the client details from when they were checked in; swap in current balances where we have them
@@ -292,11 +301,14 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
       })()}
 
       {/* Steps 2 and 3 stay hidden until a group is chosen */}
-      {group && wf.view === 'checkin' && (
-        <CheckInStep group={group} wf={wf} onOpenSearch={() => setSearchOpen(true)} onOpenClient={onOpenClient} />
-      )}
-      {group && wf.view === 'review' && (
-        <ReviewStep group={group} wf={wf} createdBy={createdBy} canPickCover={canPickCover} onSuccess={onSuccess} onError={onError} onSaved={onSaved} />
+      {group && (
+        <div ref={stepPanelRef}>
+          {wf.view === 'checkin' ? (
+            <CheckInStep group={group} wf={wf} onOpenSearch={() => setSearchOpen(true)} onOpenClient={onOpenClient} />
+          ) : (
+            <ReviewStep group={group} wf={wf} createdBy={createdBy} canPickCover={canPickCover} onSuccess={onSuccess} onError={onError} onSaved={onSaved} />
+          )}
+        </div>
       )}
 
       {searchOpen && (
