@@ -3,7 +3,8 @@ import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { CalendarDays, CalendarX, List, Printer, SlidersHorizontal, Trash2, UserX } from 'lucide-react';
 import ClientAttendanceCalendar from './ClientAttendanceCalendar';
 import { printAttendanceReceipt } from '../../utils/receipt';
-import { deleteAttendance, getClient, getClientAttendance, getClientFinancials, getClientGroupCancellations, getClientMissedGroups, type GroupCancellation, type MissedGroup } from '../../api';
+import { deleteAttendance, getClient, getClientAttendance, getClientCalendar, getClientFinancials, getClientGroupCancellations, getClientMissedGroups, type GroupCancellation, type MissedGroup } from '../../api';
+import type { ClientCalendarData } from '../../utils/clientCalendar';
 import RecordFilterBar from './RecordFilterBar';
 import MonthHeader from './MonthHeader';
 import { EMPTY_ATTENDANCE_FILTERS, groupByMonth, sortedUnique, toggleInSet } from '../../utils/filters';
@@ -131,6 +132,20 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
     return () => { current = false; };
   }, [clientId, attendance]);
   const missedGroups = missedLoad.clientId === clientId ? missedLoad.rows : [];
+
+  // What's coming up for the calendar: the group's next meetings, booked assessments and polygraphs (and polygraphs
+  // taken). Loaded when the calendar is first opened, and again when the attendance changes.
+  const [scheduleLoad, setScheduleLoad] = useState<{ clientId: number; data: ClientCalendarData } | null>(null);
+  useEffect(() => {
+    if (view !== 'calendar') return;
+    let current = true;
+    getClientCalendar(clientId)
+      .then(data => { if (current) setScheduleLoad({ clientId, data }); })
+      // The attendance still shows without it
+      .catch(() => {});
+    return () => { current = false; };
+  }, [clientId, attendance, view]);
+  const schedule = scheduleLoad?.clientId === clientId ? scheduleLoad.data : null;
   const missedTotals = missedGroupSummary(missedGroups);
 
   const search = filters.search.trim().toLowerCase();
@@ -246,7 +261,7 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
       {shown.length === 0 && rows.length > 0 && (
         <p className="text-center text-slate-500 text-sm py-4">No attendance matches these filters.</p>
       )}
-      {view === 'calendar' && <ClientAttendanceCalendar key={clientId} rows={shown} />}
+      {view === 'calendar' && <ClientAttendanceCalendar key={clientId} rows={shown} schedule={schedule} filtered={activeFilterCount > 0} />}
       {view === 'list' && groupByMonth(shown, filters.sort).map(month => {
         const sessions = month.rows.filter(att => !att.cancellation && !att.missed);
         const totals = sessions.reduce((t, att) => {

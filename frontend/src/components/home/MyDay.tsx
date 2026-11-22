@@ -6,6 +6,8 @@ import { formatDisplayTime } from '../../utils/dates';
 import { parseSchedule } from '../../utils/schedule';
 import GroupMeetingPanel, { type Meeting } from './GroupMeetingPanel';
 import AssessmentTimePanel, { type PanelClient } from './AssessmentTimePanel';
+import { TONE_CHIP, dayCellClass, dayChipsClass, dayWhen, type CalendarTone } from '../../utils/calendar';
+import { CalendarLegend, DayNumber, KindIcon } from '../calendar/CalendarKey';
 
 interface GroupRow {
   groupid: number | string;
@@ -50,15 +52,12 @@ const to24h = (time: string) => {
 };
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-const KIND_STYLE: Record<DayItem['kind'], string> = {
-  closed: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200',
-  open: 'bg-amber-500/15 border-amber-500/40 text-amber-200',
-  scheduled: 'bg-transparent border-dashed border-blue-400/60 text-blue-200',
-  cancelled: 'bg-rose-500/10 border-rose-500/40 text-rose-300 line-through',
-  moved: 'bg-transparent border-dashed border-rose-400/50 text-rose-300',
-  assessOpen: 'bg-transparent border-dashed border-violet-400/60 text-violet-200',
-  assessBooked: 'bg-violet-500/20 border-violet-500/50 text-violet-100',
+// Each kind of entry in the calendar colors every calendar shares (utils/calendar.ts); assessment times also get an icon
+const KIND_TONE: Record<DayItem['kind'], CalendarTone> = {
+  closed: 'done', open: 'open', scheduled: 'booked', cancelled: 'cancelled', moved: 'moved', assessOpen: 'available', assessBooked: 'booked',
 };
+const KIND_STYLE = Object.fromEntries(Object.entries(KIND_TONE).map(([k, t]) => [k, TONE_CHIP[t]])) as Record<DayItem['kind'], string>;
+const isAssessment = (kind: DayItem['kind']) => kind === 'assessOpen' || kind === 'assessBooked';
 const KIND_LABEL: Record<DayItem['kind'], string> = {
   closed: 'Closed', open: 'Open', scheduled: 'Scheduled', cancelled: 'Cancelled', moved: 'Moved',
   assessOpen: 'Open assessment time', assessBooked: 'Assessment',
@@ -259,7 +258,7 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
           {monthGrid(month).map((day, i) => {
             if (!day) return <div key={`blank-${i}`} className="min-h-24" />;
             const items = byDay.get(day) ?? [];
-            const isToday = day === todayKey;
+            const when = dayWhen(day, todayKey);
             const picked = day === shownDay;
             // The whole day opens its list below the calendar; a group chip inside also opens its cancel/reschedule panel
             return (
@@ -271,35 +270,35 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
                 aria-label={`${longDate(day)}: ${items.length ? plural(items.length, 'item') : 'nothing scheduled'}`}
                 onClick={() => pickDay(day)}
                 onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pickDay(day); } }}
-                className={`min-h-24 rounded-lg border p-1.5 space-y-1 cursor-pointer transition hover:border-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${picked ? 'border-blue-400 bg-blue-500/10 ring-1 ring-blue-400/60' : isToday ? 'border-blue-500/60 bg-blue-500/5' : 'border-slate-800 bg-slate-950/40'}`}>
-                <p className={`text-xs ${isToday ? 'text-blue-300 font-semibold' : 'text-slate-400'}`}>{Number(day.slice(8))}</p>
+                className={`min-h-24 rounded-lg border p-1.5 space-y-1 cursor-pointer transition hover:border-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${dayCellClass(when, picked)}`}>
+                <DayNumber day={day} when={when} />
+                <div className={`space-y-1 ${dayChipsClass(when)}`}>
                 {items.slice(0, MAX_CHIPS).map(item => (item.meeting || item.appt ? (
                   <button
                     key={item.key}
                     type="button"
                     title={`${item.title} (click to ${item.appt ? (item.appt.status === 'Open' ? 'assign a client' : 'cancel or reschedule') : item.meeting!.change ? 'see or undo the change' : 'cancel or reschedule'})`}
                     onClick={e => { e.stopPropagation(); pickDay(day); if (item.appt) openAppt(item.appt); else openMeeting(item.meeting!); }}
-                    className={`block w-full text-left text-[11px] leading-tight border rounded px-1 py-0.5 truncate hover:brightness-125 ${KIND_STYLE[item.kind]}`}>
-                    {item.label}
+                    className={`flex items-center gap-1 w-full text-left text-[11px] leading-tight border rounded px-1 py-0.5 truncate hover:brightness-125 ${KIND_STYLE[item.kind]}`}>
+                    {isAssessment(item.kind) && <KindIcon kind="assessment" />}<span className="truncate">{item.label}</span>
                   </button>
                 ) : (
-                  <p key={item.key} title={item.title} className={`text-[11px] leading-tight border rounded px-1 py-0.5 truncate ${KIND_STYLE[item.kind]}`}>
-                    {item.label}
+                  <p key={item.key} title={item.title} className={`flex items-center gap-1 text-[11px] leading-tight border rounded px-1 py-0.5 truncate ${KIND_STYLE[item.kind]}`}>
+                    {isAssessment(item.kind) && <KindIcon kind="assessment" />}<span className="truncate">{item.label}</span>
                   </p>
                 )))}
                 {items.length > MAX_CHIPS && <p className="text-[11px] text-slate-500">+{items.length - MAX_CHIPS} more</p>}
+                </div>
               </div>
             );
           })}
         </div>
-        <div className="flex flex-wrap gap-4 text-[11px] text-slate-400 mt-3">
-          <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-emerald-500/40 bg-emerald-500/15" /> Closed</span>
-          <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-amber-500/40 bg-amber-500/15" /> Still open</span>
-          <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-dashed border-blue-400/60" /> Scheduled, coming up</span>
-          <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-rose-500/40 bg-rose-500/10" /> Cancelled</span>
-          <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-dashed border-rose-400/50" /> Moved to another day</span>
-          <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-violet-500/50 bg-violet-500/20" /> Assessment with a client</span>
-          <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded border border-dashed border-violet-400/60" /> Open assessment time</span>
+        <div className="mt-3">
+          <CalendarLegend
+            tones={['done', 'open', 'booked', 'cancelled', 'moved', 'available']}
+            labels={{ done: 'Closed', open: 'Still open', booked: 'Scheduled, coming up', available: 'Open assessment time' }}
+            kinds={['assessment']}
+          />
         </div>
         <p className="text-[11px] text-slate-500 mt-2">Click a day to see everything on it. Click an upcoming group to cancel or reschedule that meeting; its clients get a case note.</p>
       </div>

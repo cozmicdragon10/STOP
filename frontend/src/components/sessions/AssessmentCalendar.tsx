@@ -5,6 +5,8 @@ import AssessmentTimePanel from '../home/AssessmentTimePanel';
 import PopupDialog from '../home/PopupDialog';
 import { formatDisplayTime, getLocalDateString } from '../../utils/dates';
 import { assessmentPickList } from '../../utils/counselor';
+import { TONE_CHIP, dayCellClass, dayChipsClass, dayWhen } from '../../utils/calendar';
+import { CalendarLegend, DayNumber } from '../calendar/CalendarKey';
 import {
   assignAssessmentSlot, cancelAssessmentAppointment, cancelOpenAssessmentTimes, getAssessmentAppointments,
   openAssessmentSlot, unassignAssessmentSlot, updateAssessmentAppointment,
@@ -253,7 +255,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
     const isOpen = a.status === 'Open';
     const mine = canChange(a);
     return (
-      <div key={a.appointmentid} className={`bg-slate-950 border ${isOpen ? 'border-slate-800' : 'border-emerald-500/40 bg-emerald-950/10'} px-4 py-3 rounded-xl text-sm space-y-2`}>
+      <div key={a.appointmentid} className={`bg-slate-950 border ${isOpen ? 'border-slate-800' : 'border-blue-500/40 bg-blue-950/10'} px-4 py-3 rounded-xl text-sm space-y-2`}>
         <div className="flex justify-between items-start gap-3">
           <div className="min-w-0">
             <p className="font-semibold text-white">{isOpen ? 'Open for assessment' : `${a.lastname}, ${a.firstname}`}</p>
@@ -263,7 +265,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
             </p>
             {a.notes && <p className="text-xs text-slate-500 mt-1">{a.notes}</p>}
           </div>
-          <span className={`shrink-0 text-xs px-2 py-0.5 rounded ${isOpen ? 'bg-blue-500/10 text-blue-400' : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'}`}>
+          <span className={`shrink-0 text-xs px-2 py-0.5 rounded border ${isOpen ? TONE_CHIP.available : TONE_CHIP.booked}`}>
             {isOpen ? 'Open' : 'Scheduled'}
           </span>
         </div>
@@ -544,6 +546,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
             const open = entries.filter(a => a.status === 'Open').length;
             const booked = entries.length - open;
             const picked = day === pickedDay;
+            const when = dayWhen(day, today);
             return (
               <button
                 key={day}
@@ -551,13 +554,18 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
                 onClick={() => setPickedDay(day)}
                 aria-pressed={picked}
                 aria-label={`${longDay(day)}: ${entries.length ? `${open} open, ${booked} scheduled` : 'nothing scheduled'}`}
-                className={`min-h-[3.25rem] sm:min-h-[4.5rem] rounded-lg border p-1 sm:p-1.5 text-left flex flex-col gap-0.5 transition ${picked ? 'border-blue-500 bg-blue-950/40' : entries.length ? 'border-slate-700 bg-slate-900 hover:border-slate-500' : 'border-slate-800/60 hover:border-slate-700'} ${day < today ? 'opacity-60' : ''}`}>
-                <span className={`text-xs font-semibold ${day === today ? 'text-blue-400' : entries.length ? 'text-white' : 'text-slate-600'}`}>{Number(day.slice(8))}</span>
-                {open > 0 && <span className="text-[10px] sm:text-[11px] leading-tight rounded px-1 bg-blue-500/15 text-blue-300 truncate">{open}<span className="hidden sm:inline"> open</span></span>}
-                {booked > 0 && <span className="text-[10px] sm:text-[11px] leading-tight rounded px-1 bg-emerald-500/15 text-emerald-300 truncate">{booked}<span className="hidden sm:inline"> scheduled</span></span>}
+                className={`min-h-[3.25rem] sm:min-h-[4.5rem] rounded-lg border p-1 sm:p-1.5 text-left flex flex-col gap-0.5 transition hover:border-slate-500 ${dayCellClass(when, picked)}`}>
+                <DayNumber day={day} when={when} />
+                <span className={`flex flex-col gap-0.5 ${dayChipsClass(when)}`}>
+                  {open > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.available}`}>{open}<span className="hidden sm:inline"> open</span></span>}
+                  {booked > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.booked}`}>{booked}<span className="hidden sm:inline"> scheduled</span></span>}
+                </span>
               </button>
             );
           })}
+        </div>
+        <div className="mt-3">
+          <CalendarLegend tones={['available', 'booked']} labels={{ available: 'Open time', booked: 'Client scheduled' }} />
         </div>
       </div>
 

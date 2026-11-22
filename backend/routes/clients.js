@@ -466,6 +466,59 @@ router.get('/api/clients/:id/missed-groups', async (req, res) => {
     }
 });
 
+// What's on the client's calendar besides attendance, for the Attendance tab's calendar: their group's weekly schedule
+// and its cancelled or moved meetings from today on (only while they're Active in an active group), their booked
+// assessment times and polygraphs from today on, and the polygraphs they've taken (date and type only, no results;
+// results imported from the old system have no time, stored as midnight, so midnight is sent as no time).
+// The calendar works out the group's meeting dates from the schedule (frontend/src/utils/clientCalendar.ts).
+router.get('/api/clients/:id/calendar', async (req, res) => {
+    try {
+        const id = Number(req.params.id);
+        const today = todayLocal();
+        const client = (await pool.query(
+            `SELECT c.ProgramStatus, c.Phase, g.GroupId, g.GroupName, g.Schedule, g.Counselor, g.Active
+             FROM Clients c LEFT JOIN Groups g ON g.GroupId = c.GroupId WHERE c.ClientId = $1`, [id])).rows[0];
+        if (!client) return res.status(404).json({ error: 'Client not found.' });
+        const group = client.programstatus === 'Active' && client.groupid && client.active !== false
+            ? { groupid: client.groupid, groupname: client.groupname, schedule: client.schedule, counselor: client.counselor }
+            : null;
+        const [changes, assessments, polygraphs, taken] = await Promise.all([
+            group ? pool.query(
+                `SELECT ChangeId AS changeid, to_char(OriginalDate, 'YYYY-MM-DD') AS originaldate, Action AS action,
+                        to_char(NewDate, 'YYYY-MM-DD') AS newdate, to_char(NewTime, 'HH24:MI') AS newtime, Reason AS reason
+                 FROM GroupScheduleChanges WHERE GroupId = $1 AND (OriginalDate >= $2 OR NewDate >= $2) ORDER BY OriginalDate`,
+                [group.groupid, today]) : { rows: [] },
+            pool.query(
+                `SELECT AppointmentId AS appointmentid, to_char(ApptDate, 'YYYY-MM-DD') AS date, to_char(ApptTime, 'HH24:MI') AS time,
+                        Assessor AS assessor, Location AS location
+                 FROM AssessmentAppointments WHERE ClientId = $1 AND Status = 'Scheduled' AND ApptDate >= $2 ORDER BY ApptDate, ApptTime`,
+                [id, today]),
+            pool.query(
+                `SELECT a.AppointmentId AS appointmentid, to_char(s.Date, 'YYYY-MM-DD') AS date, to_char(s.Time, 'HH24:MI') AS time,
+                        a.Type AS type, s.Location AS location
+                 FROM PolygraphAppointments a JOIN PolygraphSlots s ON s.SlotId = a.SlotId
+                 WHERE a.Client = $1 AND a.Status = 'Scheduled' AND s.Date >= $2 ORDER BY s.Date, s.Time`,
+                [id, today]),
+            pool.query(
+                `SELECT ResultId AS resultid, to_char(COALESCE(PolygraphDateTime::date, Date), 'YYYY-MM-DD') AS date,
+                        NULLIF(to_char(PolygraphDateTime, 'HH24:MI'), '00:00') AS time, Type AS type
+                 FROM PolygraphResults WHERE Client = $1 ORDER BY date`,
+                [id]),
+        ]);
+        res.json({
+            today,
+            phase: client.phase || null,
+            group,
+            changes: changes.rows,
+            assessments: assessments.rows,
+            polygraphs: polygraphs.rows,
+            polygraphsTaken: taken.rows,
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 router.get('/api/clients/:id/financials', async (req, res) => {
     try {
         const { id } = req.params;

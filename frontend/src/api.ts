@@ -1,6 +1,7 @@
 import type { SessionEntry } from './hooks/useGroupCheckIn';
 import type { PaymentMethod } from './utils/paymentMethods';
 import type { BipCheckInBlock } from './utils/bip';
+import type { ClientCalendarData } from './utils/clientCalendar';
 
 // The built site calls the API on its own address (the server answers /api on the site's port too; see
 // backend/frontendServer.js), so it works at any address it is opened by: inside the office or from outside. The Vite
@@ -2148,6 +2149,13 @@ export interface MissedGroup {
 export async function getClientMissedGroups(clientId: number): Promise<MissedGroup[]> {
     const res = await apiFetch(`${API_BASE}/clients/${clientId}/missed-groups`);
     return jsonResponse(res, 'Failed to load missed groups.');
+}
+
+// The client's group schedule, booked assessments and polygraphs, and polygraphs taken, for the Attendance calendar
+// (utils/clientCalendar.ts)
+export async function getClientCalendar(clientId: number): Promise<ClientCalendarData> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/calendar`);
+    return jsonResponse(res, 'Failed to load the client\'s schedule.');
 }
 
 // Newest first

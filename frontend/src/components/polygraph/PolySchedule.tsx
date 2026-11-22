@@ -3,6 +3,8 @@ import { CalendarClock, CalendarDays, ChevronLeft, ChevronRight, List, RotateCcw
 import ClientPicker from '../ClientPicker';
 import { formatDisplayTime, getLocalDateString, localYmd } from '../../utils/dates';
 import { cancelReservationHint, cancelReservationLabel } from '../../utils/polygraph';
+import { TONE_CHIP, dayCellClass, dayChipsClass, dayWhen } from '../../utils/calendar';
+import { CalendarLegend, DayNumber } from '../calendar/CalendarKey';
 
 export interface ScheduleSlot {
   slotid: number;
@@ -119,7 +121,7 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
   const byDay = new Map(days.map(d => [d.day, d]));
 
   const renderSlot = (slot: ScheduleSlot) => (
-    <div key={slot.slotid} id={`poly-slot-${slot.slotid}`} className={`bg-slate-950 border ${slot.status === 'Assigned' ? 'border-emerald-500/40 bg-emerald-950/10' : 'border-slate-800'} ${highlightedSlotId === slot.slotid ? 'ring-2 ring-blue-500' : ''} px-4 py-3 rounded-xl text-sm space-y-2 transition`}>
+    <div key={slot.slotid} id={`poly-slot-${slot.slotid}`} className={`bg-slate-950 border ${slot.status === 'Assigned' ? 'border-blue-500/40 bg-blue-950/10' : 'border-slate-800'} ${highlightedSlotId === slot.slotid ? 'ring-2 ring-blue-500' : ''} px-4 py-3 rounded-xl text-sm space-y-2 transition`}>
       <div className="flex justify-between items-start gap-3">
         <div className="min-w-0">
           <p className="font-semibold text-white">{slot.location}</p>
@@ -129,7 +131,7 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
             <span className="text-slate-600"> · </span>Examiner: {examinerName(slot.polygrapher || '')}
           </p>
         </div>
-        <span className={`shrink-0 text-xs px-2 py-0.5 rounded ${slot.status === 'Assigned' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : slot.status === 'Closed' ? 'bg-slate-800 text-slate-400 border border-slate-700' : 'bg-blue-500/10 text-blue-400'}`}>
+        <span className={`shrink-0 text-xs px-2 py-0.5 rounded border ${slot.status === 'Assigned' ? TONE_CHIP.booked : slot.status === 'Closed' ? TONE_CHIP.closed : TONE_CHIP.available}`}>
           {slot.status === 'Assigned' ? 'Assigned' : slot.status === 'Closed' ? 'Closed' : '1 Open Slot'}
         </span>
       </div>
@@ -137,7 +139,7 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
       {slot.status === 'Assigned' ? (
         <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-2">
-            <span className="text-slate-300 font-medium">Assigned Client: <strong className="text-emerald-400">{slot.assignedClientName}</strong></span>
+            <span className="text-slate-300 font-medium">Assigned Client: <strong className="text-blue-300">{slot.assignedClientName}</strong></span>
             <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded">{slot.type}</span>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -303,6 +305,7 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
                 const assigned = entry?.slots.filter(s => s.status === 'Assigned').length ?? 0;
                 const closed = entry?.slots.filter(s => s.status === 'Closed').length ?? 0;
                 const picked = day === shownDay;
+                const when = dayWhen(day, today);
                 const summary = entry ? [open && `${open} open`, assigned && `${assigned} assigned`, closed && `${closed} closed`].filter(Boolean).join(', ') : 'no slots';
                 return (
                   <button
@@ -311,14 +314,19 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
                     onClick={() => setPickedDay(day)}
                     aria-pressed={picked}
                     aria-label={`${new Date(year, monthNumber - 1, Number(day.slice(8))).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}: ${summary}`}
-                    className={`min-h-[3.25rem] sm:min-h-[4.5rem] rounded-lg border p-1 sm:p-1.5 text-left flex flex-col gap-0.5 transition ${picked ? 'border-blue-500 bg-blue-950/40' : entry ? 'border-slate-700 bg-slate-900 hover:border-slate-500' : 'border-slate-800/60 hover:border-slate-700'}`}>
-                    <span className={`text-xs font-semibold ${day === today ? 'text-blue-400' : entry ? 'text-white' : 'text-slate-600'}`}>{Number(day.slice(8))}</span>
-                    {open > 0 && <span className="text-[10px] sm:text-[11px] leading-tight rounded px-1 bg-blue-500/15 text-blue-300 truncate">{open}<span className="hidden sm:inline"> open</span></span>}
-                    {assigned > 0 && <span className="text-[10px] sm:text-[11px] leading-tight rounded px-1 bg-emerald-500/15 text-emerald-300 truncate">{assigned}<span className="hidden sm:inline"> assigned</span></span>}
-                    {closed > 0 && <span className="text-[10px] sm:text-[11px] leading-tight rounded px-1 bg-slate-800 text-slate-400 truncate">{closed}<span className="hidden sm:inline"> closed</span></span>}
+                    className={`min-h-[3.25rem] sm:min-h-[4.5rem] rounded-lg border p-1 sm:p-1.5 text-left flex flex-col gap-0.5 transition hover:border-slate-500 ${dayCellClass(when, picked)}`}>
+                    <DayNumber day={day} when={when} />
+                    <span className={`flex flex-col gap-0.5 ${dayChipsClass(when)}`}>
+                      {open > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.available}`}>{open}<span className="hidden sm:inline"> open</span></span>}
+                      {assigned > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.booked}`}>{assigned}<span className="hidden sm:inline"> assigned</span></span>}
+                      {closed > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.closed}`}>{closed}<span className="hidden sm:inline"> closed</span></span>}
+                    </span>
                   </button>
                 );
               })}
+            </div>
+            <div className="mt-3">
+              <CalendarLegend tones={['available', 'booked', 'closed']} labels={{ available: 'Open slot', booked: 'Client assigned', closed: 'Closed, not used' }} />
             </div>
           </div>
           {shownDayEntry ? daySection(shownDayEntry) : shownDay ? (
