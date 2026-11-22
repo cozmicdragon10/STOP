@@ -3,10 +3,10 @@ import { NO_TYPE, distinctValues, filterAgentRows } from './agents';
 
 const agent = (agenttype: string | null, location: string | null = null) => ({ phone: null, email: null, agenttype, location });
 const rows = [
-  { name: 'Aarika Holt', agent: agent('DHS', 'Tulsa') },
-  { name: 'Aaron Lanford', agent: agent('Probation (DOC)', 'Tulsa County') },
-  { name: 'Adam Fisher', agent: agent(null) },
-  { name: 'Unknown Person', agent: null },
+  { name: 'Aarika Holt', agent: agent('DHS', 'Tulsa'), activeClients: 0 },
+  { name: 'Aaron Lanford', agent: agent('Probation (DOC)', 'Tulsa County'), activeClients: 3 },
+  { name: 'Adam Fisher', agent: agent(null), activeClients: 0 },
+  { name: 'Unknown Person', agent: null, activeClients: 1 },
 ];
 const names = (r: { name: string }[]) => r.map(x => x.name);
 const all = { search: '', directory: 'all' as const, type: '' };
@@ -24,6 +24,12 @@ describe('filterAgentRows', () => {
   it('filters by type ignoring case, and by no type', () => {
     expect(names(filterAgentRows(rows, { ...all, type: 'dhs' }))).toEqual(['Aarika Holt']);
     expect(names(filterAgentRows(rows, { ...all, type: NO_TYPE }))).toEqual(['Adam Fisher', 'Unknown Person']);
+  });
+
+  it('shows agents with active clients, without them, or both', () => {
+    expect(names(filterAgentRows(rows, { ...all, active: 'with' }))).toEqual(['Aaron Lanford', 'Unknown Person']);
+    expect(names(filterAgentRows(rows, { ...all, active: 'without' }))).toEqual(['Aarika Holt', 'Adam Fisher']);
+    expect(filterAgentRows(rows, { ...all, active: 'all' })).toHaveLength(4);
   });
 
   it('searches type and location too', () => {

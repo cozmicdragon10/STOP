@@ -12,9 +12,14 @@ export type DirectoryFilter = 'all' | 'missing' | 'listed';
 // The Type filter value for agents with no type
 export const NO_TYPE = '__none__';
 
+// Active client filter: every agent, only agents with at least one Active client, or only agents with none
+export type ActiveClientFilter = 'all' | 'with' | 'without';
+
 export interface AgentFilterRow {
   name: string;
   agent: { phone: string | null; email: string | null; agenttype: string | null; location: string | null } | null;
+  // Clients with program status Active assigned to this agent
+  activeClients: number;
 }
 
 export interface AgentFilters {
@@ -22,15 +27,19 @@ export interface AgentFilters {
   directory: DirectoryFilter;
   // '' for every type; NO_TYPE for agents with no type
   type: string;
+  // Missing means every agent
+  active?: ActiveClientFilter;
 }
 
-// The rows matching the search (name, phone, email, type, or location), directory filter, and type filter.
+// The rows matching the search (name, phone, email, type, or location), directory, type, and active client filters.
 // Names not in the directory have no type, so they only show under "every type" or "no type".
-export function filterAgentRows<T extends AgentFilterRow>(rows: T[], { search, directory, type }: AgentFilters): T[] {
+export function filterAgentRows<T extends AgentFilterRow>(rows: T[], { search, directory, type, active = 'all' }: AgentFilters): T[] {
   const term = search.trim().toLowerCase();
   return rows.filter(r => {
     if (directory === 'missing' && r.agent) return false;
     if (directory === 'listed' && !r.agent) return false;
+    if (active === 'with' && r.activeClients === 0) return false;
+    if (active === 'without' && r.activeClients > 0) return false;
     if (type) {
       const rowType = agentKey(r.agent?.agenttype);
       if (type === NO_TYPE ? rowType !== '' : rowType !== agentKey(type)) return false;

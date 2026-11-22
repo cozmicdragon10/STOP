@@ -8,7 +8,7 @@ import { scrollToStackedPanel } from '../../utils/layout';
 import { idText } from '../../utils/clients';
 import { errorMessage } from '../../utils/errors';
 import { AGENT_TYPE_SUGGESTIONS, NO_TYPE, agentKey, distinctValues, filterAgentRows } from '../../utils/agents';
-import type { DirectoryFilter } from '../../utils/agents';
+import type { ActiveClientFilter, DirectoryFilter } from '../../utils/agents';
 
 interface Props {
   // Current clients (not discharged); the selected agent's discharged clients are loaded on their own
@@ -30,6 +30,8 @@ interface AgentRow {
   agent: SupervisingAgent | null;
   name: string;
   clients: Client[];
+  // Clients in the list with program status Active
+  activeClients: number;
 }
 
 const emptyForm = { name: '', phone: '', email: '', agentType: '', location: '' };
@@ -43,6 +45,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
   const [search, setSearch] = useState('');
   const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>('all');
   const [typeFilter, setTypeFilter] = useState('');
+  const [activeFilter, setActiveFilter] = useState<ActiveClientFilter>('all');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   // The selected agent's clients; on phones this sits below the whole agent list
   const detailPanelRef = useRef<HTMLDivElement>(null);
@@ -85,25 +88,27 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
   const rows = useMemo<AgentRow[]>(() => {
     const byKey = new Map<string, AgentRow>();
     for (const a of agents) {
-      byKey.set(agentKey(a.name), { key: agentKey(a.name), agent: a, name: a.name, clients: [] });
+      byKey.set(agentKey(a.name), { key: agentKey(a.name), agent: a, name: a.name, clients: [], activeClients: 0 });
     }
     for (const c of clients) {
       const key = agentKey(c.supervisingagent);
       if (!key) continue;
-      if (!byKey.has(key)) byKey.set(key, { key, agent: null, name: String(c.supervisingagent).trim(), clients: [] });
-      byKey.get(key)!.clients.push(c);
+      if (!byKey.has(key)) byKey.set(key, { key, agent: null, name: String(c.supervisingagent).trim(), clients: [], activeClients: 0 });
+      const row = byKey.get(key)!;
+      row.clients.push(c);
+      if (c.programstatus === 'Active') row.activeClients++;
     }
     return Array.from(byKey.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [agents, clients]);
 
-  const visibleRows = filterAgentRows(rows, { search, directory: directoryFilter, type: typeFilter });
+  const visibleRows = filterAgentRows(rows, { search, directory: directoryFilter, type: typeFilter, active: activeFilter });
   const unlistedCount = rows.filter(r => !r.agent).length;
   const typesInUse = useMemo(() => distinctValues(agents.map(a => a.agenttype)), [agents]);
   const typeOptions = useMemo(() => distinctValues([...AGENT_TYPE_SUGGESTIONS, ...typesInUse]), [typesInUse]);
   const locationOptions = useMemo(() => distinctValues(agents.map(a => a.location)), [agents]);
-  const filtering = search.trim() !== '' || directoryFilter !== 'all' || typeFilter !== '';
+  const filtering = search.trim() !== '' || directoryFilter !== 'all' || typeFilter !== '' || activeFilter !== 'all';
   // 50 agents per page; a new search or filter starts again on page 1
-  const pager = usePagination(visibleRows, `${search.trim().toLowerCase()}|${directoryFilter}|${typeFilter}`);
+  const pager = usePagination(visibleRows, `${search.trim().toLowerCase()}|${directoryFilter}|${typeFilter}|${activeFilter}`);
 
   const selected = rows.find(r => r.key === selectedKey) || null;
   const selectedName = selected?.name;
@@ -179,7 +184,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
           setAgents(fresh);
           onAgentsLoaded(fresh);
           const current = fresh.find(a => a.agentid === editingId);
-          if (current) openForm({ key: agentKey(current.name), agent: current, name: current.name, clients: [] });
+          if (current) openForm({ key: agentKey(current.name), agent: current, name: current.name, clients: [], activeClients: 0 });
           else closeForm();
         }
       }
@@ -248,8 +253,18 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
               {typesInUse.map(t => <option key={t} value={t}>{t}</option>)}
               <option value={NO_TYPE}>No type set</option>
             </select>
+            <select
+              value={activeFilter}
+              onChange={(e) => setActiveFilter(e.target.value as ActiveClientFilter)}
+              aria-label="Active clients filter"
+              className="bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"
+            >
+              <option value="all">With or without active clients</option>
+              <option value="with">With active clients</option>
+              <option value="without">Without active clients</option>
+            </select>
             {filtering && (
-              <button type="button" onClick={() => { setSearch(''); setDirectoryFilter('all'); setTypeFilter(''); }} className="text-xs text-blue-400 hover:text-blue-300">Clear</button>
+              <button type="button" onClick={() => { setSearch(''); setDirectoryFilter('all'); setTypeFilter(''); setActiveFilter('all'); }} className="text-xs text-blue-400 hover:text-blue-300">Clear</button>
             )}
             {filtering && <span className="text-xs text-slate-500 ml-auto">{visibleRows.length} of {rows.length}</span>}
           </div>
@@ -289,7 +304,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
         {/* Phones: one compact card per agent. The table's columns don't fit, and a call or email is usually why they're here. */}
         <ul className="md:hidden divide-y divide-slate-800">
           {pager.pageItems.map(r => {
-            const current = r.clients.filter(c => c.programstatus === 'Active').length;
+            const current = r.activeClients;
             return (
               <li
                 key={r.key}
@@ -334,7 +349,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
             </thead>
             <tbody className="divide-y divide-slate-800 text-sm">
               {pager.pageItems.map(r => {
-                const current = r.clients.filter(c => c.programstatus === 'Active').length;
+                const current = r.activeClients;
                 return (
                   <tr
                     key={r.key}
