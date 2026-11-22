@@ -14,7 +14,16 @@ export const BIP_FEE_KEY = 'BIP';
 const otherProgramFees: Record<string, number> = { [BIP_FEE_KEY]: 35 };
 // The current BIP treatment fee for new BIP clients
 export const bipTreatmentFee = () => otherProgramFees[BIP_FEE_KEY];
-export const applyProgramFees = (fees: { feekey: string; fee: number | string }[]) => {
+// The price list's per-attendance group fee for a program and phase, or null when the price list doesn't set one (the
+// fee on the account is kept). Federal SO has none. The server checks edits against the same rule (standardTreatmentFee
+// in backend/lib/moneyFields.js).
+export const standardTreatmentFee = (programtype?: string | null, phase?: string | null): number | null => {
+  if (programtype === 'Federal SO') return 0;
+  if (programtype === 'BIP') return bipTreatmentFee();
+  if ((programtype === 'State SO' || programtype === 'Voluntary SO') && SO_TREATMENT_FEES[phase ?? ''] !== undefined) return SO_TREATMENT_FEES[phase ?? ''];
+  return null;
+};
+export const applyProgramFees =(fees: { feekey: string; fee: number | string }[]) => {
   for (const { feekey, fee } of fees) {
     const value = Number(fee);
     if (!Number.isFinite(value)) continue;

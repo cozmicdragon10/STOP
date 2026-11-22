@@ -9,7 +9,7 @@ import { todayLocal } from '../../hooks/useGroupCheckIn';
 import {
   BUS_PASS_MAX, CHAPERON_PHASES, CLIENT_FIELD_OPTIONS, EDITABLE_PROGRAM_STATUSES, FEDERAL_PROGRAM_TYPES, GROUP_TYPES_BY_PROGRAM, POLY_PROGRAM_TYPES, PRETRIAL_PROGRAM_TYPES, SO_ATTENDANCE_LIMIT_MONTHS, SO_PROGRAM_TYPES,
   STATE_FEE_PROGRAM_TYPES, copayFieldsFor, copayText, formatPhase, isAttendanceOverdue, isIndividualGroup, isWholeNumber, idText, ID_TYPES, REFERRAL_TYPES, referredByText } from '../../utils/clients';
-import { SO_PHASES, SO_TREATMENT_FEES, bipTreatmentFee } from '../../utils/soPhases';
+import { SO_PHASES, SO_TREATMENT_FEES, standardTreatmentFee } from '../../utils/soPhases';
 import { formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
 import { ageFromBirthDate, toLocalDay } from '../../utils/dates';
 import { polyVoucherMax, takesPolygraphs } from '../../utils/polygraph';
@@ -368,10 +368,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
                       : newType === 'Chaperon' && !CHAPERON_PHASES.includes(f.phase) ? 'Chaperon'
                       : f.phase;
                     // BIP takes the Admin BIP price; Federal SO has no treatment fee; State and Voluntary SO take the Admin price for the phase
-                    const treatmentfee = newType === 'BIP' ? bipTreatmentFee()
-                      : newType === 'Federal SO' ? 0
-                      : STATE_FEE_PROGRAM_TYPES.includes(newType) && SO_TREATMENT_FEES[phase] !== undefined ? SO_TREATMENT_FEES[phase]
-                      : f.treatmentfee;
+                    const treatmentfee = standardTreatmentFee(newType, phase) ?? f.treatmentfee;
                     return { programtype: newType, phase, treatmentfee };
                   });
                 }}
@@ -438,7 +435,15 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
           <div>
             <p className="text-xs text-slate-500 mb-0.5">Group</p>
             {editing ? (
-              <select value={form.groupid || ''} onChange={e => setField('groupid', e.target.value)} className={inputClass}>
+              <select value={form.groupid || ''} onChange={e => {
+                const groupid = e.target.value;
+                // Joining a group (e.g. after an assessment) sets the treatment fee to the price list's group fee for the
+                // program; an assessment's price comes from its assessment type, not this fee
+                update(f => {
+                  const fee = groupid && !f.groupid ? standardTreatmentFee(f.programtype, f.phase) : null;
+                  return { groupid, ...(fee !== null ? { treatmentfee: fee } : {}) };
+                });
+              }} className={inputClass}>
                 <option value="">-- None --</option>
                 {groups.filter(g => (g.active !== false || g.groupid === form.groupid)
                   && (!GROUP_TYPES_BY_PROGRAM[form.programtype || '']
