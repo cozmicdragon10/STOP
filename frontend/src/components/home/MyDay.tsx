@@ -6,7 +6,7 @@ import { formatDisplayTime } from '../../utils/dates';
 import { parseSchedule } from '../../utils/schedule';
 import GroupMeetingPanel, { type Meeting } from './GroupMeetingPanel';
 import AssessmentTimePanel, { type PanelClient } from './AssessmentTimePanel';
-import { TONE_CHIP, dayCellClass, dayChipsClass, dayWhen, type CalendarTone } from '../../utils/calendar';
+import { TONE_CHIP, chipsInOrder, dayCellClass, dayChipsClass, dayWhen, type CalendarTone } from '../../utils/calendar';
 import { CalendarLegend, DayNumber, KindIcon } from '../calendar/CalendarKey';
 
 interface GroupRow {
@@ -257,7 +257,8 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
           ))}
           {monthGrid(month).map((day, i) => {
             if (!day) return <div key={`blank-${i}`} className="min-h-24" />;
-            const items = byDay.get(day) ?? [];
+            // Assessment times first, so a busy day's "+N more" only ever hides groups
+            const items = chipsInOrder(byDay.get(day) ?? [], item => isAssessment(item.kind));
             const when = dayWhen(day, todayKey);
             const picked = day === shownDay;
             // The whole day opens its list below the calendar; a group chip inside also opens its cancel/reschedule panel

@@ -54,5 +54,13 @@ export const dayCellClass = (when: DayWhen, picked = false) => {
 export const dayNumberClass = (when: DayWhen) =>
   when === 'today' ? 'text-blue-300 font-bold' : when === 'past' ? 'text-slate-600 font-semibold' : 'text-slate-300 font-semibold';
 
+// A day box has room for only a few chips, the rest folded into "+N more": the entries `first` picks go first (by time,
+// sort being HH:MM), then the others in the order given. My Day puts assessment times first, since a day's groups are
+// the same every week but its assessment times aren't.
+export const chipsInOrder = <T extends { sort: string }>(items: T[], first: (item: T) => boolean): T[] => [
+  ...items.filter(first).sort((a, b) => a.sort.localeCompare(b.sort)),
+  ...items.filter(item => !first(item)),
+];
+
 // Chips on a past day are a little dimmed too, so the eye goes to today and what's coming
 export const dayChipsClass = (when: DayWhen) => (when === 'past' ? 'opacity-75' : '');
