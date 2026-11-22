@@ -8,6 +8,7 @@ import DischargeOutcomesReport from './DischargeOutcomesReport';
 import GroupIncomeReport from './GroupIncomeReport';
 import GroupCashDepositReport from './GroupCashDepositReport';
 import UserCashDepositReport from './UserCashDepositReport';
+import MoneyOnHand from '../moneyOnHand/MoneyOnHand';
 import CounselorClientReport from './CounselorClientReport';
 import UserActivityReport from './UserActivityReport';
 import MonthlyPoReports from './MonthlyPoReports';
@@ -29,8 +30,9 @@ interface Props {
 export default function ReportsTab({ user, clients, groups, onOpenClient, onOpenClientId }: Props) {
   // The report tab last picked; null until one is picked (the role's first report shows)
   const [reportTab, setReportTab] = useState<string | null>(null);
-  // Cash Deposits: cash taken at group sessions, or cash payments users took outside a group
-  const [cashTab, setCashTab] = useState<'group' | 'user'>('group');
+  // Cash Deposits: the money on hand now (hand-offs and bank deposits), cash taken at group sessions, or cash payments
+  // users took outside a group
+  const [cashTab, setCashTab] = useState<'hand' | 'group' | 'user'>('hand');
 
   const currentReport = currentReportFor(reportTab, user.role);
 
@@ -67,7 +69,7 @@ export default function ReportsTab({ user, clients, groups, onOpenClient, onOpen
       {currentReport === 'cashDeposits' && (
         <div className="space-y-4">
           <div className="inline-flex bg-slate-950 p-1 rounded-lg border border-slate-800">
-            {([['group', 'Group Cash Deposits'], ['user', 'User Cash Deposits']] as const).map(([id, label]) => (
+            {([['hand', 'Money on Hand'], ['group', 'Group Cash Deposits'], ['user', 'User Cash Deposits']] as const).map(([id, label]) => (
               <button
                 key={id}
                 type="button"
@@ -79,9 +81,10 @@ export default function ReportsTab({ user, clients, groups, onOpenClient, onOpen
               </button>
             ))}
           </div>
+          {cashTab === 'hand' && <MoneyOnHand userEmail={user.employeeemail} wide />}
           {cashTab === 'group'
             ? <GroupCashDepositReport userEmail={user.employeeemail} isAdmin={user.role === 'Business Administrator'} />
-            : <UserCashDepositReport userEmail={user.employeeemail} isAdmin={user.role === 'Business Administrator'} />}
+            : cashTab === 'user' && <UserCashDepositReport userEmail={user.employeeemail} isAdmin={user.role === 'Business Administrator'} />}
         </div>
       )}
 

@@ -4,9 +4,10 @@ const { activeRoleFor, openGroupViewer } = require('../lib/access');
 const { requireRole } = require('../lib/auth');
 const { groupNameFor } = require('../lib/changeLog');
 const { YMD } = require('../lib/sql');
-const { withResponsible, OPEN_GROUP_ADMIN_ROLES } = require('../lib/cashResponsibility');
+const { withResponsible, closedSessionsSql, OPEN_GROUP_ADMIN_ROLES } = require('../lib/cashResponsibility');
 // Money someone holds until it's dropped off at the bank: cash, and checks / money orders / cashier's checks
-const { HELD_PAYMENT_SQL, paymentMethodText } = require('../lib/paymentMethods');
+const { HELD_PAYMENT_SQL } = require('../lib/paymentMethods');
+const { lastHandoffJoin, groupKeySql, paymentKeySql } = require('../lib/moneyOnHand');
 
 const router = express.Router();
 // The Group Income report is for Business Administrators only
@@ -77,10 +78,15 @@ router.put('/api/reports/group-deposits', async (req, res) => {
              VALUES ($1, $2, $3, $4, $5, $6, $7)
              ON CONFLICT (GroupId, SessionDate, SessionNumber) DO UPDATE SET AmountDeposited = EXCLUDED.AmountDeposited,
                  DepositDate = EXCLUDED.DepositDate, Notes = EXCLUDED.Notes, RecordedBy = EXCLUDED.RecordedBy, RecordedOn = CURRENT_TIMESTAMP
+                 -- A session on a Money on Hand bank deposit is corrected there (checked against the bank, or voided)
+                 WHERE GroupDeposits.BankDepositId IS NULL
              RETURNING GroupId, to_char(SessionDate, 'YYYY-MM-DD') AS SessionDate, SessionNumber, AmountDeposited,
                  to_char(DepositDate, 'YYYY-MM-DD') AS DepositDate, Notes, RecordedBy, RecordedOn`,
             [groupId, sessionDate, session, amount.toFixed(2), depositDate, String(notes || '').trim() || null, user]
         );
+        if (result.rows.length === 0) {
+            return res.status(409).json({ error: 'This session\'s cash is on a bank deposit made on Money on Hand. Check that deposit against the bank there, or void it.' });
+        }
         const variance = amount - Number(cash.rows[0].cash);
         await logAction(
             user,
@@ -102,10 +108,13 @@ router.delete('/api/reports/group-deposits', async (req, res) => {
             return res.status(403).json({ error: 'Only Business Administrators can remove deposits.' });
         }
         const removed = await pool.query(
-            'DELETE FROM GroupDeposits WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3 RETURNING AmountDeposited',
+            'DELETE FROM GroupDeposits WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3 AND BankDepositId IS NULL RETURNING AmountDeposited',
             [groupId, sessionDate, Number(sessionNumber) || 1]
         );
         if (removed.rows.length === 0) {
+            const onBank = await pool.query('SELECT 1 FROM GroupDeposits WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3 AND BankDepositId IS NOT NULL',
+                [groupId, sessionDate, Number(sessionNumber) || 1]);
+            if (onBank.rows.length) return res.status(409).json({ error: 'This session\'s cash is on a bank deposit made on Money on Hand. Void that deposit there to take it off.' });
             return res.status(404).json({ error: 'No deposit is recorded for that session.' });
         }
         await logAction(user, 'Group Deposit Removed', `${await groupNameFor(groupId)} session ${sessionDate} #${Number(sessionNumber) || 1}: removed the $${Number(removed.rows[0].amountdeposited).toFixed(2)} deposit.`, 'Audit');
@@ -116,21 +125,13 @@ router.delete('/api/reports/group-deposits', async (req, res) => {
 });
 
 // --- GROUP CASH DEPOSIT REPORT ---
-// Closed group sessions that took cash (or have a deposit), with whether the cash was dropped off at the bank.
-// Business Administrators see every session; everyone else sees the sessions whose cash they are responsible for
-// (lib/cashResponsibility.js).
+// Closed group sessions that took cash (or have a deposit), with whether the cash was dropped off at the bank, who holds
+// it now (Holder: after any hand-offs, lib/moneyOnHand.js) and its bank deposit. Business Administrators see every
+// session; everyone else sees the sessions whose cash they were responsible for (lib/cashResponsibility.js) or hold now.
+// Drop-offs are made on Money on Hand (routes/moneyOnHand.js).
 const GROUP_DEPOSIT_COLUMNS = `d.AmountDeposited, to_char(d.DepositDate, 'YYYY-MM-DD') AS DepositDate, d.Notes, d.RecordedBy, d.RecordedOn`;
-
-// One row per closed group session; filtered by the WHERE clause passed in
-const closedSessionsSql = (where) => `
-    SELECT a."Group" AS GroupId, g.GroupName, g.Counselor, a.Date, a.SessionNumber,
-           MIN(COALESCE(a.OpenedBy, a.CreatedBy)) AS OpenedBy, MAX(a.CoveredBy) AS CoveredBy,
-           MAX(a.CreatedOn) AS ClosedOn, COUNT(*)::int AS Attendance,
-           COALESCE(SUM(a.AccountPaid) FILTER (WHERE ${HELD_PAYMENT_SQL('a.')}), 0) AS Cash
-    FROM Attendance a
-    JOIN Groups g ON g.GroupId = a."Group"
-    WHERE ${where}
-    GROUP BY a."Group", g.GroupName, g.Counselor, a.Date, a.SessionNumber`;
+// A deposit row's bank deposit (b), if it went through Money on Hand
+const BANK_DEPOSIT_COLUMNS = `d.BankDepositId, b.SlipNumber, (b.VerifiedOn IS NOT NULL) AS BankChecked`;
 
 router.get('/api/reports/group-cash-deposits', async (req, res) => {
     try {
@@ -144,13 +145,17 @@ router.get('/api/reports/group-cash-deposits', async (req, res) => {
             `SELECT s.GroupId, s.GroupName, s.Counselor, to_char(s.Date, 'YYYY-MM-DD') AS SessionDate, s.SessionNumber,
                     s.OpenedBy, eo.DisplayName AS OpenedByName, s.CoveredBy, s.Responsible, s.ResponsibleName,
                     s.ClosedOn, s.Attendance, s.Cash,
-                    ${GROUP_DEPOSIT_COLUMNS}, er.DisplayName AS RecordedByName
+                    ${GROUP_DEPOSIT_COLUMNS}, er.DisplayName AS RecordedByName, ${BANK_DEPOSIT_COLUMNS},
+                    COALESCE(h.Holder, s.Responsible) AS Holder, COALESCE(eh.DisplayName, h.Holder, s.ResponsibleName, s.Responsible) AS HolderName
              FROM (${withResponsible(closedSessionsSql('a.Date BETWEEN $1 AND $2'), '$5')}) s
              LEFT JOIN GroupDeposits d ON d.GroupId = s.GroupId AND d.SessionDate = s.Date AND d.SessionNumber = s.SessionNumber
+             LEFT JOIN BankDeposits b ON b.BankDepositId = d.BankDepositId
+             ${lastHandoffJoin(groupKeySql('s.GroupId', 's.Date', 's.SessionNumber'))}
+             LEFT JOIN EmployeeRoles eh ON LOWER(eh.EmployeeEmail) = LOWER(h.Holder)
              LEFT JOIN EmployeeRoles eo ON LOWER(eo.EmployeeEmail) = LOWER(s.OpenedBy)
              LEFT JOIN EmployeeRoles er ON LOWER(er.EmployeeEmail) = LOWER(d.RecordedBy)
              WHERE (s.Cash > 0 OR d.DepositId IS NOT NULL)
-               AND ($3::boolean OR LOWER(s.Responsible) = LOWER($4))
+               AND ($3::boolean OR LOWER(s.Responsible) = LOWER($4) OR LOWER(h.Holder) = LOWER($4))
              ORDER BY s.GroupName, s.Date DESC, s.SessionNumber DESC`,
             [from, to, viewer.role === 'Business Administrator', viewer.employeeemail, OPEN_GROUP_ADMIN_ROLES]
         );
@@ -160,173 +165,24 @@ router.get('/api/reports/group-cash-deposits', async (req, res) => {
     }
 });
 
-// Checks a session's cash off as dropped off at the bank (records a deposit for the session's cash), or unchecks it.
-// The employee responsible for the session's cash or a Business Administrator can check it off; only a Business
-// Administrator or the employee who checked it off can uncheck it.
-router.put('/api/reports/group-cash-deposits', async (req, res) => {
-    try {
-        const { groupId, sessionDate, sessionNumber, droppedOff, depositDate, user } = req.body;
-        const viewer = await openGroupViewer(user);
-        if (!viewer) return res.status(403).json({ error: 'Only active employees can check off deposits.' });
-        if (!groupId || !YMD.test(String(sessionDate || ''))) {
-            return res.status(400).json({ error: 'A group session is required.' });
-        }
-        const isAdmin = viewer.role === 'Business Administrator';
-        const session = Number(sessionNumber) || 1;
-        const sessionRes = await pool.query(
-            withResponsible(closedSessionsSql('a."Group" = $1 AND a.Date = $2 AND a.SessionNumber = $3'), '$4'),
-            [groupId, sessionDate, session, OPEN_GROUP_ADMIN_ROLES]
-        );
-        const info = sessionRes.rows[0];
-        if (!info) return res.status(404).json({ error: 'That group session has not been closed.' });
-        const responsible = String(info.responsible || '').toLowerCase() === String(viewer.employeeemail).toLowerCase();
-        if (!isAdmin && !responsible) {
-            return res.status(403).json({ error: 'You can only check off deposits for group sessions you are responsible for.' });
-        }
-        const groupName = await groupNameFor(groupId);
-        const cash = Number(info.cash);
-
-        if (droppedOff) {
-            if (!YMD.test(String(depositDate || ''))) {
-                return res.status(400).json({ error: 'Enter the date the deposit was dropped off.' });
-            }
-            // A deposit already recorded for the session (by anyone) is kept as it is
-            const inserted = await pool.query(
-                `INSERT INTO GroupDeposits (GroupId, SessionDate, SessionNumber, AmountDeposited, DepositDate, RecordedBy)
-                 VALUES ($1, $2, $3, $4, $5, $6)
-                 ON CONFLICT (GroupId, SessionDate, SessionNumber) DO NOTHING RETURNING DepositId`,
-                [groupId, sessionDate, session, cash.toFixed(2), depositDate, viewer.employeeemail]
-            );
-            if (inserted.rows.length > 0) {
-                await logAction(user, 'Group Deposit Dropped Off', `${groupName} session ${sessionDate} #${session}: $${cash.toFixed(2)} cash checked off as dropped off at the bank on ${depositDate}.`, 'Audit');
-            }
-        } else {
-            const existing = await pool.query(
-                'SELECT RecordedBy, AmountDeposited FROM GroupDeposits WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3',
-                [groupId, sessionDate, session]
-            );
-            const deposit = existing.rows[0];
-            if (deposit) {
-                if (!isAdmin && String(deposit.recordedby || '').toLowerCase() !== String(viewer.employeeemail).toLowerCase()) {
-                    return res.status(403).json({ error: 'This deposit was checked off by someone else. Ask a Business Administrator to uncheck it.' });
-                }
-                await pool.query('DELETE FROM GroupDeposits WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3', [groupId, sessionDate, session]);
-                await logAction(user, 'Group Deposit Unchecked', `${groupName} session ${sessionDate} #${session}: unchecked the $${Number(deposit.amountdeposited).toFixed(2)} deposit; the cash shows as held again.`, 'Audit');
-            }
-        }
-
-        const result = await pool.query(
-            `SELECT ${GROUP_DEPOSIT_COLUMNS}, er.DisplayName AS RecordedByName
-             FROM GroupDeposits d LEFT JOIN EmployeeRoles er ON LOWER(er.EmployeeEmail) = LOWER(d.RecordedBy)
-             WHERE d.GroupId = $1 AND d.SessionDate = $2 AND d.SessionNumber = $3`,
-            [groupId, sessionDate, session]
-        );
-        res.json(result.rows[0] || null);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// --- TOTAL CASH DEPOSIT (Closed Groups panel, Cash tab) ---
-// Every closed group session whose cash hasn't been dropped off yet, whatever its date: the cash each employee is
-// holding (lib/cashResponsibility.js). Business Administrators see everyone's; others see their own.
-const heldSessionsSql = (where, adminRolesParam) => `
-    SELECT s.GroupId, s.GroupName, to_char(s.Date, 'YYYY-MM-DD') AS SessionDate, s.SessionNumber, s.ClosedOn,
-           s.Cash, s.Responsible, COALESCE(s.ResponsibleName, s.Responsible) AS ResponsibleName
-    FROM (${withResponsible(closedSessionsSql(`(a."Group", a.Date, a.SessionNumber) IN (
-        SELECT "Group", Date, SessionNumber FROM Attendance
-        WHERE "Group" IS NOT NULL AND ${HELD_PAYMENT_SQL()} AND AccountPaid > 0 AND ${where})`), adminRolesParam)}) s
-    LEFT JOIN GroupDeposits d ON d.GroupId = s.GroupId AND d.SessionDate = s.Date AND d.SessionNumber = s.SessionNumber
-    WHERE s.Cash > 0 AND d.DepositId IS NULL`;
-
-router.get('/api/reports/group-cash-held', async (req, res) => {
-    try {
-        const viewer = await openGroupViewer(req.user?.employeeemail);
-        if (!viewer) return res.json([]);
-        const result = await pool.query(
-            `SELECT * FROM (${heldSessionsSql('TRUE', '$1')}) h
-             WHERE $2::boolean OR LOWER(h.Responsible) = LOWER($3)
-             ORDER BY h.ResponsibleName, h.SessionDate, h.GroupName, h.SessionNumber`,
-            [OPEN_GROUP_ADMIN_ROLES, viewer.role === 'Business Administrator', viewer.employeeemail]
-        );
-        res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// Drop Off Deposit: checks off every listed session's cash as dropped off at the bank on depositDate, all or nothing.
-// sessions: [{ groupId, sessionDate, sessionNumber, cash }] as shown (and printed). The employee responsible for each
-// session's cash or a Business Administrator can do it. If any session's cash changed or was already dropped off since
-// the list was shown, nothing is saved (409) so the deposit matches the printed receipt.
-router.post('/api/reports/group-cash-held/drop-off', async (req, res) => {
-    const { sessions, depositDate } = req.body || {};
-    if (!Array.isArray(sessions) || sessions.length === 0) return res.status(400).json({ error: 'There is no cash to drop off.' });
-    if (!YMD.test(String(depositDate || ''))) return res.status(400).json({ error: 'Enter the date the deposit was dropped off.' });
-    const db = await pool.connect();
-    try {
-        const viewer = await openGroupViewer(req.user?.employeeemail);
-        if (!viewer) throw Object.assign(new Error('Only active employees can drop off deposits.'), { status: 403 });
-        const isAdmin = viewer.role === 'Business Administrator';
-        await db.query('BEGIN');
-        let total = 0;
-        const lines = [];
-        for (const s of sessions) {
-            const session = Number(s.sessionNumber) || 1;
-            if (!s.groupId || !YMD.test(String(s.sessionDate || ''))) throw Object.assign(new Error('A group session is missing its group or date.'), { status: 400 });
-            // Locks the session's deposit slot so two people can't drop the same cash off at once
-            await db.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`group-deposit:${s.groupId}:${s.sessionDate}:${session}`]);
-            const info = (await db.query(
-                withResponsible(closedSessionsSql('a."Group" = $1 AND a.Date = $2 AND a.SessionNumber = $3'), '$4'),
-                [s.groupId, s.sessionDate, session, OPEN_GROUP_ADMIN_ROLES]
-            )).rows[0];
-            if (!info) throw Object.assign(new Error('A group session on this deposit was not found. Refresh and try again.'), { status: 404 });
-            const label = `${info.groupname} ${s.sessionDate}${session > 1 ? ` #${session}` : ''}`;
-            if (!isAdmin && String(info.responsible || '').toLowerCase() !== String(viewer.employeeemail).toLowerCase()) {
-                throw Object.assign(new Error(`You are not responsible for the cash from ${label}.`), { status: 403 });
-            }
-            const cash = Number(info.cash);
-            if (Math.abs(cash - Number(s.cash)) >= 0.005) {
-                throw Object.assign(new Error(`Not saved: the cash for ${label} is now $${cash.toFixed(2)}, not $${Number(s.cash).toFixed(2)}. `
-                    + 'Refresh the list and print the receipt again.'), { status: 409 });
-            }
-            const inserted = await db.query(
-                `INSERT INTO GroupDeposits (GroupId, SessionDate, SessionNumber, AmountDeposited, DepositDate, RecordedBy)
-                 VALUES ($1, $2, $3, $4, $5, $6)
-                 ON CONFLICT (GroupId, SessionDate, SessionNumber) DO NOTHING RETURNING DepositId`,
-                [s.groupId, s.sessionDate, session, cash.toFixed(2), depositDate, viewer.employeeemail]
-            );
-            if (inserted.rows.length === 0) {
-                throw Object.assign(new Error(`Not saved: the cash for ${label} was already dropped off. Refresh the list.`), { status: 409 });
-            }
-            total += cash;
-            lines.push(`${label} $${cash.toFixed(2)}`);
-        }
-        await db.query('COMMIT');
-        await logAction(viewer.employeeemail, 'Group Deposit Dropped Off',
-            `$${total.toFixed(2)} cash from ${lines.length} group session(s) dropped off at the bank on ${depositDate}: ${lines.join('; ')}.`, 'Audit');
-        res.json({ count: lines.length, total: Math.round(total * 100) / 100 });
-    } catch (err) {
-        await db.query('ROLLBACK').catch(() => {});
-        res.status(err.status || 500).json({ error: err.message });
-    } finally {
-        db.release();
-    }
-});
-
 // --- USER CASH DEPOSIT REPORT ---
 // Cash payments taken outside a group session (no check-in, or an assessment or individual session check-in), with
-// whether the cash was dropped off at the bank. The employee who entered the payment holds the cash. Business
-// Administrators see every payment; everyone else sees the ones they entered.
+// whether the cash was dropped off at the bank. The employee who entered the payment holds the cash until they hand it
+// off (Holder, lib/moneyOnHand.js). Business Administrators see every payment; everyone else sees the ones they entered
+// or hold now. Drop-offs are made on Money on Hand (routes/moneyOnHand.js).
 const userCashSql = (where) => `
     SELECT f.TransactionId, f.Date AS PaidOn, f.Amount, f.FeeType, f.Comments, f.EnteredBy, ee.DisplayName AS EnteredByName,
            f.PaymentMethod, f.PaymentSubtype, f.PaymentReference,
            c.ClientId, c.FirstName, c.LastName, c.DOCNumber, c.DocType,
-           to_char(d.DepositDate, 'YYYY-MM-DD') AS DepositDate, d.RecordedBy, er.DisplayName AS RecordedByName, d.RecordedOn
+           to_char(d.DepositDate, 'YYYY-MM-DD') AS DepositDate, d.RecordedBy, er.DisplayName AS RecordedByName, d.RecordedOn,
+           ${BANK_DEPOSIT_COLUMNS}, COALESCE(h.Holder, f.EnteredBy) AS Holder, COALESCE(eh.DisplayName, h.Holder, ee.DisplayName, f.EnteredBy) AS HolderName
     FROM FinancialTransactions f
     LEFT JOIN Attendance a ON a.AttendanceId = f.AttendanceId
     LEFT JOIN Clients c ON c.ClientId = f.Client
     LEFT JOIN CashPaymentDeposits d ON d.TransactionId = f.TransactionId
+    LEFT JOIN BankDeposits b ON b.BankDepositId = d.BankDepositId
+    ${lastHandoffJoin(paymentKeySql('f.TransactionId'))}
+    LEFT JOIN EmployeeRoles eh ON LOWER(eh.EmployeeEmail) = LOWER(h.Holder)
     LEFT JOIN EmployeeRoles ee ON LOWER(ee.EmployeeEmail) = LOWER(f.EnteredBy)
     LEFT JOIN EmployeeRoles er ON LOWER(er.EmployeeEmail) = LOWER(d.RecordedBy)
     WHERE f.Type = 'Payment' AND ${HELD_PAYMENT_SQL('f.')} AND a."Group" IS NULL AND ${where}`;
@@ -340,54 +196,11 @@ router.get('/api/reports/user-cash-deposits', async (req, res) => {
         const viewer = await openGroupViewer(user);
         if (!viewer) return res.json([]);
         const result = await pool.query(
-            `${userCashSql(`f.Date >= $1::date AND f.Date < $2::date + 1 AND ($3::boolean OR LOWER(f.EnteredBy) = LOWER($4))`)}
+            `${userCashSql(`f.Date >= $1::date AND f.Date < $2::date + 1 AND ($3::boolean OR LOWER(f.EnteredBy) = LOWER($4) OR LOWER(h.Holder) = LOWER($4))`)}
              ORDER BY f.Date DESC, f.TransactionId DESC`,
             [from, to, viewer.role === 'Business Administrator', viewer.employeeemail]
         );
         res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-// Checks a cash payment off as dropped off at the bank, or unchecks it. The employee who entered the payment or a
-// Business Administrator can check it off; only a Business Administrator or the employee who checked it off can uncheck it.
-router.put('/api/reports/user-cash-deposits', async (req, res) => {
-    try {
-        const { transactionId, droppedOff, depositDate, user } = req.body;
-        const viewer = await openGroupViewer(user);
-        if (!viewer) return res.status(403).json({ error: 'Only active employees can check off deposits.' });
-        const isAdmin = viewer.role === 'Business Administrator';
-        const found = await pool.query(userCashSql('f.TransactionId = $1'), [transactionId]);
-        const payment = found.rows[0];
-        if (!payment) return res.status(404).json({ error: 'That cash payment was not found.' });
-        if (!isAdmin && String(payment.enteredby || '').toLowerCase() !== String(viewer.employeeemail).toLowerCase()) {
-            return res.status(403).json({ error: 'You can only check off cash payments you took.' });
-        }
-        const what = `$${Number(payment.amount).toFixed(2)} ${paymentMethodText(payment.paymentmethod || 'Cash', payment.paymentsubtype, payment.paymentreference)} payment from ${payment.lastname}, ${payment.firstname} (payment ${transactionId})`;
-
-        if (droppedOff) {
-            if (!YMD.test(String(depositDate || ''))) {
-                return res.status(400).json({ error: 'Enter the date the deposit was dropped off.' });
-            }
-            const inserted = await pool.query(
-                `INSERT INTO CashPaymentDeposits (TransactionId, DepositDate, RecordedBy) VALUES ($1, $2, $3)
-                 ON CONFLICT (TransactionId) DO NOTHING RETURNING TransactionId`,
-                [transactionId, depositDate, viewer.employeeemail]
-            );
-            if (inserted.rows.length > 0) {
-                await logAction(user, 'Cash Payment Dropped Off', `${what} checked off as dropped off at the bank on ${depositDate}.`, 'Audit');
-            }
-        } else if (payment.depositdate) {
-            if (!isAdmin && String(payment.recordedby || '').toLowerCase() !== String(viewer.employeeemail).toLowerCase()) {
-                return res.status(403).json({ error: 'This deposit was checked off by someone else. Ask a Business Administrator to uncheck it.' });
-            }
-            await pool.query('DELETE FROM CashPaymentDeposits WHERE TransactionId = $1', [transactionId]);
-            await logAction(user, 'Cash Payment Deposit Unchecked', `${what}: unchecked; the cash shows as held again.`, 'Audit');
-        }
-
-        const result = await pool.query(userCashSql('f.TransactionId = $1'), [transactionId]);
-        res.json(result.rows[0]);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

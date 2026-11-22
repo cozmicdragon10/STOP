@@ -75,12 +75,15 @@ const ALLOWED = [
     ['POST', /^\/api\/callin\/(client|group)$/],
     // Polygraphs: the schedule only (booking, rescheduling and results are the Polygrapher's and office's)
     ['GET', /^\/api\/polygraphs\/slots$/],
-    // Cash Deposits: the group cash they're holding and marking dropped off
+    // Cash Deposits reports: the money they were responsible for and where it went
     ['GET', /^\/api\/reports\/(user|group)-cash-deposits$/],
-    ['PUT', /^\/api\/reports\/(user|group)-cash-deposits$/],
-    // Closed Groups > Cash: the group cash they hold, and dropping it off (routes/reports.js keeps them to their own)
-    ['GET', /^\/api\/reports\/group-cash-held$/],
-    ['POST', /^\/api\/reports\/group-cash-held\/drop-off$/],
+    // Money on Hand: the money they hold, hand-offs to and from them, and their bank deposits (routes/moneyOnHand.js keeps
+    // them to their own; checking deposits against the bank and voiding them are for Business Administrators)
+    ['GET', /^\/api\/money-on-hand$/],
+    ['GET', /^\/api\/money-on-hand\/history\/[^/]+$/],
+    ['POST', /^\/api\/money-on-hand\/handoffs(\/\d+\/(accept|decline|cancel))?$/],
+    ['POST', /^\/api\/money-on-hand\/deposits$/],
+    ['PUT', /^\/api\/money-on-hand\/deposits\/\d+\/slip$/],
 ];
 
 const isCounselorAllowed = (method, path) => ALLOWED.some(([m, re]) => m === method && re.test(path));

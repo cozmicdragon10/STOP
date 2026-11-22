@@ -898,42 +898,6 @@ export interface ClosedGroupSession {
     }[];
 }
 
-// A closed group session whose cash hasn't been dropped off: held by responsible (an email; responsiblename for display)
-export interface HeldGroupCash {
-    groupid: number;
-    groupname: string;
-    sessiondate: string;
-    sessionnumber: number;
-    closedon: string | null;
-    cash: number | string;
-    responsible: string;
-    responsiblename: string;
-}
-
-// Closed Groups > Cash: the group cash this user holds (Business Administrators: everyone's)
-export async function getHeldGroupCash(): Promise<HeldGroupCash[]> {
-    const res = await apiFetch(`${API_BASE}/reports/group-cash-held`);
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.error || 'Failed to load the cash held.');
-    return body;
-}
-
-// Drop Off Deposit: checks off all these sessions' cash as dropped off on depositDate (all or nothing). cash is each
-// session's amount as shown; if one changed since, nothing is saved and this throws with the server's message.
-export async function dropOffHeldGroupCash(data: {
-    depositDate: string;
-    sessions: { groupId: number; sessionDate: string; sessionNumber: number; cash: number }[];
-}): Promise<{ count: number; total: number }> {
-    const res = await apiFetch(`${API_BASE}/reports/group-cash-held/drop-off`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-    });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.error || 'Failed to record the drop-off.');
-    return body;
-}
-
 // Update Attendance Notes on a closed group. Each change sends the note as it was shown (original, null when the client
 // had none); if one was changed on another screen meanwhile, nothing is saved and this throws with the server's message.
 export async function updateClosedGroupNotes(data: {
@@ -1789,9 +1753,16 @@ export interface GroupCashDepositRow extends GroupCashDropOff {
     closedon: string | null;
     attendance: string | number;
     cash: string | number;
+    // Its Money on Hand bank deposit (null for an older check-off), the slip number, and whether it was checked
+    bankdepositid?: number | null;
+    slipnumber?: string | null;
+    bankchecked?: boolean;
+    // Who holds the money now, after any hand-offs (or held it when it was dropped off)
+    holder?: string | null;
+    holdername?: string | null;
 }
 
-// Business Administrators get every closed session that took cash; everyone else gets the ones they are responsible for
+// Business Administrators get every closed session that took cash; everyone else gets the ones they were responsible for or hold now
 export async function getGroupCashDeposits(from: string, to: string, user: string): Promise<GroupCashDepositRow[]> {
     const res = await apiFetch(`${API_BASE}/reports/group-cash-deposits?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&user=${encodeURIComponent(user)}`);
     return jsonResponse(res, 'Failed to load group cash deposits.');
@@ -1820,22 +1791,19 @@ export interface UserCashDepositRow {
     recordedby: string | null;
     recordedbyname: string | null;
     recordedon: string | null;
+    // Its Money on Hand bank deposit (null for an older check-off), the slip number, and whether it was checked
+    bankdepositid?: number | null;
+    slipnumber?: string | null;
+    bankchecked?: boolean;
+    // Who holds the money now, after any hand-offs (or held it when it was dropped off)
+    holder?: string | null;
+    holdername?: string | null;
 }
 
-// Business Administrators get every cash payment taken outside a group; everyone else gets the ones they took
+// Business Administrators get every cash payment taken outside a group; everyone else gets the ones they took or hold now
 export async function getUserCashDeposits(from: string, to: string, user: string): Promise<UserCashDepositRow[]> {
     const res = await apiFetch(`${API_BASE}/reports/user-cash-deposits?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&user=${encodeURIComponent(user)}`);
     return jsonResponse(res, 'Failed to load user cash deposits.');
-}
-
-// Returns the payment after the change
-export async function setUserCashDroppedOff(data: { transactionId: number; droppedOff: boolean; depositDate: string; user: string }): Promise<UserCashDepositRow> {
-    const res = await apiFetch(`${API_BASE}/reports/user-cash-deposits`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-    });
-    return jsonResponse(res, 'Failed to update the deposit.');
 }
 
 // A payment (or a refund or dispute against one) or a client note, with who entered it and when
@@ -1936,16 +1904,6 @@ export async function createPoReportDraft(month: string, agent: string, user: st
     const blob = await fileResponse(res, 'Could not make the Outlook draft.', 'message/rfc822');
     const fileName = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'PO Reports.eml';
     return { blob, fileName };
-}
-
-// Returns the session's deposit after the change, or null when it has none
-export async function setGroupCashDroppedOff(data: GroupSessionRef & { droppedOff: boolean; depositDate: string; user: string }): Promise<GroupCashDropOff | null> {
-    const res = await apiFetch(`${API_BASE}/reports/group-cash-deposits`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-    });
-    return jsonResponse(res, 'Failed to update the deposit.');
 }
 
 export async function getEmployees(): Promise<Employee[]> {
@@ -2620,4 +2578,147 @@ export async function moveAssessmentAppointment(id: number, toId: number): Promi
 export async function cancelAssessmentAppointment(id: number): Promise<{ success: true }> {
     const res = await sendJson(`${API_BASE}/assessment-appointments/${id}/cancel`, { cancelledBy: '' });
     return jsonResponse(res, 'Failed to cancel the assessment.');
+}
+
+// --- MONEY ON HAND (backend routes/moneyOnHand.js) ---
+// A check, money order or cashier's check in an item of money
+export interface MoneyCheck {
+    kind: string | null;
+    reference: string | null;
+    amount: number | string;
+    client: string | null;
+}
+
+// Money not at the bank yet: a closed group session's cash and checks, or one cash / check payment taken outside a group.
+// itemkey is 'g:<group>:<date>:<session>' or 'p:<transaction>'. holder is who has it now; collector who was first
+// responsible for it. pendinghandoffid is set while a hand-off of it waits to be accepted.
+export interface MoneyItem {
+    itemkey: string;
+    kind: 'group' | 'payment';
+    groupid: number | null;
+    sessionnumber: number | null;
+    transactionid: number | null;
+    clientid: number | null;
+    // The group's name, or the payment's fee type
+    label: string;
+    clientname: string | null;
+    // The session date, or the date the payment was taken
+    eventdate: string;
+    collectedon: string | null;
+    amount: number | string;
+    collector: string;
+    collectorname: string;
+    // A payment's method (Cash or Other)
+    method: string | null;
+    checks: MoneyCheck[];
+    holder: string;
+    holdername: string;
+    heldsince: string | null;
+    pendinghandoffid: number | null;
+    pendingto: string | null;
+}
+
+// Money taken at a group that hasn't closed yet, with who will be responsible for it
+export interface OpenGroupMoney {
+    groupid: number;
+    groupname: string;
+    sessiondate: string;
+    sessionnumber: number;
+    responsible: string;
+    responsiblename: string | null;
+    updatedon: string | null;
+    amount: number;
+    checks: MoneyCheck[];
+}
+
+export interface MoneyHandoff {
+    handoffid: number;
+    fromemployee: string;
+    toemployee: string;
+    fromname: string;
+    toname: string;
+    total: number | string;
+    notes: string | null;
+    createdby: string;
+    createdbyname: string;
+    createdon: string;
+    status: 'Pending' | 'Accepted' | 'Declined' | 'Cancelled';
+    resolvedby: string | null;
+    resolvedon: string | null;
+    items: { key: string; amount: number | string; label: string }[];
+}
+
+export interface BankDeposit {
+    bankdepositid: number;
+    depositdate: string;
+    slipnumber: string | null;
+    total: number | string;
+    droppedoffby: string;
+    droppedoffbyname: string;
+    recordedon: string;
+    // Entered by a Business Administrator once the bank's statement shows the deposit
+    bankamount: number | string | null;
+    verifiedby: string | null;
+    verifiedbyname: string | null;
+    verifiedon: string | null;
+    verifynotes: string | null;
+    voidedby: string | null;
+    voidedbyname: string | null;
+    voidedon: string | null;
+    voidreason: string | null;
+    items: { key: string; amount: number | string; label: string; collector: string | null; collectorName: string | null }[];
+}
+
+export interface MoneyOnHandData {
+    isAdmin: boolean;
+    items: MoneyItem[];
+    open: OpenGroupMoney[];
+    handoffs: MoneyHandoff[];
+    deposits: BankDeposit[];
+    // Who money can be handed to (active employees, not Polygraphers, not you)
+    recipients: { employeeemail: string; displayname: string | null; role: string | null }[];
+}
+
+export interface MoneyHistory {
+    key: string;
+    label: string;
+    amount: number | string;
+    holder: { email: string; name: string; since: string | null } | null;
+    events: { at: string | null; kind: string; text: string }[];
+}
+
+// The money picked for a hand-off or deposit, with each amount as shown (the server refuses if one changed since)
+export type PickedMoney = { key: string; amount: number }[];
+
+export async function getMoneyOnHand(): Promise<MoneyOnHandData> {
+    return jsonResponse(await apiFetch(`${API_BASE}/money-on-hand`), 'Failed to load the money on hand.');
+}
+
+export async function getMoneyHistory(key: string): Promise<MoneyHistory> {
+    return jsonResponse(await apiFetch(`${API_BASE}/money-on-hand/history/${encodeURIComponent(key)}`), 'Failed to load where this money has been.');
+}
+
+export async function handOffMoney(data: { to: string; notes: string; items: PickedMoney }): Promise<{ handoffId: number; total: number }> {
+    return jsonResponse(await sendJson(`${API_BASE}/money-on-hand/handoffs`, data), 'Failed to hand off the money.');
+}
+
+export async function resolveHandoff(id: number, action: 'accept' | 'decline' | 'cancel'): Promise<{ handoffId: number; status: string }> {
+    return jsonResponse(await sendJson(`${API_BASE}/money-on-hand/handoffs/${id}/${action}`, {}), 'Failed to update the hand-off.');
+}
+
+export async function makeBankDeposit(data: { depositDate: string; slipNumber: string; items: PickedMoney }): Promise<{ bankDepositId: number; total: number }> {
+    return jsonResponse(await sendJson(`${API_BASE}/money-on-hand/deposits`, data), 'Failed to record the deposit.');
+}
+
+export async function setDepositSlip(id: number, slipNumber: string): Promise<{ bankDepositId: number; slipNumber: string | null }> {
+    return jsonResponse(await sendJson(`${API_BASE}/money-on-hand/deposits/${id}/slip`, { slipNumber }, 'PUT'), 'Failed to save the slip number.');
+}
+
+// Business Administrators: the amount the bank credited, or clear to undo the check
+export async function checkDepositAgainstBank(id: number, data: { bankAmount: number; notes: string } | { clear: true }): Promise<{ bankDepositId: number }> {
+    return jsonResponse(await sendJson(`${API_BASE}/money-on-hand/deposits/${id}/verify`, data, 'PUT'), 'Failed to save the bank check.');
+}
+
+export async function voidBankDeposit(id: number, reason: string): Promise<{ bankDepositId: number }> {
+    return jsonResponse(await sendJson(`${API_BASE}/money-on-hand/deposits/${id}/void`, { reason }), 'Failed to void the deposit.');
 }

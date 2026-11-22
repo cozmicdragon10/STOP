@@ -11,7 +11,7 @@ test('a Counselor can check in, take payments, and see every client', () => {
         ['GET', '/api/polygraphs/slots'], ['GET', '/api/clients/12/polygraphs'], ['GET', '/api/clients/12/attachments'],
         ['POST', '/api/clients/12/attachments'], ['GET', '/api/attachments/5'], ['POST', '/api/clients/12/notes'],
         ['PUT', '/api/notes/9'], ['DELETE', '/api/notes/9'], ['GET', '/api/reports/user-cash-deposits'],
-        ['PUT', '/api/reports/group-cash-deposits'], ['PUT', '/api/reports/user-cash-deposits'], ['GET', '/api/agents'], ['GET', '/api/documents/7'], ['GET', '/api/auth/me']]) {
+        ['GET', '/api/reports/group-cash-deposits'], ['GET', '/api/agents'], ['GET', '/api/documents/7'], ['GET', '/api/auth/me']]) {
         assert.ok(isCounselorAllowed(m, p), `${m} ${p} should be allowed`);
     }
 });
@@ -47,6 +47,21 @@ test('a Counselor cannot edit agents, groups, prices, or reports beyond cash dep
         ['PUT', '/api/program-fees/X'], ['POST', '/api/federal-units'], ['GET', '/api/reports/groups'],
         ['GET', '/api/reports/group-deposits'], ['GET', '/api/admin/logs'], ['GET', '/api/notes/pending'],
         ['POST', '/api/notes/9/review'], ['GET', '/api/dev/info']]) {
+        assert.ok(!isCounselorAllowed(m, p), `${m} ${p} should be refused`);
+    }
+});
+
+test('a Counselor uses Money on Hand for their own money, but cannot check deposits against the bank or void them', () => {
+    for (const [m, p] of [['GET', '/api/money-on-hand'], ['GET', '/api/money-on-hand/history/g:3:2026-11-20:1'],
+        ['GET', '/api/money-on-hand/history/p:41'], ['POST', '/api/money-on-hand/handoffs'],
+        ['POST', '/api/money-on-hand/handoffs/7/accept'], ['POST', '/api/money-on-hand/handoffs/7/decline'],
+        ['POST', '/api/money-on-hand/handoffs/7/cancel'], ['POST', '/api/money-on-hand/deposits'],
+        ['PUT', '/api/money-on-hand/deposits/4/slip']]) {
+        assert.ok(isCounselorAllowed(m, p), `${m} ${p} should be allowed`);
+    }
+    for (const [m, p] of [['PUT', '/api/money-on-hand/deposits/4/verify'], ['POST', '/api/money-on-hand/deposits/4/void'],
+        ['POST', '/api/money-on-hand/handoffs/7/steal'], ['PUT', '/api/reports/group-cash-deposits'],
+        ['PUT', '/api/reports/user-cash-deposits']]) {
         assert.ok(!isCounselorAllowed(m, p), `${m} ${p} should be refused`);
     }
 });

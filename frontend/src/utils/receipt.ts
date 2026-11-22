@@ -251,26 +251,43 @@ export const printReceipt = (r: Omit<Receipt, 'newBalance'> & { newBalance?: num
   `, onError, r.transactionIds);
 };
 
-// A cash deposit receipt: the group cash one employee is holding, session by session, with the total to drop off at the
-// bank and lines to sign when it's handed over (Closed Groups > Cash)
-export const printCashDepositReceipt = (
-  r: { heldBy: string; sessions: { groupName: string; sessionDate: string; sessionNumber: number; cash: number }[] },
+// A money slip to go with cash and checks (Money on Hand): a bank deposit, or a hand-off from one employee to another.
+// Lists each item with its amount, then the cash and each check separately (as a bank deposit slip asks for), the
+// total, and lines to sign.
+export const printMoneySlip = (
+  r: {
+    title: 'Bank Deposit' | 'Cash Hand-Off';
+    // Bank Deposit: who drops it off; Cash Hand-Off: who hands it and who takes it
+    from: string;
+    to?: string;
+    date: string;
+    slipNumber?: string;
+    items: { title: string; amount: number }[];
+    cash: number;
+    checks: { kind: string | null; reference: string | null; amount: number | string; client: string | null }[];
+  },
   onError: (message: string) => void,
 ) => {
-  const total = r.sessions.reduce((t, s) => t + s.cash, 0);
-  const rows = r.sessions.map(s => `<tr><td class="wrap">${escapeHtml(s.groupName)}${s.sessionNumber > 1 ? ` (#${s.sessionNumber})` : ''}<br>`
-    + `<span class="tag">${escapeHtml(shortDate(s.sessionDate))}</span></td><td class="r">${money(s.cash)}</td></tr>`).join('');
-  printReceiptPage('Cash Deposit', `
-    <p><b>Cash held by:</b> ${escapeHtml(r.heldBy)}</p>
-    <p><b>Group sessions:</b> ${r.sessions.length}</p>
+  const total = r.items.reduce((t, i) => t + Math.round(i.amount * 100), 0) / 100;
+  const itemRows = r.items.map(i => `<tr><td class="wrap">${escapeHtml(i.title)}</td><td class="r">${money(i.amount)}</td></tr>`).join('');
+  const checkRows = r.checks.map(c => `<tr><td class="wrap">${escapeHtml(`${c.kind || 'Check'}${c.reference ? ` #${c.reference}` : ''}`)}`
+    + `${c.client ? `<br><span class="tag">${escapeHtml(c.client)}</span>` : ''}</td><td class="r">${money(Number(c.amount) || 0)}</td></tr>`).join('');
+  const deposit = r.title === 'Bank Deposit';
+  printReceiptPage(r.title, `
+    <p><b>${deposit ? 'Dropped off by' : 'Handed off by'}:</b> ${escapeHtml(r.from)}</p>
+    ${r.to ? `<p><b>Handed to:</b> ${escapeHtml(r.to)}</p>` : ''}
+    <p><b>Date:</b> ${escapeHtml(shortDate(r.date))}</p>
+    ${deposit ? `<p><b>Deposit slip #:</b> ${r.slipNumber ? escapeHtml(r.slipNumber) : '______________'}</p>` : ''}
+    <hr>
+    <table>${itemRows}</table>
     <hr>
     <table>
-      ${rows}
+      <tr><td>Cash</td><td class="r">${money(r.cash)}</td></tr>
+      ${checkRows}
       <tr class="total"><td>Total cash &amp; checks</td><td class="r">${money(total)}</td></tr>
     </table>
     <hr>
-    <p class="small">Dropped off by: ______________________</p>
-    <p class="small">Received by: ________________________</p>
-    <p class="small">Date: ______________</p>
+    <p class="small">${deposit ? 'Dropped off by' : 'Handed off by'}: ______________________</p>
+    <p class="small">${deposit ? 'Bank receipt attached' : 'Received by'}: ________________________</p>
   `, onError);
 };

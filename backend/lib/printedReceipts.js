@@ -53,4 +53,4 @@ const keepPrintedMarks = (saved, next) => {
     return next.map(e => (printedIds.has(clientIdOf(e)) ? { ...e, receiptPrinted: true } : e));
 };
 
-module.exports = { cashEntries, cashDiscardProblem, printedEntries, printedReceiptProblem, keepPrintedMarks };
+module.exports = { nameOf, cashEntries, cashDiscardProblem, printedEntries, printedReceiptProblem, keepPrintedMarks };

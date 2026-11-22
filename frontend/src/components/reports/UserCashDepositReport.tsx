@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from 'react';
 import QuickRanges from './QuickRanges';
-import { getUserCashDeposits, setUserCashDroppedOff } from '../../api';
+import { getUserCashDeposits } from '../../api';
 import type { UserCashDepositRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
@@ -28,9 +28,10 @@ const formatDate = (ymd: string) => {
 };
 const formatWhen = (value: string) => new Date(value).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
 
-// Cash payments taken outside a group session (account payments, assessments, individual sessions) and whether each
-// was dropped off at the bank. Business Administrators see and check off every payment; everyone else sees and
-// checks off the ones they took (the server decides).
+// Cash payments taken outside a group session (account payments, assessments, individual sessions), who holds each
+// now, and whether it was dropped off at the bank. Business Administrators see every payment; everyone else sees the
+// ones they took or were handed (the server decides). Drop-offs are recorded on Money on Hand
+// (components/moneyOnHand/MoneyOnHand.tsx).
 export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmail: string; isAdmin: boolean }) {
   const employeeLabel = useEmployeeLabel();
   // "Display Name (Role)"; payments from before this was recorded have no one
@@ -39,14 +40,9 @@ export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmai
   const [to, setTo] = useState(todayLocal);
   const [statusFilter, setStatusFilter] = useState<'all' | 'held' | 'dropped'>('all');
   const [takenByFilter, setTakenByFilter] = useState('');
-  // Date given to new check-offs
-  const [dropOffDate, setDropOffDate] = useState(todayLocal);
   const [rows, setRows] = useState<UserCashDepositRow[]>([]);
   // The range the rows (or the error) were loaded for; an invalid range keeps showing the last one
   const [loaded, setLoaded] = useState<{ key: string; error: string } | null>(null);
-  const [saving, setSaving] = useState<Set<number>>(() => new Set());
-  // Shown under the payment it belongs to
-  const [rowError, setRowError] = useState<{ id: number; message: string } | null>(null);
 
   const rangeKey = from && to && from <= to ? `${from}|${to}|${userEmail}` : null;
   useEffect(() => {
@@ -83,35 +79,8 @@ export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmai
   const totalHeld = cents(heldRows.reduce((t, r) => t + cashOf(r), 0));
   const totalDropped = cents(droppedRows.reduce((t, r) => t + cashOf(r), 0));
 
-  // Non-admins can uncheck only the check-offs they made
-  const canToggle = (r: UserCashDepositRow) => isAdmin || !isDroppedOff(r) || sameEmail(r.recordedby, userEmail);
-
-  const toggleDroppedOff = async (r: UserCashDepositRow) => {
-    const id = r.transactionid;
-    const droppedOff = !isDroppedOff(r);
-    if (!droppedOff && !window.confirm(`Uncheck this deposit? The ${money(cashOf(r))} will show as held again.`)) return;
-    if (droppedOff && !dropOffDate) {
-      setRowError({ id, message: 'Enter the drop-off date above first.' });
-      return;
-    }
-    setRowError(null);
-    setSaving(prev => new Set(prev).add(id));
-    try {
-      const updated = await setUserCashDroppedOff({ transactionId: id, droppedOff, depositDate: dropOffDate, user: userEmail });
-      setRows(prev => prev.map(o => (o.transactionid === id ? updated : o)));
-    } catch (err: unknown) {
-      setRowError({ id, message: err instanceof Error ? err.message : 'Failed to update the deposit.' });
-    } finally {
-      setSaving(prev => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    }
-  };
-
   const input = 'block mt-1 h-9 bg-slate-950 border border-slate-700 rounded px-2 text-white text-xs';
-  const columns = 5;
+  const columns = 4;
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl space-y-5">
@@ -119,7 +88,7 @@ export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmai
         <div>
           <h3 className="font-semibold text-white">User Cash Deposits</h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Cash payments taken outside a group session{isAdmin ? ', by who took them' : ' that you took'}: account payments, assessments, and individual sessions. Check a payment off once its cash has been dropped off at the bank.
+            Cash payments taken outside a group session{isAdmin ? ', by who took them' : ' that you took'}: account payments, assessments, and individual sessions. Drop-offs are recorded on Money on Hand.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
@@ -145,9 +114,6 @@ export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmai
               </select>
             </label>
           )}
-          <label className="text-xs text-slate-400" title="The date given to payments you check off">Drop-Off Date
-            <input type="date" value={dropOffDate} max={todayLocal()} onChange={(e) => setDropOffDate(e.target.value)} className={input} />
-          </label>
         </div>
       </div>
 
@@ -174,7 +140,6 @@ export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmai
               <th className="p-3">Taken</th>
               <th className="p-3">Client</th>
               <th className="p-3 text-right">Cash</th>
-              <th className="p-3 text-center">Dropped Off</th>
               <th className="p-3">Status</th>
             </tr>
           </thead>
@@ -196,7 +161,6 @@ export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmai
                 {p.rows.map(r => {
                   const id = r.transactionid;
                   const dropped = isDroppedOff(r);
-                  const toggleable = canToggle(r);
                   return (
                     <tr key={id} className="hover:bg-slate-800/30 align-top">
                       <td className="p-3 pl-6 text-slate-200 whitespace-nowrap">{formatWhen(r.paidon)}</td>
@@ -206,28 +170,17 @@ export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmai
                         {r.comments && <span className="block text-[0.6875rem] text-slate-500 max-w-md truncate" title={r.comments}>{r.comments}</span>}
                       </td>
                       <td className="p-3 text-right font-semibold text-white">{money(cashOf(r))}</td>
-                      <td className="p-3 text-center">
-                        <input
-                          type="checkbox"
-                          checked={dropped}
-                          disabled={saving.has(id) || !toggleable}
-                          onChange={() => toggleDroppedOff(r)}
-                          title={toggleable
-                            ? (dropped ? 'Uncheck if this cash was not dropped off' : 'Check off once this cash is dropped off at the bank')
-                            : 'Checked off by someone else. A Business Administrator can uncheck it.'}
-                          className="h-4 w-4 rounded accent-emerald-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                        />
-                      </td>
                       <td className="p-3 text-xs">
                         {dropped ? (
                           <span className="text-slate-300">
                             <span className="text-emerald-400 font-semibold">Dropped off</span> {formatDate(r.depositdate!)}
                             {r.recordedby && <span className="text-slate-500"> · by {employeeLabel(r.recordedby)}</span>}
+                            {r.bankdepositid && <span className="text-slate-500"> · {r.slipnumber ? `slip ${r.slipnumber}` : `deposit #${r.bankdepositid}`}{r.bankchecked ? ', checked with bank' : ''}</span>}
                           </span>
                         ) : (
-                          <span className="text-amber-400 font-semibold">Holding</span>
+                          <span><span className="text-amber-400 font-semibold">Holding</span>
+                            {r.holder && !sameEmail(r.holder, r.enteredby || '') && <span className="text-amber-300/80"> · handed to {r.holdername || employeeLabel(r.holder)}</span>}</span>
                         )}
-                        {rowError?.id === id && <p className="text-red-400 mt-1">{rowError.message}</p>}
                       </td>
                     </tr>
                   );

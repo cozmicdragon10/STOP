@@ -27,7 +27,7 @@ import DeviceAccess from './components/device/DeviceAccess';
 import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import ClosedGroupNotesDialog from './components/attendance/ClosedGroupNotesDialog';
-import CashHeldPanel from './components/attendance/CashHeldPanel';
+import MoneyOnHand from './components/moneyOnHand/MoneyOnHand';
 import { balanceWord, formatBalance, formatBalanceLabeled, toDisplayBalance } from './utils/balance';
 import { applyProgramFees } from './utils/soPhases';
 import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
@@ -1626,7 +1626,7 @@ export default function App() {
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl min-w-0">
               <div>
                 <div className="flex items-center justify-between gap-2 mb-1">
-                  <h3 className="font-semibold text-white flex items-center gap-2"><ClipboardCheck size={18} className="text-blue-400" /> {groupPanelTab === 'open' ? 'Open Groups' : groupPanelTab === 'closed' ? 'Closed Groups' : 'Total Cash Deposit'}</h3>
+                  <h3 className="font-semibold text-white flex items-center gap-2"><ClipboardCheck size={18} className="text-blue-400" /> {groupPanelTab === 'open' ? 'Open Groups' : groupPanelTab === 'closed' ? 'Closed Groups' : 'Money on Hand'}</h3>
                   <div className="flex bg-slate-950 border border-slate-800 rounded-lg p-0.5">
                     {(['open', 'closed', 'cash'] as const).map(t => (
                       <button
@@ -1641,7 +1641,7 @@ export default function App() {
                   </div>
                 </div>
                 {groupPanelTab === 'cash' ? (
-                  <CashHeldPanel isAdmin={role === 'Business Administrator'} onSuccess={setSuccessMsg} onError={setError} />
+                  <MoneyOnHand userEmail={user.employeeemail} />
                 ) : groupPanelTab === 'closed' ? (
                   <>
                     <p className="text-xs text-slate-400 leading-relaxed mb-4">{role === 'Business Administrator' ? 'Recently closed group sessions.' : 'Recently closed group sessions for groups you counsel or opened.'} Select one to see who attended.</p>

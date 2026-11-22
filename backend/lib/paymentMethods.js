@@ -33,6 +33,9 @@ const paymentMethodText = (method, subtype, reference) => {
     return `${subtype || 'Other'}${ref ? ` #${ref}` : ''}`;
 };
 
+// A payment someone holds until it's dropped off (cash, or a check / money order / cashier's check)
+const isHeldPayment = (method, subtype) => method === 'Cash' || (method === 'Other' && HELD_OTHER_TYPES.includes(subtype));
+
 // SQL: a row's payment is money someone holds until it's dropped off (cash, or a check / money order / cashier's check).
 // prefix is the table alias with its dot ('a.', 'f.') or ''.
 const HELD_PAYMENT_SQL = (prefix = '') =>
@@ -40,5 +43,5 @@ const HELD_PAYMENT_SQL = (prefix = '') =>
 
 module.exports = {
     PAYMENT_METHODS, OTHER_PAYMENT_TYPES, HELD_OTHER_TYPES, ADMIN_ONLY_OTHER_TYPES,
-    paymentMethodProblem, paymentDetails, paymentMethodText, HELD_PAYMENT_SQL,
+    paymentMethodProblem, paymentDetails, paymentMethodText, isHeldPayment, HELD_PAYMENT_SQL,
 };
