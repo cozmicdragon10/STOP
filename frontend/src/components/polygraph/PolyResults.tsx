@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CheckCircle2, RotateCcw } from 'lucide-react';
+import { CheckCircle2, RotateCcw, Search } from 'lucide-react';
 import { deletePolygraphSlot, submitPolygraphResult } from '../../api';
 import { POLY_INCENTIVE_OVERRIDE_RESULTS, cancelReservationHint, cancelReservationLabel } from '../../utils/polygraph';
 import { formatDisplayTime, getLocalDateString } from '../../utils/dates';
@@ -48,6 +48,16 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
   const [resIncentiveOverride, setResIncentiveOverride] = useState(false);
   const [resNotes, setResNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState('');
+
+  const scheduledText = (slot: AssignedPolySlot) => `${new Date(slot.date).toLocaleDateString()} @ ${formatDisplayTime(slot.time)}`;
+  // Every word typed must match the client, type, location, scheduled date/time, or examiner
+  const words = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const visibleSlots = words.length === 0 ? slots : slots.filter(slot => {
+    const haystack = [slot.assignedClientName, slot.type, slot.location, scheduledText(slot), examinerName(slot.polygrapher || '')]
+      .join(' ').toLowerCase();
+    return words.every(w => haystack.includes(w));
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,6 +109,21 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
           <p className="text-xs text-slate-500 mt-1">Assign clients to open slots under the Poly Schedule tab first.</p>
         </div>
       ) : (
+        <>
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search client, type, location, date, or examiner..."
+            aria-label="Search pending polygraph results"
+            className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 pl-9 text-white text-xs placeholder-slate-500"
+          />
+        </div>
+        {visibleSlots.length === 0 ? (
+          <p className="text-sm text-slate-400 text-center py-6">No appointments match "{search.trim()}".</p>
+        ) : (
         <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-x-auto">
           <table className="stack-table w-full text-left border-collapse text-xs whitespace-nowrap">
             <thead>
@@ -111,7 +136,7 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800 text-sm">
-              {slots.map(slot => (
+              {visibleSlots.map(slot => (
                 <tr
                   key={slot.slotid}
                   onClick={() => { setSelectedId(slot.slotid); setResIncentiveContinued(false); setResIncentiveOverride(false); }}
@@ -119,13 +144,15 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
                   <td className="p-3 font-medium text-white">{slot.assignedClientName}</td>
                   <td data-label="Type" className="p-3"><span className="bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded text-xs">{slot.type || 'Polygraph'}</span></td>
                   <td data-label="Location" className="p-3 text-slate-400">{slot.location}</td>
-                  <td data-label="Scheduled" className="p-3 text-slate-300">{new Date(slot.date).toLocaleDateString()} @ {formatDisplayTime(slot.time)}</td>
+                  <td data-label="Scheduled" className="p-3 text-slate-300">{scheduledText(slot)}</td>
                   <td data-label="Examiner" className="p-3 text-slate-300">{examinerName(slot.polygrapher || '')}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        )}
+        </>
       )}
 
       {selected && (
