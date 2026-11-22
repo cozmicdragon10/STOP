@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Mail, Pencil, Phone, PlusCircle, Search, Trash2, UserCheck } from 'lucide-react';
+import { Mail, MapPin, Pencil, Phone, PlusCircle, Search, Trash2, UserCheck } from 'lucide-react';
 import { EditConflictError, deleteSupervisingAgent, getClients, getSupervisingAgents, saveSupervisingAgent } from '../../api';
 import type { Client, SupervisingAgent } from '../../api';
 import { usePagination } from '../../hooks/usePagination';
@@ -7,6 +7,8 @@ import Pagination from '../Pagination';
 import { scrollToStackedPanel } from '../../utils/layout';
 import { idText } from '../../utils/clients';
 import { errorMessage } from '../../utils/errors';
+import { AGENT_TYPE_SUGGESTIONS, NO_TYPE, agentKey, distinctValues, filterAgentRows } from '../../utils/agents';
+import type { DirectoryFilter } from '../../utils/agents';
 
 interface Props {
   // Current clients (not discharged); the selected agent's discharged clients are loaded on their own
@@ -30,15 +32,17 @@ interface AgentRow {
   clients: Client[];
 }
 
-// Clients link to an agent by name; case and surrounding spaces are ignored (the server matches the same way)
-const agentKey = (name: string | null | undefined) => String(name ?? '').trim().toLowerCase();
+const emptyForm = { name: '', phone: '', email: '', agentType: '', location: '' };
 
-const emptyForm = { name: '', phone: '', email: '' };
+// "Type · Location" for an agent, or '' when neither is set
+const typeAndLocation = (a: SupervisingAgent | null) => [a?.agenttype, a?.location].filter(Boolean).join(' · ');
 
 export default function SupervisingAgentsTab({ clients, user, dischargeStatuses, onOpenClient, onSuccess, onError, onClientsChanged, onAgentsLoaded }: Props) {
   const [agents, setAgents] = useState<SupervisingAgent[]>([]);
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
+  const [directoryFilter, setDirectoryFilter] = useState<DirectoryFilter>('all');
+  const [typeFilter, setTypeFilter] = useState('');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   // The selected agent's clients; on phones this sits below the whole agent list
   const detailPanelRef = useRef<HTMLDivElement>(null);
@@ -92,11 +96,14 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
     return Array.from(byKey.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [agents, clients]);
 
-  const term = search.trim().toLowerCase();
-  const visibleRows = rows.filter(r => !term || [r.name, r.agent?.phone, r.agent?.email].some(v => String(v ?? '').toLowerCase().includes(term)));
+  const visibleRows = filterAgentRows(rows, { search, directory: directoryFilter, type: typeFilter });
   const unlistedCount = rows.filter(r => !r.agent).length;
-  // 50 agents per page; a new search starts again on page 1
-  const pager = usePagination(visibleRows, term);
+  const typesInUse = useMemo(() => distinctValues(agents.map(a => a.agenttype)), [agents]);
+  const typeOptions = useMemo(() => distinctValues([...AGENT_TYPE_SUGGESTIONS, ...typesInUse]), [typesInUse]);
+  const locationOptions = useMemo(() => distinctValues(agents.map(a => a.location)), [agents]);
+  const filtering = search.trim() !== '' || directoryFilter !== 'all' || typeFilter !== '';
+  // 50 agents per page; a new search or filter starts again on page 1
+  const pager = usePagination(visibleRows, `${search.trim().toLowerCase()}|${directoryFilter}|${typeFilter}`);
 
   const selected = rows.find(r => r.key === selectedKey) || null;
   const selectedName = selected?.name;
@@ -120,7 +127,10 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
     ...dischargedHere,
     ...(dischargedLoaded?.key === selectedKey ? dischargedLoaded.clients.filter(c => !dischargedHereIds.has(c.clientid)) : []),
   ];
-  const selectedVisible = (showDischarged ? [...selectedCurrent, ...selectedDischarged] : selectedCurrent)
+  // Active clients are shown by default; inactive (and other not-yet-discharged statuses) join discharged behind the checkbox
+  const selectedActive = selectedCurrent.filter(c => c.programstatus === 'Active');
+  const selectedInactive = selectedCurrent.filter(c => c.programstatus !== 'Active');
+  const selectedVisible = (showDischarged ? [...selectedCurrent, ...selectedDischarged] : selectedActive)
     .slice()
     .sort((a, b) => `${a.lastname}, ${a.firstname}`.localeCompare(`${b.lastname}, ${b.firstname}`));
 
@@ -128,7 +138,10 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
     if (row?.agent) {
       setEditingId(row.agent.agentid);
       setEditingOriginal(row.agent);
-      setForm({ name: row.agent.name, phone: row.agent.phone || '', email: row.agent.email || '' });
+      setForm({
+        name: row.agent.name, phone: row.agent.phone || '', email: row.agent.email || '',
+        agentType: row.agent.agenttype || '', location: row.agent.location || '',
+      });
     } else {
       setEditingId(0);
       setForm({ ...emptyForm, name: row?.name || '' });
@@ -144,7 +157,10 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
     e.preventDefault();
     setSaving(true);
     try {
-      const expected = editingId && editingOriginal ? { name: editingOriginal.name, phone: editingOriginal.phone, email: editingOriginal.email } : undefined;
+      const expected = editingId && editingOriginal ? {
+        name: editingOriginal.name, phone: editingOriginal.phone, email: editingOriginal.email,
+        agenttype: editingOriginal.agenttype, location: editingOriginal.location,
+      } : undefined;
       const { agent: saved, clientsRenamed } = await saveSupervisingAgent(editingId || null, { ...form, user: user.employeeemail, expected });
       if (clientsRenamed > 0) {
         onSuccess(`Agent updated. ${clientsRenamed} client record(s) moved to the new name.`);
@@ -204,12 +220,44 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, phone, or email..."
+              placeholder="Search by name, type, location, phone, or email..."
               className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 pl-9 text-white text-xs placeholder-slate-500"
             />
           </div>
-          {unlistedCount > 0 && canEdit && (
-            <p className="text-xs text-amber-400">{unlistedCount} agent name(s) on client records aren't in the directory yet. They're marked "Not in directory" below.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex rounded border border-slate-700 overflow-hidden text-xs" role="group" aria-label="Directory filter">
+              {([['all', 'All'], ['listed', 'In directory'], ['missing', `Not in directory (${unlistedCount})`]] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setDirectoryFilter(value)}
+                  aria-pressed={directoryFilter === value}
+                  className={`px-3 py-1.5 font-semibold ${directoryFilter === value
+                    ? (value === 'missing' ? 'bg-amber-500/20 text-amber-300' : 'bg-blue-600 text-white')
+                    : 'bg-slate-950 text-slate-300 hover:bg-slate-800'}`}
+                >{label}</button>
+              ))}
+            </div>
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              aria-label="Agent type filter"
+              className="bg-slate-950 border border-slate-700 rounded px-2 py-1.5 text-xs text-white"
+            >
+              <option value="">All types</option>
+              {typesInUse.map(t => <option key={t} value={t}>{t}</option>)}
+              <option value={NO_TYPE}>No type set</option>
+            </select>
+            {filtering && (
+              <button type="button" onClick={() => { setSearch(''); setDirectoryFilter('all'); setTypeFilter(''); }} className="text-xs text-blue-400 hover:text-blue-300">Clear</button>
+            )}
+            {filtering && <span className="text-xs text-slate-500 ml-auto">{visibleRows.length} of {rows.length}</span>}
+          </div>
+          {unlistedCount > 0 && canEdit && directoryFilter !== 'missing' && (
+            <p className="text-xs text-amber-400">
+              {unlistedCount} agent name(s) on client records aren't in the directory yet.{' '}
+              <button type="button" onClick={() => setDirectoryFilter('missing')} className="underline hover:text-amber-300">Show only those</button>
+            </p>
           )}
         </div>
 
@@ -220,6 +268,11 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
               <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Full Name" className="bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm" required />
               <input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="Phone Number" className="bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm" />
               <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="Email" className="bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm" />
+              {/* Pick a listed type or location, or type a new one */}
+              <input type="text" list="agent-type-options" value={form.agentType} onChange={(e) => setForm({ ...form, agentType: e.target.value })} placeholder="Type (Probation, DHS...)" aria-label="Agent type" className="bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm" />
+              <input type="text" list="agent-location-options" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Location (office, county...)" aria-label="Location" className="bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-sm md:col-span-2" />
+              <datalist id="agent-type-options">{typeOptions.map(t => <option key={t} value={t} />)}</datalist>
+              <datalist id="agent-location-options">{locationOptions.map(l => <option key={l} value={l} />)}</datalist>
             </div>
             {editingId !== 0 && (
               <p className="text-xs text-slate-500">Changing the name also updates every client assigned under the old name.</p>
@@ -236,7 +289,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
         {/* Phones: one compact card per agent. The table's columns don't fit, and a call or email is usually why they're here. */}
         <ul className="md:hidden divide-y divide-slate-800">
           {pager.pageItems.map(r => {
-            const current = r.clients.filter(c => !isDischarged(c)).length;
+            const current = r.clients.filter(c => c.programstatus === 'Active').length;
             return (
               <li
                 key={r.key}
@@ -246,7 +299,8 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium text-white">{r.name}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">{current} client{current === 1 ? '' : 's'}</p>
+                    {typeAndLocation(r.agent) && <p className="text-xs text-slate-300 mt-0.5">{typeAndLocation(r.agent)}</p>}
+                    <p className="text-xs text-slate-400 mt-0.5">{current} active client{current === 1 ? '' : 's'}</p>
                     {!r.agent && <span className="mt-1 inline-block bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[0.625rem] font-semibold">Not in directory</span>}
                   </div>
                   {canEdit && (
@@ -262,7 +316,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
             );
           })}
           {visibleRows.length === 0 && (
-            <li className="p-6 text-center text-slate-500 text-sm">{rows.length === 0 ? 'No supervising agents yet.' : 'No agents match your search.'}</li>
+            <li className="p-6 text-center text-slate-500 text-sm">{rows.length === 0 ? 'No supervising agents yet.' : 'No agents match your search or filters.'}</li>
           )}
         </ul>
         <div className="hidden md:block overflow-x-auto">
@@ -270,15 +324,17 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
             <thead>
               <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
                 <th className="p-3">Name</th>
+                <th className="p-3">Type</th>
+                <th className="p-3">Location</th>
                 <th className="p-3">Phone</th>
                 <th className="p-3">Email</th>
-                <th className="p-3 text-right">Clients</th>
+                <th className="p-3 text-right">Active Clients</th>
                 {canEdit && <th className="p-3"></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800 text-sm">
               {pager.pageItems.map(r => {
-                const current = r.clients.filter(c => !isDischarged(c)).length;
+                const current = r.clients.filter(c => c.programstatus === 'Active').length;
                 return (
                   <tr
                     key={r.key}
@@ -289,6 +345,8 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
                       {r.name}
                       {!r.agent && <span className="ml-2 inline-block whitespace-nowrap bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[0.625rem] font-semibold">Not in directory</span>}
                     </td>
+                    <td className="p-3 text-slate-300 text-xs">{r.agent?.agenttype || <span className="text-slate-600">—</span>}</td>
+                    <td className="p-3 text-slate-300 text-xs">{r.agent?.location || <span className="text-slate-600">—</span>}</td>
                     <td className="p-3 text-slate-300 text-xs whitespace-nowrap">{r.agent?.phone ? <a href={`tel:${r.agent.phone}`} onClick={(e) => e.stopPropagation()} className="hover:text-blue-400">{r.agent.phone}</a> : <span className="text-slate-600">—</span>}</td>
                     <td className="p-3 text-slate-300 text-xs min-w-[12rem]">{r.agent?.email ? <a href={`mailto:${r.agent.email}`} onClick={(e) => e.stopPropagation()} className="hover:text-blue-400 break-all">{r.agent.email}</a> : <span className="text-slate-600">—</span>}</td>
                     <td className="p-3 text-right"><span className="bg-slate-800 text-slate-200 px-2 py-0.5 rounded font-semibold text-xs">{current}</span></td>
@@ -311,7 +369,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
               })}
               {visibleRows.length === 0 && (
                 <tr>
-                  <td colSpan={canEdit ? 5 : 4} className="p-6 text-center text-slate-500 text-sm">{rows.length === 0 ? 'No supervising agents yet.' : 'No agents match your search.'}</td>
+                  <td colSpan={canEdit ? 7 : 6} className="p-6 text-center text-slate-500 text-sm">{rows.length === 0 ? 'No supervising agents yet.' : 'No agents match your search or filters.'}</td>
                 </tr>
               )}
             </tbody>
@@ -330,14 +388,20 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
           <>
             <div className="border-b border-slate-800 pb-3 space-y-1">
               <h2 className="text-lg font-bold text-white">{selected.name}</h2>
+              {selected.agent?.agenttype && <p className="text-xs font-semibold text-slate-300">{selected.agent.agenttype}</p>}
+              {selected.agent?.location && <p className="text-xs text-slate-300 flex items-center gap-2"><MapPin size={12} className="text-slate-500" />{selected.agent.location}</p>}
               {selected.agent?.phone && <p className="text-xs text-slate-300 flex items-center gap-2"><Phone size={12} className="text-slate-500" /><a href={`tel:${selected.agent.phone}`} className="max-md:inline-block max-md:py-3 hover:text-blue-400">{selected.agent.phone}</a></p>}
               {selected.agent?.email && <p className="text-xs text-slate-300 flex items-center gap-2"><Mail size={12} className="text-slate-500" /><a href={`mailto:${selected.agent.email}`} className="max-md:inline-block max-md:py-3 hover:text-blue-400 break-all">{selected.agent.email}</a></p>}
-              <p className="text-xs text-slate-400">{selectedCurrent.length} assigned client(s){selectedDischarged.length > 0 ? `, ${selectedDischarged.length} discharged` : ''}</p>
+              <p className="text-xs text-slate-400">
+                {selectedActive.length} active client(s)
+                {selectedInactive.length > 0 ? `, ${selectedInactive.length} inactive` : ''}
+                {selectedDischarged.length > 0 ? `, ${selectedDischarged.length} discharged` : ''}
+              </p>
             </div>
-            {selectedDischarged.length > 0 && (
+            {(selectedInactive.length > 0 || selectedDischarged.length > 0) && (
               <label className="flex items-center gap-2 text-xs text-slate-300">
                 <input type="checkbox" checked={showDischarged} onChange={(e) => setShowDischarged(e.target.checked)} className="rounded accent-blue-500" />
-                Include discharged clients
+                Include inactive and discharged clients
               </label>
             )}
             <div className="space-y-2 max-h-[60vh] overflow-y-auto">
@@ -358,7 +422,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
                 </button>
               ))}
               {selectedVisible.length === 0 && (
-                <p className="text-center text-slate-500 text-sm py-6">No clients assigned.</p>
+                <p className="text-center text-slate-500 text-sm py-6">{showDischarged ? 'No clients assigned.' : 'No active clients.'}</p>
               )}
             </div>
           </>

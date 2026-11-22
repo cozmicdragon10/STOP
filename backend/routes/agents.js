@@ -7,10 +7,14 @@ const { staleFields, staleMessage } = require('../lib/editConflicts');
 const router = express.Router();
 
 const AGENT_EDIT_ROLES = ['Business Administrator', 'Office Admin'];
+const AGENT_COLUMNS = 'AgentId, Name, Phone, Email, AgentType, Location';
+
+// A trimmed text field, or null when blank
+const optionalText = (value) => String(value ?? '').trim() || null;
 
 router.get('/api/agents', async (req, res) => {
     try {
-        const result = await pool.query('SELECT AgentId, Name, Phone, Email FROM SupervisingAgents ORDER BY Name ASC');
+        const result = await pool.query(`SELECT ${AGENT_COLUMNS} FROM SupervisingAgents ORDER BY Name ASC`);
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -19,7 +23,7 @@ router.get('/api/agents', async (req, res) => {
 
 router.post('/api/agents', async (req, res) => {
     try {
-        const { name, phone, email, user } = req.body;
+        const { name, phone, email, agentType, location, user } = req.body;
         if (!AGENT_EDIT_ROLES.includes(await activeRoleFor(user))) {
             return res.status(403).json({ error: 'Only Business Administrators and Office Admins can add supervising agents.' });
         }
@@ -27,9 +31,9 @@ router.post('/api/agents', async (req, res) => {
             return res.status(400).json({ error: 'A name is required.' });
         }
         const result = await pool.query(
-            `INSERT INTO SupervisingAgents (Name, Phone, Email, CreatedBy) VALUES ($1, $2, $3, $4)
-             RETURNING AgentId, Name, Phone, Email`,
-            [name.trim(), phone?.trim() || null, email?.trim() || null, user]
+            `INSERT INTO SupervisingAgents (Name, Phone, Email, AgentType, Location, CreatedBy) VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING ${AGENT_COLUMNS}`,
+            [name.trim(), optionalText(phone), optionalText(email), optionalText(agentType), optionalText(location), user]
         );
         await logAction(user, 'Agent Added', `Added supervising agent ${name.trim()}.`, 'Admin');
         res.status(201).json(result.rows[0]);
@@ -45,7 +49,7 @@ router.put('/api/agents/:id', async (req, res) => {
     try {
         const { id } = req.params;
         // expected: the agent as the form loaded it; a change made since then refuses the save (lib/editConflicts.js)
-        const { name, phone, email, user, expected } = req.body;
+        const { name, phone, email, agentType, location, user, expected } = req.body;
         if (!AGENT_EDIT_ROLES.includes(await activeRoleFor(user))) {
             return res.status(403).json({ error: 'Only Business Administrators and Office Admins can edit supervising agents.' });
         }
@@ -55,21 +59,25 @@ router.put('/api/agents/:id', async (req, res) => {
         const newName = name.trim();
 
         await db.query('BEGIN');
-        const before = await db.query('SELECT Name, Phone, Email FROM SupervisingAgents WHERE AgentId = $1 FOR UPDATE', [id]);
+        const before = await db.query('SELECT Name, Phone, Email, AgentType, Location FROM SupervisingAgents WHERE AgentId = $1 FOR UPDATE', [id]);
         if (before.rows.length === 0) {
             await db.query('ROLLBACK');
             return res.status(404).json({ error: 'Supervising agent not found.' });
         }
-        const stale = staleFields(expected, before.rows[0], [['name', 'Name'], ['phone', 'Phone'], ['email', 'Email']]);
+        const stale = staleFields(expected, before.rows[0],
+            [['name', 'Name'], ['phone', 'Phone'], ['email', 'Email'], ['agenttype', 'Type'], ['location', 'Location']]);
         if (stale.length) {
             await db.query('ROLLBACK');
             return res.status(409).json({ error: staleMessage('this supervising agent', stale, before.rows[0]), conflict: true });
         }
         const oldName = before.rows[0].name;
         const result = await db.query(
-            `UPDATE SupervisingAgents SET Name = $1, Phone = $2, Email = $3 WHERE AgentId = $4
-             RETURNING AgentId, Name, Phone, Email`,
-            [newName, phone?.trim() || null, email?.trim() || null, id]
+            `UPDATE SupervisingAgents SET Name = $1, Phone = $2, Email = $3, AgentType = $4, Location = $5 WHERE AgentId = $6
+             RETURNING ${AGENT_COLUMNS}`,
+            // A screen that doesn't send type or location (an older open tab) leaves them as they are
+            [newName, optionalText(phone), optionalText(email),
+                agentType === undefined ? before.rows[0].agenttype : optionalText(agentType),
+                location === undefined ? before.rows[0].location : optionalText(location), id]
         );
 
         let clientsRenamed = 0;

@@ -2043,6 +2043,9 @@ export interface SupervisingAgent {
     name: string;
     phone: string | null;
     email: string | null;
+    // Kind of agent (Probation, Parole, DHS, ...) and where they work; free text, blank when unknown
+    agenttype: string | null;
+    location: string | null;
 }
 
 export async function getSupervisingAgents(): Promise<SupervisingAgent[]> {
@@ -2053,7 +2056,7 @@ export async function getSupervisingAgents(): Promise<SupervisingAgent[]> {
 // Business Administrators and Office Admins only; the server checks the role. Renaming an agent moves their clients
 // to the new name; clientsRenamed counts them (always 0 for a new agent).
 // expected (edits): the agent as the form loaded it; throws EditConflictError when it was changed on another screen since
-export async function saveSupervisingAgent(agentId: number | null, data: { name: string; phone: string; email: string; user: string; expected?: Record<string, unknown> }): Promise<{ agent: SupervisingAgent; clientsRenamed: number }> {
+export async function saveSupervisingAgent(agentId: number | null, data: { name: string; phone: string; email: string; agentType: string; location: string; user: string; expected?: Record<string, unknown> }): Promise<{ agent: SupervisingAgent; clientsRenamed: number }> {
     const res = await apiFetch(agentId ? `${API_BASE}/agents/${agentId}` : `${API_BASE}/agents`, {
         method: agentId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },

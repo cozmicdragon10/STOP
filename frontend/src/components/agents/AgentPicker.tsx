@@ -64,6 +64,7 @@ export default function AgentPicker({ value, onChange, agents, className }: Prop
               className={`px-3 py-2 cursor-pointer text-sm ${i === highlight ? 'bg-blue-500/15 text-white' : 'text-slate-300'}`}
             >
               <p className="font-medium">{a.name}</p>
+              {(a.agenttype || a.location) && <p className="text-xs text-slate-400">{[a.agenttype, a.location].filter(Boolean).join(' · ')}</p>}
               {(a.phone || a.email) && <p className="text-xs text-slate-500">{[a.phone, a.email].filter(Boolean).join(' · ')}</p>}
             </li>
           ))}
