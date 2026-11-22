@@ -11,8 +11,10 @@ $ErrorActionPreference = 'Stop'
 $taskName = 'STOP Server'
 $script = Join-Path $PSScriptRoot 'run-server.ps1'
 
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-    -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`""
+# conhost --headless runs it with no window at all. On Windows 11, -WindowStyle Hidden alone still opens a visible
+# Windows Terminal window, and closing that window stops the server.
+$action = New-ScheduledTaskAction -Execute 'conhost.exe' `
+    -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`""
 # No time limit; if the watchdog itself ever stops, Task Scheduler starts it again every minute
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 9999 `
     -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
