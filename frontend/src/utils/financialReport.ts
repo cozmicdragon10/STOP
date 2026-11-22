@@ -121,7 +121,7 @@ export function summarizeFinancials(data: FinancialSummaryData, from: string, to
       addTo(charges, `${r.type} fees`, r.count, fees);
       m.charged = cents(m.charged + fees);
     }
-    if (r.fundedby) addTo(funded, `Assessments billed to ${r.fundedby === 'DHS Invoice' ? 'DHS (invoice)' : 'vouchers'}`, r.count, num(r.fundedprice));
+    if (r.fundedby) addTo(funded, `Assessments billed to ${r.fundedby === 'DHS Voucher' ? 'DHS vouchers' : 'invoices'}`, r.count, num(r.fundedprice));
     const imported = num(r.importedpaid);
     if (imported !== 0) {
       pay(OLD_SYSTEM_LABEL, '', 0, imported);

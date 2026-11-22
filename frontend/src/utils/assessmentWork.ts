@@ -20,14 +20,14 @@ export const worksOnAssessment = (viewer: { role?: string; displayname?: string 
   return !!viewer.displayname && sameName(row.provider, viewer.displayname);
 };
 
-// A Business Administrator can begin an assessment without payment when one of these covers it: the client isn't
-// charged, and only a past due balance has to be paid first
-export const FUNDING_SOURCES = ['DHS Invoice', 'Voucher'] as const;
+// A Business Administrator can begin an assessment without paying its fee up front when one of these will pay for it:
+// the fee is still charged to the client's account, and only a past due balance has to be paid first
+export const FUNDING_SOURCES = ['DHS Voucher', 'Invoice'] as const;
 export type FundingSource = typeof FUNDING_SOURCES[number];
 export const FUNDING_ROLE = 'Business Administrator';
 
 // What has to be paid to begin: the fee and any past due balance (stored sign: positive = owes), less any credit.
-// With a funding source the fee isn't charged, so only the past due balance is due. maxOwed: a Max Debt Override lets
+// With a funding source the fee goes on the account unpaid, so only the past due balance is due. maxOwed: a Max Debt Override lets
 // the client begin owing up to that much afterwards.
 export const amountDueToBegin = (balance: number | string | null | undefined, fee: number, fundedBy: string | null = null, maxOwed: number | string | null | undefined = 0) =>
   Math.max(0, cents(Number(balance || 0) + (fundedBy || !Number.isFinite(fee) ? 0 : fee) - Math.max(0, Number(maxOwed) || 0)));

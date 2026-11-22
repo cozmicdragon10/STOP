@@ -107,15 +107,16 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
   const feeNum = isAdmin ? Number(fee) : (shownFee ?? 0);
   const paymentNum = Number(payment || 0);
   const balance = Number(client?.accountbalance || 0);
-  // Business Administrators can begin on a DHS invoice or voucher: the fee isn't charged, a past due balance still is
+  // Business Administrators can begin on a DHS voucher or invoice: the fee is charged to the account but needn't be paid
+  // to begin; a past due balance still has to be paid
   const canFund = user.role === FUNDING_ROLE;
   const [fundedBy, setFundedBy] = useState<FundingSource | null>(null);
   const [fundingNote, setFundingNote] = useState('');
-  const charged = fundedBy ? 0 : (Number.isFinite(feeNum) ? feeNum : 0);
+  const charged = Number.isFinite(feeNum) ? feeNum : 0;
   const maxOwed = Number(client?.maxowed) || 0;
   const due = amountDueToBegin(balance, feeNum, fundedBy, maxOwed);
   const covers = Number.isFinite(paymentNum) && paymentNum + 0.005 >= due;
-  // Nothing to collect (credit, a DHS invoice or voucher, or a Max Debt Override covers it): no payment box
+  // Nothing to collect (credit, a DHS voucher or invoice, or a Max Debt Override covers it): no payment box
   const needsPaymentBox = due > 0;
   const confirmed = !needsPaymentBox || (paymentConfirmed && covers);
   const balanceAfter = cents(balance + charged - (Number.isFinite(paymentNum) ? paymentNum : 0));
@@ -181,7 +182,7 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
         payment: cents(paymentNum), provider: provider.trim(), comments: firstNote.trim(), paymentComments: paymentComments.trim(),
         paymentConfirmed: confirmed, fundedBy, fundingNote: fundingNote.trim(), user: user.employeeemail,
       });
-      onBegun(res.attendanceId, `${sessionType!.name} begun for ${client!.lastname}, ${client!.firstname}${fundedBy ? ` on a ${fundedBy} (not charged to the client)` : ''}. New balance ${formatBalance(res.newBalance)}.`);
+      onBegun(res.attendanceId, `${sessionType!.name} begun for ${client!.lastname}, ${client!.firstname}${fundedBy ? ` on a ${fundedBy} (fee charged to the client's account)` : ''}. New balance ${formatBalance(res.newBalance)}.`);
     } catch (err) {
       setError(errorMessage(err, 'Failed to begin the assessment.'));
     } finally {
@@ -316,11 +317,7 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
             ))}
             <div className="border-t border-slate-800 my-2" />
             <div className="flex justify-between"><span className="text-slate-400">Current balance</span><span className={toDisplayBalance(balance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatBalance(balance)}</span></div>
-            {fundedBy ? (
-              <div className="flex justify-between gap-4"><span className="text-slate-400">Price ({money(Number.isFinite(feeNum) ? feeNum : 0)})</span><span className="text-sky-300 text-right">Billed to {fundedBy}, not charged</span></div>
-            ) : (
-              <div className="flex justify-between"><span className="text-slate-400">Price</span><span className="text-red-400">-{money(feeNum)}</span></div>
-            )}
+            <div className="flex justify-between gap-4"><span className="text-slate-400">Price{fundedBy ? ` (billed to ${fundedBy})` : ''}</span><span className="text-red-400">-{money(Number.isFinite(feeNum) ? feeNum : 0)}</span></div>
             <div className="flex justify-between"><span className="text-slate-400">Payment (Cash)</span><span className="text-emerald-400">+{money(Number.isFinite(paymentNum) ? paymentNum : 0)}</span></div>
             <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="font-semibold text-slate-300">Balance after</span><span className={`font-bold ${toDisplayBalance(balanceAfter) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(balanceAfter)}</span></div>
           </div>
@@ -329,7 +326,7 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
             <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3 text-sm">
               <div>
                 <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Who Pays for the Assessment</p>
-                <p className="text-[0.6875rem] text-slate-500">Business Administrators only. A DHS invoice or voucher begins it without charging the client; any past due balance is still paid.</p>
+                <p className="text-[0.6875rem] text-slate-500">Business Administrators only. A DHS voucher or invoice lets it begin without paying the fee first. The fee is still charged to the client's account; any past due balance is still paid.</p>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {([null, ...FUNDING_SOURCES] as (FundingSource | null)[]).map(f => (
@@ -354,7 +351,7 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
               <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Amount Due to Begin</p>
               <p className="text-white text-lg font-bold">{money(due)}</p>
               <p className="text-xs text-slate-500">
-                {fundedBy ? `${sessionType?.name} billed to ${fundedBy}` : `${sessionType?.name} ${money(feeNum)}`}
+                {fundedBy ? `${sessionType?.name} billed to ${fundedBy} (charged to the account)` : `${sessionType?.name} ${money(feeNum)}`}
                 {balance > 0 ? ` + past due balance ${money(balance)}` : ''}{balance < 0 && !fundedBy ? ` − account credit ${money(-balance)}` : ''}
                 {maxOwed > 0 ? ` − Max Debt Override ${money(maxOwed)} (may owe up to this after it begins)` : ''}
               </p>
@@ -391,7 +388,7 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
               </label>
             ) : (
               <p className="text-xs text-sky-300">
-                Nothing to collect: {fundedBy ? `the ${fundedBy} covers the ${sessionType?.name}` : balance < 0 && balance + feeNum <= 0 ? 'the account credit covers it' : 'it is within the Max Debt Override'}. A payment is optional.
+                Nothing to collect: {fundedBy ? `the ${sessionType?.name} is billed to the ${fundedBy} and charged to the client's account` : balance < 0 && balance + feeNum <= 0 ? 'the account credit covers it' : 'it is within the Max Debt Override'}. A payment is optional.
               </p>
             )}
             <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5">Once the assessment is begun the payment is not refunded, whatever the results.</p>

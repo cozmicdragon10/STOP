@@ -171,7 +171,7 @@ test('assessment rules match: who works on one, what is due to begin, the paperw
     assert.equal(browser.FUNDING_ROLE, server.FUNDING_ROLE);
     for (const balance of [-500, -20, 0, 0.01, 50, '75.50', null]) {
         for (const fee of [0, 40, 150.5]) {
-            for (const funded of [null, 'DHS Invoice']) {
+            for (const funded of [null, 'Invoice']) {
                 for (const maxOwed of [0, 75, '200.00']) assert.equal(browser.amountDueToBegin(balance, fee, funded, maxOwed), server.amountDueToBegin(balance, fee, funded, maxOwed), `balance ${balance} fee ${fee} ${funded} ${maxOwed}`);
             }
         }

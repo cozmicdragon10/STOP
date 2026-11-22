@@ -22,13 +22,13 @@ const worksOnAssessment = (viewer, row) => {
     return !!viewer.displayname && sameName(row?.provider, viewer.displayname);
 };
 
-// A Business Administrator can begin an assessment without payment when one of these covers it. The client is not
-// charged; any past due balance still has to be paid first.
-const FUNDING_SOURCES = ['DHS Invoice', 'Voucher'];
+// A Business Administrator can begin an assessment without paying its fee up front when one of these will pay for it.
+// The fee is still charged to the client's account; only any past due balance has to be paid first.
+const FUNDING_SOURCES = ['DHS Voucher', 'Invoice'];
 const FUNDING_ROLE = 'Business Administrator';
 
 // What has to be paid to begin: the fee and any past due balance (stored sign: positive = owes), less any credit.
-// With a funding source the fee isn't charged, so only the past due balance is due. maxOwed: a Max Debt Override lets
+// With a funding source the fee goes on the account unpaid, so only the past due balance is due. maxOwed: a Max Debt Override lets
 // the client begin owing up to that much afterwards.
 const amountDueToBegin = (balance, fee, fundedBy = null, maxOwed = 0) =>
     Math.max(0, cents(Number(balance || 0) + (fundedBy ? 0 : Number(fee || 0)) - Math.max(0, Number(maxOwed) || 0)));
@@ -39,19 +39,19 @@ const beginPaymentProblem = ({ balance, fee, payment, paymentConfirmed, fundedBy
     if (cents(payment) + 0.005 < due) {
         const limit = Number(maxOwed) > 0 ? ` Their Max Debt Override lets them owe up to $${Number(maxOwed).toFixed(2)} after it begins.` : '';
         return (fundedBy
-            ? `${clientName} needs to pay $${due.toFixed(2)} of the past due balance before the assessment can begin. The ${fundedBy} covers only the ${typeName}.`
+            ? `${clientName} needs to pay $${due.toFixed(2)} of the past due balance before the assessment can begin. The ${fundedBy} pays only for the ${typeName}.`
             : `${clientName} needs to pay $${due.toFixed(2)} (the ${typeName}${Number(balance || 0) > 0 ? ' and the past due balance' : ''}) before the assessment can begin.`) + limit;
     }
-    // Nothing to collect (credit, a DHS invoice or voucher, or a Max Debt Override covers it): no payment box
+    // Nothing to collect (credit, a DHS voucher or invoice, or a Max Debt Override covers it): no payment box
     if (paymentConfirmed !== true && due > 0) return 'Check off that the payment was received.';
     return null;
 };
 
-// Why the assessment can't begin on a DHS invoice or voucher, or null (none chosen is fine)
+// Why the assessment can't begin on a DHS voucher or invoice, or null (none chosen is fine)
 const fundingProblem = ({ fundedBy, fundingNote, role }) => {
     if (!fundedBy) return null;
     if (!FUNDING_SOURCES.includes(fundedBy)) return `Choose ${FUNDING_SOURCES.join(' or ')}.`;
-    if (role !== FUNDING_ROLE) return 'Only a Business Administrator can begin an assessment on a DHS invoice or voucher.';
+    if (role !== FUNDING_ROLE) return 'Only a Business Administrator can begin an assessment on a DHS voucher or invoice.';
     if (!String(fundingNote || '').trim()) return `Enter a note about the ${fundedBy} (for example its number and who approved it).`;
     if (String(fundingNote).trim().length > NOTE_MAX) return `Notes can be up to ${NOTE_MAX} characters.`;
     return null;

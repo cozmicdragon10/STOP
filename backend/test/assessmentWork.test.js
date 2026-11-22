@@ -26,30 +26,30 @@ test('the payment must cover what is due and be checked off', () => {
 test('a Max Debt Override lets the assessment begin owing up to the limit', () => {
     assert.equal(amountDueToBegin(25, 100, null, 100), 25);
     assert.equal(amountDueToBegin(0, 100, null, 150), 0);
-    assert.equal(amountDueToBegin(200, 100, 'Voucher', 150), 50);
+    assert.equal(amountDueToBegin(200, 100, 'DHS Voucher', 150), 50);
     const base = { balance: 25, fee: 100, maxOwed: 100, clientName: 'Lee, Pat', typeName: 'DV Assessment' };
     assert.match(beginPaymentProblem({ ...base, payment: 10, paymentConfirmed: true }), /needs to pay \$25\.00.*owe up to \$100\.00/);
     assert.equal(beginPaymentProblem({ ...base, payment: 25, paymentConfirmed: true }), null);
 });
 
-test('a DHS invoice or voucher covers the fee, not the past due balance', () => {
-    assert.equal(amountDueToBegin(40, 150, 'DHS Invoice'), 40);
-    assert.equal(amountDueToBegin(-30, 150, 'Voucher'), 0);
-    const base = { balance: 0, fee: 150, payment: 0, fundedBy: 'Voucher', typeName: 'DV Assessment', clientName: 'Lee, Pat' };
+test('a DHS voucher or invoice lets it begin without paying the fee, not the past due balance', () => {
+    assert.equal(amountDueToBegin(40, 150, 'Invoice'), 40);
+    assert.equal(amountDueToBegin(-30, 150, 'DHS Voucher'), 0);
+    const base = { balance: 0, fee: 150, payment: 0, fundedBy: 'DHS Voucher', typeName: 'DV Assessment', clientName: 'Lee, Pat' };
     // Nothing to collect: no payment box needed
     assert.equal(beginPaymentProblem(base), null);
-    assert.match(beginPaymentProblem({ ...base, balance: 40 }), /pay \$40\.00 of the past due balance.*Voucher covers only/);
+    assert.match(beginPaymentProblem({ ...base, balance: 40 }), /pay \$40\.00 of the past due balance.*DHS Voucher pays only/);
     assert.match(beginPaymentProblem({ ...base, balance: 40, payment: 40 }), /payment was received/);
     assert.equal(beginPaymentProblem({ ...base, balance: 40, payment: 40, paymentConfirmed: true }), null);
 });
 
-test('only a Business Administrator begins on a DHS invoice or voucher, with a note', () => {
+test('only a Business Administrator begins on a DHS voucher or invoice, with a note', () => {
     const ba = 'Business Administrator';
     assert.equal(fundingProblem({ fundedBy: null, role: 'Counselor' }), null);
-    assert.match(fundingProblem({ fundedBy: 'Gift card', fundingNote: 'x', role: ba }), /DHS Invoice or Voucher/);
-    assert.match(fundingProblem({ fundedBy: 'DHS Invoice', fundingNote: 'x', role: 'Office Admin' }), /Only a Business Administrator/);
-    assert.match(fundingProblem({ fundedBy: 'DHS Invoice', fundingNote: '  ', role: ba }), /Enter a note/);
-    assert.equal(fundingProblem({ fundedBy: 'DHS Invoice', fundingNote: 'Invoice 2211, approved by J.', role: ba }), null);
+    assert.match(fundingProblem({ fundedBy: 'Gift card', fundingNote: 'x', role: ba }), /DHS Voucher or Invoice/);
+    assert.match(fundingProblem({ fundedBy: 'Invoice', fundingNote: 'x', role: 'Office Admin' }), /Only a Business Administrator/);
+    assert.match(fundingProblem({ fundedBy: 'Invoice', fundingNote: '  ', role: ba }), /Enter a note/);
+    assert.equal(fundingProblem({ fundedBy: 'Invoice', fundingNote: 'Invoice 2211, approved by J.', role: ba }), null);
 });
 
 test('BIP intakes and reinstates need their paperwork checked to complete', () => {

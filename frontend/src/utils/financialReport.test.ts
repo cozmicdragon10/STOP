@@ -43,7 +43,7 @@ describe('summarizeFinancials', () => {
         ledger('Charge', 50, { feetype: 'Custom Fee' }),
         ledger('Charge', 40, { feetype: 'Polygraph Copay' }),
       ],
-      attendance: [att('Group', 35), att('Assessment', 0, { fundedby: 'DHS Invoice', fundedprice: '150' }), att('Holiday', 0)],
+      attendance: [att('Group', 35), att('Assessment', 0, { fundedby: 'Invoice', fundedprice: '150' }), att('Holiday', 0)],
     }), '2026-10-01', '2026-10-31');
     expect(s.charges).toEqual([
       { label: 'Custom Fee', count: 1, amount: 50 },
@@ -51,7 +51,7 @@ describe('summarizeFinancials', () => {
       { label: 'Group fees', count: 1, amount: 35 },
     ]);
     expect(s.chargeTotal).toBe(125);
-    expect(s.funded).toEqual([{ label: 'Assessments billed to DHS (invoice)', count: 1, amount: 150 }]);
+    expect(s.funded).toEqual([{ label: 'Assessments billed to invoices', count: 1, amount: 150 }]);
   });
 
   it('keeps debt forgiven and copay credits apart from money collected', () => {

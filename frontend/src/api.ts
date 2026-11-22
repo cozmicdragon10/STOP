@@ -1207,7 +1207,7 @@ export interface ClosedIndividualSession {
     closedon: string | null;
     begunby: string | null;
     begunon: string | null;
-    fundedby: 'DHS Invoice' | 'Voucher' | null;
+    fundedby: 'DHS Voucher' | 'Invoice' | null;
     fundedprice: string | number | null;
     notecount: number;
 }
@@ -1237,7 +1237,7 @@ export interface AssessmentInProgress {
     begunby: string | null;
     assessmentstatus: 'In Progress' | 'Completed';
     // Begun on a DHS invoice or voucher: the client wasn't charged (fee 0) and fundedprice is what it was billed at
-    fundedby: 'DHS Invoice' | 'Voucher' | null;
+    fundedby: 'DHS Voucher' | 'Invoice' | null;
     fundedprice: string | number | null;
     notecount: number;
     lastnoteon: string | null;
@@ -1270,8 +1270,8 @@ export interface BeginAssessmentPayload {
     paymentComments: string;
     // The payment for the fee and any past due balance was received
     paymentConfirmed: boolean;
-    // Business Administrators only: a DHS invoice or voucher covers the fee (not charged to the client), with a required note
-    fundedBy: 'DHS Invoice' | 'Voucher' | null;
+    // Business Administrators only: a DHS voucher or invoice lets it begin without paying the fee (still charged to the account), with a required note
+    fundedBy: 'DHS Voucher' | 'Invoice' | null;
     fundingNote: string;
     user: string;
 }
@@ -1635,7 +1635,7 @@ export interface FinancialLedgerRow {
 export interface FinancialAttendanceRow {
     month: string;
     type: string;
-    fundedby: '' | 'DHS Invoice' | 'Voucher';
+    fundedby: '' | 'DHS Voucher' | 'Invoice';
     count: number;
     fees: Amount;
     fundedprice: Amount;

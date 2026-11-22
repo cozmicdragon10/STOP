@@ -97,7 +97,7 @@ export default function AssessmentWorkspace({ attendanceId, user, clients, onBac
     printAttendanceReceipt({
       clientName: `${detail.lastname}, ${detail.firstname}`, docNumber: idText(clients.find(c => c.clientid === detail.clientid)),
       sessionKind: 'Assessment', sessionDate: detail.beganon, provider: detail.provider,
-      // On a DHS invoice or voucher the client is charged nothing
+      // On a DHS voucher or invoice the fee goes on the client's account; the payment taken was toward the past due balance
       sessionName: detail.fundedby ? `${detail.sessiontypename} (billed to ${detail.fundedby})` : detail.sessiontypename,
       fee: Number(detail.fee || 0),
       payments: [{ label: detail.fundedby ? 'Past due balance paid' : 'Paid when begun', amount: Number(detail.paid || 0), method: detail.paymentmethod || 'Cash' }],

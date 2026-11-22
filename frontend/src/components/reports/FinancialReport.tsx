@@ -237,7 +237,7 @@ export default function FinancialReport() {
           </div>
 
           {s.funded.length > 0 && (
-            <Section title="Billed to Funders" note="Assessments a DHS invoice or voucher covers; not charged to the client.">
+            <Section title="Billed to Funders" note="Assessments begun on a DHS voucher or invoice. Their fees are also charged to the client accounts (since 11/22/2026), so they appear in the charges above.">
               <AmountTable lines={s.funded} total={s.fundedTotal} empty="" />
             </Section>
           )}

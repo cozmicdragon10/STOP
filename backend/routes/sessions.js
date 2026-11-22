@@ -520,9 +520,9 @@ router.post('/api/individual-sessions/close', async (req, res) => {
 // due balance and be checked off as received (paymentConfirmed). The attendance is recorded today with the fee and the
 // payment, marked In Progress; the scheduled open session is cleared and the client comes off the waiting list.
 // Only a Business Administrator's fee is used; everyone else gets the price list's (checkIndividualSession).
-// fundedBy ('DHS Invoice' or 'Voucher', Business Administrators only, with a required fundingNote): the client isn't
-// charged the fee (the price is kept in FundedPrice for billing) and only a past due balance has to be paid; the note
-// goes on the client's case notes.
+// fundedBy ('DHS Voucher' or 'Invoice', Business Administrators only, with a required fundingNote): the fee is still
+// charged to the client's account but doesn't have to be paid to begin (only a past due balance does); the price is kept
+// in FundedPrice for billing and the note goes on the client's case notes.
 router.post('/api/assessments/begin', async (req, res) => {
     const { openSessionId, comments, paymentComments, paymentConfirmed } = req.body;
     const fundedBy = req.body.fundedBy || null;
@@ -561,10 +561,10 @@ router.post('/api/assessments/begin', async (req, res) => {
         if (problem) return refuse(400, problem);
         const note = String(comments || '').trim();
         const { attendanceId, newBalance } = await recordAttendance(db, {
-            client: s.client, group: null, date: s.date, sessionNumber: 1, paid: true, groupFee: fundedBy ? 0 : s.fee, accountPaid: s.payment,
+            client: s.client, group: null, date: s.date, sessionNumber: 1, paid: true, groupFee: s.fee, accountPaid: s.payment,
             paymentMethod: s.paymentMethod, voucherUsed: false, type: 'Assessment', createdBy: viewer.employeeemail, feeType: 'Assessment Fee',
             paymentComments: String(paymentComments || '').trim(),
-            comments: fundedBy ? `${s.typeName} begun on a ${fundedBy} ($${s.fee.toFixed(2)}, not charged to the client).` : `${s.typeName} begun. Payment received.`,
+            comments: fundedBy ? `${s.typeName} begun on a ${fundedBy} ($${s.fee.toFixed(2)} charged to the client's account).` : `${s.typeName} begun. Payment received.`,
             sessionTypeId: s.sessionTypeId, provider: s.provider,
         });
         await db.query(
@@ -572,7 +572,7 @@ router.post('/api/assessments/begin', async (req, res) => {
             [attendanceId, open?.createdby || viewer.employeeemail, fundedBy, fundedBy ? s.fee : null]
         );
         if (fundedBy) {
-            const fundingText = `${s.typeName} begun without payment: billed to a ${fundedBy} ($${s.fee.toFixed(2)}). ${fundingNote}`;
+            const fundingText = `${s.typeName} begun without payment: billed to a ${fundedBy} ($${s.fee.toFixed(2)}, charged to the client's account). ${fundingNote}`;
             await db.query(
                 `INSERT INTO Notes (Client, Date, "User", Comments, Category, ApprovalStatus, AttendanceId) VALUES ($1, NOW(), $2, $3, 'Assessment', NULL, $4)`,
                 [s.client, viewer.employeeemail, fundingText, attendanceId]
@@ -588,7 +588,7 @@ router.post('/api/assessments/begin', async (req, res) => {
         if (openSessionId) await db.query('DELETE FROM OpenIndividualSessions WHERE OpenSessionId = $1', [openSessionId]);
         await clearWaitingAssessor(db, s.client, viewer.employeeemail, `${s.typeName} begun on ${dateText(s.date)} with ${s.provider}.`);
         await db.query('COMMIT');
-        await logAction(viewer.employeeemail, 'Assessment Begun', `${s.typeName} for ${s.clientName} (Client ID ${s.client}) on ${s.date} with ${s.provider}: ${fundedBy ? `billed to ${fundedBy} $${s.fee.toFixed(2)}, client not charged` : `fee $${s.fee.toFixed(2)}`}, paid $${s.payment.toFixed(2)}${s.paymentMethod ? ` ${s.paymentMethod}` : ''}`);
+        await logAction(viewer.employeeemail, 'Assessment Begun', `${s.typeName} for ${s.clientName} (Client ID ${s.client}) on ${s.date} with ${s.provider}: ${fundedBy ? `billed to ${fundedBy}, fee $${s.fee.toFixed(2)} charged to account` : `fee $${s.fee.toFixed(2)}`}, paid $${s.payment.toFixed(2)}${s.paymentMethod ? ` ${s.paymentMethod}` : ''}`);
         res.status(201).json({ success: true, attendanceId, newBalance });
     } catch (err) {
         await db.query('ROLLBACK').catch(() => {});
