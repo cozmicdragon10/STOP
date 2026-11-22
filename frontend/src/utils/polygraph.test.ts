@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { POLY_VOUCHER_MAX, polygraphHistoryText, polygraphNotice, polySchedulingNeeds, polyVoucherReturnRule, slotStart, cancelReservationHint, cancelReservationLabel } from './polygraph';
+import { POLY_VOUCHER_MAX, polygraphHistoryText, polygraphNotice, polySchedulingNeeds, polyVoucherReturnRule, polyResultTone, slotStart, cancelReservationHint, cancelReservationLabel } from './polygraph';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -105,5 +105,23 @@ describe('cancel reservation label', () => {
   it('only cancels, and says the slot closes, once the appointment time has passed', () => {
     expect(cancelReservationLabel({ date: '2026-11-05', time: '9:00 AM' }, now)).toBe('Cancel Reservation');
     expect(cancelReservationHint({ date: '2026-11-12', time: '11:30:00' }, now)).toMatch(/closes the slot/);
+  });
+});
+
+describe('polyResultTone', () => {
+  it('reads NDI and NSR as passed', () => {
+    expect(polyResultTone('No Deception Indicated')).toBe('pass');
+    expect(polyResultTone('No Significant Response')).toBe('pass');
+  });
+
+  it('reads DI as failed', () => {
+    expect(polyResultTone('Deception Indicated')).toBe('fail');
+    expect(polyResultTone(' deception indicated ')).toBe('fail');
+  });
+
+  it('reads everything else as neither', () => {
+    for (const r of ['Inconclusive', 'No Opinion', 'Unable to Perform Test', 'Other - See Test', '', null, undefined]) {
+      expect(polyResultTone(r)).toBe('unclear');
+    }
   });
 });

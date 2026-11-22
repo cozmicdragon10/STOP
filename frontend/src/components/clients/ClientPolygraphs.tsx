@@ -1,7 +1,8 @@
 import { Fragment, useState } from 'react';
 import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { setClientNoPolyRequired } from '../../api';
-import { polySchedulingNeeds, slotStart, slotSummary } from '../../utils/polygraph';
+import { polyResultTone, polySchedulingNeeds, slotStart, slotSummary } from '../../utils/polygraph';
+import type { PolyResultTone } from '../../utils/polygraph';
 import { formatLogMonthDay, formatLogYear, localYmd, timeBetween } from '../../utils/dates';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client, slot, and polygraph rows are untyped throughout App */
@@ -37,6 +38,9 @@ const POLY_TYPES: [string, string][] = [
   ['Specific', 'Specific Issue'],
   ['Monitoring', 'Monitoring'],
 ];
+
+// Passed results green, failed red, inconclusive and the like amber
+const RESULT_COLOR: Record<PolyResultTone, string> = { pass: 'text-emerald-400', fail: 'text-red-400', unclear: 'text-amber-400' };
 
 // Schedule Polygraph form; shown only while the client isn't booked, so it starts empty again after a booking
 function SchedulePolygraphForm({ openSlots, examinerName, onSchedule, scheduling, error }: {
@@ -218,7 +222,7 @@ export default function ClientPolygraphs({
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-start gap-3 font-semibold text-white">
                   <span>{poly.type} Polygraph</span>
-                  <span className="text-xs text-emerald-400 text-right">{poly.results}</span>
+                  <span className={`text-xs text-right ${RESULT_COLOR[polyResultTone(poly.results)]}`}>{poly.results}</span>
                 </div>
                 <p className="text-xs text-slate-400 mt-1">Examiner: {examinerName(poly.polygrapher)}</p>
                 <p className="text-xs text-slate-400 mt-1">

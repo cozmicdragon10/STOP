@@ -81,6 +81,16 @@ export const POLY_RESCHEDULE_REASONS = ['Examiner rescheduled', 'Weather', 'Othe
 // Results that can keep the client in the NDI voucher incentive, but only by Business Administrator override
 export const POLY_INCENTIVE_OVERRIDE_RESULTS = ['Inconclusive', 'No Opinion'];
 
+// How a polygraph result reads: passed (NDI, NSR), failed (DI), or neither (Inconclusive, No Opinion,
+// Unable to Perform Test, Other - See Test, anything else)
+export type PolyResultTone = 'pass' | 'fail' | 'unclear';
+export const polyResultTone = (result: string | null | undefined): PolyResultTone => {
+  const r = (result ?? '').trim().toLowerCase();
+  if (r === 'deception indicated') return 'fail';
+  if (r === 'no deception indicated' || r === 'no significant response') return 'pass';
+  return 'unclear';
+};
+
 // Hours of notice a client must give for a requested cancellation to get their poly fee vouchers back
 export const POLY_CANCEL_NOTICE_HOURS = 48;
 
