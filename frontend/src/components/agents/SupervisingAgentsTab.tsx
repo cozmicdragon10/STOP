@@ -268,12 +268,6 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
             )}
             {filtering && <span className="text-xs text-slate-500 ml-auto">{visibleRows.length} of {rows.length}</span>}
           </div>
-          {unlistedCount > 0 && canEdit && directoryFilter !== 'missing' && (
-            <p className="text-xs text-amber-400">
-              {unlistedCount} agent name(s) on client records aren't in the directory yet.{' '}
-              <button type="button" onClick={() => setDirectoryFilter('missing')} className="underline hover:text-amber-300">Show only those</button>
-            </p>
-          )}
         </div>
 
         {editingId !== null && (
