@@ -4,7 +4,7 @@ import { EditConflictError, deleteSupervisingAgent, getClients, getSupervisingAg
 import type { Client, SupervisingAgent } from '../../api';
 import { usePagination } from '../../hooks/usePagination';
 import Pagination from '../Pagination';
-import { scrollToStackedPanel } from '../../utils/layout';
+import { revealPanel } from '../../utils/layout';
 import { idText } from '../../utils/clients';
 import { errorMessage } from '../../utils/errors';
 import { AGENT_TYPE_SUGGESTIONS, NO_TYPE, agentKey, distinctValues, filterAgentRows } from '../../utils/agents';
@@ -47,13 +47,14 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
   const [typeFilter, setTypeFilter] = useState('');
   const [activeFilter, setActiveFilter] = useState<ActiveClientFilter>('all');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  // The selected agent's clients; on phones this sits below the whole agent list
+  // The selected agent's clients. On phones this sits below the whole agent list; on wider screens it is beside the list
+  // at the top of the page, out of sight once you've scrolled down the list. Either way, picking an agent brings it into view.
   const detailPanelRef = useRef<HTMLDivElement>(null);
   const selectAgent = (key: string) => {
     setSelectedKey(key);
     setShowDischarged(false);
     // After the frame, so the scroll is measured with the agent's clients in the panel
-    requestAnimationFrame(() => scrollToStackedPanel(detailPanelRef.current));
+    requestAnimationFrame(() => revealPanel(detailPanelRef.current));
   };
   const [showDischarged, setShowDischarged] = useState(false);
   // null: form closed; 0: adding; otherwise the id of the agent being edited
