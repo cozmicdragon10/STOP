@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { CalendarX, ChevronLeft, ChevronRight, UserX } from 'lucide-react';
+import { CalendarX, UserX } from 'lucide-react';
 import { localYmd } from '../../utils/dates';
 import { signedMoney } from '../../utils/ledger';
-import { monthGrid, shiftMonth } from '../../utils/counselor';
-import { TONE_CHIP, dayCellClass, dayChipsClass, dayWhen, type CalendarTone } from '../../utils/calendar';
+import { TONE_CHIP, type CalendarTone } from '../../utils/calendar';
 import { clientCalendarEntries, groupCheckInDays, hasUpcoming, phaseAttendanceNote, type ClientCalendarData, type ClientCalendarEntry } from '../../utils/clientCalendar';
-import { CalendarLegend, DayNumber, KindIcon, type CalendarKind } from '../calendar/CalendarKey';
+import { CalendarLegend, KindIcon, type CalendarKind } from '../calendar/CalendarKey';
+import MonthCalendar from '../calendar/MonthCalendar';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- attendance rows are untyped throughout App */
 interface Props {
@@ -16,8 +16,6 @@ interface Props {
   // Filters are on: only the filtered attendance shows, not the schedule
   filtered: boolean;
 }
-
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // An attendance row's color (its state) and icon (its kind)
 const rowTone = (row: { cancellation?: boolean; missed?: boolean }): CalendarTone =>
@@ -64,7 +62,6 @@ export default function ClientAttendanceCalendar({ rows, schedule, filtered }: P
   const newest = rows.map(r => localYmd(r.date)).filter(Boolean).sort().pop();
   const shownSchedule = filtered ? null : schedule;
   const month = picked ?? (hasUpcoming(shownSchedule) || !newest ? thisMonth : newest.slice(0, 7));
-  const go = (by: number) => setPicked(shiftMonth(month, by));
 
   // Attendance rows by day
   const byDay = new Map<string, Chip[]>();
@@ -88,48 +85,29 @@ export default function ClientAttendanceCalendar({ rows, schedule, filtered }: P
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => go(-1)} aria-label="Previous month" className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"><ChevronLeft size={16} /></button>
-        <p className="font-bold text-white min-w-[9rem] text-center">{new Date(Number(month.slice(0, 4)), Number(month.slice(5)) - 1, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' })}</p>
-        <button type="button" onClick={() => go(1)} aria-label="Next month" className="p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300"><ChevronRight size={16} /></button>
-        {month !== thisMonth && (
-          <button type="button" onClick={() => setPicked(thisMonth)} className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300">This Month</button>
-        )}
-        <span className="ml-auto text-xs text-slate-500">
-          {sessions} session{sessions === 1 ? '' : 's'}{cancelled > 0 && ` · ${cancelled} group${cancelled === 1 ? '' : 's'} cancelled`}{missed > 0 && ` · ${missed} missed`}{comingUp > 0 && ` · ${comingUp} coming up`}
-        </span>
-      </div>
       {filtered && <p className="text-xs text-slate-500">Filters are on, so only the matching attendance shows. Clear them to see what's coming up.</p>}
       {phaseNote && <p className="text-xs text-slate-400">{phaseNote}</p>}
-
-      <div className="grid grid-cols-7 gap-1 text-[0.6875rem]">
-        {WEEKDAYS.map(d => <p key={d} className="text-center font-semibold uppercase tracking-wide text-slate-500 pb-1">{d}</p>)}
-        {monthGrid(month).map((day, i) => {
-          if (!day) return <div key={`blank-${i}`} className="min-h-[4.5rem] rounded-lg bg-slate-950/40" />;
-          const when = dayWhen(day, today);
-          const chips = byDay.get(day) || [];
-          return (
-            <div key={day} className={`min-h-[4.5rem] rounded-lg border p-1 space-y-1 ${dayCellClass(when)}`}>
-              <div className="flex justify-end"><DayNumber day={day} when={when} /></div>
-              <div className={`space-y-1 ${dayChipsClass(when)}`}>
-                {chips.map(c => (
-                  <p key={c.key} title={c.title} className={`border rounded px-1 py-0.5 truncate font-semibold flex items-center gap-1 ${TONE_CHIP[c.tone].replace('line-through', '')}`}>
-                    {c.icon === 'cancelled' && <CalendarX size={11} className="shrink-0" />}
-                    {c.icon === 'missed' && <UserX size={11} className="shrink-0" />}
-                    {c.kind && <KindIcon kind={c.kind} />}
-                    <span className={`truncate ${c.tone === 'cancelled' ? 'line-through' : ''}`}>{c.label}</span>
-                  </p>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <CalendarLegend
-        tones={['done', 'booked', 'cancelled', 'moved', 'missed']}
-        labels={{ done: 'Attended / taken' }}
-        kinds={['assessment', 'individual', 'polygraph']}
+      <MonthCalendar
+        month={month}
+        today={today}
+        onMonth={setPicked}
+        summary={<>{sessions} session{sessions === 1 ? '' : 's'}{cancelled > 0 && ` · ${cancelled} group${cancelled === 1 ? '' : 's'} cancelled`}{missed > 0 && ` · ${missed} missed`}{comingUp > 0 && ` · ${comingUp} coming up`}</>}
+        cellClassName="min-h-[4.5rem]"
+        renderDay={day => (byDay.get(day) || []).map(c => (
+          <p key={c.key} title={c.title} className={`border rounded px-1 py-0.5 text-[11px] leading-tight truncate font-semibold flex items-center gap-1 ${TONE_CHIP[c.tone].replace('line-through', '')}`}>
+            {c.icon === 'cancelled' && <CalendarX size={11} className="shrink-0" />}
+            {c.icon === 'missed' && <UserX size={11} className="shrink-0" />}
+            {c.kind && <KindIcon kind={c.kind} />}
+            <span className={`truncate ${c.tone === 'cancelled' ? 'line-through' : ''}`}>{c.label}</span>
+          </p>
+        ))}
+        legend={
+          <CalendarLegend
+            tones={['done', 'booked', 'cancelled', 'moved', 'missed']}
+            labels={{ done: 'Attended / taken' }}
+            kinds={['assessment', 'individual', 'polygraph']}
+          />
+        }
       />
     </div>
   );

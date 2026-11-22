@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { getGroupScheduleChanges, getMySessions } from '../../api';
 import type { GroupScheduleChange, MyAssessment, MyClosedSession, MyOpenSession } from '../../api';
-import { dayKey, monthGrid, monthOfDate, myGroupIds, scheduledDatesIn, shiftMonth } from '../../utils/counselor';
+import { dayKey, monthOfDate, myGroupIds, scheduledDatesIn } from '../../utils/counselor';
 import { formatDisplayTime } from '../../utils/dates';
 import { parseSchedule } from '../../utils/schedule';
 import GroupMeetingPanel, { type Meeting } from './GroupMeetingPanel';
 import AssessmentTimePanel, { type PanelClient } from './AssessmentTimePanel';
-import { TONE_CHIP, chipsInOrder, dayCellClass, dayChipsClass, dayWhen, type CalendarTone } from '../../utils/calendar';
-import { CalendarLegend, DayNumber, KindIcon } from '../calendar/CalendarKey';
+import { TONE_CHIP, chipsInOrder, type CalendarTone } from '../../utils/calendar';
+import { CalendarLegend, KindIcon } from '../calendar/CalendarKey';
+import MonthCalendar from '../calendar/MonthCalendar';
 
 interface GroupRow {
   groupid: number | string;
@@ -69,7 +70,6 @@ const shortDate = (ymd: string) => {
 const assessmentClient = (a: MyAssessment) => (a.status === 'Scheduled' ? `${a.lastname ?? ''}, ${a.firstname ?? ''}` : 'Open');
 const assessmentPlace = (a: MyAssessment) => a.location || 'No location set';
 const MAX_CHIPS = 3;
-const WEEKDAY_HEADINGS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 // "Closed by you", "Closed on your behalf", etc., from what the server says about the session
 // you: the counselor is reading their own calendar; otherwise the tags describe the counselor being viewed
@@ -215,7 +215,6 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
     ...(sessions?.open ?? []).map(s => ({ day: s.sessiondate, kind: 'open' as const, groupname: s.groupname, tags: openTags(s, !viewing), clients: null })),
   ].sort((a, b) => a.day.localeCompare(b.day) || a.groupname.localeCompare(b.groupname));
 
-  const isCurrentMonth = month === monthOfDate(new Date());
 
   return (
     <section aria-label={viewing ? `${displayName}'s calendar` : 'My Day'} className="space-y-4">
@@ -233,47 +232,28 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => setMonth(m => shiftMonth(m, -1))} aria-label="Previous month" className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs font-semibold">← Previous</button>
-        <input
-          type="month"
-          value={month}
-          onChange={e => { if (e.target.value) setMonth(e.target.value); }}
-          aria-label="Month"
-          className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white text-xs"
-        />
-        <button type="button" onClick={() => setMonth(m => shiftMonth(m, 1))} aria-label="Next month" className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 px-3 py-1.5 rounded text-xs font-semibold">Next →</button>
-        {!isCurrentMonth && (
-          <button type="button" onClick={() => setMonth(monthOfDate(new Date()))} className="text-xs text-blue-300 hover:text-blue-200 underline px-2">This month</button>
-        )}
-      </div>
-
       {error && <p role="alert" className="text-sm text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg p-3">{error}</p>}
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 md:p-4 overflow-x-auto">
-        <div className="grid grid-cols-7 gap-1 min-w-[560px]">
-          {WEEKDAY_HEADINGS.map(w => (
-            <div key={w} className="text-[11px] uppercase tracking-wide text-slate-500 px-1 pb-1">{w}</div>
-          ))}
-          {monthGrid(month).map((day, i) => {
-            if (!day) return <div key={`blank-${i}`} className="min-h-24" />;
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 md:p-4">
+        <MonthCalendar
+          month={month}
+          today={todayKey}
+          onMonth={setMonth}
+          summary={sessions ? `${plural(listed.length, 'session')} · ${plural(assessments.length, 'assessment time')}` : 'Loading…'}
+          pickedDay={shownDay}
+          onPickDay={pickDay}
+          cellClassName="min-h-24"
+          minWidthClassName="min-w-[560px]"
+          dayLabel={day => {
+            const count = byDay.get(day)?.length ?? 0;
+            return `${longDate(day)}: ${count ? plural(count, 'item') : 'nothing scheduled'}`;
+          }}
+          renderDay={day => {
             // Assessment times first, so a busy day's "+N more" only ever hides groups
             const items = chipsInOrder(byDay.get(day) ?? [], item => isAssessment(item.kind));
-            const when = dayWhen(day, todayKey);
-            const picked = day === shownDay;
-            // The whole day opens its list below the calendar; a group chip inside also opens its cancel/reschedule panel
+            // The whole day opens its list below the calendar; a chip inside also opens its own panel
             return (
-              <div
-                key={day}
-                role="button"
-                tabIndex={0}
-                aria-pressed={picked}
-                aria-label={`${longDate(day)}: ${items.length ? plural(items.length, 'item') : 'nothing scheduled'}`}
-                onClick={() => pickDay(day)}
-                onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pickDay(day); } }}
-                className={`min-h-24 rounded-lg border p-1.5 space-y-1 cursor-pointer transition hover:border-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${dayCellClass(when, picked)}`}>
-                <DayNumber day={day} when={when} />
-                <div className={`space-y-1 ${dayChipsClass(when)}`}>
+              <>
                 {items.slice(0, MAX_CHIPS).map(item => (item.meeting || item.appt ? (
                   <button
                     key={item.key}
@@ -289,18 +269,17 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
                   </p>
                 )))}
                 {items.length > MAX_CHIPS && <p className="text-[11px] text-slate-500">+{items.length - MAX_CHIPS} more</p>}
-                </div>
-              </div>
+              </>
             );
-          })}
-        </div>
-        <div className="mt-3">
-          <CalendarLegend
-            tones={['done', 'open', 'booked', 'cancelled', 'moved', 'available']}
-            labels={{ done: 'Closed', open: 'Still open', booked: 'Scheduled, coming up', available: 'Open assessment time' }}
-            kinds={['assessment']}
-          />
-        </div>
+          }}
+          legend={
+            <CalendarLegend
+              tones={['done', 'open', 'booked', 'cancelled', 'moved', 'available']}
+              labels={{ done: 'Closed', open: 'Still open', booked: 'Scheduled, coming up', available: 'Open assessment time' }}
+              kinds={['assessment']}
+            />
+          }
+        />
         <p className="text-[11px] text-slate-500 mt-2">Click a day to see everything on it. Click an upcoming group to cancel or reschedule that meeting; its clients get a case note.</p>
       </div>
 

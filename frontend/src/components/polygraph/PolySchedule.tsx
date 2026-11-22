@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { CalendarClock, CalendarDays, ChevronLeft, ChevronRight, List, RotateCcw, Trash2 } from 'lucide-react';
+import { CalendarClock, CalendarDays, List, RotateCcw, Trash2 } from 'lucide-react';
 import ClientPicker from '../ClientPicker';
 import { formatDisplayTime, getLocalDateString, localYmd } from '../../utils/dates';
 import { cancelReservationHint, cancelReservationLabel } from '../../utils/polygraph';
-import { TONE_CHIP, dayCellClass, dayChipsClass, dayWhen } from '../../utils/calendar';
-import { CalendarLegend, DayNumber } from '../calendar/CalendarKey';
+import { TONE_CHIP } from '../../utils/calendar';
+import { CalendarLegend } from '../calendar/CalendarKey';
+import MonthCalendar from '../calendar/MonthCalendar';
 
 export interface ScheduleSlot {
   slotid: number;
@@ -65,14 +66,7 @@ const POLY_TYPES: [string, string][] = [
 type View = 'list' | 'calendar';
 // Remembered per browser; the list is the default when storage is unavailable
 const VIEW_KEY = 'stop.polySchedule.view';
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-// 'YYYY-MM' moved by a number of months
-const shiftMonth = (ym: string, by: number) => {
-  const [y, m] = ym.split('-').map(Number);
-  const d = new Date(y, m - 1 + by, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-};
 
 // Poly Schedule: every slot as a card, listed by day or picked from a month calendar. Business Administrators assign
 // clients to open slots and delete open or closed ones; any assigned reservation can be cancelled. Business
@@ -238,7 +232,6 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
   const today = getLocalDateString();
   const shownMonth = month ?? days[0]?.day.slice(0, 7) ?? today.slice(0, 7);
   const [year, monthNumber] = shownMonth.split('-').map(Number);
-  const leadingBlanks = new Date(year, monthNumber - 1, 1).getDay();
   const daysInMonth = new Date(year, monthNumber, 0).getDate();
   const monthDays = Array.from({ length: daysInMonth }, (_, i) => `${shownMonth}-${String(i + 1).padStart(2, '0')}`);
   // The picked day when it is in this month, else this month's first day with slots
@@ -246,6 +239,13 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
   const shownDayEntry = shownDay ? byDay.get(shownDay) : undefined;
   const monthSlotCount = monthDays.reduce((n, d) => n + (byDay.get(d)?.slots.length ?? 0), 0);
   const goToMonth = (ym: string) => { setMonth(ym); setPickedDay(null); };
+  // A day's slots by status, for its box on the calendar
+  const slotCounts = (day: string) => {
+    const slotsOn = byDay.get(day)?.slots ?? [];
+    const assigned = slotsOn.filter(s => s.status === 'Assigned').length;
+    const closed = slotsOn.filter(s => s.status === 'Closed').length;
+    return { total: slotsOn.length, open: slotsOn.length - assigned - closed, assigned, closed };
+  };
 
   const toggleButton = (value: View, label: string, Icon: typeof List) => (
     <button
@@ -277,57 +277,31 @@ export default function PolySchedule({ slots, filtersActive, role, assignableCli
       ) : (
         <div className="space-y-4">
           <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 sm:p-4">
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <button type="button" onClick={() => goToMonth(shiftMonth(shownMonth, -1))} aria-label="Previous month" className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition">
-                <ChevronLeft size={16} />
-              </button>
-              <div className="text-center">
-                <p className="text-sm font-semibold text-white">{new Date(year, monthNumber - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</p>
-                <p className="text-xs text-slate-500">
-                  {monthSlotCount === 0 ? (filtersActive ? 'No slots match these filters this month' : 'No slots this month') : `${monthSlotCount} ${monthSlotCount === 1 ? 'slot' : 'slots'} this month`}
-                  {shownMonth !== today.slice(0, 7) && (
-                    <> · <button type="button" onClick={() => { setMonth(today.slice(0, 7)); setPickedDay(today); }} className="text-blue-400 hover:text-blue-300 font-medium">Today</button></>
-                  )}
-                </p>
-              </div>
-              <button type="button" onClick={() => goToMonth(shiftMonth(shownMonth, 1))} aria-label="Next month" className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition">
-                <ChevronRight size={16} />
-              </button>
-            </div>
-            <div className="grid grid-cols-7 gap-1 text-center text-[11px] uppercase text-slate-500 mb-1">
-              {WEEKDAYS.map(w => <div key={w}>{w}</div>)}
-            </div>
-            <div className="grid grid-cols-7 gap-1">
-              {Array.from({ length: leadingBlanks }, (_, i) => <div key={`blank-${i}`} />)}
-              {monthDays.map(day => {
-                const entry = byDay.get(day);
-                const open = entry?.slots.filter(s => s.status !== 'Assigned' && s.status !== 'Closed').length ?? 0;
-                const assigned = entry?.slots.filter(s => s.status === 'Assigned').length ?? 0;
-                const closed = entry?.slots.filter(s => s.status === 'Closed').length ?? 0;
-                const picked = day === shownDay;
-                const when = dayWhen(day, today);
-                const summary = entry ? [open && `${open} open`, assigned && `${assigned} assigned`, closed && `${closed} closed`].filter(Boolean).join(', ') : 'no slots';
+            <MonthCalendar
+              month={shownMonth}
+              today={today}
+              onMonth={goToMonth}
+              onToday={() => { setMonth(today.slice(0, 7)); setPickedDay(today); }}
+              summary={monthSlotCount === 0 ? (filtersActive ? 'No slots match these filters this month' : 'No slots this month') : `${monthSlotCount} ${monthSlotCount === 1 ? 'slot' : 'slots'} this month`}
+              pickedDay={shownDay}
+              onPickDay={setPickedDay}
+              dayLabel={day => {
+                const c = slotCounts(day);
+                const summary = c.total ? [c.open && `${c.open} open`, c.assigned && `${c.assigned} assigned`, c.closed && `${c.closed} closed`].filter(Boolean).join(', ') : 'no slots';
+                return `${new Date(year, monthNumber - 1, Number(day.slice(8))).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}: ${summary}`;
+              }}
+              renderDay={day => {
+                const { open, assigned, closed } = slotCounts(day);
                 return (
-                  <button
-                    key={day}
-                    type="button"
-                    onClick={() => setPickedDay(day)}
-                    aria-pressed={picked}
-                    aria-label={`${new Date(year, monthNumber - 1, Number(day.slice(8))).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}: ${summary}`}
-                    className={`min-h-[3.25rem] sm:min-h-[4.5rem] rounded-lg border p-1 sm:p-1.5 text-left flex flex-col gap-0.5 transition hover:border-slate-500 ${dayCellClass(when, picked)}`}>
-                    <DayNumber day={day} when={when} />
-                    <span className={`flex flex-col gap-0.5 ${dayChipsClass(when)}`}>
-                      {open > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.available}`}>{open}<span className="hidden sm:inline"> open</span></span>}
-                      {assigned > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.booked}`}>{assigned}<span className="hidden sm:inline"> assigned</span></span>}
-                      {closed > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.closed}`}>{closed}<span className="hidden sm:inline"> closed</span></span>}
-                    </span>
-                  </button>
+                  <>
+                    {open > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.available}`}>{open}<span className="hidden sm:inline"> open</span></span>}
+                    {assigned > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.booked}`}>{assigned}<span className="hidden sm:inline"> assigned</span></span>}
+                    {closed > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.closed}`}>{closed}<span className="hidden sm:inline"> closed</span></span>}
+                  </>
                 );
-              })}
-            </div>
-            <div className="mt-3">
-              <CalendarLegend tones={['available', 'booked', 'closed']} labels={{ available: 'Open slot', booked: 'Client assigned', closed: 'Closed, not used' }} />
-            </div>
+              }}
+              legend={<CalendarLegend tones={['available', 'booked', 'closed']} labels={{ available: 'Open slot', booked: 'Client assigned', closed: 'Closed, not used' }} />}
+            />
           </div>
           {shownDayEntry ? daySection(shownDayEntry) : shownDay ? (
             <p className="text-xs text-slate-500 italic">No slots on {new Date(year, monthNumber - 1, Number(shownDay.slice(8))).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}{filtersActive ? ' that match these filters' : ''}.</p>

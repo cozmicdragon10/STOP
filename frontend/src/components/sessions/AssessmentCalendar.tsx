@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { CalendarClock, CalendarPlus, ChevronLeft, ChevronRight, ClipboardPlus, RotateCcw, UserPlus, XCircle } from 'lucide-react';
+import { CalendarClock, CalendarPlus, ClipboardPlus, RotateCcw, UserPlus, XCircle } from 'lucide-react';
 import ClientPicker from '../ClientPicker';
 import AssessmentTimePanel from '../home/AssessmentTimePanel';
 import PopupDialog from '../home/PopupDialog';
 import { formatDisplayTime, getLocalDateString } from '../../utils/dates';
 import { assessmentPickList } from '../../utils/counselor';
-import { TONE_CHIP, dayCellClass, dayChipsClass, dayWhen } from '../../utils/calendar';
-import { CalendarLegend, DayNumber } from '../calendar/CalendarKey';
+import { TONE_CHIP } from '../../utils/calendar';
+import { CalendarLegend } from '../calendar/CalendarKey';
+import MonthCalendar from '../calendar/MonthCalendar';
 import {
   assignAssessmentSlot, cancelAssessmentAppointment, cancelOpenAssessmentTimes, getAssessmentAppointments,
   openAssessmentSlot, unassignAssessmentSlot, updateAssessmentAppointment,
@@ -34,15 +35,8 @@ interface Props {
   onError: (message: string) => void;
 }
 
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FILTER_KEY = 'stop.assessmentCalendar.assessor';
 
-// 'YYYY-MM' moved by a number of months
-const shiftMonth = (ym: string, by: number) => {
-  const [y, m] = ym.split('-').map(Number);
-  const d = new Date(y, m - 1 + by, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-};
 const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 const longDay = (ymd: string) => new Date(`${ymd}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
@@ -101,7 +95,6 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
   const [year, monthNumber] = month.split('-').map(Number);
   const daysInMonth = new Date(year, monthNumber, 0).getDate();
   const monthDays = Array.from({ length: daysInMonth }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`);
-  const leadingBlanks = new Date(year, monthNumber - 1, 1).getDay();
   const firstDay = monthDays[0];
   const lastDay = monthDays[monthDays.length - 1];
 
@@ -519,54 +512,32 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
       )}
 
       <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 sm:p-4">
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <button type="button" onClick={() => { setMonth(shiftMonth(month, -1)); setPickedDay(''); }} aria-label="Previous month" className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition">
-            <ChevronLeft size={16} />
-          </button>
-          <div className="text-center">
-            <p className="text-sm font-semibold text-white">{new Date(year, monthNumber - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</p>
-            <p className="text-xs text-slate-500">
-              {monthOpen + monthScheduled === 0 ? 'Nothing open or scheduled this month' : `${monthOpen} open · ${monthScheduled} scheduled`}
-              {month !== today.slice(0, 7) && (
-                <> · <button type="button" onClick={() => { setMonth(today.slice(0, 7)); setPickedDay(today); }} className="text-blue-400 hover:text-blue-300 font-medium">Today</button></>
-              )}
-            </p>
-          </div>
-          <button type="button" onClick={() => { setMonth(shiftMonth(month, 1)); setPickedDay(''); }} aria-label="Next month" className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition">
-            <ChevronRight size={16} />
-          </button>
-        </div>
-        <div className="grid grid-cols-7 gap-1 text-center text-[11px] uppercase text-slate-500 mb-1">
-          {WEEKDAYS.map(w => <div key={w}>{w}</div>)}
-        </div>
-        <div className="grid grid-cols-7 gap-1">
-          {Array.from({ length: leadingBlanks }, (_, i) => <div key={`blank-${i}`} />)}
-          {monthDays.map(day => {
+        <MonthCalendar
+          month={month}
+          today={today}
+          onMonth={m => { setMonth(m); setPickedDay(''); }}
+          onToday={() => { setMonth(today.slice(0, 7)); setPickedDay(today); }}
+          summary={monthOpen + monthScheduled === 0 ? 'Nothing open or scheduled this month' : `${monthOpen} open · ${monthScheduled} scheduled`}
+          pickedDay={pickedDay}
+          onPickDay={setPickedDay}
+          dayLabel={day => {
+            const entries = byDay.get(day) ?? [];
+            const open = entries.filter(a => a.status === 'Open').length;
+            return `${longDay(day)}: ${entries.length ? `${open} open, ${entries.length - open} scheduled` : 'nothing scheduled'}`;
+          }}
+          renderDay={day => {
             const entries = byDay.get(day) ?? [];
             const open = entries.filter(a => a.status === 'Open').length;
             const booked = entries.length - open;
-            const picked = day === pickedDay;
-            const when = dayWhen(day, today);
             return (
-              <button
-                key={day}
-                type="button"
-                onClick={() => setPickedDay(day)}
-                aria-pressed={picked}
-                aria-label={`${longDay(day)}: ${entries.length ? `${open} open, ${booked} scheduled` : 'nothing scheduled'}`}
-                className={`min-h-[3.25rem] sm:min-h-[4.5rem] rounded-lg border p-1 sm:p-1.5 text-left flex flex-col gap-0.5 transition hover:border-slate-500 ${dayCellClass(when, picked)}`}>
-                <DayNumber day={day} when={when} />
-                <span className={`flex flex-col gap-0.5 ${dayChipsClass(when)}`}>
-                  {open > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.available}`}>{open}<span className="hidden sm:inline"> open</span></span>}
-                  {booked > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.booked}`}>{booked}<span className="hidden sm:inline"> scheduled</span></span>}
-                </span>
-              </button>
+              <>
+                {open > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.available}`}>{open}<span className="hidden sm:inline"> open</span></span>}
+                {booked > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.booked}`}>{booked}<span className="hidden sm:inline"> scheduled</span></span>}
+              </>
             );
-          })}
-        </div>
-        <div className="mt-3">
-          <CalendarLegend tones={['available', 'booked']} labels={{ available: 'Open time', booked: 'Client scheduled' }} />
-        </div>
+          }}
+          legend={<CalendarLegend tones={['available', 'booked']} labels={{ available: 'Open time', booked: 'Client scheduled' }} />}
+        />
       </div>
 
       {pickedDay && (
