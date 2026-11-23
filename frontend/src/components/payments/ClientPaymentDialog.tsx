@@ -201,7 +201,7 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
             )}
             <div className="flex justify-between">
               <span className="text-slate-400">{receipt ? 'Payment (processed)' : 'This payment'}</span>
-              <span className="text-emerald-400">{formatBalance(-paymentShown)}</span>
+              <span className={balanceColor(-paymentShown)}>{formatBalance(-paymentShown)}</span>
             </div>
             {polyShown > 0 && (
               <>

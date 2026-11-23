@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { clientFee, feeAlreadyCharged, type ClientRecord, type PaymentMethod, type PaymentTerms } from '../../hooks/useGroupCheckIn';
 import { submitAccountPayment } from '../../api';
-import { FIRST_CHECKIN_MAX_OWED, allowedOwed, checkInPaymentRule, formatBalance, formatBalanceLabeled, minimumCheckInPayment } from '../../utils/balance';
+import { FIRST_CHECKIN_MAX_OWED, allowedOwed, balanceColor, checkInPaymentRule, formatBalance, formatBalanceLabeled, minimumCheckInPayment } from '../../utils/balance';
 import { feePeriodMonths } from '../../utils/soPhases';
 import { FEDERAL_PROGRAM_TYPES, federalGroupFee, individualSessionFee, idText } from '../../utils/clients';
 import { printReceipt, type Receipt } from '../../utils/receipt';
@@ -260,19 +260,19 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
             <div className="mt-3 bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs space-y-1.5">
               <div className="flex justify-between">
                 <span className="text-slate-400">Current balance</span>
-                <span className="text-white">{formatBalance(baseBalance)}</span>
+                <span className={balanceColor(baseBalance)}>{formatBalance(baseBalance)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">{federalCopay ? (fee > 0 ? 'Individual copay (federal client)' : 'Federal client: no individual copay (nothing charged)') : individual ? 'Individual session (price from Admin)' : feeLabel(c, fee)}</span>
-                <span className="text-red-400">{formatBalance(fee)}</span>
+                <span className={balanceColor(fee)}>{formatBalance(fee)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">{locked ? 'Payment (processed)' : 'This payment'}</span>
-                <span className="text-emerald-400">{formatBalance(-paymentNow)}</span>
+                <span className={balanceColor(-paymentNow)}>{formatBalance(-paymentNow)}</span>
               </div>
               <div className="flex justify-between border-t border-slate-800 pt-1.5">
                 <span className="font-semibold text-slate-300">Balance after check-in</span>
-                <span className="font-bold text-white">{formatBalance(afterCheckIn)}</span>
+                <span className={`font-bold ${balanceColor(afterCheckIn)}`}>{formatBalance(afterCheckIn)}</span>
               </div>
             </div>
 

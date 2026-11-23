@@ -317,8 +317,8 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
             ))}
             <div className="border-t border-slate-800 my-2" />
             <div className="flex justify-between"><span className="text-slate-400">Current balance</span><span className={balanceColor(balance)}>{formatBalance(balance)}</span></div>
-            <div className="flex justify-between gap-4"><span className="text-slate-400">Price{fundedBy ? ` (billed to ${fundedBy})` : ''}</span><span className="text-red-400">-{money(Number.isFinite(feeNum) ? feeNum : 0)}</span></div>
-            <div className="flex justify-between"><span className="text-slate-400">Payment (Cash)</span><span className="text-emerald-400">+{money(Number.isFinite(paymentNum) ? paymentNum : 0)}</span></div>
+            <div className="flex justify-between gap-4"><span className="text-slate-400">Price{fundedBy ? ` (billed to ${fundedBy})` : ''}</span><span className={balanceColor(Number.isFinite(feeNum) ? feeNum : 0)}>-{money(Number.isFinite(feeNum) ? feeNum : 0)}</span></div>
+            <div className="flex justify-between"><span className="text-slate-400">Payment (Cash)</span><span className={balanceColor(-(Number.isFinite(paymentNum) ? paymentNum : 0))}>+{money(Number.isFinite(paymentNum) ? paymentNum : 0)}</span></div>
             <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="font-semibold text-slate-300">Balance after</span><span className={`font-bold ${balanceColor(balanceAfter)}`}>{formatBalance(balanceAfter)}</span></div>
           </div>
 

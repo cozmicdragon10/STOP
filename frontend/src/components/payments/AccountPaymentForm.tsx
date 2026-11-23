@@ -137,7 +137,7 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">This payment</span>
-                <span className="text-emerald-400">+{formatMoney(amount)}</span>
+                <span className={balanceColor(-amount)}>+{formatMoney(amount)}</span>
               </div>
               <div className="flex justify-between border-t border-slate-800 pt-1.5">
                 <span className="font-semibold text-slate-300">Balance after payment</span>

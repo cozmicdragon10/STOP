@@ -64,7 +64,7 @@ export default function CustomChargeForm({ clients, userEmail, onCharged, onSucc
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">This charge</span>
-              <span className="text-red-400">-{formatMoney(amount)}</span>
+              <span className={balanceColor(amount)}>-{formatMoney(amount)}</span>
             </div>
             <div className="flex justify-between border-t border-slate-800 pt-1.5">
               <span className="font-semibold text-slate-300">Balance after charge</span>
