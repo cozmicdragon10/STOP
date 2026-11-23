@@ -363,14 +363,15 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
                     onClick={() => selectAgent(r.key)}
                     className={`cursor-pointer transition ${selectedKey === r.key ? 'bg-blue-500/10' : 'hover:bg-slate-800/50'}`}
                   >
-                    <td className="p-3 font-medium text-white">
+                    {/* Wide enough for a usual first and last name on one line; only unusually long names wrap */}
+                    <td className="p-3 font-medium text-white min-w-[9rem]">
                       {r.name}
                       {!r.agent && <span className="ml-2 inline-block whitespace-nowrap bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded text-[0.625rem] font-semibold">Not in directory</span>}
                     </td>
                     <td className="p-3 text-slate-300 text-xs">{r.agent?.agenttype || <span className="text-slate-600">—</span>}</td>
                     <td className="p-3 text-slate-300 text-xs">{r.agent?.location || <span className="text-slate-600">—</span>}</td>
                     <td className="p-3 text-slate-300 text-xs whitespace-nowrap">{r.agent?.phone || <span className="text-slate-600">—</span>}</td>
-                    <td className="p-3 text-slate-300 text-xs min-w-[12rem] break-all">{r.agent?.email || <span className="text-slate-600">—</span>}</td>
+                    <td className="p-3 text-slate-300 text-xs min-w-[9rem] break-all">{r.agent?.email || <span className="text-slate-600">—</span>}</td>
                     <td className="p-3 text-right"><span className="bg-slate-800 text-slate-200 px-2 py-0.5 rounded font-semibold text-xs">{current}</span></td>
                     {canEdit && (
                       <td className="p-3 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
