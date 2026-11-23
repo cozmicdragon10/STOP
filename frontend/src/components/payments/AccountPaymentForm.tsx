@@ -45,8 +45,22 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
   const payWith: PaymentMethod = cardBlocked(client) && paymentMethod === 'Credit Card' ? 'Cash' : paymentMethod;
   const methodProblem = paymentMethodProblem(payWith, subtype, role);
   const methodText = paymentMethodText(payWith, subtype, reference);
-  const currentBalance = Number(client?.accountbalance || 0);
-  const balanceAfter = currentBalance - amount;
+  // After a payment is processed the form locks (Print Receipt and New Payment stay) and shows that payment. The client's
+  // balance reloads with the payment in it, so the figures come from the saved payment, not the client row.
+  const locked = lastPayment !== null;
+  const currentBalance = locked ? lastPayment.newBalance + lastPayment.amount : Number(client?.accountbalance || 0);
+  const balanceAfter = locked ? lastPayment.newBalance : currentBalance - amount;
+
+  const startNewPayment = () => {
+    setLastPayment(null);
+    setClientId('');
+    setAmountInput('');
+    setComments('');
+    setPaymentMethod('Cash');
+    setSubtype('');
+    setReference('');
+    setCardBilling(emptyCardBilling);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,7 +89,6 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
         date: new Date().toLocaleString()
       });
       onRecorded();
-      setComments('');
     } catch (err) {
       onError(err instanceof Error && err.message ? err.message : 'Error recording payment.');
     } finally {
@@ -86,6 +99,8 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
   return (
     <>
       <form onSubmit={handleSubmit} className="space-y-5 max-w-xl">
+        {/* Disabled once the payment is processed: every field and choice locks until New Payment */}
+        <fieldset disabled={locked || saving} className={`space-y-5 min-w-0 border-0 p-0 m-0 ${locked ? 'opacity-70' : ''}`}>
         <div>
           <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Client</label>
           <ClientPicker clients={clients} value={clientId} onChange={setClientId} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" required />
@@ -132,12 +147,12 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
           {client ? (
             <div className="mt-3 bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm space-y-1.5">
               <div className="flex justify-between">
-                <span className="text-slate-400">Current balance</span>
+                <span className="text-slate-400">{locked ? 'Balance before payment' : 'Current balance'}</span>
                 <span className={balanceColor(currentBalance)}>{formatMoney(toDisplayBalance(currentBalance))}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">This payment</span>
-                <span className={balanceColor(-amount)}>+{formatMoney(amount)}</span>
+                <span className="text-slate-400">{locked ? 'Payment (processed)' : 'This payment'}</span>
+                <span className={balanceColor(-(locked ? lastPayment.amount : amount))}>+{formatMoney(locked ? lastPayment.amount : amount)}</span>
               </div>
               <div className="flex justify-between border-t border-slate-800 pt-1.5">
                 <span className="font-semibold text-slate-300">Balance after payment</span>
@@ -153,10 +168,21 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
           <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Notes <span className="normal-case font-normal text-slate-500">(optional)</span></label>
           <textarea value={comments} onChange={(e) => setComments(e.target.value)} rows={3} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" placeholder="e.g. Cash payment, receipt #…" />
         </div>
+        </fieldset>
+
+        {locked && (
+          <p className="text-sm text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-3">
+            Payment processed. Print the receipt, or press New Payment to enter another.
+          </p>
+        )}
 
         <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
           <button type="button" onClick={() => lastPayment && printReceipt(lastPayment, onError)} disabled={!lastPayment} className="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">Print Receipt</button>
-          <button type="submit" disabled={saving || methodProblem !== null} className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">Process Payment</button>
+          {locked ? (
+            <button type="button" onClick={startNewPayment} className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">New Payment</button>
+          ) : (
+            <button type="submit" disabled={saving || methodProblem !== null} className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-semibold px-6 py-2.5 rounded-lg text-sm mt-4">{saving ? 'Processing...' : 'Process Payment'}</button>
+          )}
         </div>
       </form>
 
