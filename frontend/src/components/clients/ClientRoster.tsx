@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import type { ReactNode } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, Eye, EyeOff, SlidersHorizontal } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, CalendarCheck, Eye, EyeOff, SlidersHorizontal } from 'lucide-react';
 import { createClient } from '../../api';
 import type { SupervisingAgent } from '../../api';
 import AgentPicker from '../agents/AgentPicker';
@@ -19,10 +19,27 @@ import type { CoveredClient } from '../../api';
 import { SO_PHASES, SO_TREATMENT_FEES, bipTreatmentFee } from '../../utils/soPhases';
 import { balanceColor, formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
 import { privacyRosterView } from '../../utils/privacy';
-import { takesPolygraphs } from '../../utils/polygraph';
+import { rosterPolygraphNotice, takesPolygraphs } from '../../utils/polygraph';
+import { toLocalDay } from '../../utils/dates';
 import { needsGroup } from '../../utils/home';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client and group rows are untyped throughout App */
+// A client's last polygraph date on the roster: red when they're overdue for their next one (or attending without a first one),
+// with a calendar mark when their next polygraph is already booked
+function LastPolyValue({ client }: { client: any }) {
+  const notice = rosterPolygraphNotice(client);
+  const next = client.nextpoly ? `Next polygraph scheduled for ${toLocalDay(client.nextpoly).toLocaleDateString()}` : null;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 ${notice ? 'text-red-400 font-semibold' : ''}`}
+      title={[notice, next].filter(Boolean).join('. ') || undefined}
+    >
+      {client.lastpoly ? new Date(client.lastpoly).toLocaleDateString() : 'None'}
+      {next && <CalendarCheck size={14} role="img" aria-label={next} className="shrink-0 text-emerald-400" />}
+    </span>
+  );
+}
+
 interface Props {
   // Current clients (not discharged); discharged clients are loaded when the status filter asks for them
   clients: any[];
@@ -132,7 +149,7 @@ const ROSTER_CELLS: Record<SortKey, (c: any) => ReactNode> = {
       {c.lastattended ? new Date(c.lastattended).toLocaleDateString() : 'Never'}
     </td>
   ),
-  lastpoly: c => <td className="p-3 text-slate-400 text-xs">{!takesPolygraphs(c.programtype) ? '—' : c.lastpoly ? new Date(c.lastpoly).toLocaleDateString() : 'None'}</td>,
+  lastpoly: c => <td className="p-3 text-slate-400 text-xs">{!takesPolygraphs(c.programtype) ? '—' : <LastPolyValue client={c} />}</td>,
   status: c => <td className="p-3"><span className={`inline-block whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium ${c.programstatus === 'Active' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`} title={c.programstatus}>{c.programstatus === 'Discharged Supervision' ? 'Discharged' : c.programstatus}</span></td>,
   balance: c => <td className={`p-3 font-semibold whitespace-nowrap ${balanceColor(c.accountbalance)}`}>{formatBalanceLabeled(c.accountbalance)}</td>,
 };
@@ -663,7 +680,7 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
                   </span>
                   <span className="block text-xs text-slate-400">
                     Last attended: <span className={isAttendanceOverdue(c) ? 'text-red-400 font-semibold' : ''}>{c.lastattended ? new Date(c.lastattended).toLocaleDateString() : 'Never'}</span>
-                    {takesPolygraphs(c.programtype) && ` · Last poly: ${c.lastpoly ? new Date(c.lastpoly).toLocaleDateString() : 'None'}`}
+                    {takesPolygraphs(c.programtype) && <> · Last poly: <LastPolyValue client={c} /></>}
                   </span>
                 </button>
               )}

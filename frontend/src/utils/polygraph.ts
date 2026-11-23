@@ -43,6 +43,14 @@ export const polygraphNotice = (
   if (!client.lastdateattended) return null;
   return "Client hasn't taken their first polygraph yet";
 };
+// The same notice for a Client Roster row, which carries only its last polygraph's date (lastpoly) and last attendance
+export const rosterPolygraphNotice = (
+  client: { programtype?: string | null; nopolyrequired?: boolean | null; lastpoly?: string | null; lastattended?: string | null; lastdateattended?: string | null },
+  today = new Date()) =>
+  polygraphNotice(
+    { programtype: client.programtype, nopolyrequired: client.nopolyrequired, lastdateattended: client.lastattended ?? client.lastdateattended },
+    client.lastpoly ? [{ date: client.lastpoly }] : [],
+    today);
 
 // A client's poly fee voucher runs 0 to this; the server fills it when the poly fee is paid in full
 export const POLY_VOUCHER_MAX = 6;

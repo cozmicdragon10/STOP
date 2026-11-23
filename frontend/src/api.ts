@@ -191,6 +191,8 @@ export interface Client extends Omit<ClientColumns, 'programtype'> {
     programtype: string;
     lastattended: string | null;
     lastpoly: string | null;
+    // Day (YYYY-MM-DD) of the next scheduled polygraph, today or later; null when none is booked
+    nextpoly?: string | null;
     attendedthismonth: boolean;
     // This period's treatment fee was already charged (month for SO Phase 1 and 2, 3 or 6 months for Phase 3 and 4)
     feealreadycharged: boolean;

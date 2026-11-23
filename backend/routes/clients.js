@@ -33,6 +33,10 @@ const individualGroupFrom = async (value) => {
     return { id: r.rows[0].groupid };
 };
 
+// The day (YYYY-MM-DD) of the client's next scheduled polygraph, today or later; null when none is booked
+const NEXT_POLY_SQL = `(SELECT to_char(s.Date, 'YYYY-MM-DD') FROM PolygraphAppointments a JOIN PolygraphSlots s ON s.SlotId = a.SlotId
+        WHERE a.Client = c.ClientId AND a.Status = 'Scheduled' AND s.Date >= CURRENT_DATE ORDER BY s.Date, s.Time LIMIT 1)`;
+
 // A client row as the roster and every client picker use it
 const clientRowsSql = (where) => `
     SELECT
@@ -44,6 +48,7 @@ const clientRowsSql = (where) => `
         COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
         (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
         (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly,
+        ${NEXT_POLY_SQL} AS NextPoly,
         ${ATTENDED_THIS_MONTH} AS AttendedThisMonth,
         ${FEE_ALREADY_CHARGED} AS FeeAlreadyCharged,
         ${ACTIVE_FEE_OVERRIDE} AS ActiveFeeOverride,
@@ -1103,7 +1108,8 @@ const updateClientInfo = async (req, res) => {
         const updated = await db.query(
             `SELECT c.*, g.GroupName, ig.GroupName AS IndividualGroupName, ${FEDERAL_UNITS_SQL('c.ClientId')} AS FederalUnits, ${FEDERAL_UNIT_REFILLS_SQL('c.ClientId')} AS FederalUnitRefills, COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
                     (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
-                    (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly
+                    (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly,
+                    ${NEXT_POLY_SQL} AS NextPoly
              FROM Clients c
              LEFT JOIN Groups g ON c.GroupId = g.GroupId
              LEFT JOIN Groups ig ON c.IndividualGroupId = ig.GroupId

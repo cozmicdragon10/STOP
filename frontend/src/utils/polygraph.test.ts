@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { POLY_VOUCHER_MAX, polygraphHistoryText, polygraphNotice, polySchedulingNeeds, polyVoucherReturnRule, polyResultTone, slotStart, cancelReservationHint, cancelReservationLabel } from './polygraph';
+import { POLY_VOUCHER_MAX, polygraphHistoryText, polygraphNotice, rosterPolygraphNotice, polySchedulingNeeds, polyVoucherReturnRule, polyResultTone, slotStart, cancelReservationHint, cancelReservationLabel } from './polygraph';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -123,5 +123,26 @@ describe('polyResultTone', () => {
     for (const r of ['Inconclusive', 'No Opinion', 'Unable to Perform Test', 'Other - See Test', '', null, undefined]) {
       expect(polyResultTone(r)).toBe('unclear');
     }
+  });
+});
+
+describe('rosterPolygraphNotice', () => {
+  const today = new Date(2026, 6, 15);
+
+  it('flags a roster row whose last polygraph is six or more months old', () => {
+    expect(rosterPolygraphNotice({ programtype: 'State SO', lastpoly: '2026-01-15T06:00:00.000Z' }, today))
+      .toBe('Client is overdue for their next Polygraph');
+    expect(rosterPolygraphNotice({ programtype: 'State SO', lastpoly: '2026-01-16T06:00:00.000Z' }, today)).toBeNull();
+  });
+
+  it('flags a client who has attended but not taken a first polygraph, using the roster\'s last attended date', () => {
+    expect(rosterPolygraphNotice({ programtype: 'State SO', lastpoly: null, lastattended: '2026-07-05' }, today))
+      .toBe("Client hasn't taken their first polygraph yet");
+    expect(rosterPolygraphNotice({ programtype: 'State SO', lastpoly: null, lastattended: null }, today)).toBeNull();
+  });
+
+  it('skips programs without polygraphs and No Poly Required', () => {
+    expect(rosterPolygraphNotice({ programtype: 'BIP', lastpoly: '2025-01-01', lastattended: '2026-07-05' }, today)).toBeNull();
+    expect(rosterPolygraphNotice({ programtype: 'State SO', nopolyrequired: true, lastpoly: '2025-01-01' }, today)).toBeNull();
   });
 });
