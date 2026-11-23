@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { getGroupClients, getGroupSessions, saveOpenGroup, submitBatchAttendance } from '../api';
+import { deleteOpenGroup, getGroupClients, getGroupSessions, moveCardPayment, saveOpenGroup, submitAccountPayment, submitBatchAttendance } from '../api';
 import type { GroupDaySession } from '../api';
 import type { OpenGroupSession } from '../api';
 import { isMonthlyFeeClient } from '../utils/soPhases';
@@ -7,7 +7,7 @@ import { bipCheckInBlockMessage } from '../utils/bip';
 import type { BipCheckInBlock } from '../utils/bip';
 import { drugTestedOn, needsDuration, outOfUnits, unitCodeFor, unitCodeLabel } from '../utils/federalUnits';
 import { federalGroupFee, individualSessionFee } from '../utils/clients';
-import type { PaymentMethod } from '../utils/paymentMethods';
+import { paymentMethodText, type PaymentMethod } from '../utils/paymentMethods';
 
 export interface ClientRecord {
   clientid: number;
@@ -80,6 +80,8 @@ export interface SessionEntry {
   paymentReference?: string | null;
   // Card payment taken at check-in; already saved to the account, so it is not recorded again on close
   cardPaid: number;
+  // Its ledger row(s), so it can be moved to the right client if this one was checked in by mistake
+  cardTransactionIds?: number[];
   // Account balance as of check-in, including any card payment already saved
   balance: number;
   voucher: boolean;
@@ -102,8 +104,17 @@ export interface CheckInTerms {
   paymentReference?: string | null;
   voucher: boolean;
   cardPaid: number;
+  cardTransactionIds?: number[];
   balance: number;
 }
+
+// What happens to the money of a client removed from the sheet (see resolveRemoval)
+type RemovalClient = { clientid: number; firstname: string; lastname: string };
+export type RemovalChoice =
+  | { kind: 'refund' }
+  | { kind: 'account'; toClient: RemovalClient }
+  | { kind: 'move-card'; toClient: RemovalClient }
+  | { kind: 'keep-card' };
 
 // What the check-in dialog sets per client. The fee comes from the client's account, not the dialog.
 export type PaymentTerms = Omit<CheckInTerms, 'fee'>;
@@ -190,7 +201,8 @@ const confirmMakeups = (clients: ClientRecord[]) => {
   return { approved, makeupIds };
 };
 
-export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
+// openGroups: the saved open check-ins, so removing a paid client can update the one saved for this sheet
+export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, openGroups: OpenGroupSession[] = []) {
   const [groupId, setGroupId] = useState<number | null>(null);
   const [view, setView] = useState<WorkflowView>('checkin');
   const [roster, setRoster] = useState<ClientRecord[]>([]);
@@ -203,6 +215,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
   // Clients waiting on the check-in details dialog.
   // makeupIds are clients confirmed as approved make-ups for this week.
   const [pendingCheckIn, setPendingCheckIn] = useState<{ clients: ClientRecord[]; makeupIds: Set<number> } | null>(null);
+  // A client who paid Cash or Other at check-in, waiting in the Remove dialog for where that money goes
+  const [pendingRemoval, setPendingRemoval] = useState<SessionEntry | null>(null);
   // Clients who already attended this session of the group; a client can attend a session only once
   const [attendedIds, setAttendedIds] = useState<Set<number>>(() => new Set());
   // Which session of the group on the session date this sheet is for (1 = the day's first)
@@ -403,6 +417,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
           paymentSubtype: terms.paymentMethod === 'Other' ? terms.paymentSubtype ?? null : null,
           paymentReference: terms.paymentMethod === 'Other' ? terms.paymentReference ?? null : null,
           cardPaid: terms.cardPaid,
+          ...(terms.cardTransactionIds?.length ? { cardTransactionIds: terms.cardTransactionIds } : {}),
           balance: terms.balance,
           voucher: terms.voucher,
           comments: '',
@@ -472,15 +487,108 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     setSession(prev => prev.map(e => (e.client.clientid === clientId ? { ...e, ...patch } : e)));
   };
 
-  // A client with a printed attendance receipt stays on the sheet
+  // A client with a printed attendance receipt stays on the sheet. A client who paid at check-in isn't removed straight
+  // away: the Remove dialog asks where the money goes first. Cash or Other is recorded only when the group closes, so it
+  // goes on an account now or back to the client; a card payment is already on their account and can move to the client
+  // who actually paid (the usual case: the wrong client was checked in).
   const removeEntry = (clientId: number) => {
     const entry = session.find(e => e.client.clientid === clientId);
-    if (entry?.receiptPrinted) {
+    if (!entry) return;
+    if (entry.receiptPrinted) {
       notify.onError(`An attendance receipt was printed for ${entry.client.lastname}, ${entry.client.firstname}, so they can't be removed from this session.`);
       return;
     }
+    if (entry.payment > 0 || (entry.cardPaid > 0 && entry.cardTransactionIds?.length)) {
+      setPendingRemoval(entry);
+      return;
+    }
+    // A sheet saved before card payments kept their receipt numbers: the payment stays where it is
+    if (entry.cardPaid > 0 && !window.confirm(
+      `${entry.client.lastname}, ${entry.client.firstname} paid $${entry.cardPaid.toFixed(2)} by card at check-in. That payment is already on their account and stays there as a credit. Remove them from the sheet?`
+    )) return;
     setSession(prev => prev.filter(e => e.client.clientid !== clientId || e.receiptPrinted));
   };
+
+  // The open check-in saved on the server (Finish Check-In or Save for Later) for this sheet, if there is one
+  const savedOpenGroup = () => openGroups.find(o => o.groupid === groupId
+    && o.sessiondate === (sessionDate ?? todayLocal()) && (o.sessionnumber ?? 1) === sessionNumber) ?? null;
+
+  // Settles the money of the client waiting in the Remove dialog, then takes them off the sheet.
+  // Cash or Other: 'refund' (handed back, nothing recorded) or 'account' (recorded now as an account payment on toClient:
+  // the same client, or the client who should have been checked in). Card: 'move-card' (the payment moves to toClient's
+  // account) or 'keep-card' (it stays on this client's account as a credit).
+  const resolveRemoval = async (choice: RemovalChoice) => {
+    const entry = pendingRemoval;
+    if (!entry || groupId === null) return;
+    const name = `${entry.client.lastname}, ${entry.client.firstname}`;
+    const card = entry.payment <= 0 && entry.cardPaid > 0;
+    const paid = card
+      ? `$${entry.cardPaid.toFixed(2)} Credit Card`
+      : `$${entry.payment.toFixed(2)} ${paymentMethodText(entry.paymentMethod, entry.paymentSubtype, entry.paymentReference)}`;
+    const date = new Date(`${sessionDate ?? todayLocal()}T00:00:00`).toLocaleDateString();
+    const toName = 'toClient' in choice ? `${choice.toClient.lastname}, ${choice.toClient.firstname}` : '';
+    setSubmitting(true);
+    let message: string;
+    try {
+      if (choice.kind === 'account') {
+        const sameClient = choice.toClient.clientid === entry.client.clientid;
+        await submitAccountPayment({
+          client: choice.toClient.clientid,
+          amount: entry.payment,
+          comments: sameClient
+            ? `Paid at group check-in on ${date}; removed from the attendance sheet, so applied to the account.`
+            : `Paid at group check-in on ${date}, entered under ${name} by mistake; moved to this account.`,
+          createdBy,
+          paymentMethod: entry.paymentMethod,
+          paymentSubtype: entry.paymentMethod === 'Other' ? entry.paymentSubtype ?? null : null,
+          paymentReference: entry.paymentMethod === 'Other' ? entry.paymentReference ?? null : null,
+        });
+        message = sameClient
+          ? `${name} removed. The ${paid} payment was applied to their account.`
+          : `${name} removed. The ${paid} payment was applied to ${toName}'s account; check them in and it shows as account credit.`;
+      } else if (choice.kind === 'move-card') {
+        for (const id of entry.cardTransactionIds ?? []) {
+          await moveCardPayment(id, { fromClient: entry.client.clientid, toClient: choice.toClient.clientid, reason: `Wrong client checked in at group check-in on ${date}` });
+        }
+        message = `${name} removed. The ${paid} payment was moved to ${toName}'s account; check them in and it shows as account credit.`;
+      } else if (choice.kind === 'keep-card') {
+        message = `${name} removed. The ${paid} payment stays on their account as a credit.`;
+      } else {
+        message = `${name} removed. The ${paid} payment was not recorded; hand the money back.`;
+      }
+    } catch (err: unknown) {
+      setSubmitting(false);
+      notify.onError(err instanceof Error && err.message ? err.message : 'The payment could not be saved, so the client is still on the sheet. Try again.');
+      return;
+    }
+
+    const next = session.filter(e => e.client.clientid !== entry.client.clientid);
+    setSession(next);
+    setPendingRemoval(null);
+    if (choice.kind === 'account' || choice.kind === 'move-card') {
+      notify.onSaved?.();
+      reloadRoster();
+    }
+    // A saved open check-in still lists the payment; update it now so it isn't recorded again when the group closes
+    const saved = savedOpenGroup();
+    try {
+      if (saved && next.length > 0) {
+        await saveOpenGroup({ group: groupId, date: sessionDate ?? todayLocal(), sessionNumber, entries: next, createdBy, coveredBy });
+        notify.onOpenGroupsChanged?.();
+      } else if (saved) {
+        await deleteOpenGroup(saved.opensessionid, createdBy);
+        notify.onOpenGroupsChanged?.();
+      }
+      notify.onSuccess(message);
+    } catch (err: unknown) {
+      const reason = err instanceof Error && err.message ? ` (${err.message})` : '';
+      notify.onError(`${message} But the saved check-in could not be updated${reason}. ${next.length > 0 ? 'Press Save for Later now' : 'Discard it from Open Groups'} so the payment isn't recorded twice when the group closes.`);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const cancelRemoval = () => setPendingRemoval(null);
 
   // Called when an attendance receipt is printed: marks the client and saves the sheet as an open group right away, so the
   // lock holds even if this screen is left before the group is saved or closed. The sheet stays on screen.
@@ -575,6 +683,9 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier) {
     session,
     updateEntry,
     removeEntry,
+    pendingRemoval,
+    resolveRemoval,
+    cancelRemoval,
     markReceiptPrinted,
     submitSession,
     submitting,

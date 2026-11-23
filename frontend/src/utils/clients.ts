@@ -64,6 +64,7 @@ export const CHANGE_LOG_TYPES: { type: string; label: string }[] = [
   { type: 'Payment Adjusted', label: 'Payment Adjusted' },
   { type: 'Payment Refunded', label: 'Payment Refunded' },
   { type: 'Payment Disputed', label: 'Payment Disputed' },
+  { type: 'Payment Moved', label: 'Payment Moved' },
   { type: 'Account Balance', label: 'Account Balance' },
   { type: 'Treatment Fee', label: 'Treatment Fee' },
   { type: 'Fee Override', label: 'Temporary Fee Override' },

@@ -157,6 +157,7 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
         paymentReference: row.paymentMethod === 'Other' ? row.paymentReference.trim() || null : null,
         voucher: row.voucher,
         cardPaid: row.receipt ? row.receipt.amount : 0,
+        cardTransactionIds: row.receipt?.transactionIds ?? [],
         // Card payments are already saved, so the balance here already reflects them
         balance: row.receipt ? row.receipt.newBalance : Number(c.accountbalance || 0),
       }];

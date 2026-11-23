@@ -1487,6 +1487,16 @@ export async function deleteAttendance(attendanceId: number, reason: string): Pr
 
 export type CardPaymentAction = 'refund' | 'dispute' | 'dispute-won' | 'dispute-lost';
 
+// Moves a credit card payment to another client's account (the wrong client was checked in and charged)
+export async function moveCardPayment(transactionId: number, data: { fromClient: number; toClient: number; reason: string }): Promise<{ success: true; fromBalance: number; toBalance: number }> {
+    const res = await apiFetch(`${API_BASE}/financials/${transactionId}/move-to-client`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return jsonResponse(res, 'Failed to move the card payment.');
+}
+
 // Refund (full or partial), dispute, or dispute outcome on a credit card payment
 export async function recordCardPaymentAction(transactionId: number, data: { action: CardPaymentAction; amount?: number; reason: string; user: string }): Promise<PaymentChangeResult> {
     const res = await apiFetch(`${API_BASE}/financials/${transactionId}/card-action`, {

@@ -10,6 +10,7 @@ import CheckInStep from './CheckInStep';
 import ReviewStep from './ReviewStep';
 import ClientSearchModal from './ClientSearchModal';
 import CheckInOptionsDialog from './CheckInOptionsDialog';
+import RemovePaidClientDialog from './RemovePaidClientDialog';
 
 interface Props {
   groups: GroupRecord[];
@@ -113,7 +114,7 @@ function filterSearchableClients(clients: ClientRecord[], groupType: string | nu
 }
 
 export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPickCover, onSuccess, onError, onSaved, openGroups, onOpenGroupsChanged, resumeRequest, onResumeHandled, missedCheckInRequest, onMissedCheckInHandled, onOpenClient }: Props) {
-  const wf = useGroupCheckIn(createdBy, { onSuccess, onError, onSaved, onOpenGroupsChanged });
+  const wf = useGroupCheckIn(createdBy, { onSuccess, onError, onSaved, onOpenGroupsChanged }, openGroups);
   const [searchOpen, setSearchOpen] = useState(false);
 
   const group = groups.find(g => g.groupid === wf.groupId) ?? null;
@@ -332,6 +333,16 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
           // The payment is already on the account, so the roster must show it even if this check-in is canceled
           onProcessed={() => { onSaved(); wf.reloadRoster(); }}
           individualFee={wf.individualFee}
+        />
+      )}
+
+      {wf.pendingRemoval && (
+        <RemovePaidClientDialog
+          entry={wf.pendingRemoval}
+          clients={clients}
+          saving={wf.submitting}
+          onConfirm={wf.resolveRemoval}
+          onCancel={wf.cancelRemoval}
         />
       )}
     </div>

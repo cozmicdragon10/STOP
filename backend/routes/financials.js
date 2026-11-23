@@ -3,6 +3,7 @@ const { effectiveRole } = require('../lib/roles');
 const { logAction, pool } = require('../db');
 const { activeRoleFor, OPEN_GROUP_ADMIN_ROLES } = require('../lib/access');
 const { assertCardAllowed } = require('../lib/cardBlock');
+const { cardMoveProblem } = require('../lib/cardMove');
 const { requireRole } = require('../lib/auth');
 const { FORGIVEN_FEE_TYPE, forgivenessEditProblem, forgivenessProblem } = require('../lib/debtForgiveness');
 const { dollars, logClientChange } = require('../lib/changeLog');
@@ -484,6 +485,77 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
 // A dispute reverses the payment as soon as it's opened; winning it puts the disputed amount back, losing it leaves it reversed.
 // On a poly fee payment, what PolyFeePaid can't absorb (it never goes below $0) is owed on the account instead.
 const CARD_ACTIONS = ['refund', 'dispute', 'dispute-won', 'dispute-lost'];
+// Moves a credit card payment to another client's account (lib/cardMove.js has who and which payments). Used when the
+// wrong client was checked in and charged: the ledger row moves to the client who paid, with both balances updated, so
+// there is still one card charge. Both client rows are locked, lowest id first.
+router.post('/api/financials/:id/move-to-client', async (req, res) => {
+    const { fromClient, toClient, reason } = req.body || {};
+    const user = req.user;
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        const tx = (await db.query('SELECT * FROM FinancialTransactions WHERE TransactionId = $1 FOR UPDATE', [req.params.id])).rows[0];
+        const relatedCount = tx
+            ? Number((await db.query('SELECT COUNT(*) AS n FROM FinancialTransactions WHERE RelatedTransactionId = $1', [tx.transactionid])).rows[0].n)
+            : 0;
+        const problem = cardMoveProblem({ tx, relatedCount, fromClient, toClient, user });
+        if (problem) {
+            await db.query('ROLLBACK');
+            return res.status(problem.startsWith('Only the person') ? 403 : 400).json({ error: problem });
+        }
+        const locked = await db.query(
+            'SELECT ClientId, FirstName, LastName, AccountBalance FROM Clients WHERE ClientId = ANY($1::int[]) ORDER BY ClientId FOR UPDATE',
+            [[Number(tx.client), Number(toClient)]]
+        );
+        const from = locked.rows.find(r => Number(r.clientid) === Number(tx.client));
+        const to = locked.rows.find(r => Number(r.clientid) === Number(toClient));
+        if (!from || !to) {
+            await db.query('ROLLBACK');
+            return res.status(404).json({ error: 'That client no longer exists.' });
+        }
+        await assertCardAllowed(db, to.clientid);
+
+        const amount = Number(tx.amount);
+        const cents = (n) => Math.round(n * 100) / 100;
+        // Stored sign: positive = owes. The first client owes the payment again; the second has it.
+        const fromOld = Number(from.accountbalance || 0);
+        const toOld = Number(to.accountbalance || 0);
+        const fromNew = cents(fromOld + amount);
+        const toNew = cents(toOld - amount);
+        const fromName = `${from.lastname}, ${from.firstname}`;
+        const toName = `${to.lastname}, ${to.firstname}`;
+        const why = String(reason || '').trim() || 'Wrong client checked in';
+        const paidOn = new Date(tx.date).toLocaleDateString('en-US');
+
+        await db.query('UPDATE Clients SET AccountBalance = $1 WHERE ClientId = $2', [fromNew, from.clientid]);
+        await db.query('UPDATE Clients SET AccountBalance = $1 WHERE ClientId = $2', [toNew, to.clientid]);
+        await db.query(
+            `UPDATE FinancialTransactions SET Client = $1, FinalBalance = $2,
+                 Comments = TRIM(COALESCE(Comments, '') || ' ' || $3)
+             WHERE TransactionId = $4`,
+            [to.clientid, toNew, `Moved from ${fromName} by ${user.employeeemail}: ${why}.`, tx.transactionid]
+        );
+        await logClientChange(db, {
+            clientId: from.clientid, changedBy: user.employeeemail, changeType: 'Payment Moved',
+            oldValue: moneyText('accountbalance', fromOld), newValue: moneyText('accountbalance', fromNew),
+            details: `${dollars(amount)} Credit Card payment from ${paidOn} (receipt ${tx.transactionid}) moved to ${toName}: ${why}.`,
+        });
+        await logClientChange(db, {
+            clientId: to.clientid, changedBy: user.employeeemail, changeType: 'Payment Moved',
+            oldValue: moneyText('accountbalance', toOld), newValue: moneyText('accountbalance', toNew),
+            details: `${dollars(amount)} Credit Card payment from ${paidOn} (receipt ${tx.transactionid}) moved here from ${fromName}: ${why}.`,
+        });
+        await db.query('COMMIT');
+        await logAction(user.employeeemail, 'Payment Moved', `Card payment ${tx.transactionid} (${dollars(amount)}) moved from client ID ${from.clientid} to client ID ${to.clientid}: ${why}`);
+        res.json({ success: true, fromBalance: fromNew, toBalance: toNew });
+    } catch (err) {
+        await db.query('ROLLBACK');
+        res.status(err.status || 500).json({ error: err.message });
+    } finally {
+        db.release();
+    }
+});
+
 router.post('/api/financials/:id/card-action', async (req, res) => {
     const { id } = req.params;
     const { action, amount, reason, user } = req.body || {};
