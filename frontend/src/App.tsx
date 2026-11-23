@@ -4,8 +4,10 @@ import {
   Users, ClipboardCheck, ShieldCheck, Shield, LogOut, AlertCircle, X, FileText,
   DollarSign, Calendar, Activity, PhoneCall, ShieldAlert, 
   Layers, BarChart3, Settings, Trash2, RotateCcw, Home, History,
-  Paperclip, UserCheck, ClipboardList, SlidersHorizontal, Lock, Palette, Code2, CalendarDays
+  Paperclip, UserCheck, ClipboardList, SlidersHorizontal, Lock, Palette, Code2, CalendarDays, ChevronDown, ChevronRight, Search
 } from 'lucide-react';
+import { CLOSED_RANGES, closedGroupCounselors, closedRangeDates, filterClosedGroups } from './utils/closedGroups';
+import type { ClosedRange } from './utils/closedGroups';
 import { isTabLockedByPrivacy, readPrivacyOn, writePrivacyOn } from './utils/privacy';
 import {
   loginUser, logoutUser, setSessionEndedHandler, setSessionStartedHandler, setDeviceBlockedHandler, getDeviceStatus,
@@ -17,7 +19,7 @@ import {
   deleteClient,
   getClientDeletable,
   getEmployees, fetchClientFeeOverride, fetchPolyFeeOverride,
-  getOpenGroups, deleteOpenGroup, getClosedGroups, getSupervisingAgents, getCoveredByMe
+  getOpenGroups, deleteOpenGroup, getClosedGroups, CLOSED_GROUPS_MAX, getSupervisingAgents, getCoveredByMe
 } from './api';
 import type {
   CardBlock, Client, ClientAttendance, CoveredClient, ClientNote, ClosedGroupSession, DeviceState, Employee, FinancialTransaction, Group,
@@ -222,6 +224,26 @@ export default function App() {
   const [closedGroups, setClosedGroups] = useState<ClosedGroupSession[]>([]);
   const [closedGroupsError, setClosedGroupsError] = useState('');
   const [expandedClosedGroup, setExpandedClosedGroup] = useState<string | null>(null);
+  // Closed Groups filters: the date range is fetched from the server; search and counselor filter what came back.
+  // Counselor sections folded up (lower-case name) are remembered in this browser.
+  const [closedRange, setClosedRange] = useState<ClosedRange>('30');
+  const [closedCustom, setClosedCustom] = useState({ from: '', to: '' });
+  const [closedSearch, setClosedSearch] = useState('');
+  const [closedCounselor, setClosedCounselor] = useState('');
+  const [foldedCounselors, setFoldedCounselors] = useState<Set<string>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('closedGroups.foldedCounselors') || '[]');
+      return new Set<string>(Array.isArray(saved) ? saved.map(String) : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
+  const saveFolded = (next: Set<string>) => {
+    setFoldedCounselors(next);
+    try { localStorage.setItem('closedGroups.foldedCounselors', JSON.stringify([...next])); } catch { /* this visit only */ }
+  };
+  const closedDates = closedRangeDates(closedRange, todayLocal(), closedCustom);
+  const closedRequest = useRef(0);
   // Open group picked in the Open Groups panel, handed to the check-in workflow to load
   const [resumeRequest, setResumeRequest] = useState<OpenGroupSession | null>(null);
   // Closed group picked in the Closed Groups panel for missed check-ins (Business Administrators)
@@ -433,10 +455,20 @@ export default function App() {
       setOpenGroupsError(errorMessage(err, 'Failed to load open groups.'));
     }
     // Closing an open group moves it to the Closed tab, so both lists refresh together
+    await loadClosedGroups();
+  };
+
+  // Only the latest request's answer is kept, so quickly changing the dates can't show an older range's list
+  const loadClosedGroups = async () => {
+    if (!user) return;
+    const request = ++closedRequest.current;
     try {
-      setClosedGroups(await getClosedGroups(user.employeeemail));
+      const list = await getClosedGroups(user.employeeemail, closedDates);
+      if (request !== closedRequest.current) return;
+      setClosedGroups(list);
       setClosedGroupsError('');
     } catch (err) {
+      if (request !== closedRequest.current) return;
       setClosedGroupsError(errorMessage(err, 'Failed to load closed groups.'));
     }
   };
@@ -447,6 +479,14 @@ export default function App() {
     if (user && activeTab === 'attendance') loadOpenGroups();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, activeTab]);
+
+  // A new date range on Closed Groups loads that range (the first run is covered by the load above)
+  const closedRangeLoaded = useRef(false);
+  useEffect(() => {
+    if (!closedRangeLoaded.current) { closedRangeLoaded.current = true; return; }
+    if (user && activeTab === 'attendance') loadClosedGroups();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closedDates.from, closedDates.to]);
 
   // Polygraph slot assignment, shared by the Poly Schedule cards and the client account's Schedule Polygraph
   const polyAssign = usePolyAssignment({
@@ -833,16 +873,34 @@ export default function App() {
   // Open and Closed Groups lists: Business Administrators (DEV signs in as one) and Office Admins see them split by
   // counselor under a heading with the count; everyone else sees one list
   const groupListsByCounselor = role === 'Business Administrator' || role === 'Office Admin';
-  const counselorSections = <T,>(items: T[], counselorOf: (item: T) => string | null | undefined, render: (item: T) => React.ReactNode) =>
-    !groupListsByCounselor ? items.map(render) : groupByCounselor(items, counselorOf).map(section => (
-      <li key={`counselor-${section.counselor}`} className="space-y-2">
-        <p className="flex justify-between gap-2 pt-1 text-[0.6875rem] font-semibold uppercase tracking-wide text-slate-400 border-b border-slate-800 pb-1">
-          <span className="truncate">{section.counselor}</span>
-          <span className="text-slate-500 shrink-0">{section.items.length}</span>
-        </p>
-        <ul className="space-y-2">{section.items.map(render)}</ul>
-      </li>
-    ));
+  // fold: when given, each counselor's heading folds their list up and opens it again (folded: lower-case names)
+  const counselorSections = <T,>(items: T[], counselorOf: (item: T) => string | null | undefined, render: (item: T) => React.ReactNode,
+    fold?: { folded: Set<string>; toggle: (key: string) => void }) =>
+    !groupListsByCounselor ? items.map(render) : groupByCounselor(items, counselorOf).map(section => {
+      const key = section.counselor.toLowerCase();
+      const folded = !!fold?.folded.has(key);
+      const heading = 'flex justify-between gap-2 pt-1 text-[0.6875rem] font-semibold uppercase tracking-wide text-slate-400 border-b border-slate-800 pb-1';
+      return (
+        <li key={`counselor-${section.counselor}`} className="space-y-2">
+          {fold ? (
+            <button type="button" onClick={() => fold.toggle(key)} aria-expanded={!folded} title={folded ? 'Show these groups' : 'Hide these groups'}
+              className={`${heading} w-full text-left hover:text-slate-200`}>
+              <span className="flex items-center gap-1 min-w-0">
+                {folded ? <ChevronRight size={13} className="shrink-0" /> : <ChevronDown size={13} className="shrink-0" />}
+                <span className="truncate">{section.counselor}</span>
+              </span>
+              <span className="text-slate-500 shrink-0">{section.items.length}</span>
+            </button>
+          ) : (
+            <p className={heading}>
+              <span className="truncate">{section.counselor}</span>
+              <span className="text-slate-500 shrink-0">{section.items.length}</span>
+            </p>
+          )}
+          {!folded && <ul className="space-y-2">{section.items.map(render)}</ul>}
+        </li>
+      );
+    });
   // Counselors: the groups they lead, which decide "my clients" on the roster and My Day
   const isCounselor = role === 'Counselor';
   // Home page: Business Administrators (isBusinessAdmin; DEV signs in as one) and Office Admins get the office's Today
@@ -1644,14 +1702,75 @@ export default function App() {
                   <MoneyOnHand userEmail={user.employeeemail} />
                 ) : groupPanelTab === 'closed' ? (
                   <>
-                    <p className="text-xs text-slate-400 leading-relaxed mb-4">{role === 'Business Administrator' ? 'Recently closed group sessions.' : 'Recently closed group sessions for groups you counsel or opened.'} Select one to see who attended.</p>
+                    <p className="text-xs text-slate-400 leading-relaxed mb-3">{role === 'Business Administrator' ? 'Closed group sessions.' : 'Closed group sessions for groups you counsel or opened.'} Select one to see who attended.</p>
+                    {(() => {
+                      const counselors = closedGroupCounselors(closedGroups);
+                      const shown = filterClosedGroups(closedGroups, closedSearch, closedCounselor);
+                      const filtering = !!closedSearch.trim() || !!closedCounselor;
+                      const sectionKeys = groupListsByCounselor ? [...new Set(shown.map(c => (c.counselor || '').trim().replace(/\s+/g, ' ').toLowerCase() || 'no counselor'))] : [];
+                      const allFolded = sectionKeys.length > 0 && sectionKeys.every(k => foldedCounselors.has(k));
+                      const fieldClass = 'h-8 bg-slate-950 border border-slate-700 rounded px-2 text-white text-xs';
+                      return (
+                        <div className="space-y-2 mb-3 text-xs">
+                          <div className="flex flex-wrap gap-2">
+                            <label className="relative flex-1 min-w-[9rem]">
+                              <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
+                              <input value={closedSearch} onChange={e => setClosedSearch(e.target.value)} placeholder="Search group or client"
+                                aria-label="Search closed groups by group or client name" className={`${fieldClass} w-full pl-7`} />
+                            </label>
+                            <select value={closedRange} onChange={e => setClosedRange(e.target.value as ClosedRange)} aria-label="Closed groups date range" className={fieldClass}>
+                              {CLOSED_RANGES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                            </select>
+                          </div>
+                          {closedRange === 'custom' && (
+                            <div className="flex flex-wrap items-center gap-2 text-slate-400">
+                              <label className="flex items-center gap-1">From
+                                <input type="date" value={closedCustom.from} max={closedCustom.to || todayLocal()} onChange={e => setClosedCustom(c => ({ ...c, from: e.target.value }))} className={fieldClass} />
+                              </label>
+                              <label className="flex items-center gap-1">To
+                                <input type="date" value={closedCustom.to} min={closedCustom.from || undefined} max={todayLocal()} onChange={e => setClosedCustom(c => ({ ...c, to: e.target.value }))} className={fieldClass} />
+                              </label>
+                            </div>
+                          )}
+                          {counselors.length > 1 && (
+                            <select value={closedCounselor} onChange={e => setClosedCounselor(e.target.value)} aria-label="Closed groups counselor" className={`${fieldClass} w-full`}>
+                              <option value="">All counselors</option>
+                              {counselors.map(n => <option key={n} value={n}>{n}</option>)}
+                            </select>
+                          )}
+                          {!closedGroupsError && closedGroups.length > 0 && (
+                            <div className="flex justify-between gap-2 text-slate-500">
+                              <span>
+                                {filtering ? `${shown.length} of ${closedGroups.length}` : shown.length} session{shown.length === 1 ? '' : 's'}
+                                {filtering && <button type="button" onClick={() => { setClosedSearch(''); setClosedCounselor(''); }} className="ml-2 text-blue-400 hover:text-blue-300">Clear filters</button>}
+                              </span>
+                              {sectionKeys.length > 1 && (
+                                <button type="button" className="text-blue-400 hover:text-blue-300"
+                                  onClick={() => {
+                                    const next = new Set(foldedCounselors);
+                                    for (const k of sectionKeys) if (allFolded) next.delete(k); else next.add(k);
+                                    saveFolded(next);
+                                  }}>
+                                  {allFolded ? 'Expand all' : 'Collapse all'}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {closedGroups.length >= CLOSED_GROUPS_MAX && (
+                            <p className="text-amber-300">Showing the newest {CLOSED_GROUPS_MAX}. Pick a shorter date range to see the rest.</p>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {closedGroupsError ? (
                       <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">{closedGroupsError}</p>
-                    ) : closedGroups.length === 0 ? (
-                      <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">No closed groups.</p>
+                    ) : filterClosedGroups(closedGroups, closedSearch, closedCounselor).length === 0 ? (
+                      <p className="text-sm text-slate-500 bg-slate-950 border border-dashed border-slate-700 rounded-lg p-4 text-center">
+                        {closedGroups.length === 0 ? 'No closed groups in these dates.' : 'No closed groups match.'}
+                      </p>
                     ) : (
                       <ul className="space-y-2 max-h-[32rem] overflow-y-auto pr-1">
-                        {counselorSections(closedGroups, c => c.counselor, c => {
+                        {counselorSections(filterClosedGroups(closedGroups, closedSearch, closedCounselor), c => c.counselor, c => {
                           const key = `${c.groupid}-${c.sessiondate}-${c.sessionnumber}`;
                           const expanded = expandedClosedGroup === key;
                           const collected = c.entries.reduce((sum, e) => sum + Number(e.accountPaid || 0), 0);
@@ -1712,6 +1831,13 @@ export default function App() {
                               )}
                             </li>
                           );
+                        }, {
+                          folded: foldedCounselors,
+                          toggle: key => {
+                            const next = new Set(foldedCounselors);
+                            if (next.has(key)) next.delete(key); else next.add(key);
+                            saveFolded(next);
+                          },
                         })}
                       </ul>
                     )}

@@ -37,12 +37,17 @@ router.get('/api/open-groups', async (req, res) => {
 });
 
 // Closed group sessions, newest first. Only Business Administrators see all of them; others see the sessions of groups
-// they counsel, the ones they opened, and the ones they covered.
+// they counsel, the ones they opened, and the ones they covered. from / to (YYYY-MM-DD, optional) limit the session dates;
+// at most CLOSED_GROUPS_MAX come back.
+const CLOSED_GROUPS_MAX = 500;
+const ymdOrNull = (v) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) ? v : null);
 router.get('/api/closed-groups', async (req, res) => {
     try {
         const viewer = await openGroupViewer(req.query.user);
         if (!viewer) return res.json([]);
         const isAdmin = viewer.role === 'Business Administrator';
+        const from = ymdOrNull(req.query.from);
+        const to = ymdOrNull(req.query.to);
         const result = await pool.query(
             `SELECT a."Group" AS GroupId, g.GroupName, g.Counselor, to_char(a.Date, 'YYYY-MM-DD') AS SessionDate, a.SessionNumber,
                     MIN(COALESCE(a.OpenedBy, a.CreatedBy)) AS OpenedBy, MIN(a.CreatedBy) AS ClosedBy, MAX(a.CreatedOn) AS ClosedOn,
@@ -60,14 +65,15 @@ router.get('/api/closed-groups', async (req, res) => {
                  SELECT Comments FROM Notes WHERE AttendanceId = a.AttendanceId ORDER BY NoteId DESC LIMIT 1
              ) n ON TRUE
              WHERE a.Type = 'Group'
+               AND ($4::date IS NULL OR a.Date >= $4::date) AND ($5::date IS NULL OR a.Date <= $5::date)
              GROUP BY a."Group", g.GroupName, g.Counselor, a.Date, a.SessionNumber
              HAVING $1::boolean
                  OR ($3 <> '' AND LOWER(TRIM(g.Counselor)) = LOWER(TRIM($3)))
                  OR bool_or(LOWER(COALESCE(a.OpenedBy, a.CreatedBy)) = LOWER($2))
                  OR bool_or(LOWER(a.CoveredBy) = LOWER($2))
              ORDER BY a.Date DESC, MAX(a.CreatedOn) DESC NULLS LAST
-             LIMIT 100`,
-            [isAdmin, viewer.employeeemail, viewer.displayname || '']
+             LIMIT ${CLOSED_GROUPS_MAX}`,
+            [isAdmin, viewer.employeeemail, viewer.displayname || '', from, to]
         );
         // Each client's note is shown without its heading (the BIP week or attendance number, group, and date)
         res.json(result.rows.map(row => ({

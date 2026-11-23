@@ -917,8 +917,13 @@ export async function updateClosedGroupNotes(data: {
 }
 
 // Only the closed sessions this user may see: Business Administrators see all; others see their groups' and the ones they opened
-export async function getClosedGroups(user: string): Promise<ClosedGroupSession[]> {
-    const res = await apiFetch(`${API_BASE}/closed-groups?user=${encodeURIComponent(user)}`);
+// range: session dates (YYYY-MM-DD) to include; an empty end means no limit that way. The server sends at most 500.
+export const CLOSED_GROUPS_MAX = 500;
+export async function getClosedGroups(user: string, range: { from: string; to: string } = { from: '', to: '' }): Promise<ClosedGroupSession[]> {
+    const q = new URLSearchParams({ user });
+    if (range.from) q.set('from', range.from);
+    if (range.to) q.set('to', range.to);
+    const res = await apiFetch(`${API_BASE}/closed-groups?${q}`);
     const body = await res.json();
     if (!res.ok) {
         throw new Error(body.error || 'Failed to load closed groups.');
