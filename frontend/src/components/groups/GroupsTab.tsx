@@ -392,7 +392,7 @@ export default function GroupsTab({ groups, clients, employees, role, onSuccess,
               className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded text-xs font-semibold"
             >+ New Group</button>}
           </div>
-          <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800" role="tablist" aria-label="Group type">
+          <div className="flex flex-wrap max-w-full bg-slate-950 p-1 rounded-lg border border-slate-800" role="tablist" aria-label="Group type">
             {GROUP_SECTIONS.map(s => (
               <button
                 key={s.key}
@@ -400,7 +400,7 @@ export default function GroupsTab({ groups, clients, employees, role, onSuccess,
                 role="tab"
                 aria-selected={section === s.key}
                 onClick={() => changeSection(s.key)}
-                className={`px-3 py-1.5 rounded text-xs font-semibold ${section === s.key ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                className={`px-3 py-1.5 rounded text-xs font-semibold whitespace-nowrap ${section === s.key ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
               >{s.label}</button>
             ))}
           </div>

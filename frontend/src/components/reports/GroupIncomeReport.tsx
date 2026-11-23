@@ -444,7 +444,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
       </div>
       {printError && <p className="text-xs text-red-400">{printError}</p>}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 text-center">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(10rem,100%),1fr))] gap-3 text-center">
         {[
           { label: 'Fees Charged', value: money(sum('charged')), tone: 'text-amber-400' },
           { label: 'Total Collected', value: money(sum('collected')), tone: 'text-emerald-400' },

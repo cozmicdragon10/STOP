@@ -1161,6 +1161,7 @@ export default function App() {
                       onOpenClient={openClientById}
                       onChanged={refreshPendingNotes}
                       onSuccess={setSuccessMsg}
+                      wrapLabel
                     />
                   </div>
                 </div>
@@ -1299,9 +1300,11 @@ export default function App() {
             <UnsavedFormsContext.Provider value={reportUnsavedForm}>
             <div className="bg-slate-900 w-full max-w-6xl client-full:max-w-none h-full border-l client-left:border-l-0 client-left:border-r client-full:border-0 border-slate-800 flex flex-col shadow-2xl">
               <div ref={accountScrollRef} className="flex-1 min-h-0 flex flex-col overflow-y-auto overscroll-contain">
-              <div className="shrink-0 flex flex-col md:flex-row md:justify-between md:items-start gap-3 border-b client-tabs-top:border-b-0 border-slate-800 p-4 md:px-6">
+              {/* From md up the buttons sit beside the name, and drop below it when larger text or a narrow window leaves the
+                  name less than 16rem (it grows with the Font Size setting) */}
+              <div className="shrink-0 flex flex-col md:flex-row md:flex-wrap md:justify-between md:items-start gap-3 border-b client-tabs-top:border-b-0 border-slate-800 p-4 md:px-6">
 
-                <div className="min-w-0 pr-12 md:pr-0">
+                <div className="min-w-0 pr-12 md:pr-0 md:flex-1 md:min-w-[16rem]">
                   <div className="flex flex-wrap items-center gap-3">
                     <h2 className="text-xl font-bold text-white">{selectedClientDetail.firstname} {selectedClientDetail.lastname}</h2>
                     {role !== 'Polygrapher' && (
@@ -1326,7 +1329,7 @@ export default function App() {
                   </div>
                   <p className="text-xs text-slate-400 mt-1">ID #: <span className="text-slate-200 font-mono">{idText(selectedClientDetail)}</span> | Program: <span className="text-blue-400 font-semibold">{selectedClientDetail.programtype || 'State SO'}</span> | Agent: {selectedClientDetail.supervisingagent}</p>
                 </div>
-                <div className="flex flex-wrap gap-2 md:shrink-0 max-md:pr-12">
+                <div className="flex flex-wrap gap-2 max-md:pr-12">
                   <div ref={setAccountActionsSlot} className="contents" />
                   {/* Client call-ins are logged here, on the account (the Call-In tab is gone) */}
                   {role !== 'Polygrapher' && (
@@ -1639,9 +1642,10 @@ export default function App() {
         {isAllowed('attendance') && (
           <div className={`${activeTab === 'attendance' ? 'grid' : 'hidden'} grid-cols-1 lg:grid-cols-3 gap-6`}>
             <div ref={checkInPanelRef} className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl min-w-0 scroll-mt-4">
-              <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-3 mb-4 md:mb-6 border-b border-slate-800 pb-4">
-                <div><h2 className="text-lg font-bold text-white">Attendance Sign-In & Payment Entry</h2><p className="text-xs text-slate-400 mt-0.5">Record attendance, cross-group makeups, or standalone ledger payments.</p></div>
-                <div className="flex bg-slate-950 p-1 rounded-lg border border-slate-800 lg:shrink-0">
+              {/* Wraps instead of switching at a window width, so larger text drops the mode buttons below the title rather than off the card */}
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4 md:mb-6 border-b border-slate-800 pb-4">
+                <div className="grow basis-64"><h2 className="text-lg font-bold text-white">Attendance Sign-In & Payment Entry</h2><p className="text-xs text-slate-400 mt-0.5">Record attendance, cross-group makeups, or standalone ledger payments.</p></div>
+                <div className="flex grow lg:grow-0 min-w-0 bg-slate-950 p-1 rounded-lg border border-slate-800">
                   <button onClick={() => { setIsAccountOnly(false); setIsCustomCharge(false); }} className={`flex-1 lg:flex-none px-3 py-1.5 rounded text-xs font-semibold ${!isAccountOnly && !isCustomCharge ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Attendance + Payment</button>
                   <button onClick={() => { setIsAccountOnly(true); setIsCustomCharge(false); }} className={`flex-1 lg:flex-none px-3 py-1.5 rounded text-xs font-semibold ${isAccountOnly && !isCustomCharge ? 'bg-blue-600 text-white' : 'text-slate-400'}`}>Account-Only Payment</button>
                   {role === 'Business Administrator' && (
@@ -1683,7 +1687,7 @@ export default function App() {
 
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl min-w-0">
               <div>
-                <div className="flex items-center justify-between gap-2 mb-1">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                   <h3 className="font-semibold text-white flex items-center gap-2"><ClipboardCheck size={18} className="text-blue-400" /> {groupPanelTab === 'open' ? 'Open Groups' : groupPanelTab === 'closed' ? 'Closed Groups' : 'Money on Hand'}</h3>
                   <div className="flex bg-slate-950 border border-slate-800 rounded-lg p-0.5">
                     {(['open', 'closed', 'cash'] as const).map(t => (

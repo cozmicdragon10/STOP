@@ -14,9 +14,9 @@ export function KindIcon({ kind, size = 11 }: { kind: CalendarKind; size?: numbe
 // A day cell's number, with "Today" beside it on today
 export function DayNumber({ day, when }: { day: string; when: DayWhen }) {
   return (
-    <span className={`text-xs flex items-baseline gap-1 ${dayNumberClass(when)}`}>
+    <span className={`text-xs flex flex-wrap items-baseline gap-x-1 ${dayNumberClass(when)}`}>
       {Number(day.slice(8))}
-      {when === 'today' && <span className="text-[9px] uppercase tracking-wide font-semibold">Today</span>}
+      {when === 'today' && <span className="text-[0.5625rem] uppercase tracking-wide font-semibold">Today</span>}
     </span>
   );
 }

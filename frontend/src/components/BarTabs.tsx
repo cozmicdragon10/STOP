@@ -49,7 +49,7 @@ export default function BarTabs({ items, activeTab, onSelect, className = '' }: 
             <item.icon size={20} />
             {item.locked && <Lock size={11} aria-hidden="true" className="absolute -top-1 -right-1.5 text-amber-300" />}
           </span>
-          <span className="truncate max-w-full px-1 md:px-0">{item.shortLabel ?? item.label}</span>
+          <span className="truncate max-w-full px-1">{item.shortLabel ?? item.label}</span>
         </button>
       ))}
     </div>

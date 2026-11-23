@@ -133,7 +133,7 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-center">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(10rem,100%),1fr))] gap-3 text-center">
         {[
           { label: 'Cash Held', value: money(totalHeld), tone: totalHeld > 0 ? 'text-amber-400' : 'text-white' },
           { label: 'Sessions Holding Cash', value: String(heldRows.length), tone: 'text-amber-400' },

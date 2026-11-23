@@ -339,7 +339,8 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
               type="search"
               value={clientSearch}
               onChange={(e) => setClientSearch(e.target.value)}
-              placeholder="Search name, ID #, agent, group..."
+              placeholder="Search name, ID #, agent..."
+              title="Search by name, ID #, agent, or group"
               className="max-md:order-first bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs w-full md:w-64 max-w-full"
             />
             <button

@@ -65,7 +65,7 @@ export default function GroupPicker({ id, groups, value, onChange, disabled, cla
         value={text}
         autoComplete="off"
         disabled={disabled}
-        placeholder="Type to search groups..."
+        placeholder="Search groups..."
         onFocus={e => { setOpen(true); setHighlight(0); e.target.select(); }}
         onBlur={() => { setOpen(false); setText(selected?.groupname ?? ''); }}
         onChange={e => {

@@ -11,7 +11,7 @@ function ThemePicker({ label, hint, value, onChange }: { label: string; hint: st
         <p className="text-sm font-semibold text-slate-200">{label}</p>
         <p className="text-xs text-slate-500">{hint}</p>
       </div>
-      <div role="group" aria-label={`${label} theme`} className="flex bg-slate-800 border border-slate-700 rounded-lg p-0.5 shrink-0">
+      <div role="group" aria-label={`${label} theme`} className="flex flex-wrap max-w-full bg-slate-800 border border-slate-700 rounded-lg p-0.5">
         {THEME_OPTIONS.map(o => {
           const Icon = THEME_ICONS[o.value];
           const active = value === o.value;
@@ -55,7 +55,7 @@ export default function SettingsTab() {
           <ThemePicker label="Banner & Tabs" hint="The header and the main tab bar" value={bannerTheme} onChange={setBannerTheme} />
         </div>
         <p className="text-xs text-slate-400">Light, Soft (light on gray), Dim (dark on softer gray), or Dark. Your choices are remembered on this computer.</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(14rem,100%),1fr))] gap-3">
           <div>
             <label htmlFor="font-size" className="block text-xs text-slate-400 uppercase mb-1">Font Size</label>
             <select
@@ -131,7 +131,7 @@ export default function SettingsTab() {
             {TABS_POSITION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(14rem,100%),1fr))] gap-3">
           <div>
             <label htmlFor="client-side" className="block text-xs text-slate-400 uppercase mb-1">Client View Side</label>
             <select

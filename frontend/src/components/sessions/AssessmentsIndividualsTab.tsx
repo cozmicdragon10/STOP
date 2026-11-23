@@ -191,9 +191,10 @@ export default function AssessmentsIndividualsTab({ active, clients, groups, emp
 
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 md:p-6 shadow-xl">
         <h3 className="font-semibold text-white flex items-center gap-2 mb-3"><ClipboardList size={18} className="text-blue-400" /> Assessments</h3>
-        <div className="grid grid-cols-3 bg-slate-950 border border-slate-800 rounded-lg p-0.5 mb-3">
+        {/* Wraps onto a second row when larger text or a wide font leaves too little room, instead of the labels running together */}
+        <div className="flex flex-wrap bg-slate-950 border border-slate-800 rounded-lg p-0.5 mb-3">
           {(['scheduled', 'progress', 'completed'] as const).map(t => (
-            <button key={t} type="button" onClick={() => setPanelTab(t)} className={`px-2 py-1 rounded text-xs font-semibold transition ${panelTab === t ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
+            <button key={t} type="button" onClick={() => setPanelTab(t)} className={`grow whitespace-nowrap px-2 py-1 rounded text-xs font-semibold transition ${panelTab === t ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>
               {tabLabel(t)}
             </button>
           ))}

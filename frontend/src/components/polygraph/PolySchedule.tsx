@@ -189,8 +189,9 @@ export default function PolySchedule({ slots: allSlots, filtersActive, role, ass
         </div>
       ) : role === 'Business Administrator' ? (
         <div className="pt-2 border-t border-slate-800 space-y-2">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-            <div>
+          {/* Wraps by width rather than at a window size, so larger text moves fields to a new line instead of squeezing them */}
+          <div className="flex flex-wrap gap-2">
+            <div className="grow basis-44 min-w-0">
               <label className="block text-xs text-slate-400 uppercase mb-1">Assign Client</label>
               <ClientPicker
                 clients={assignableClients}
@@ -199,7 +200,7 @@ export default function PolySchedule({ slots: allSlots, filtersActive, role, ass
                 className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-xs placeholder-slate-500"
               />
             </div>
-            <div>
+            <div className="grow basis-40 min-w-0">
               <label className="block text-xs text-slate-400 uppercase mb-1">Poly Type</label>
               <select
                 value={choices.typeOf(slot.slotid)}
@@ -208,13 +209,13 @@ export default function PolySchedule({ slots: allSlots, filtersActive, role, ass
                 {POLY_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </div>
-            <div className="md:col-span-2">
+            <div className="grow-[2] basis-72 min-w-0">
               <label className="block text-xs text-slate-400 uppercase mb-1">Comment <span className="normal-case text-slate-500">(optional)</span></label>
               <input
                 type="text"
                 value={choices.commentOf(slot.slotid)}
                 onChange={(e) => choices.setComment(slot.slotid, e.target.value)}
-                placeholder="Added to the client's case note when assigned..."
+                placeholder="Added to the case note..."
                 className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white text-xs" />
             </div>
           </div>
@@ -299,7 +300,8 @@ export default function PolySchedule({ slots: allSlots, filtersActive, role, ass
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search location, date, examiner, client, or status (open, assigned, closed)..."
+            placeholder="Search slots..."
+            title="Search by location, date, examiner, client, or status (open, assigned, closed)"
             aria-label="Search polygraph slots"
             className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 pl-9 text-white text-xs placeholder-slate-500"
           />

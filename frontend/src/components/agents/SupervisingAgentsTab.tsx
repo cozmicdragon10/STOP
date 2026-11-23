@@ -226,7 +226,8 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, type, location, phone, or email..."
+              placeholder="Search agents..."
+              title="Search by name, type, location, phone, or email"
               className="w-full bg-slate-950 border border-slate-700 rounded p-2.5 pl-9 text-white text-xs placeholder-slate-500"
             />
           </div>

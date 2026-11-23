@@ -15,13 +15,15 @@ interface Props {
   // A note here was approved or denied
   onChanged: () => void;
   onSuccess: (message: string) => void;
+  // Lets the label wrap to fit a narrow spot (the Home card); the Client Roster header keeps it on one line
+  wrapLabel?: boolean;
 }
 
 const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 
 // Business Administrators only: a button with the count of case notes awaiting approval, opening the list grouped by
 // client. Each note's text can be edited before approving; Deny takes it off the account.
-export default function PendingNotesButton({ userEmail, refreshKey, onOpenClient, onChanged, onSuccess }: Props) {
+export default function PendingNotesButton({ userEmail, refreshKey, onOpenClient, onChanged, onSuccess, wrapLabel = false }: Props) {
   const employeeLabel = useEmployeeLabel();
   const [notes, setNotes] = useState<PendingNote[]>([]);
   const [loadError, setLoadError] = useState('');
@@ -75,7 +77,7 @@ export default function PendingNotesButton({ userEmail, refreshKey, onOpenClient
         type="button"
         onClick={() => setOpen(true)}
         title={loadError || 'Case notes awaiting your approval'}
-        className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap flex items-center gap-1.5 border ${notes.length > 0 ? 'bg-amber-500/10 border-amber-500/50 text-amber-300 hover:bg-amber-500/20' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
+        className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${wrapLabel ? 'max-w-full text-left' : 'whitespace-nowrap'} flex items-center gap-1.5 border ${notes.length > 0 ? 'bg-amber-500/10 border-amber-500/50 text-amber-300 hover:bg-amber-500/20' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
       >
         <ClipboardCheck size={14} /> Notes to Approve
         <span className={`rounded-full px-1.5 text-[0.625rem] leading-4 ${notes.length > 0 ? 'bg-amber-500 text-slate-950' : 'bg-slate-700 text-slate-300'}`}>{loadError ? '!' : notes.length}</span>

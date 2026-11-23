@@ -213,19 +213,21 @@ export default function AdminTab({ user, onOpenTransaction, employees, onEmploye
               ))}
             </div>
           </div>
-          <div className="flex flex-col sm:flex-row gap-2">
+          {/* The type list drops below the search when larger text leaves the search under 12rem */}
+          <div className="flex flex-wrap gap-2">
             <input
               type="search"
               value={empSearch}
               onChange={(e) => setEmpSearch(e.target.value)}
-              placeholder="Search by name or email..."
-              className="flex-1 min-w-0 bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-xs placeholder-slate-500"
+              placeholder="Search name or email..."
+              title="Search by name or email"
+              className="grow basis-48 min-w-0 bg-slate-950 border border-slate-700 rounded p-2.5 text-white text-xs placeholder-slate-500"
             />
             <select
               value={empRoleFilter}
               onChange={(e) => setEmpRoleFilter(e.target.value)}
               aria-label="Filter by user type"
-              className={`sm:shrink-0 bg-slate-950 border rounded px-2.5 text-xs ${empRoleFilter ? 'border-blue-500 text-white' : 'border-slate-700 text-slate-300'}`}
+              className={`max-sm:grow bg-slate-950 border rounded px-2.5 text-xs ${empRoleFilter ? 'border-blue-500 text-white' : 'border-slate-700 text-slate-300'}`}
             >
               <option value="">All User Types</option>
               {sortedUnique(employees.map(e => e.role)).map(r => (
