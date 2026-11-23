@@ -343,14 +343,15 @@ export default function ClientRoster({ clients, activeGroups, directoryAgents, u
             {!limited && <button type="button" onClick={() => setShowNewClientForm(s => !s)} className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap">+ New Client</button>}
             {headerActions}
             {isMine && (
-              <button
-                type="button"
-                onClick={() => setMineOnly(m => !m)}
-                aria-pressed={mineOnly}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap border ${mineOnly ? 'bg-blue-600/20 border-blue-500/40 text-blue-200' : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'}`}
-              >
-                {mineOnly ? 'My clients' : 'All clients'}
-              </button>
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-300 whitespace-nowrap cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={mineOnly}
+                  onChange={(e) => setMineOnly(e.target.checked)}
+                  className="rounded accent-blue-500"
+                />
+                My clients
+              </label>
             )}
             <input
               type="search"
