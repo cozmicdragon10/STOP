@@ -43,6 +43,16 @@ describe('money on hand', () => {
     expect(holders[0].items).toHaveLength(2);
   });
 
+  it('puts group sessions at the top of each person\'s list, keeping the order otherwise', () => {
+    const [h] = holdersOf([
+      item({ itemkey: 'p:1' }),
+      item({ itemkey: 'g:1:2026-11-20:1', kind: 'group' }),
+      item({ itemkey: 'p:2' }),
+      item({ itemkey: 'g:2:2026-11-21:1', kind: 'group' }),
+    ], 'amy@x');
+    expect(h.items.map(i => i.itemkey)).toEqual(['g:1:2026-11-20:1', 'g:2:2026-11-21:1', 'p:1', 'p:2']);
+  });
+
   it('leaves out money waiting on a hand-off, and sends amounts as shown', () => {
     expect(isPickable(item({}))).toBe(true);
     expect(isPickable(item({ pendinghandoffid: 4 }))).toBe(false);

@@ -41,8 +41,10 @@ export interface Holder {
   total: number;
 }
 
-// The money on hand by who holds it: the viewer first, then by name
+// The money on hand by who holds it: the viewer first, then by name. In each person's list group sessions come first,
+// otherwise in the order the server sent (by date).
 export const holdersOf = (items: MoneyItem[], me: string): Holder[] => {
+  items = [...items].sort((a, b) => Number(b.kind === 'group') - Number(a.kind === 'group'));
   const byEmail = new Map<string, Holder>();
   for (const i of items) {
     const key = i.holder.trim().toLowerCase();
