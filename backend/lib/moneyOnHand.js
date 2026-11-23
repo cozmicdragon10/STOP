@@ -71,7 +71,8 @@ const pendingHandoffJoin = (keyExpr, alias = 'ph') => `LEFT JOIN LATERAL (
 // Every item of money not yet at the bank, from closed groups and payments, with who holds it now. One row per item:
 // ItemKey, Kind ('group' | 'payment'), GroupId, SessionNumber, TransactionId, ClientId, Label (group name, or the
 // payment's fee type), ClientName, EventDate (session or payment date), CollectedOn, Amount, Collector, Method (a
-// payment's method), Checks (the checks / money orders in it: [{ kind, reference, amount, client }]), Holder, HeldSince,
+// payment's method), Checks (the checks / money orders in it: [{ kind, reference, amount, client }]), Payers (a group
+// session's clients who paid: [{ client, method, kind, reference, amount }]; empty for a payment), Holder, HeldSince,
 // PendingHandoffId, PendingTo, HolderName, CollectorName. OPEN_GROUP_ADMIN_ROLES is bound as adminRolesParam.
 const heldItemsSql = (adminRolesParam) => `
     WITH grp AS (
@@ -85,8 +86,16 @@ const heldItemsSql = (adminRolesParam) => `
                grp.GroupId, grp.SessionNumber, NULL::int AS TransactionId, NULL::int AS ClientId,
                grp.GroupName::text AS Label, NULL::text AS ClientName, to_char(grp.Date, 'YYYY-MM-DD') AS EventDate,
                grp.ClosedOn AS CollectedOn, grp.Cash AS Amount, grp.Responsible::text AS Collector, NULL::text AS Method,
-               ck.Checks
+               ck.Checks, py.Payers
         FROM grp
+        LEFT JOIN LATERAL (
+            SELECT COALESCE(json_agg(json_build_object('client', c.LastName || ', ' || c.FirstName, 'method', a.PaymentMethod,
+                       'kind', a.PaymentSubtype, 'reference', a.PaymentReference, 'amount', a.AccountPaid)
+                       ORDER BY c.LastName, c.FirstName, a.AttendanceId), '[]'::json) AS Payers
+            FROM Attendance a JOIN Clients c ON c.ClientId = a.Client
+            WHERE a."Group" = grp.GroupId AND a.Date = grp.Date AND a.SessionNumber = grp.SessionNumber
+              AND ${HELD_PAYMENT_SQL('a.')} AND a.AccountPaid > 0
+        ) py ON TRUE
         LEFT JOIN LATERAL (
             SELECT COALESCE(json_agg(json_build_object('kind', a.PaymentSubtype, 'reference', a.PaymentReference,
                        'amount', a.AccountPaid, 'client', c.LastName || ', ' || c.FirstName) ORDER BY c.LastName, c.FirstName), '[]'::json) AS Checks
@@ -100,7 +109,8 @@ const heldItemsSql = (adminRolesParam) => `
                to_char(f.Date, 'YYYY-MM-DD'), f.Date, f.Amount, f.EnteredBy::text, f.PaymentMethod::text,
                CASE WHEN f.PaymentMethod = 'Other' THEN json_build_array(json_build_object('kind', f.PaymentSubtype,
                    'reference', f.PaymentReference, 'amount', f.Amount, 'client', c.LastName || ', ' || c.FirstName))
-                   ELSE '[]'::json END
+                   ELSE '[]'::json END,
+               '[]'::json
         FROM FinancialTransactions f
         LEFT JOIN Attendance a ON a.AttendanceId = f.AttendanceId
         LEFT JOIN Clients c ON c.ClientId = f.Client

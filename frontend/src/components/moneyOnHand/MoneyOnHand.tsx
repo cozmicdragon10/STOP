@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowRightLeft, History, Landmark, Printer, RefreshCw } from 'lucide-react';
+import { ArrowRightLeft, ChevronDown, ChevronRight, History, Landmark, Printer, RefreshCw } from 'lucide-react';
 import { getMoneyOnHand, handOffMoney, makeBankDeposit, resolveHandoff } from '../../api';
 import type { MoneyHandoff, MoneyItem, MoneyOnHandData } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
@@ -23,6 +23,20 @@ const inputClass = 'h-9 bg-slate-900 border border-slate-700 rounded px-2 text-w
 const buttonClass = 'flex items-center justify-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold disabled:opacity-40';
 const sectionClass = 'bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3';
 
+// Whose money on hand the viewer folded up, remembered in this browser
+const COLLAPSED_KEY = 'moneyOnHand.collapsedHolders';
+const loadCollapsed = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '[]');
+    return new Set<string>(Array.isArray(saved) ? saved.map(String) : []);
+  } catch {
+    return new Set<string>();
+  }
+};
+const saveCollapsed = (s: Set<string>) => {
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...s])); } catch { /* not saved; still works this visit */ }
+};
+
 // Money on Hand: the cash and checks not at the bank yet and who holds each one now, hand-offs between employees, and
 // bank deposits (backend routes/moneyOnHand.js). Pick money to hand it to someone (they accept it before it's theirs)
 // or to record a bank deposit. Business Administrators see everyone's and check deposits against the bank.
@@ -39,6 +53,19 @@ export default function MoneyOnHand({ userEmail, wide = false }: Props) {
   const [slipNumber, setSlipNumber] = useState('');
   const [busy, setBusy] = useState(false);
   const [historyKey, setHistoryKey] = useState<string | null>(null);
+  // Holders (lower-case email) whose list is folded up, and group sessions showing who paid
+  const [collapsed, setCollapsed] = useState<Set<string>>(loadCollapsed);
+  const [openPayers, setOpenPayers] = useState<Set<string>>(() => new Set());
+  const flip = (s: Set<string>, key: string) => {
+    const next = new Set(s);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  };
+  const toggleHolder = (email: string) => setCollapsed(prev => {
+    const next = flip(prev, email.trim().toLowerCase());
+    saveCollapsed(next);
+    return next;
+  });
 
   const load = useCallback(async () => {
     try {
@@ -186,6 +213,8 @@ export default function MoneyOnHand({ userEmail, wide = false }: Props) {
     const old = days !== null && days > HELD_TOO_LONG_DAYS;
     const pickable = isPickable(i);
     const cash = cashAndChecks([i]).cash;
+    const payers = i.kind === 'group' ? i.payers ?? [] : [];
+    const showPayers = openPayers.has(i.itemkey);
     return (
       <li key={i.itemkey} className="flex items-start gap-2 py-2">
         <input type="checkbox" checked={picked.has(i.itemkey)} disabled={!pickable || busy} onChange={() => toggle(i)}
@@ -205,6 +234,26 @@ export default function MoneyOnHand({ userEmail, wide = false }: Props) {
               <History size={11} /> history
             </button>
           </div>
+          {payers.length > 0 && (
+            <button type="button" onClick={() => setOpenPayers(prev => flip(prev, i.itemkey))} aria-expanded={showPayers}
+              className="inline-flex items-center gap-0.5 mt-0.5 text-blue-400 hover:text-blue-300">
+              {showPayers ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              {payers.length} {payers.length === 1 ? 'client' : 'clients'} paid
+            </button>
+          )}
+          {showPayers && (
+            <ul className="mt-1 ml-1 pl-2 border-l border-slate-700 space-y-0.5">
+              {payers.map((p, n) => (
+                <li key={n} className="flex justify-between gap-2">
+                  <span className="text-slate-300 truncate">
+                    {p.client}
+                    <span className="text-slate-500"> · {p.method === 'Other' ? checkText(p) : (p.method || 'Cash')}</span>
+                  </span>
+                  <span className="text-slate-300 shrink-0">{moneyText(p.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
           {i.pendinghandoffid && (
             <span className="inline-block mt-1 text-amber-300">
               Waiting for {handoffs.find(h => h.handoffid === i.pendinghandoffid)?.toname || employeeLabel(i.pendingto)} to accept
@@ -337,18 +386,33 @@ export default function MoneyOnHand({ userEmail, wide = false }: Props) {
                 {holders.map(h => {
                   const pickable = h.items.filter(isPickable);
                   const allPicked = pickable.length > 0 && pickable.every(i => picked.has(i.itemkey));
+                  const folded = collapsed.has(h.email.trim().toLowerCase());
+                  const pickedHere = h.items.filter(i => picked.has(i.itemkey)).length;
                   return (
                     <li key={h.email} className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span className="text-sm font-semibold text-white truncate">{sameEmail(h.email, userEmail) ? `${h.name} (you)` : h.name}</span>
+                      <button type="button" onClick={() => toggleHolder(h.email)} aria-expanded={!folded}
+                        title={folded ? 'Show this money' : 'Hide this money'}
+                        className="w-full flex items-baseline justify-between gap-2 text-left">
+                        <span className="flex items-center gap-1 min-w-0 text-sm font-semibold text-white">
+                          {folded ? <ChevronRight size={15} className="shrink-0 self-center text-slate-400" /> : <ChevronDown size={15} className="shrink-0 self-center text-slate-400" />}
+                          <span className="truncate">{sameEmail(h.email, userEmail) ? `${h.name} (you)` : h.name}</span>
+                        </span>
                         <span className="text-base font-bold text-amber-400 shrink-0">{moneyText(h.total)}</span>
-                      </div>
-                      {pickable.length > 0 && (
-                        <button type="button" onClick={() => pickAll(h.items, !allPicked)} disabled={busy} className="text-blue-400 hover:text-blue-300 mt-0.5">
-                          {allPicked ? 'Unpick all' : 'Pick all'}
-                        </button>
+                      </button>
+                      {folded ? (
+                        <p className="text-slate-500 mt-0.5 ml-5">
+                          {h.items.length} {h.items.length === 1 ? 'item' : 'items'}{pickedHere > 0 && <span className="text-blue-400"> · {pickedHere} picked</span>}
+                        </p>
+                      ) : (
+                        <>
+                          {pickable.length > 0 && (
+                            <button type="button" onClick={() => pickAll(h.items, !allPicked)} disabled={busy} className="text-blue-400 hover:text-blue-300 mt-0.5 ml-5">
+                              {allPicked ? 'Unpick all' : 'Pick all'}
+                            </button>
+                          )}
+                          <ul className="divide-y divide-slate-800 border-t border-slate-800 mt-2">{h.items.map(itemRow)}</ul>
+                        </>
                       )}
-                      <ul className="divide-y divide-slate-800 border-t border-slate-800 mt-2">{h.items.map(itemRow)}</ul>
                     </li>
                   );
                 })}

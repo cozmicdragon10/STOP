@@ -2602,6 +2602,15 @@ export interface MoneyCheck {
     client: string | null;
 }
 
+// One client's payment in a group session's money: method is Cash or Other (kind / reference say which check)
+export interface MoneyPayer {
+    client: string;
+    method: string | null;
+    kind: string | null;
+    reference: string | null;
+    amount: number | string;
+}
+
 // Money not at the bank yet: a closed group session's cash and checks, or one cash / check payment taken outside a group.
 // itemkey is 'g:<group>:<date>:<session>' or 'p:<transaction>'. holder is who has it now; collector who was first
 // responsible for it. pendinghandoffid is set while a hand-off of it waits to be accepted.
@@ -2624,6 +2633,8 @@ export interface MoneyItem {
     // A payment's method (Cash or Other)
     method: string | null;
     checks: MoneyCheck[];
+    // A group session's clients who paid (cash and checks); empty for a payment
+    payers?: MoneyPayer[];
     holder: string;
     holdername: string;
     heldsince: string | null;
