@@ -46,6 +46,9 @@ export interface ClientRecord {
   // Card payments blocked by a Business Administrator: cash only (utils/cardBlock.ts)
   cardpaymentsblocked?: boolean | null;
   cardblockreason?: string | null;
+  // Check payments blocked by a Business Administrator: Check isn't offered (utils/checkBlock.ts)
+  checkpaymentsblocked?: boolean | null;
+  checkblockreason?: string | null;
   // Federal billing units by code (utils/federalUnits.ts); Federal SO clients use 6022 / 6012 per session
   federalunits?: Record<string, number | string> | null;
   // Fed Drug Test clients: date (YYYY-MM-DD) of their latest drug test; they can be tested once a day

@@ -183,6 +183,11 @@ reports changes back. Saves that finish after another client was opened don't ov
   corrected it and why, and later ledger and attendance balances move by the difference.
 - **New accounts**: New User refuses an email that already has an account; existing accounts are changed with Edit,
   which signs the person out when their password changes or the account is deactivated.
+- **Payment blocks** (Business Administrators, on the client's Ledger tab, with a reason): **Block Card Payments**
+  (e.g. after a disputed card payment; `backend/lib/cardBlock.js`) and **Block Check Payments** (e.g. after a bounced
+  check; `backend/lib/checkBlock.js`). Only personal checks are blocked; money orders and cashier's checks are still
+  taken. The account shows a "Cash Only" or "No Checks" badge, payment screens don't offer the blocked method, and the
+  server refuses it on every payment path. Each change goes on the change log and case notes.
 
 - **Two people at once** (`backend/lib/editConflicts.js`, `frontend/src/utils/clientEdits.ts`):
   - Payments, check-ins, adjustments, and other money changes lock the client's row while they save, so overlapping

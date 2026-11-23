@@ -8,6 +8,7 @@ import { useUserRole } from '../../hooks/useUserRole';
 import { emptyCardBilling } from './cardBilling';
 import { balanceColor, formatBalance, toDisplayBalance } from '../../utils/balance';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
+import { checkBlocked, isCheckPayment } from '../../utils/checkBlock';
 import { formatMoney } from '../../utils/ledger';
 import { printReceipt, type Receipt } from '../../utils/receipt';
 import { idText } from '../../utils/clients';
@@ -43,8 +44,10 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
   const client = clients.find(c => c.clientid === Number(clientId));
   // A client blocked from card payments pays cash if a card was picked for the client before
   const payWith: PaymentMethod = cardBlocked(client) && paymentMethod === 'Credit Card' ? 'Cash' : paymentMethod;
-  const methodProblem = paymentMethodProblem(payWith, subtype, role);
-  const methodText = paymentMethodText(payWith, subtype, reference);
+  // Likewise a check picked before choosing a client blocked from check payments has to be chosen again
+  const payKind = checkBlocked(client) && isCheckPayment(payWith, subtype) ? '' : subtype;
+  const methodProblem = paymentMethodProblem(payWith, payKind, role);
+  const methodText = paymentMethodText(payWith, payKind, reference);
   // After a payment is processed the form locks (Print Receipt and New Payment stay) and shows that payment. The client's
   // balance reloads with the payment in it, so the figures come from the saved payment, not the client row.
   const locked = lastPayment !== null;
@@ -73,14 +76,14 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
     setLastPayment(null);
     try {
       const res = await submitAccountPayment({ client: Number(clientId), amount, comments, createdBy: userEmail, paymentMethod: payWith,
-        paymentSubtype: payWith === 'Other' ? subtype : null, paymentReference: payWith === 'Other' ? reference.trim() || null : null });
+        paymentSubtype: payWith === 'Other' ? payKind : null, paymentReference: payWith === 'Other' ? reference.trim() || null : null });
       onSuccess(`${methodText} payment recorded! Updated Balance: ${formatBalance(res.newBalance)}`);
       setLastPayment({
         clientName: client ? `${client.lastname}, ${client.firstname}` : `Client #${clientId}`,
         docNumber: idText(client),
         amount,
         method: payWith,
-        paymentSubtype: payWith === 'Other' ? subtype : null,
+        paymentSubtype: payWith === 'Other' ? payKind : null,
         paymentReference: payWith === 'Other' ? reference.trim() || null : null,
         notes: comments,
         newBalance: Number(res.newBalance),
@@ -125,7 +128,8 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
           {payWith === 'Other' && (
             <div className="mt-3">
               <OtherPaymentFields
-                subtype={subtype}
+                subtype={payKind}
+                client={client}
                 reference={reference}
                 onChange={patch => { if (patch.subtype !== undefined) setSubtype(patch.subtype); if (patch.reference !== undefined) setReference(patch.reference); }}
                 inputClass="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm"

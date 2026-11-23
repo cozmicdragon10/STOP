@@ -3,8 +3,9 @@ import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { AlertCircle, Ban, HandCoins, Pencil, Printer, SlidersHorizontal, Undo2, X } from 'lucide-react';
 import { printReceipt } from '../../utils/receipt';
 import { adjustCashPayment, fetchPolyFeeOverride, forgiveClientDebt, getClientAttendance, getClientFinancials, recordCardPaymentAction, setClientCardPayments, updateForgiveness } from '../../api';
-import type { CardBlock, CardPaymentAction, PaymentChangeResult, PolyFeeOverride } from '../../api';
+import type { CardBlock, CardPaymentAction, CheckBlock, PaymentChangeResult, PolyFeeOverride } from '../../api';
 import RecordFilterBar from './RecordFilterBar';
+import CheckBlockPanel from './CheckBlockPanel';
 import MonthHeader from './MonthHeader';
 import { EMPTY_LEDGER_FILTERS, groupByMonth, sortedUnique, toggleInSet } from '../../utils/filters';
 import { FORGIVEN_FEE_TYPE, LEDGER_TONES, PAYMENT_REVERSAL_TYPES, cardPaymentStatus, feesCharged, forgivenessProblem, formatMoney, ledgerBalanceChange, sessionFeeOf, signedMoney } from '../../utils/ledger';
@@ -43,8 +44,8 @@ interface Props {
   onSuccess: (message: string) => void;
   // For reprinted payment receipts (pop-ups blocked)
   onError: (message: string) => void;
-  // Card payments were blocked or allowed again (Business Administrators); the client record takes these fields
-  onCardBlockChanged: (clientId: number, changes: CardBlock) => void;
+  // Card or check payments were blocked or allowed again (Business Administrators); the client record takes these fields
+  onCardBlockChanged: (clientId: number, changes: CardBlock | CheckBlock) => void;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -314,6 +315,7 @@ export default function ClientLedger({ client, role, userEmail, financials, high
           </form>
         )
       )}
+      <CheckBlockPanel client={client} isAdmin={isAdmin} onChanged={onCardBlockChanged} onSuccess={onSuccess} onError={onError} />
       {scheduledPolyNotice && (
         <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-3 text-sm text-amber-300 flex items-start justify-between gap-3">
           <p><AlertCircle size={15} className="inline mr-1.5 -mt-0.5" />{scheduledPolyNotice.text}</p>

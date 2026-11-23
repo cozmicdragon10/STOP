@@ -22,7 +22,7 @@ import {
   getOpenGroups, deleteOpenGroup, getClosedGroups, CLOSED_GROUPS_MAX, getSupervisingAgents, getCoveredByMe
 } from './api';
 import type {
-  CardBlock, Client, ClientAttendance, CoveredClient, ClientNote, ClosedGroupSession, DeviceState, Employee, FinancialTransaction, Group,
+  CardBlock, CheckBlock, Client, ClientAttendance, CoveredClient, ClientNote, ClosedGroupSession, DeviceState, Employee, FinancialTransaction, Group,
   OpenGroupSession, PolyFeeOverride, PolyFeeOverrideResult, PolygraphResult, PolygraphSlot, SupervisingAgent, TempFeeOverride,
 } from './api';
 import DeviceAccess from './components/device/DeviceAccess';
@@ -557,9 +557,9 @@ export default function App() {
     setClientNotes(await getClientNotes(clientid));
   };
 
-  // Card payments were blocked or allowed on the Ledger tab: the account and roster take the new fields (so every payment
+  // Card or check payments were blocked or allowed on the Ledger tab: the account and roster take the new fields (so every payment
   // screen sees them), and Case Notes reloads for the note the server added
-  const handleCardBlockChanged = async (clientid: number, changes: CardBlock) => {
+  const handleCardBlockChanged = async (clientid: number, changes: CardBlock | CheckBlock) => {
     setSelectedClientDetail(c => (c && c.clientid === clientid ? { ...c, ...changes } : c));
     setClients(prev => prev.map(c => c.clientid === clientid ? { ...c, ...changes } : c));
     setClientNotes(await getClientNotes(clientid));
@@ -1324,6 +1324,14 @@ export default function App() {
                         title={`Credit card payments blocked${selectedClientDetail.cardblockreason ? `: ${selectedClientDetail.cardblockreason}` : ''}`}
                       >
                         Cash Only
+                      </span>
+                    )}
+                    {selectedClientDetail.checkpaymentsblocked && (
+                      <span
+                        className="text-xs font-semibold px-2 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 text-amber-300"
+                        title={`Check payments blocked${selectedClientDetail.checkblockreason ? `: ${selectedClientDetail.checkblockreason}` : ''}`}
+                      >
+                        No Checks
                       </span>
                     )}
                   </div>

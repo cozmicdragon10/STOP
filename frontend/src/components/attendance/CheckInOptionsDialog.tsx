@@ -282,6 +282,7 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
                 <OtherPaymentFields
                   subtype={row.paymentSubtype}
                   reference={row.paymentReference}
+                  client={c}
                   onChange={patch => updateRow(c.clientid, {
                     ...(patch.subtype !== undefined ? { paymentSubtype: patch.subtype } : {}),
                     ...(patch.reference !== undefined ? { paymentReference: patch.reference } : {}),

@@ -7,6 +7,7 @@ const { clientsWithoutUnits, drugTestedOn, noUnitsMessage } = require('../lib/fe
 const { addAttendanceNote, bipWeekAt, noteAuthor, noteBody, replaceNoteBody } = require('../lib/attendanceNotes');
 const { logClientChange } = require('../lib/changeLog');
 const { paymentMethodProblem } = require('../lib/paymentMethods');
+const { assertCheckAllowed, isCheckPayment } = require('../lib/checkBlock');
 
 const router = express.Router();
 
@@ -205,6 +206,15 @@ router.put('/api/open-groups', async (req, res) => {
             const unchanged = saved && saved.paymentMethod === e.paymentMethod && saved.paymentSubtype === e.paymentSubtype
                 && !paymentMethodProblem({ method: e.paymentMethod, subtype: e.paymentSubtype, role: 'Business Administrator' });
             if (!unchanged) return res.status(methodProblem.startsWith('Only') ? 403 : 400).json({ error: `${e.client?.lastname}, ${e.client?.firstname}: ${methodProblem}` });
+        }
+        // A client blocked from paying by check can't have a check on the sheet (closing the group would refuse it too)
+        for (const e of entries) {
+            if (!(Number(e.payment) > 0) || !isCheckPayment(e.paymentMethod, e.paymentSubtype)) continue;
+            try {
+                await assertCheckAllowed(pool, e.client?.clientid);
+            } catch (err) {
+                return res.status(err.status || 500).json({ error: err.message });
+            }
         }
         // A Federal SO client newly put on the sheet needs units left for this group (6022 group, 6012 individual)
         const savedIds = new Set(savedEntries.map(e => Number(e.client?.clientid)));

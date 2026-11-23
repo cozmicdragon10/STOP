@@ -18,7 +18,8 @@ test('a Counselor can check in, take payments, and see every client', () => {
 
 test('a Counselor cannot correct money, set overrides, or delete', () => {
     for (const [m, p] of [['PUT', '/api/financials/4/adjust'], ['POST', '/api/financials/4/card-action'],
-        ['POST', '/api/financials/charge'], ['PUT', '/api/clients/12/card-payments'], ['POST', '/api/clients/12/fee-override'],
+        ['POST', '/api/financials/charge'], ['PUT', '/api/clients/12/card-payments'], ['PUT', '/api/clients/12/check-payments'],
+        ['POST', '/api/clients/12/fee-override'],
         ['DELETE', '/api/clients/12/fee-override'], ['POST', '/api/clients/12/poly-fee-override'],
         ['DELETE', '/api/clients/12'], ['GET', '/api/clients/12/change-log'], ['GET', '/api/clients/12/deletable'],
         ['PATCH', '/api/attachments/5'], ['DELETE', '/api/attachments/5'], ['DELETE', '/api/attendance/3'],

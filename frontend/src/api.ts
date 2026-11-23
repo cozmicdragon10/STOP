@@ -164,9 +164,15 @@ export interface ClientColumns {
     cardblockreason: string | null;
     cardblockedby: string | null;
     cardblockedon: string | null;
+    // Check payments blocked by a Business Administrator (e.g. after a bounced check). See utils/checkBlock.ts.
+    checkpaymentsblocked: boolean;
+    checkblockreason: string | null;
+    checkblockedby: string | null;
+    checkblockedon: string | null;
 }
 
 export type CardBlock = Pick<ClientColumns, 'cardpaymentsblocked' | 'cardblockreason' | 'cardblockedby' | 'cardblockedon'>;
+export type CheckBlock = Pick<ClientColumns, 'checkpaymentsblocked' | 'checkblockreason' | 'checkblockedby' | 'checkblockedon'>;
 
 // A client on the roster, with its group and the check-in facts the frontend needs
 export interface Client extends Omit<ClientColumns, 'programtype'> {
@@ -606,6 +612,20 @@ export async function setClientCardPayments(clientId: number, blocked: boolean, 
     const body = await res.json();
     if (!res.ok) {
         throw new Error(body.error || 'Failed to change card payments for this client.');
+    }
+    return body;
+}
+
+// Business Administrators only (the server checks the role): block or allow check payments for a client. Blocking needs a reason.
+export async function setClientCheckPayments(clientId: number, blocked: boolean, reason: string): Promise<CheckBlock> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/check-payments`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ blocked, reason }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+        throw new Error(body.error || 'Failed to change check payments for this client.');
     }
     return body;
 }

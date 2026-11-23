@@ -3,6 +3,7 @@ const { effectiveRole } = require('../lib/roles');
 const { logAction, pool } = require('../db');
 const { activeRoleFor, OPEN_GROUP_ADMIN_ROLES } = require('../lib/access');
 const { assertCardAllowed } = require('../lib/cardBlock');
+const { assertCheckAllowed, isCheckPayment } = require('../lib/checkBlock');
 const { cardMoveProblem } = require('../lib/cardMove');
 const { requireRole } = require('../lib/auth');
 const { FORGIVEN_FEE_TYPE, forgivenessEditProblem, forgivenessProblem } = require('../lib/debtForgiveness');
@@ -34,6 +35,7 @@ router.post('/api/financials/payment', async (req, res) => {
         const clientRes = await clientDb.query('SELECT AccountBalance, PolyFeePaid, PolyFee, PolyFeeVoucher, Phase FROM Clients WHERE ClientId = $1 FOR UPDATE', [client]);
         // Read after the row lock, so a block set a moment ago is seen
         if (paymentMethod === 'Credit Card') await assertCardAllowed(clientDb, client);
+        if (isCheckPayment(paymentMethod, subtype)) await assertCheckAllowed(clientDb, client);
         const oldBalance = Number(clientRes.rows[0].accountbalance || 0);
         const payAmount = Number(amount || 0);
         const comment = comments || `Direct account payment processed by ${createdBy}`;

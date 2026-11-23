@@ -1,4 +1,5 @@
 const { assertCardAllowed } = require('./cardBlock');
+const { assertCheckAllowed, isCheckPayment } = require('./checkBlock');
 const { paymentDetails, paymentMethodProblem, paymentMethodText } = require('./paymentMethods');
 const { dateText, dollars, logClientChange } = require('./changeLog');
 const { moneyText } = require('./moneyFields');
@@ -219,6 +220,7 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         if (methodProblem) throw Object.assign(new Error(`${clientRes.rows[0].lastname}, ${clientRes.rows[0].firstname}: ${methodProblem}`), { status: 400 });
     }
     if (paidNum > 0 && paymentMethod === 'Credit Card') await assertCardAllowed(db, client);
+    if (paidNum > 0 && isCheckPayment(paymentMethod, paymentSubtype)) await assertCheckAllowed(db, client);
     const { subtype, reference } = paidNum > 0 ? paymentDetails({ method: paymentMethod, subtype: paymentSubtype, reference: paymentReference }) : { subtype: null, reference: null };
 
     const attRes = await db.query(

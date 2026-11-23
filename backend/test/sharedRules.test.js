@@ -32,6 +32,16 @@ test('payment methods and Other payment kinds match', async () => {
     assert.equal(server.paymentMethodText('Other', 'Check', '1042'), browser.paymentMethodText('Other', 'Check', '1042'));
 });
 
+// Check payment block: which Other payment kinds count as a check (lib/checkBlock.js)
+test('check block kinds match', async () => {
+    const browser = await frontend('checkBlock.ts');
+    const server = require('../lib/checkBlock');
+    assert.deepEqual([...server.CHECK_BLOCKED_TYPES], [...browser.CHECK_BLOCKED_TYPES]);
+    for (const subtype of [...require('../lib/paymentMethods').OTHER_PAYMENT_TYPES, null]) {
+        assert.equal(server.isCheckPayment('Other', subtype), browser.isCheckPayment('Other', subtype), String(subtype));
+    }
+});
+
 // Referred By choices on the client's information (Clients.ReferredByType)
 test('referred by choices match', async () => {
     const { REFERRAL_TYPES: browser } = await frontend('clients.ts');

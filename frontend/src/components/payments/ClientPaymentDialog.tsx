@@ -155,6 +155,7 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
                 <OtherPaymentFields
                   subtype={subtype}
                   reference={reference}
+                  client={client}
                   disabled={receipt !== null}
                   onChange={patch => { if (patch.subtype !== undefined) setSubtype(patch.subtype); if (patch.reference !== undefined) setReference(patch.reference); }}
                   inputClass={inputClass}
