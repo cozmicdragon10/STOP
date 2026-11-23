@@ -1804,6 +1804,7 @@ export default function App() {
               onSuccess={setSuccessMsg}
               onError={setError}
               onSaved={loadDashboardData}
+              onOpenClient={openClientById}
             />
           </div>
         )}

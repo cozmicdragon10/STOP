@@ -19,6 +19,8 @@ interface Props {
   // Offered after a BIP Intake, BIP Reinstate or DV Assessment is completed
   groups: AssignGroupOption[];
   onBack: () => void;
+  // Clicking the client's name opens their account
+  onOpenClient?: (clientId: number) => void;
   // A note was added or the assessment completed: the lists refresh
   onChanged: () => void;
   // The client was assigned to a group: client records refresh
@@ -34,7 +36,7 @@ const stamp = (iso: string) => new Date(iso).toLocaleString([], { dateStyle: 'me
 
 // One assessment being worked on: what was paid, its notes (newest first), adding a note, and completing it. The
 // counselor adds notes as often as needed while it stays open (more sessions, waiting on results or other providers).
-export default function AssessmentWorkspace({ attendanceId, user, clients, groups, onBack, onChanged, onClientChanged, onSuccess, onError }: Props) {
+export default function AssessmentWorkspace({ attendanceId, user, clients, groups, onBack, onOpenClient, onChanged, onClientChanged, onSuccess, onError }: Props) {
   const employeeLabel = useEmployeeLabel();
   const [detail, setDetail] = useState<AssessmentDetail | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -127,7 +129,18 @@ export default function AssessmentWorkspace({ attendanceId, user, clients, group
           {detail ? (
             <>
               <h2 className="text-lg font-bold text-white flex flex-wrap items-center gap-2">
-                {detail.lastname}, {detail.firstname}
+                {onOpenClient ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenClient(detail.clientid)}
+                    className="text-left cursor-pointer hover:text-blue-300 hover:underline underline-offset-2"
+                    title="Open account"
+                  >
+                    {detail.lastname}, {detail.firstname}
+                  </button>
+                ) : (
+                  <>{detail.lastname}, {detail.firstname}</>
+                )}
                 <span className={`text-xs font-semibold px-2 py-0.5 rounded ${inProgress ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'}`}>
                   {inProgress ? 'In Progress' : 'Completed'}
                 </span>

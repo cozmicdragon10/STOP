@@ -50,6 +50,8 @@ interface Props {
   onError: (message: string) => void;
   // Called after an assessment is begun so balances and Last Attended refresh
   onSaved?: () => void;
+  // Opens a client's account (clicking the client's name in an assessment)
+  onOpenClient?: (clientId: number) => void;
 }
 
 // What the main area shows: the calendar, the Begin steps (for a scheduled assessment, or a new one), or one assessment
@@ -64,7 +66,7 @@ const formatDay = (ymd: string) => (ymd === todayLocal() ? 'Today' : new Date(`$
 
 // Assessments: scheduled on the calendar, begun once the payment is taken (the attendance is recorded that day), then
 // worked on by the counselor (notes, as often as needed, for days or weeks) until it is completed.
-export default function AssessmentsIndividualsTab({ active, clients, groups, employees, user, onSuccess, onError, onSaved }: Props) {
+export default function AssessmentsIndividualsTab({ active, clients, groups, employees, user, onSuccess, onError, onSaved, onOpenClient }: Props) {
   const employeeLabel = useEmployeeLabel();
   const isAdmin = ASSESSMENT_ADMIN_ROLES.includes(user.role || '');
   const [view, setView] = useState<View>({ kind: 'calendar' });
@@ -178,6 +180,7 @@ export default function AssessmentsIndividualsTab({ active, clients, groups, emp
             clients={clients}
             groups={groups}
             onBack={() => setView({ kind: 'calendar' })}
+            onOpenClient={onOpenClient}
             onChanged={loadLists}
             onClientChanged={onSaved}
             onSuccess={onSuccess}
