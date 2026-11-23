@@ -247,6 +247,7 @@ export default function ReviewStep({ group, wf, createdBy, canPickCover, onSucce
             paymentReference: paymentEntry?.paymentReference ?? null,
             cardPaid: paymentEntry?.cardPaid ?? 0,
           }}
+          allowSplit
           createdBy={createdBy}
           onClose={() => setPaymentClient(null)}
           onSuccess={onSuccess}

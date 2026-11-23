@@ -22,6 +22,8 @@ interface Props {
 // back to the client. A card payment is already on their account: it moves to the client who paid, or stays as a credit.
 export default function RemovePaidClientDialog({ entry, clients, saving, onConfirm, onCancel }: Props) {
   const card = entry.payment <= 0 && entry.cardPaid > 0;
+  // A split payment: the Cash or Other part is settled here; the card part is already on their account
+  const splitCard = !card && entry.cardPaid > 0;
   const [choice, setChoice] = useState<Choice>('other');
   const [otherId, setOtherId] = useState('');
   // Starts with the Therapist Note typed on the review screen, which would otherwise be lost with the client
@@ -65,6 +67,11 @@ export default function RemovePaidClientDialog({ entry, clients, saving, onConfi
                 ? 'The card was already charged and the payment is on their account. Choose where it belongs.'
                 : 'It hasn\'t been recorded yet, so choose where the money goes before they come off the sheet.'}
             </p>
+            {splitCard && (
+              <p className="text-xs text-amber-400 mt-1">
+                They also paid ${entry.cardPaid.toFixed(2)} by Credit Card (a split payment). The card was already charged, so that part stays on {entry.client.firstname}'s account as a credit.
+              </p>
+            )}
           </div>
           <button type="button" onClick={onCancel} disabled={saving} className="text-slate-400 hover:text-white p-1 rounded" aria-label="Close">
             <X size={16} />

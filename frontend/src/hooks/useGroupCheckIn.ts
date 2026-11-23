@@ -565,6 +565,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
       notify.onError(err instanceof Error && err.message ? err.message : 'The payment could not be saved, so the client is still on the sheet. Try again.');
       return;
     }
+    // A split payment's card part is already on the removed client's account and stays there
+    if (!card && entry.cardPaid > 0) message += ` The $${entry.cardPaid.toFixed(2)} card part of their split payment stays on their account as a credit.`;
 
     // The case note typed in the Remove dialog goes on the removed client's case notes as a Therapist note. The money is
     // already settled, so a note that fails to save doesn't keep them on the sheet; the message says to add it by hand.
