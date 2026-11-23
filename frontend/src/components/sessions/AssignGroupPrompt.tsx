@@ -3,6 +3,7 @@ import { Users } from 'lucide-react';
 import { EditConflictError, updateClient } from '../../api';
 import { errorMessage } from '../../utils/errors';
 import { groupAssignmentPayload, groupChoicesFor } from '../../utils/groupAssignment';
+import ScrollLock from '../ScrollLock';
 
 export interface AssignGroupClient {
   clientid: number;
@@ -60,6 +61,7 @@ export default function AssignGroupPrompt({ assessmentName, client, groups, user
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="assign-group-title">
+      <ScrollLock />
       <div className="bg-slate-900 border border-blue-500/40 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
         <div>
           <h3 id="assign-group-title" className="font-semibold text-white flex items-center gap-2"><Users size={18} className="text-blue-400" /> Assign to a Group?</h3>

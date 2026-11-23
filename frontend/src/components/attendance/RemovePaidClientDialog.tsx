@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import ClientPicker from '../ClientPicker';
 import type { ClientRecord, RemovalChoice, SessionEntry } from '../../hooks/useGroupCheckIn';
 import { paymentMethodText } from '../../utils/paymentMethods';
+import ScrollLock from '../ScrollLock';
 
 type Choice = 'other' | 'own' | 'refund';
 
@@ -53,6 +54,7 @@ export default function RemovePaidClientDialog({ entry, clients, saving, onConfi
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="remove-paid-title">
+      <ScrollLock />
       <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
         <header className="flex justify-between items-start gap-3 p-4 border-b border-slate-800">
           <div>

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
+import ScrollLock from '../ScrollLock';
 
 interface Props {
   // Heading text and the line under it
@@ -35,6 +36,7 @@ export default function PopupDialog({ title, subtitle, busy = false, closeOnOuts
     // z-[60]: above the client account panel (z-50), which a call-in dialog opens over. A box taller than the window
     // scrolls with the page (m-auto centers it when it fits) instead of being cut off.
     <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex overflow-y-auto z-[60] p-4" onClick={() => { if (!busy && closeOnOutsideClick) onClose(); }}>
+      <ScrollLock />
       <div
         ref={box}
         role="dialog"

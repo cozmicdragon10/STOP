@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { grantBusPass } from '../../api';
 import type { ClientNote } from '../../api';
+import ScrollLock from '../ScrollLock';
 
 interface Props {
   clientId: number;
@@ -33,6 +34,7 @@ export default function BusPassDialog({ clientId, clientName, busPasses, userEma
 
   return (
     <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => !saving && onClose()}>
+      <ScrollLock />
       <form
         role="dialog" aria-modal="true" aria-labelledby="bus-pass-title" onSubmit={submit} onClick={e => e.stopPropagation()}
         className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-sm p-6 space-y-4"

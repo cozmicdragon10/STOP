@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import { updateClosedGroupNotes } from '../../api';
 import type { ClosedGroupSession } from '../../api';
+import ScrollLock from '../ScrollLock';
 
 interface Props {
   session: ClosedGroupSession;
@@ -48,6 +49,7 @@ export default function ClosedGroupNotesDialog({ session, onClose, onSaved }: Pr
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="closed-group-notes-title">
+      <ScrollLock />
       <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col">
         <header className="flex justify-between items-start gap-3 p-4 border-b border-slate-800">
           <div>

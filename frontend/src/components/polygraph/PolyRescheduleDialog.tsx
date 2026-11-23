@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { reschedulePolygraphSlot } from '../../api';
 import { getLocalDateString, getLocalTimeString } from '../../utils/dates';
 import { POLY_RESCHEDULE_REASONS, slotStart, slotSummary } from '../../utils/polygraph';
+import ScrollLock from '../ScrollLock';
 
 interface Employee {
   employeeemail: string;
@@ -74,6 +75,7 @@ export default function PolyRescheduleDialog({ slot, role, userEmail, employees,
   const fieldClass = 'w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm';
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="poly-reschedule-title">
+      <ScrollLock />
       <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-lg max-h-full overflow-y-auto space-y-4 text-sm">
         <div>
           <h3 id="poly-reschedule-title" className="font-semibold text-white">Reschedule Polygraph Slot</h3>

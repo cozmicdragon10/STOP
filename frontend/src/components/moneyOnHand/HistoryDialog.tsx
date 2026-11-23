@@ -4,6 +4,7 @@ import { getMoneyHistory } from '../../api';
 import type { MoneyHistory } from '../../api';
 import { errorMessage } from '../../utils/errors';
 import { moneyText } from '../../utils/moneyOnHand';
+import ScrollLock from '../ScrollLock';
 
 const DOT: Record<string, string> = {
   collected: 'bg-blue-400', offered: 'bg-amber-400', accepted: 'bg-emerald-400', declined: 'bg-slate-400',
@@ -32,6 +33,7 @@ export default function HistoryDialog({ itemKey, onClose }: { itemKey: string; o
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <ScrollLock />
       <div role="dialog" aria-modal="true" aria-label="Where this money has been"
         className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-5 max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}>

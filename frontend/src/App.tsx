@@ -85,10 +85,12 @@ import AssessmentsIndividualsTab from './components/sessions/AssessmentsIndividu
 import BipIntakePrompt from './components/sessions/BipIntakePrompt';
 import ProgressTab from './components/sessions/ProgressTab';
 import { UnsavedFormsContext } from './hooks/useUnsavedForm';
+import { useScrollLock } from './hooks/useScrollLock';
 import { DISCHARGE_STATUSES, idText, isPolyGroup } from './utils/clients';
 import { scrollToStackedPanel } from './utils/layout';
 import { polygraphHistoryText, polygraphNotice, slotStart, slotSummary, takesPolygraphs } from './utils/polygraph';
 import { errorMessage } from './utils/errors';
+import ScrollLock from './components/ScrollLock';
 
 export default function App() {
   const [user, setUser] = useState<Employee | null>(null);
@@ -741,11 +743,7 @@ export default function App() {
   // The page behind an open account doesn't scroll or show its scrollbar. Checks user too: an expired session swaps the
   // account for the login screen with the client still selected.
   const accountOpen = !!user && !!selectedClientDetail;
-  useEffect(() => {
-    if (!accountOpen) return;
-    document.documentElement.style.overflow = 'hidden';
-    return () => { document.documentElement.style.overflow = ''; };
-  }, [accountOpen]);
+  useScrollLock(accountOpen);
 
   // Back (the phone's button or swipe) closes the account instead of leaving the app, and asks first if there's unsaved
   // work. It does nothing while a dialog is over the account, so a payment being entered isn't dropped. Refreshing or
@@ -1630,6 +1628,7 @@ export default function App() {
 
             {leavePrompt?.kind === 'other' && (
               <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="unsaved-work-title">
+                <ScrollLock />
                 <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
                   <div>
                     <h3 id="unsaved-work-title" className="font-semibold text-white">Discard your unsaved work?</h3>

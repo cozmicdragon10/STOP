@@ -8,6 +8,7 @@ import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { caseNoteLabel } from '../../utils/notes';
 import { EMPTY_NOTE_FILTERS, sortedUnique } from '../../utils/filters';
 import { formatLogMonthDay, formatLogTime, formatLogYear, localYmd } from '../../utils/dates';
+import ScrollLock from '../ScrollLock';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- note rows are untyped throughout App */
 interface Props {
@@ -230,6 +231,7 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
     <div className="space-y-4">
       {leaveRequested && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="unsaved-notes-title">
+          <ScrollLock />
           <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
             <div>
               <h3 id="unsaved-notes-title" className="font-semibold text-white">Save your case note changes?</h3>

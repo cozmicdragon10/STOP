@@ -4,6 +4,7 @@ import BipAssessmentPicker from '../sessions/BipAssessmentPicker';
 import { bipChoiceProblem, counselorChoices, openBipAssessment } from '../sessions/bipAssessment';
 import type { BipAssessmentChoice } from '../sessions/bipAssessment';
 import { DISCHARGE_STATUSES, DISCHARGE_SUBCATEGORIES, EDITABLE_PROGRAM_STATUSES } from '../../utils/clients';
+import ScrollLock from '../ScrollLock';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client and employee rows are untyped throughout App */
 interface Props {
@@ -76,6 +77,7 @@ export default function ProgramStatusDialog({ action, client, employees, groupCo
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="status-dialog-title">
+      <ScrollLock />
       <div className={`bg-slate-900 border rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm ${activating ? 'border-blue-500/40' : 'border-amber-500/40'}`}>
         <div>
           <h3 id="status-dialog-title" className="font-semibold text-white">{activating ? 'Activate Client' : 'Discharge Client'}</h3>

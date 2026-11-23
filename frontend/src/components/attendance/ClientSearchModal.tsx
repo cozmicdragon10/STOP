@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Search, UserPlus, X } from 'lucide-react';
 import type { ClientRecord } from '../../hooks/useGroupCheckIn';
 import { idText } from '../../utils/clients';
+import ScrollLock from '../ScrollLock';
 
 interface Props {
   clients: ClientRecord[];
@@ -59,6 +60,7 @@ export default function ClientSearchModal({ clients, checkedInIds, attendedIds, 
       className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
       onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
     >
+      <ScrollLock />
       <div role="dialog" aria-modal="true" aria-labelledby="client-search-title"
         className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[85dvh]">
         <header className="flex justify-between items-center p-5 border-b border-slate-800">

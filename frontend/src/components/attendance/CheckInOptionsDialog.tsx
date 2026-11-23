@@ -11,6 +11,7 @@ import OtherPaymentFields from '../payments/OtherPaymentFields';
 import { PAYMENT_METHODS, paymentMethodProblem } from '../../utils/paymentMethods';
 import { useUserRole } from '../../hooks/useUserRole';
 import { emptyCardBilling, type CardBilling } from '../payments/cardBilling';
+import ScrollLock from '../ScrollLock';
 
 interface Props {
   clients: ClientRecord[];
@@ -191,6 +192,7 @@ export default function CheckInOptionsDialog({ clients, createdBy, onConfirm, on
 
   return (
     <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="check-in-options-title">
+      <ScrollLock />
       <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[85dvh] flex flex-col">
         <header className="p-5 border-b border-slate-800">
           <div className="flex justify-between items-baseline gap-3">

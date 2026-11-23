@@ -6,6 +6,7 @@ import { caseNoteLabel } from '../../utils/notes';
 import { toLocalDay } from '../../utils/dates';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { idText } from '../../utils/clients';
+import ScrollLock from '../ScrollLock';
 
 interface Props {
   userEmail: string;
@@ -85,6 +86,7 @@ export default function PendingNotesButton({ userEmail, refreshKey, onOpenClient
 
       {open && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-start justify-center z-50 p-4 overflow-y-auto" onClick={() => setOpen(false)}>
+          <ScrollLock />
           <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-2xl w-full max-w-3xl my-8" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-start gap-4 p-5 border-b border-slate-800">
               <div>

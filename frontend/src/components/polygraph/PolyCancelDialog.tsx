@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { reopenPolygraphSlot } from '../../api';
 import { POLY_CANCEL_NOTICE_HOURS, POLY_CANCEL_REASONS, polyVoucherReturnRule, slotHasPassed } from '../../utils/polygraph';
+import ScrollLock from '../ScrollLock';
 
 interface Props {
   // The assigned slot being cancelled (as listed on the schedule)
@@ -45,6 +46,7 @@ export default function PolyCancelDialog({ slot, role, userEmail, onClose, onCan
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <ScrollLock />
       <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
         <div>
           <h3 className="font-semibold text-white">Cancel Polygraph Reservation</h3>

@@ -4,6 +4,7 @@ import { deletePolygraphSlot, submitPolygraphResult } from '../../api';
 import { POLY_INCENTIVE_OVERRIDE_RESULTS, cancelReservationHint, cancelReservationLabel } from '../../utils/polygraph';
 import { formatDisplayTime, getLocalDateString } from '../../utils/dates';
 import { matchesAllWords } from '../../utils/search';
+import ScrollLock from '../ScrollLock';
 
 export interface AssignedPolySlot {
   slotid: number;
@@ -154,6 +155,7 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
 
       {selected && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="poly-results-title" onClick={() => !saving && setSelectedId(null)}>
+          <ScrollLock />
         <form onSubmit={handleSubmit} onClick={e => e.stopPropagation()} className="bg-slate-900 border border-blue-500/40 p-4 md:p-6 rounded-xl space-y-4 w-full max-w-2xl max-h-full overflow-y-auto">
           <div className="border-b border-slate-800 pb-3 flex flex-wrap justify-between items-center gap-x-3">
             <h4 id="poly-results-title" className="font-bold text-white">Record Results for {selected.assignedClientName}</h4>

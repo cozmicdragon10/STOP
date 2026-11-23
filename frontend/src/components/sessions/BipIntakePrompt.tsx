@@ -3,6 +3,7 @@ import BipAssessmentPicker from './BipAssessmentPicker';
 import { bipChoiceProblem, counselorChoices, openBipAssessment } from './bipAssessment';
 import type { BipAssessmentChoice } from './bipAssessment';
 import { errorMessage } from '../../utils/errors';
+import ScrollLock from '../ScrollLock';
 
 interface Employee {
   displayname: string;
@@ -42,6 +43,7 @@ export default function BipIntakePrompt({ client, employees, user, onDone }: Pro
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="bip-intake-title">
+      <ScrollLock />
       <div className="bg-slate-900 border border-blue-500/40 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
         <div>
           <h3 id="bip-intake-title" className="font-semibold text-white">Open a BIP Assessment?</h3>

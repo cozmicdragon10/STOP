@@ -15,6 +15,7 @@ import { ageFromBirthDate, toLocalDay } from '../../utils/dates';
 import { polyVoucherMax, takesPolygraphs } from '../../utils/polygraph';
 import { UNIT_FIELDS, editPayload, rebaseOrigins, recordOrigins, sameFieldValue } from '../../utils/clientEdits';
 import { joinGroupFee } from '../../utils/groupAssignment';
+import ScrollLock from '../ScrollLock';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client and group rows are untyped throughout App */
 interface Props {
@@ -192,6 +193,7 @@ export default function ClientInfoForm({ client, discharged, groups, directoryAg
       {leaveRequested && (
         // mb-0! because the parent's space-y spacing would otherwise stop the backdrop short of the bottom of the screen
         <div className="fixed inset-0 mb-0! bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="unsaved-changes-title">
+          <ScrollLock />
           <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
             <div>
               <h3 id="unsaved-changes-title" className="font-semibold text-white">Save your changes?</h3>

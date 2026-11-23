@@ -11,6 +11,7 @@ import ReviewStep from './ReviewStep';
 import ClientSearchModal from './ClientSearchModal';
 import CheckInOptionsDialog from './CheckInOptionsDialog';
 import RemovePaidClientDialog from './RemovePaidClientDialog';
+import ScrollLock from '../ScrollLock';
 
 interface Props {
   groups: GroupRecord[];
@@ -273,6 +274,7 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
         const newDay = wf.sessionChoice.date === todayLocal() ? 'today' : `on ${formatSessionDay(wf.sessionChoice.date)}`;
         return (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <ScrollLock />
           <div role="dialog" aria-modal="true" aria-labelledby="session-choice-title" className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md max-h-full overflow-y-auto p-6 space-y-4">
             <h3 id="session-choice-title" className="text-lg font-bold text-white">
               {group.groupname} was already held {closed.date === wf.sessionChoice.date ? (closedToday ? 'today' : 'that day') : wf.sessionChoice.date === todayLocal() ? 'this week' : 'that week'}

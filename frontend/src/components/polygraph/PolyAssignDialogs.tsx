@@ -3,6 +3,7 @@ import ClientPaymentDialog from '../payments/ClientPaymentDialog';
 import type { PolyAssignment } from '../../hooks/usePolyAssignment';
 import { formatDisplayTime } from '../../utils/dates';
 import { polySchedulingNeeds } from '../../utils/polygraph';
+import ScrollLock from '../ScrollLock';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- slot and client rows are untyped throughout App */
 interface Props {
@@ -41,6 +42,7 @@ export default function PolyAssignDialogs({ assignment: a, slots, clients, userE
         ];
         return (
           <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+            <ScrollLock />
             <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
               <div>
                 <h3 className="font-semibold text-white">Confirm Polygraph Assignment</h3>
@@ -80,6 +82,7 @@ export default function PolyAssignDialogs({ assignment: a, slots, clients, userE
 
       {a.waitBypassPrompt && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="wait-bypass-title">
+          <ScrollLock />
           <div className="bg-slate-900 border border-amber-500/40 rounded-xl p-6 w-full max-w-md max-h-full overflow-y-auto space-y-4 text-sm">
             <div>
               <h3 id="wait-bypass-title" className="font-semibold text-white">Bypass Polygraph Waiting Period?</h3>

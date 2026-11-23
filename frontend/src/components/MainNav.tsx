@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Lock, LogOut, Menu, X } from 'lucide-react';
 import BarTabs from './BarTabs';
 import type { NavItem } from './BarTabs';
+import ScrollLock from './ScrollLock';
 
 interface Props {
   // Every section the user can open, in order
@@ -17,6 +18,15 @@ interface Props {
 // md up there may be no touch screen to swipe, so every section fits across the bar, and the account is in the header.
 export default function MainNav({ items, activeTab, onSelect, user, onLogout }: Props) {
   const [open, setOpen] = useState(false);
+  // The Menu sheet is phone-only (md:hidden): widening the window closes it, so its scroll lock doesn't outlive it
+  useEffect(() => {
+    if (!open) return;
+    const wide = window.matchMedia('(min-width: 48rem)');
+    const close = () => { if (wide.matches) setOpen(false); };
+    close();
+    wide.addEventListener('change', close);
+    return () => wide.removeEventListener('change', close);
+  }, [open]);
 
   const select = (tab: string) => {
     setOpen(false);
@@ -42,6 +52,7 @@ export default function MainNav({ items, activeTab, onSelect, user, onLogout }: 
 
       {open && (
         <div className="md:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end" onClick={() => setOpen(false)}>
+          <ScrollLock />
           <div
             role="dialog"
             aria-modal="true"
