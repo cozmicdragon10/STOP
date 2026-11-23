@@ -3,7 +3,7 @@ import { ArrowLeft, Lock, Printer, Save, Trash2 } from 'lucide-react';
 import { printAttendanceReceipt } from '../../utils/receipt';
 import { todayLocal, validateSession } from '../../hooks/useGroupCheckIn';
 import type { ClientRecord, GroupCheckInState, GroupRecord, SessionEntry } from '../../hooks/useGroupCheckIn';
-import { formatBalance, toDisplayBalance } from '../../utils/balance';
+import { balanceColor, formatBalance } from '../../utils/balance';
 import ClientPaymentDialog from '../payments/ClientPaymentDialog';
 import CoveringCounselorPicker from './CoveringCounselorPicker';
 import { bandsFor, needsDuration, unitCodeFor, unitCodeLabel, unitsLeft } from '../../utils/federalUnits';
@@ -85,7 +85,7 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint,
       <div className="bg-slate-900 border border-slate-800 rounded-lg p-3 text-xs space-y-1.5">
         <div className="flex justify-between">
           <span className="text-slate-400">Current balance</span>
-          <span className={toDisplayBalance(balance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatBalance(balance)}</span>
+          <span className={balanceColor(balance)}>{formatBalance(balance)}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-slate-400">Group fee applied</span>
@@ -102,7 +102,7 @@ function ReviewRow({ entry, balance, onChange, onRemove, onMakePayment, onPrint,
         )}
         <div className="flex justify-between border-t border-slate-800 pt-1.5">
           <span className="font-semibold text-slate-300">Balance after group closes</span>
-          <span className={`font-bold ${toDisplayBalance(afterClose) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(afterClose)}</span>
+          <span className={`font-bold ${balanceColor(afterClose)}`}>{formatBalance(afterClose)}</span>
         </div>
       </div>
 

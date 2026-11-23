@@ -6,7 +6,7 @@ import OtherPaymentFields from './OtherPaymentFields';
 import { PAYMENT_METHODS, paymentMethodProblem, paymentMethodText, type PaymentMethod } from '../../utils/paymentMethods';
 import { useUserRole } from '../../hooks/useUserRole';
 import { emptyCardBilling } from './cardBilling';
-import { formatBalance, toDisplayBalance } from '../../utils/balance';
+import { balanceColor, formatBalance, toDisplayBalance } from '../../utils/balance';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
 import { formatMoney } from '../../utils/ledger';
 import { printReceipt, type Receipt } from '../../utils/receipt';
@@ -133,7 +133,7 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
             <div className="mt-3 bg-slate-950 border border-slate-800 rounded-lg p-3 text-sm space-y-1.5">
               <div className="flex justify-between">
                 <span className="text-slate-400">Current balance</span>
-                <span className={toDisplayBalance(currentBalance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatMoney(toDisplayBalance(currentBalance))}</span>
+                <span className={balanceColor(currentBalance)}>{formatMoney(toDisplayBalance(currentBalance))}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-400">This payment</span>
@@ -141,7 +141,7 @@ export default function AccountPaymentForm({ clients, userEmail, onRecorded, onS
               </div>
               <div className="flex justify-between border-t border-slate-800 pt-1.5">
                 <span className="font-semibold text-slate-300">Balance after payment</span>
-                <span className={`font-bold ${toDisplayBalance(balanceAfter) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatMoney(toDisplayBalance(balanceAfter))}</span>
+                <span className={`font-bold ${balanceColor(balanceAfter)}`}>{formatMoney(toDisplayBalance(balanceAfter))}</span>
               </div>
             </div>
           ) : (

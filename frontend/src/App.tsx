@@ -28,7 +28,7 @@ import { todayLocal } from './hooks/useGroupCheckIn';
 import GroupCheckInWorkflow from './components/attendance/GroupCheckInWorkflow';
 import ClosedGroupNotesDialog from './components/attendance/ClosedGroupNotesDialog';
 import MoneyOnHand from './components/moneyOnHand/MoneyOnHand';
-import { balanceWord, formatBalance, formatBalanceLabeled, toDisplayBalance } from './utils/balance';
+import { balancePillColor, balanceWord, formatBalance, formatBalanceLabeled } from './utils/balance';
 import { applyProgramFees } from './utils/soPhases';
 import ClientPaymentDialog from './components/payments/ClientPaymentDialog';
 import AccountPaymentForm from './components/payments/AccountPaymentForm';
@@ -1249,7 +1249,7 @@ export default function App() {
                     {role !== 'Polygrapher' && (
                     <span
                       title="Account balance"
-                      className={`text-sm font-semibold px-2.5 py-0.5 rounded-full border ${toDisplayBalance(selectedClientDetail.accountbalance) < 0 ? 'text-red-400 bg-red-500/10 border-red-500/30' : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'}`}
+                      className={`text-sm font-semibold px-2.5 py-0.5 rounded-full border ${balancePillColor(selectedClientDetail.accountbalance)}`}
                     >
                       {balanceWord(selectedClientDetail.accountbalance) ? formatBalanceLabeled(selectedClientDetail.accountbalance) : `${formatBalance(selectedClientDetail.accountbalance)} Balance`}
                     </span>

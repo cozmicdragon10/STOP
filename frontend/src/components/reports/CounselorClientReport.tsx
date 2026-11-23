@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Printer } from 'lucide-react';
 import { SO_PHASES } from '../../utils/soPhases';
-import { formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
+import { balanceColor, formatBalanceLabeled } from '../../utils/balance';
 import { escapeHtml } from '../../utils/receipt';
 import { useClientsByStatus } from '../../hooks/useClientsByStatus';
 import { idText } from '../../utils/clients';
@@ -385,7 +385,7 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
                                     <td className="py-1.5 pr-3 text-slate-300">{phaseLabel(m)}</td>
                                     <td className="py-1.5 pr-3 text-slate-300">{m.programstatus || '—'}</td>
                                     <td className="py-1.5 pr-3 text-slate-400">{formatDay(m.lastattended ?? m.lastdateattended)}</td>
-                                    <td className={`py-1.5 text-right ${toDisplayBalance(m.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalanceLabeled(m.accountbalance)}</td>
+                                    <td className={`py-1.5 text-right ${balanceColor(m.accountbalance)}`}>{formatBalanceLabeled(m.accountbalance)}</td>
                                   </tr>
                                 ))}
                               </tbody>

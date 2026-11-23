@@ -55,3 +55,18 @@ export const formatBalanceLabeled = (stored: number | string | null | undefined)
   const word = balanceWord(stored);
   return word ? `${formatBalance(stored)} ${word}` : formatBalance(stored);
 };
+
+// The text color for a balance: red when owed, green for a credit, plain when it's $0.00 (paid up is the normal case,
+// so it doesn't stand out and the owed rows do). Rounded to the cent, so a balance that shows as $0.00 is plain.
+export const balanceColor = (stored: number | string | null | undefined): string => {
+  const cents = Math.round(toDisplayBalance(stored) * 100);
+  return cents < 0 ? 'text-red-400' : cents > 0 ? 'text-emerald-400' : 'text-slate-200';
+};
+
+// The same for a pill (text, background and border)
+export const balancePillColor = (stored: number | string | null | undefined): string => {
+  const cents = Math.round(toDisplayBalance(stored) * 100);
+  return cents < 0 ? 'text-red-400 bg-red-500/10 border-red-500/30'
+    : cents > 0 ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+    : 'text-slate-200 bg-slate-800 border-slate-700';
+};

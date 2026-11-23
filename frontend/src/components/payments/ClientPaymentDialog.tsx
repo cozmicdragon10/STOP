@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ClientRecord, PaymentMethod } from '../../hooks/useGroupCheckIn';
 import { submitAccountPayment } from '../../api';
-import { formatBalance, toDisplayBalance } from '../../utils/balance';
+import { balanceColor, formatBalance } from '../../utils/balance';
 import { printReceipt, type Receipt } from '../../utils/receipt';
 import { takesPolygraphs } from '../../utils/polygraph';
 import { cardBlocked, cardBlockedText } from '../../utils/cardBlock';
@@ -74,7 +74,6 @@ export default function ClientPaymentDialog({ client, balance, checkIn = NO_CHEC
   // The group's fee and cash payment are not saved until the group closes, so they are shown as pending
   const hasPending = checkIn.fee > 0 || checkIn.payment > 0;
   const balanceAfterClose = baseBalance - (receipt ? 0 : accountShown) + checkIn.fee - checkIn.payment;
-  const balanceColor = (stored: number) => (toDisplayBalance(stored) < 0 ? 'text-red-400' : 'text-emerald-400');
 
   const processPayment = async () => {
     if (!validAmount) {

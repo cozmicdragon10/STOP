@@ -4,7 +4,7 @@ import { EditConflictError, createGroup, deleteGroup, getGroupClients, getGroups
 import ScheduleSelect from '../ScheduleSelect';
 import { BY_APPOINTMENT } from '../../utils/schedule';
 import { DEFAULT_GROUP_FILTERS } from '../../utils/filters';
-import { formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
+import { balanceColor, formatBalanceLabeled } from '../../utils/balance';
 import { OBSERVER_ROLES, POLY_GROUP_TYPE, allowsByAppointment, formatPhase, groupLeadLabel, isChaperonGroup, isDrugTestGroup, isPolyGroup, idText } from '../../utils/clients';
 import { toLocalDay } from '../../utils/dates';
 
@@ -334,7 +334,7 @@ export default function GroupsTab({ groups, clients, employees, role, onSuccess,
                       </td>
                       <td data-label="Phase" className="p-2.5 text-slate-300">{formatPhase(c.programtype, c.phase) || '—'}</td>
                       <td data-label="Last Attended" className="p-2.5 text-slate-300">{c.lastattended ? toLocalDay(c.lastattended).toLocaleDateString() : 'Never'}</td>
-                      <td data-label="Balance" className={`p-2.5 text-right font-medium ${toDisplayBalance(c.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalanceLabeled(c.accountbalance)}</td>
+                      <td data-label="Balance" className={`p-2.5 text-right font-medium ${balanceColor(c.accountbalance)}`}>{formatBalanceLabeled(c.accountbalance)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -4,7 +4,7 @@ import ClientPicker from '../ClientPicker';
 import { beginAssessment, getBipIntake, saveOpenIndividualSession } from '../../api';
 import type { BipIntake, OpenIndividualSession, SessionType } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
-import { formatBalance, formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
+import { balanceColor, formatBalance, formatBalanceLabeled } from '../../utils/balance';
 import { FUNDING_ROLE, FUNDING_SOURCES, amountDueToBegin, type FundingSource } from '../../utils/assessmentWork';
 
 export interface BeginClient {
@@ -236,7 +236,7 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
             )}
             {client && (
               <p className="text-xs text-slate-500 mt-1.5">
-                {client.programtype || 'No program'} · Balance <span className={toDisplayBalance(client.accountbalance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatBalanceLabeled(client.accountbalance)}</span>
+                {client.programtype || 'No program'} · Balance <span className={balanceColor(client.accountbalance)}>{formatBalanceLabeled(client.accountbalance)}</span>
               </p>
             )}
           </div>
@@ -316,10 +316,10 @@ export default function AssessmentBeginForm({ clients, sessionTypes, counselors,
               <div key={k} className="flex justify-between gap-4"><span className="text-slate-400">{k}</span><span className="text-white text-right">{v}</span></div>
             ))}
             <div className="border-t border-slate-800 my-2" />
-            <div className="flex justify-between"><span className="text-slate-400">Current balance</span><span className={toDisplayBalance(balance) < 0 ? 'text-red-400' : 'text-emerald-400'}>{formatBalance(balance)}</span></div>
+            <div className="flex justify-between"><span className="text-slate-400">Current balance</span><span className={balanceColor(balance)}>{formatBalance(balance)}</span></div>
             <div className="flex justify-between gap-4"><span className="text-slate-400">Price{fundedBy ? ` (billed to ${fundedBy})` : ''}</span><span className="text-red-400">-{money(Number.isFinite(feeNum) ? feeNum : 0)}</span></div>
             <div className="flex justify-between"><span className="text-slate-400">Payment (Cash)</span><span className="text-emerald-400">+{money(Number.isFinite(paymentNum) ? paymentNum : 0)}</span></div>
-            <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="font-semibold text-slate-300">Balance after</span><span className={`font-bold ${toDisplayBalance(balanceAfter) < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatBalance(balanceAfter)}</span></div>
+            <div className="flex justify-between border-t border-slate-800 pt-1.5"><span className="font-semibold text-slate-300">Balance after</span><span className={`font-bold ${balanceColor(balanceAfter)}`}>{formatBalance(balanceAfter)}</span></div>
           </div>
 
           {canFund && (
