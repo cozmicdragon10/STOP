@@ -11,7 +11,8 @@ interface Props {
   // Every client, for "Apply to another client's account"
   clients: ClientRecord[];
   saving: boolean;
-  onConfirm: (choice: RemovalChoice) => void;
+  // note: the optional case note, saved to the removed client's case notes as a Therapist note
+  onConfirm: (choice: RemovalChoice, note: string) => void;
   onCancel: () => void;
 }
 
@@ -22,6 +23,8 @@ export default function RemovePaidClientDialog({ entry, clients, saving, onConfi
   const card = entry.payment <= 0 && entry.cardPaid > 0;
   const [choice, setChoice] = useState<Choice>('other');
   const [otherId, setOtherId] = useState('');
+  // Starts with the Therapist Note typed on the review screen, which would otherwise be lost with the client
+  const [note, setNote] = useState(entry.comments ?? '');
   const name = `${entry.client.lastname}, ${entry.client.firstname}`;
   const paid = card
     ? `$${entry.cardPaid.toFixed(2)} Credit Card`
@@ -32,10 +35,10 @@ export default function RemovePaidClientDialog({ entry, clients, saving, onConfi
 
   const confirm = () => {
     if (!ready || saving) return;
-    if (choice === 'other') onConfirm({ kind: card ? 'move-card' : 'account', toClient: otherClient! });
-    else if (card) onConfirm({ kind: 'keep-card' });
-    else if (choice === 'own') onConfirm({ kind: 'account', toClient: entry.client });
-    else onConfirm({ kind: 'refund' });
+    if (choice === 'other') onConfirm({ kind: card ? 'move-card' : 'account', toClient: otherClient! }, note);
+    else if (card) onConfirm({ kind: 'keep-card' }, note);
+    else if (choice === 'own') onConfirm({ kind: 'account', toClient: entry.client }, note);
+    else onConfirm({ kind: 'refund' }, note);
   };
 
   const option = (value: Choice, title: string, detail: string) => (
@@ -85,6 +88,19 @@ export default function RemovePaidClientDialog({ entry, clients, saving, onConfi
             ? option('own', `Keep on ${entry.client.firstname}'s account`, 'The payment stays on their account as a credit. To refund the card, a Business Administrator records the refund on their Financial Ledger.')
             : option('own', `Apply to ${entry.client.firstname}'s account`, 'Keep the money as a payment on their account (they leave without attending). Recorded now.')}
           {!card && option('refund', 'Refund', 'Hand the money back. Nothing is recorded.')}
+
+          <label className="block pt-1">
+            <span className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Case Note (optional)</span>
+            <textarea
+              rows={3}
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              disabled={saving}
+              placeholder={`Why ${entry.client.firstname} was removed, refund given, etc.`}
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none resize-y"
+            />
+            <span className="block text-xs text-slate-500 mt-1">Added to {name}'s case notes as a Therapist note.</span>
+          </label>
         </div>
 
         <footer className="flex justify-end gap-3 p-4 border-t border-slate-800">

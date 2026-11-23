@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { deleteOpenGroup, getGroupClients, getGroupSessions, moveCardPayment, saveOpenGroup, submitAccountPayment, submitBatchAttendance } from '../api';
+import { addClientNote, deleteOpenGroup, getGroupClients, getGroupSessions, moveCardPayment, saveOpenGroup, submitAccountPayment, submitBatchAttendance } from '../api';
 import type { GroupDaySession } from '../api';
 import type { OpenGroupSession } from '../api';
 import { isMonthlyFeeClient } from '../utils/soPhases';
@@ -517,7 +517,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
   // Cash or Other: 'refund' (handed back, nothing recorded) or 'account' (recorded now as an account payment on toClient:
   // the same client, or the client who should have been checked in). Card: 'move-card' (the payment moves to toClient's
   // account) or 'keep-card' (it stays on this client's account as a credit).
-  const resolveRemoval = async (choice: RemovalChoice) => {
+  // note: an optional case note for the removed client, saved as a Therapist note
+  const resolveRemoval = async (choice: RemovalChoice, note = '') => {
     const entry = pendingRemoval;
     if (!entry || groupId === null) return;
     const name = `${entry.client.lastname}, ${entry.client.firstname}`;
@@ -562,6 +563,20 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
       return;
     }
 
+    // The case note typed in the Remove dialog goes on the removed client's case notes as a Therapist note. The money is
+    // already settled, so a note that fails to save doesn't keep them on the sheet; the message says to add it by hand.
+    const text = note.trim();
+    let noteProblem = '';
+    if (text) {
+      try {
+        await addClientNote(entry.client.clientid, { user: createdBy, comments: text, category: 'Therapist' });
+        message += ' Therapist case note added.';
+      } catch (err: unknown) {
+        const reason = err instanceof Error && err.message ? ` (${err.message})` : '';
+        noteProblem = ` The case note could not be saved${reason}; add it from their Case Notes: "${text}"`;
+      }
+    }
+
     const next = session.filter(e => e.client.clientid !== entry.client.clientid);
     setSession(next);
     setPendingRemoval(null);
@@ -579,10 +594,11 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
         await deleteOpenGroup(saved.opensessionid, createdBy);
         notify.onOpenGroupsChanged?.();
       }
-      notify.onSuccess(message);
+      if (noteProblem) notify.onError(`${message}${noteProblem}`);
+      else notify.onSuccess(message);
     } catch (err: unknown) {
       const reason = err instanceof Error && err.message ? ` (${err.message})` : '';
-      notify.onError(`${message} But the saved check-in could not be updated${reason}. ${next.length > 0 ? 'Press Save for Later now' : 'Discard it from Open Groups'} so the payment isn't recorded twice when the group closes.`);
+      notify.onError(`${message} But the saved check-in could not be updated${reason}. ${next.length > 0 ? 'Press Save for Later now' : 'Discard it from Open Groups'} so the payment isn't recorded twice when the group closes.${noteProblem}`);
     } finally {
       setSubmitting(false);
     }
