@@ -3,6 +3,7 @@ const { effectiveRole } = require('../lib/roles');
 const { todayLocal } = require('../lib/dates');
 const { ID_TYPES, idText, REFERRAL_TYPES } = require('../lib/clientId');
 const { buildDischargeSummaryPdf } = require('../dischargeSummary');
+const { CREDENTIALS_SQL, withCredentials } = require('../lib/credentials');
 const { logAction, pool } = require('../db');
 const { activeRoleFor } = require('../lib/access');
 const { requireRole } = require('../lib/auth');
@@ -301,7 +302,7 @@ const changeProgramStatus = (action) => async (req, res) => {
     }
     const db = await pool.connect();
     try {
-        const roleRes = await db.query('SELECT Role, DisplayName FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [user]);
+        const roleRes = await db.query('SELECT Role, DisplayName, Credentials FROM EmployeeRoles WHERE EmployeeEmail = $1 AND Active = TRUE', [user]);
         if (!roleRes.rows[0] || (action.adminOnly && effectiveRole(roleRes.rows[0].role) !== 'Business Administrator')) {
             return res.status(403).json({ error: action.adminOnly ? 'Only Business Administrators can discharge clients.' : 'Only active employees can activate clients.' });
         }
@@ -330,7 +331,7 @@ const changeProgramStatus = (action) => async (req, res) => {
             );
             // The discharge summary PDF is saved to the client's attachments in the same transaction
             const clientRes = await db.query(
-                `SELECT c.*, g.GroupName, g.Counselor, COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
+                `SELECT c.*, g.GroupName, g.Counselor, ${CREDENTIALS_SQL('g.Counselor')} AS CounselorCredentials, COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
                         (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
                         (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly
                  FROM Clients c LEFT JOIN Groups g ON c.GroupId = g.GroupId WHERE c.ClientId = $1`,
@@ -339,7 +340,7 @@ const changeProgramStatus = (action) => async (req, res) => {
             const client = clientRes.rows[0];
             const dischargedOn = dischargeRes.rows[0].dischargedon;
             const pdf = await buildDischargeSummaryPdf({
-                client, dischargeType: status, subcategories: chosen, note: note.trim(), dischargedOn, dischargedBy: roleRes.rows[0].displayname || user,
+                client, dischargeType: status, subcategories: chosen, note: note.trim(), dischargedOn, dischargedBy: withCredentials(roleRes.rows[0].displayname || user, roleRes.rows[0].credentials),
             });
             const day = `${dischargedOn.getFullYear()}-${String(dischargedOn.getMonth() + 1).padStart(2, '0')}-${String(dischargedOn.getDate()).padStart(2, '0')}`;
             summaryFileName = `Discharge Summary - ${client.firstname} ${client.lastname} - ${day}.pdf`;

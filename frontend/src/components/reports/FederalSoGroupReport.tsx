@@ -6,6 +6,7 @@ import { idText } from '../../utils/clients';
 import { useTableSort } from '../../hooks/useTableSort';
 import { phaseValue, sortRows, valueFromText } from '../../utils/tableSort';
 import SortableTh from '../SortableTh';
+import { useCounselorPrintName } from '../../hooks/useEmployeeLabel';
 
 interface Props {
   // Current clients (not discharged)
@@ -36,6 +37,8 @@ const cells = (c: Client) => [
 
 // Every federal client (Federal SO and Poly Only), listed under the group they're in
 export default function FederalSoGroupReport({ clients, groups, onOpenClient }: Props) {
+  // Printed counselor names carry their license credentials
+  const printName = useCounselorPrintName();
   // Active, Inactive, or '' for both (the list holds current clients only)
   const [statusFilter, setStatusFilter] = useState('Active');
 
@@ -84,13 +87,15 @@ export default function FederalSoGroupReport({ clients, groups, onOpenClient }: 
   const total = shownClients.length;
   const polyOnlyCount = shownClients.filter(c => c.programtype === POLY_ONLY).length;
   const groupCount = sections.filter(s => s.group).length;
-  const groupDetails = (g: Group | null) => (g ? [g.counselor, g.schedule, g.location].filter(Boolean).join(' · ') : '');
+  // forPrint: the counselor's name with their license credentials
+  const groupDetails = (g: Group | null, forPrint = false) => (g
+    ? [forPrint ? printName(g.counselor) : g.counselor, g.schedule, g.location].filter(Boolean).join(' · ') : '');
 
   const printReport = () => {
     const win = window.open('', '_blank');
     if (!win) return;
     const body = sections.map(s => `
-      <h2>${escapeHtml(s.title)} <span>${escapeHtml(groupDetails(s.group))}${s.group ? ' · ' : ''}${s.clients.length} client${s.clients.length === 1 ? '' : 's'}</span></h2>
+      <h2>${escapeHtml(s.title)} <span>${escapeHtml(groupDetails(s.group, true))}${s.group ? ' · ' : ''}${s.clients.length} client${s.clients.length === 1 ? '' : 's'}</span></h2>
       <table><thead><tr>${COLUMNS.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead><tbody>
         ${s.clients.map(c => `<tr>${cells(c).map(v => `<td>${escapeHtml(v)}</td>`).join('')}</tr>`).join('')}
       </tbody></table>`).join('');
@@ -101,7 +106,7 @@ export default function FederalSoGroupReport({ clients, groups, onOpenClient }: 
       .sub{color:#555;margin:2px 0 12px}
     </style></head><body>
       <h1>Federal Clients by Group</h1>
-      <p class="sub">${total} ${escapeHtml(statusFilter || 'Active and Inactive')} client${total === 1 ? '' : 's'} (${total - polyOnlyCount} Federal SO, ${polyOnlyCount} Poly Only) · ${escapeHtml(counselor || 'All counselors')} · ${groupCount} group${groupCount === 1 ? '' : 's'} · Printed ${new Date().toLocaleString()}</p>
+      <p class="sub">${total} ${escapeHtml(statusFilter || 'Active and Inactive')} client${total === 1 ? '' : 's'} (${total - polyOnlyCount} Federal SO, ${polyOnlyCount} Poly Only) · ${escapeHtml(counselor ? printName(counselor) : 'All counselors')} · ${groupCount} group${groupCount === 1 ? '' : 's'} · Printed ${new Date().toLocaleString()}</p>
       ${body || '<p>No federal clients.</p>'}
     </body></html>`);
     win.document.close();

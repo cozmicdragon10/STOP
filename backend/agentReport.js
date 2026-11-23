@@ -2,6 +2,7 @@
 // that agent's client PDFs attached. Nothing here sends email; the draft opens in Outlook and someone presses Send.
 const crypto = require('crypto');
 const { idText } = require('./lib/clientId');
+const { withCredentials } = require('./lib/credentials');
 const PDFDocument = require('pdfkit');
 const { LETTERHEAD, formatDate } = require('./dischargeSummary');
 
@@ -30,8 +31,6 @@ const NO_ATTENDANCE_PROGRAM_TYPES = ['Poly Only'];
 const ATTENDANCE_LABELS = { 'Call-In': 'Called in (absent)', Closure: 'Group closed', Holiday: 'Holiday (no group)' };
 
 const fullName = (c) => [c.firstname, c.middlename, c.lastname].filter(Boolean).join(' ');
-// A counselor's name followed by their credentials, e.g. "Belinda Harris, LPC, LADC-MH" (as on receipts)
-const withCredentials = (name, credentials) => (name && credentials ? `${name}, ${credentials}` : name || '');
 // Drug test clients are seen by an observer, not a therapist
 const DRUG_TEST_PROGRAM_TYPES = ['Fed Drug Test'];
 const staffTitle = (client) => (DRUG_TEST_PROGRAM_TYPES.includes(client.programtype) ? 'Observer' : 'Therapist');

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import QuickRanges from './QuickRanges';
 import { CheckCircle2, ChevronDown, ChevronRight, Landmark, Pencil, Printer, Trash2 } from 'lucide-react';
-import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
+import { useCounselorPrintName, useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { deleteGroupDeposit, getGroupDeposits, getGroupReport, saveGroupDeposit } from '../../api';
 import type { GroupDeposit, GroupReportRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
@@ -96,6 +96,8 @@ const totalsFor = (key: string, rows: GroupReportRow[]): GroupTotals => {
 // Only Business Administrators record, edit, or remove deposits; everyone else sees the status (the server checks too)
 export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { userEmail: string; canRecordDeposits: boolean }) {
   const employeeLabel = useEmployeeLabel();
+  // Printed counselor names carry their license credentials
+  const printName = useCounselorPrintName();
   const [from, setFrom] = useState(firstOfMonth);
   const [to, setTo] = useState(todayLocal);
   // One date instead of a range; from and to are kept equal while it's on
@@ -310,16 +312,16 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
     }
     setPrintError('');
     const range = from === to ? formatDate(from) : `${formatDate(from)} – ${formatDate(to)}`;
-    const groupName = [counselorFilter, groupFilter ? shown[0]?.name ?? 'Selected group' : 'All Groups'].filter(Boolean).join(' · ');
+    const groupName = [counselorFilter && printName(counselorFilter), groupFilter ? shown[0]?.name ?? 'Selected group' : 'All Groups'].filter(Boolean).join(' · ');
     const counselorRows = counselorTotals.map(c => `<tr>
-      <td>${escapeHtml(c.name)}</td><td class="r">${c.groups}</td><td class="r">${c.sessions}</td><td class="r">${c.attendance}</td><td class="r">${c.clients}</td>
+      <td>${escapeHtml(printName(c.name))}</td><td class="r">${c.groups}</td><td class="r">${c.sessions}</td><td class="r">${c.attendance}</td><td class="r">${c.clients}</td>
       <td class="r">${money(c.charged)}</td><td class="r">${money(c.collected)}</td><td class="r">${money(c.cash)}</td><td class="r">${money(c.card)}</td>${anyOther ? `<td class="r">${money(c.other)}</td>` : ''}
       ${anyUnrecorded ? `<td class="r">${money(c.unrecorded)}</td>` : ''}
       <td class="r">${money(c.deposit.deposited)}</td><td>${escapeHtml(depositStatusText(c.deposit))}</td></tr>`).join('');
     const cols = 10 + (anyUnrecorded ? 1 : 0) + (anyOther ? 1 : 0);
     const groupRows = shown.map(g => `
       <tr class="group">
-        <td>${escapeHtml(g.name)}</td><td>${escapeHtml(g.counselor || '—')}</td>
+        <td>${escapeHtml(g.name)}</td><td>${escapeHtml(printName(g.counselor) || '—')}</td>
         <td class="r">${g.sessions}</td><td class="r">${g.rows.length}</td><td class="r">${g.clients}</td>
         <td class="r">${money(g.charged)}</td><td class="r">${money(g.collected)}</td>
         <td class="r">${money(g.cash)}</td><td class="r">${money(g.card)}</td>${anyOther ? `<td class="r">${money(g.other)}</td>` : ''}

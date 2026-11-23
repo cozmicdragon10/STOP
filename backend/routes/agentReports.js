@@ -6,6 +6,7 @@ const express = require('express');
 const { logAction, pool } = require('../db');
 const { requireRole } = require('../lib/auth');
 const { NO_POLY_PROGRAM_TYPES } = require('../lib/poly');
+const { CREDENTIALS_SQL } = require('../lib/credentials');
 const {
     ATTENDED_TYPES, NO_ATTENDANCE_PROGRAM_TYPES, monthLabel, buildClientReportPdf, buildDraftEml, reportFileName, draftFileName,
 } = require('../agentReport');
@@ -30,9 +31,7 @@ const clientsSql = (where) => `
            c.ProgramStartDate, c.Phase, c.NoPolyRequired, COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
            g.GroupName, g.Counselor,
            -- The group counselor's credentials (e.g. "LPC"), matched by display name or email as receipts do
-           (SELECT NULLIF(TRIM(e.Credentials), '') FROM EmployeeRoles e
-            WHERE LOWER(TRIM(e.DisplayName)) = LOWER(TRIM(g.Counselor)) OR LOWER(e.EmployeeEmail) = LOWER(TRIM(g.Counselor))
-            ORDER BY e.Active DESC NULLS LAST LIMIT 1) AS CounselorCredentials,
+           ${CREDENTIALS_SQL('g.Counselor')} AS CounselorCredentials,
            ${AGENT_KEY} AS AgentKey, sa.Name AS AgentName, sa.Email AS AgentEmail,
            (SELECT MAX(a.Date) FROM Attendance a WHERE a.Client = c.ClientId AND a.Type = ANY($2)
                 AND a.Date < ${PERIOD_END}) AS LastAttended,

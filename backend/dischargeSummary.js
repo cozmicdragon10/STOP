@@ -1,5 +1,6 @@
 const PDFDocument = require('pdfkit');
 const { idText } = require('./lib/clientId');
+const { withCredentials } = require('./lib/credentials');
 
 // Letterhead printed at the top of every discharge summary
 const LETTERHEAD = {
@@ -37,7 +38,7 @@ const DISCHARGE_REASONS = {
 
 // Builds the discharge summary PDF and resolves with its bytes.
 // info: { client, dischargeType, subcategories (array, may be empty), note, dischargedOn, dischargedBy }
-// client: a Clients row plus groupname, counselor, lastattended, lastpoly
+// client: a Clients row plus groupname, counselor, counselorcredentials, lastattended, lastpoly; dischargedBy is printed as given
 const buildDischargeSummaryPdf = (info) => new Promise((resolve, reject) => {
     const { client, dischargeType, note, dischargedOn, dischargedBy } = info;
     const subcategories = info.subcategories || [];
@@ -91,7 +92,7 @@ const buildDischargeSummaryPdf = (info) => new Promise((resolve, reject) => {
         `${reasons.map(r => `${r}\n\n`).join('')}Last attended: ${formatDate(client.lastattended)}.  Last polygraph: ${formatDate(client.lastpoly)}.\n\n${note}`);
 
     doc.moveDown(2);
-    doc.font('Times-Bold').fontSize(11).text('Therapist: ', left, doc.y, { continued: true }).font('Times-Roman').text(client.counselor || '________________________________');
+    doc.font('Times-Bold').fontSize(11).text('Therapist: ', left, doc.y, { continued: true }).font('Times-Roman').text(withCredentials(client.counselor, client.counselorcredentials) || '________________________________');
     doc.moveDown(0.4);
     doc.font('Times-Bold').text('Discharged By: ', { continued: true }).font('Times-Roman').text(dischargedBy || 'N/A');
     doc.end();

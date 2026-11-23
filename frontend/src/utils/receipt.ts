@@ -2,6 +2,7 @@ import type { PaymentMethod } from '../hooks/useGroupCheckIn';
 import { paymentMethodText } from './paymentMethods';
 import { formatBalance } from './balance';
 import { formatDisplayTime } from './dates';
+import { nameWithCredentials } from './credentials';
 import { getEmployees, getPolySummary } from '../api';
 
 // A saved payment, as shown on a printed receipt. newBalance uses the stored sign (positive = owes).
@@ -170,15 +171,10 @@ const polygraphSection = async (clientId: number) => {
 // The counselor's name followed by their credentials, e.g. "Belinda Harris, LPC, LADC-MH". Takes a display name or an
 // account email (a covering counselor is saved by email) and always prints the name, never an email.
 const counselorWithCredentials = async (nameOrEmail: string) => {
-  const key = nameOrEmail.trim().toLowerCase();
-  const fallback = key.includes('@') ? '' : nameOrEmail.trim();
   try {
-    const match = (await getEmployees()).find(e => (e.displayname || '').trim().toLowerCase() === key || e.employeeemail.toLowerCase() === key);
-    if (!match) return fallback;
-    const name = match.displayname?.trim() || fallback;
-    return name && match.credentials?.trim() ? `${name}, ${match.credentials.trim()}` : name;
+    return nameWithCredentials(nameOrEmail, await getEmployees());
   } catch {
-    return fallback;
+    return nameOrEmail.includes('@') ? '' : nameOrEmail.trim();
   }
 };
 

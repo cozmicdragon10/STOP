@@ -9,6 +9,7 @@ import { useTableSort } from '../../hooks/useTableSort';
 import { phaseValue, sortRows, timeValue } from '../../utils/tableSort';
 import type { SortValue } from '../../utils/tableSort';
 import SortableTh from '../SortableTh';
+import { useCounselorPrintName } from '../../hooks/useEmployeeLabel';
 
 interface ReportClient {
   clientid: number;
@@ -95,6 +96,8 @@ const formatDay = (value?: string | null) => {
 
 // Clients per counselor, through the groups each counselor leads. Clients with no group are listed apart.
 export default function CounselorClientReport({ clients, groups, statuses, onOpenClient }: Props) {
+  // Printed counselor names carry their license credentials
+  const printName = useCounselorPrintName();
   const [counselorFilter, setCounselorFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('Active');
   // '' shows SO and BIP together; SO or BIP narrows both the clients and the groups
@@ -204,7 +207,7 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
     ].map(h => `<th class="r">${escapeHtml(h)}</th>`).join('');
     const both = !program;
     const sections = shown.map(c => `
-      <h2>${escapeHtml(c.name)}: ${c.clients.length} ${program ? `${program} ` : ''}clients${both ? ` (${c.so.length} SO, ${c.bip.length} BIP)` : ''} in ${c.groups.length} groups</h2>
+      <h2>${escapeHtml(printName(c.name))}: ${c.clients.length} ${program ? `${program} ` : ''}clients${both ? ` (${c.so.length} SO, ${c.bip.length} BIP)` : ''} in ${c.groups.length} groups</h2>
       ${c.groups.map(({ group, clients: members }) => `
         <h3>${escapeHtml(group.groupname)} <span>${escapeHtml(group.programtype || '')}${group.schedule ? ` · ${escapeHtml(group.schedule)}` : ''}${group.location ? ` · ${escapeHtml(group.location)}` : ''} · ${members.length} clients</span></h3>
         ${members.length ? `<table><thead><tr><th>Client</th><th>ID #</th><th>Program</th><th>Phase</th><th>Status</th><th>Last Attended</th><th class="r">Balance</th></tr></thead><tbody>
@@ -219,9 +222,9 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
       th{background:#eee}.r{text-align:right}.none{color:#777;font-style:italic;margin:2px 0 8px}.sub{color:#555;margin:2px 0 12px}
     </style></head><body>
       <h1>Counselor Client Report</h1>
-      <p class="sub">${escapeHtml(counselorFilter || 'All counselors')} · Program: ${program || 'SO and BIP'} · Client status: ${escapeHtml(statusFilter || 'All')} · Printed ${new Date().toLocaleString()}</p>
+      <p class="sub">${escapeHtml(counselorFilter ? printName(counselorFilter) : 'All counselors')} · Program: ${program || 'SO and BIP'} · Client status: ${escapeHtml(statusFilter || 'All')} · Printed ${new Date().toLocaleString()}</p>
       <table><thead><tr><th>Counselor</th><th class="r">Groups</th><th class="r">Clients</th>${both ? '<th class="r">SO</th><th class="r">BIP</th>' : ''}${phaseHeads}</tr></thead><tbody>
-        ${shown.map(c => `<tr><td>${escapeHtml(c.name)}</td><td class="r">${c.groups.length}</td><td class="r">${c.clients.length}</td>${both ? `<td class="r">${c.so.length}</td><td class="r">${c.bip.length}</td>` : ''}${phaseCells(c.clients)}</tr>`).join('')}
+        ${shown.map(c => `<tr><td>${escapeHtml(printName(c.name))}</td><td class="r">${c.groups.length}</td><td class="r">${c.clients.length}</td>${both ? `<td class="r">${c.so.length}</td><td class="r">${c.bip.length}</td>` : ''}${phaseCells(c.clients)}</tr>`).join('')}
       </tbody></table>
       ${sections}
     </body></html>`);
