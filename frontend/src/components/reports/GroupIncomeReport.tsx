@@ -9,6 +9,10 @@ import { escapeHtml } from '../../utils/receipt';
 import { idText } from '../../utils/clients';
 import { paymentMethodText } from '../../utils/paymentMethods';
 import { errorMessage } from '../../utils/errors';
+import { useTableSort } from '../../hooks/useTableSort';
+import { byField, sortRows } from '../../utils/tableSort';
+import type { SortValue } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
 
 interface GroupTotals {
   key: string;
@@ -47,6 +51,15 @@ const depositKey = (groupId: string | number, date: string, sessionNumber: numbe
 const varianceLabel = (variance: number) =>
   variance === 0 ? 'Accounted for' : `${variance > 0 ? 'Over' : 'Short'} ${money(Math.abs(variance))}`;
 const varianceTone = (variance: number) => (variance === 0 ? 'text-emerald-400' : variance > 0 ? 'text-sky-400' : 'text-red-400');
+
+// Sorting the Deposit column: sessions waiting on a deposit first (most waiting first), then short, accounted for,
+// and over (by how much); groups with no cash sessions last
+const DEPOSIT_SORT_TIP = 'Pending first, then short, accounted for, and over';
+const depositSortValue = (d: DepositSummary): SortValue =>
+  (d.pending > 0 ? -1e9 - d.pending : d.recorded > 0 ? d.variance : null);
+
+type MoneyKey = 'charged' | 'collected' | 'cash' | 'card' | 'other' | 'unrecorded';
+type AttendeeKey = 'client' | 'id' | 'type' | 'fee' | 'paid' | 'method';
 
 const sumDeposits = (list: DepositSummary[]): DepositSummary => list.reduce(
   (t, d) => ({ deposited: cents(t.deposited + d.deposited), variance: cents(t.variance + d.variance), pending: t.pending + d.pending, recorded: t.recorded + d.recorded }),
@@ -102,6 +115,9 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
   const [saving, setSaving] = useState(false);
   // Shown under the session it belongs to
   const [formError, setFormError] = useState<{ key: string; message: string } | null>(null);
+  const counselorSort = useTableSort<'name' | 'groups' | 'sessions' | 'attendance' | 'clients' | MoneyKey | 'deposited' | 'deposit'>();
+  const groupSort = useTableSort<'name' | 'counselor' | 'sessions' | 'attendance' | 'clients' | MoneyKey | 'deposit'>();
+  const attendeeSort = useTableSort<AttendeeKey>();
 
   const rangeKey = from && to && from <= to ? `${from}|${to}` : null;
   useEffect(() => {
@@ -197,6 +213,17 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
   };
 
   const depositTotals = sumDeposits(shown.map(depositSummary));
+
+  // One sort for every open session's attendee list
+  const attendeeValue = (r: GroupReportRow, k: AttendeeKey): SortValue => {
+    const paid = Number(r.accountpaid) || 0;
+    if (k === 'client') return `${r.lastname}, ${r.firstname}`;
+    if (k === 'id') return idText(r);
+    if (k === 'type') return `${r.type}${r.voucherused ? ' · Voucher' : ''}`;
+    if (k === 'fee') return Number(r.groupfee) || 0;
+    if (k === 'paid') return paid;
+    return paid > 0 ? (r.paymentmethod ? paymentMethodText(r.paymentmethod, r.paymentsubtype) : 'Not recorded') : null;
+  };
 
   // The shown groups rolled up by the counselor who runs them
   const counselorTotals = Array.from(
@@ -481,23 +508,25 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
-                  <th className="p-3">Counselor</th>
-                  <th className="p-3 text-right">Groups</th>
-                  <th className="p-3 text-right">Sessions</th>
-                  <th className="p-3 text-right">Attendance</th>
-                  <th className="p-3 text-right">Clients</th>
-                  <th className="p-3 text-right">Fees Charged</th>
-                  <th className="p-3 text-right">Collected</th>
-                  <th className="p-3 text-right">Cash</th>
-                  <th className="p-3 text-right">Credit Card</th>
-                  {anyOther && <th className="p-3 text-right">Other</th>}
-                  {anyUnrecorded && <th className="p-3 text-right">Unrecorded</th>}
-                  <th className="p-3 text-right">Deposited</th>
-                  <th className="p-3">Deposit</th>
+                  <SortableTh k="name" table={counselorSort} className="p-3">Counselor</SortableTh>
+                  <SortableTh k="groups" table={counselorSort} className="p-3 text-right">Groups</SortableTh>
+                  <SortableTh k="sessions" table={counselorSort} className="p-3 text-right">Sessions</SortableTh>
+                  <SortableTh k="attendance" table={counselorSort} className="p-3 text-right">Attendance</SortableTh>
+                  <SortableTh k="clients" table={counselorSort} className="p-3 text-right">Clients</SortableTh>
+                  <SortableTh k="charged" table={counselorSort} className="p-3 text-right">Fees Charged</SortableTh>
+                  <SortableTh k="collected" table={counselorSort} className="p-3 text-right">Collected</SortableTh>
+                  <SortableTh k="cash" table={counselorSort} className="p-3 text-right">Cash</SortableTh>
+                  <SortableTh k="card" table={counselorSort} className="p-3 text-right">Credit Card</SortableTh>
+                  {anyOther && <SortableTh k="other" table={counselorSort} className="p-3 text-right">Other</SortableTh>}
+                  {anyUnrecorded && <SortableTh k="unrecorded" table={counselorSort} className="p-3 text-right">Unrecorded</SortableTh>}
+                  <SortableTh k="deposited" table={counselorSort} className="p-3 text-right">Deposited</SortableTh>
+                  <SortableTh k="deposit" table={counselorSort} title={DEPOSIT_SORT_TIP} className="p-3">Deposit</SortableTh>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800 text-sm">
-                {counselorTotals.map(c => (
+                {sortRows(counselorTotals, counselorSort.sort, (c, k) => (
+                  k === 'deposited' ? c.deposit.deposited : k === 'deposit' ? depositSortValue(c.deposit) : byField(c, k)
+                )).map(c => (
                   <tr
                     key={c.name}
                     onClick={() => { setCounselorFilter(counselorFilter === c.name ? '' : c.name); setGroupFilter(''); }}
@@ -531,22 +560,24 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
         <table className="w-full text-left border-collapse text-xs">
           <thead>
             <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
-              <th className="p-3">Group</th>
-              <th className="p-3">Counselor</th>
-              <th className="p-3 text-right">Sessions</th>
-              <th className="p-3 text-right">Attendance</th>
-              <th className="p-3 text-right">Clients</th>
-              <th className="p-3 text-right">Fees Charged</th>
-              <th className="p-3 text-right">Collected</th>
-              <th className="p-3 text-right">Cash</th>
-              <th className="p-3 text-right">Credit Card</th>
-                  {anyOther && <th className="p-3 text-right">Other</th>}
-              {anyUnrecorded && <th className="p-3 text-right">Unrecorded</th>}
-              <th className="p-3">Deposit</th>
+              <SortableTh k="name" table={groupSort} className="p-3">Group</SortableTh>
+              <SortableTh k="counselor" table={groupSort} className="p-3">Counselor</SortableTh>
+              <SortableTh k="sessions" table={groupSort} className="p-3 text-right">Sessions</SortableTh>
+              <SortableTh k="attendance" table={groupSort} className="p-3 text-right">Attendance</SortableTh>
+              <SortableTh k="clients" table={groupSort} className="p-3 text-right">Clients</SortableTh>
+              <SortableTh k="charged" table={groupSort} className="p-3 text-right">Fees Charged</SortableTh>
+              <SortableTh k="collected" table={groupSort} className="p-3 text-right">Collected</SortableTh>
+              <SortableTh k="cash" table={groupSort} className="p-3 text-right">Cash</SortableTh>
+              <SortableTh k="card" table={groupSort} className="p-3 text-right">Credit Card</SortableTh>
+              {anyOther && <SortableTh k="other" table={groupSort} className="p-3 text-right">Other</SortableTh>}
+              {anyUnrecorded && <SortableTh k="unrecorded" table={groupSort} className="p-3 text-right">Unrecorded</SortableTh>}
+              <SortableTh k="deposit" table={groupSort} title={DEPOSIT_SORT_TIP} className="p-3">Deposit</SortableTh>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800 text-sm">
-            {shown.map(g => (
+            {sortRows(shown, groupSort.sort, (g, k) => (
+              k === 'attendance' ? g.rows.length : k === 'deposit' ? depositSortValue(depositSummary(g)) : byField(g, k)
+            )).map(g => (
               <Fragment key={g.key}>
                 <tr onClick={() => toggle(g.key)} className="hover:bg-slate-800/50 cursor-pointer transition">
                   <td className="p-3 font-medium text-white whitespace-nowrap">
@@ -608,16 +639,16 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
                               </colgroup>
                               <thead>
                                 <tr className="text-slate-500 uppercase">
-                                  <th className="py-1.5 pr-3 text-left">Client</th>
-                                  <th className="py-1.5 pr-3 text-left">ID #</th>
-                                  <th className="py-1.5 pr-3 text-left">Type</th>
-                                  <th className="py-1.5 pr-3 text-right">Fee</th>
-                                  <th className="py-1.5 pr-3 text-right">Paid</th>
-                                  <th className="py-1.5 text-left">Method</th>
+                                  <SortableTh k="client" table={attendeeSort} className="py-1.5 pr-3 text-left">Client</SortableTh>
+                                  <SortableTh k="id" table={attendeeSort} className="py-1.5 pr-3 text-left">ID #</SortableTh>
+                                  <SortableTh k="type" table={attendeeSort} className="py-1.5 pr-3 text-left">Type</SortableTh>
+                                  <SortableTh k="fee" table={attendeeSort} className="py-1.5 pr-3 text-right">Fee</SortableTh>
+                                  <SortableTh k="paid" table={attendeeSort} className="py-1.5 pr-3 text-right">Paid</SortableTh>
+                                  <SortableTh k="method" table={attendeeSort} className="py-1.5 text-left">Method</SortableTh>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-800/60">
-                                {attendees.map(r => {
+                                {sortRows(attendees, attendeeSort.sort, attendeeValue).map(r => {
                                   const paid = Number(r.accountpaid) || 0;
                                   return (
                                     <tr key={r.attendanceid} className="text-slate-300">

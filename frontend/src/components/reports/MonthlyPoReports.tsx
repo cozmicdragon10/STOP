@@ -4,6 +4,9 @@ import { createPoReportDraft, fetchPoClientReport, getPoReportMonth } from '../.
 import type { PoReportAgent, PoReportMonth } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { idText } from '../../utils/clients';
+import { useTableSort } from '../../hooks/useTableSort';
+import { sortRows } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
 
 interface Props {
   userEmail: string;
@@ -48,6 +51,8 @@ export default function MonthlyPoReports({ userEmail, onOpenClient }: Props) {
   const [showNoAgent, setShowNoAgent] = useState(false);
   // The agent whose draft is being made
   const [drafting, setDrafting] = useState<string | null>(null);
+  // One sort for every agent's client list
+  const clientSort = useTableSort<'client' | 'id' | 'attended' | 'calledin' | 'notecount'>();
 
   const validMonth = /^\d{4}-\d{2}$/.test(month) && /^\d{4}-\d{2}$/.test(toMonth) && toMonth >= month;
   useEffect(() => {
@@ -236,12 +241,16 @@ export default function MonthlyPoReports({ userEmail, onOpenClient }: Props) {
                 <table className="stack-table w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-slate-800/50 text-slate-400 uppercase">
-                      <th className="p-2 pl-11">Client</th><th className="p-2">ID #</th>
-                      <th className="p-2">Attended</th><th className="p-2">Called in</th><th className="p-2">Notes</th><th className="p-2" />
+                      <SortableTh k="client" table={clientSort} className="p-2 pl-11">Client</SortableTh>
+                      <SortableTh k="id" table={clientSort} className="p-2">ID #</SortableTh>
+                      <SortableTh k="attended" table={clientSort} className="p-2">Attended</SortableTh>
+                      <SortableTh k="calledin" table={clientSort} className="p-2">Called in</SortableTh>
+                      <SortableTh k="notecount" table={clientSort} className="p-2">Notes</SortableTh>
+                      <th className="p-2" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800 text-sm">
-                    {a.clients.map(c => (
+                    {sortRows(a.clients, clientSort.sort, (c, k) => (k === 'client' ? `${c.lastname}, ${c.firstname}` : k === 'id' ? idText(c) : c[k])).map(c => (
                       <tr key={c.clientid}>
                         <td className="p-2 pl-11">
                           <button type="button" onClick={() => onOpenClient(c.clientid)} className="font-medium text-white hover:underline text-left">{c.lastname}, {c.firstname}</button>

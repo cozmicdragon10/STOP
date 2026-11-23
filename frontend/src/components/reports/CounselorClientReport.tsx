@@ -1,10 +1,14 @@
 import { Fragment, useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Printer } from 'lucide-react';
 import { SO_PHASES } from '../../utils/soPhases';
-import { balanceColor, formatBalanceLabeled } from '../../utils/balance';
+import { balanceColor, formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
 import { escapeHtml } from '../../utils/receipt';
 import { useClientsByStatus } from '../../hooks/useClientsByStatus';
 import { idText } from '../../utils/clients';
+import { useTableSort } from '../../hooks/useTableSort';
+import { phaseValue, sortRows, timeValue } from '../../utils/tableSort';
+import type { SortValue } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
 
 interface ReportClient {
   clientid: number;
@@ -96,6 +100,10 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
   // '' shows SO and BIP together; SO or BIP narrows both the clients and the groups
   const [program, setProgram] = useState<'' | 'SO' | 'BIP'>('');
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
+  const counselorSort = useTableSort<string>();
+  const groupSort = useTableSort<'group' | 'counselor' | 'program' | 'schedule' | 'clients'>();
+  // One sort for every open group's client list
+  const clientSort = useTableSort<'name' | 'id' | 'program' | 'phase' | 'status' | 'lastattended' | 'balance'>();
   const showSo = program !== 'BIP';
   const showBip = program !== 'SO';
 
@@ -145,6 +153,37 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
+  // By Counselor rows with their phase counts, for showing and sorting
+  const counselorRows = counselors.map(c => {
+    const phases = countBy(c.so, SO_PHASE_KEYS);
+    const bands = countBy(c.bip, BIP_PHASE_KEYS);
+    const weeks = c.bip.map(cl => String(cl.phase ?? '').trim()).filter(p => /^\d+$/.test(p)).map(Number);
+    const avgWeek = weeks.length ? Math.round(weeks.reduce((t, w) => t + w, 0) / weeks.length) : null;
+    return { c, phases, bands, avgWeek };
+  });
+  const counselorValue = (r: typeof counselorRows[number], k: string): SortValue => {
+    if (k === 'name') return r.c.name === NO_COUNSELOR ? null : r.c.name;
+    if (k === 'groups') return r.c.groups.length;
+    if (k === 'clients') return r.c.clients.length;
+    if (k === 'so') return r.c.so.length;
+    if (k === 'bip') return r.c.bip.length;
+    if (k === 'avgWeek') return r.avgWeek;
+    const key = k.slice('phase:'.length);
+    return r.phases.get(key) ?? r.bands.get(key) ?? 0;
+  };
+  // Groups and Clients rows: each group with its counselor
+  const groupRows = shown.flatMap(c => c.groups.map(g => ({ c, ...g })));
+  const groupValue = (r: typeof groupRows[number], k: 'group' | 'counselor' | 'program' | 'schedule' | 'clients'): SortValue => (
+    k === 'group' ? r.group.groupname : k === 'counselor' ? (r.c.name === NO_COUNSELOR ? null : r.c.name)
+      : k === 'program' ? r.group.programtype : k === 'schedule' ? r.group.schedule : r.clients.length
+  );
+  const clientValue = (m: ReportClient, k: 'name' | 'id' | 'program' | 'phase' | 'status' | 'lastattended' | 'balance'): SortValue => (
+    k === 'name' ? `${m.lastname}, ${m.firstname}` : k === 'id' ? idText(m) : k === 'program' ? m.programtype
+      : k === 'phase' ? phaseValue(m.phase) : k === 'status' ? m.programstatus
+      : k === 'lastattended' ? timeValue(m.lastattended ?? m.lastdateattended)
+      : toDisplayBalance(m.accountbalance)
+  );
+
   const allGroupIds = shown.flatMap(c => c.groups.map(g => g.group.groupid));
   const allExpanded = allGroupIds.length > 0 && allGroupIds.every(id => expanded.has(id));
 
@@ -280,22 +319,18 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
-                <th className="p-3">Counselor</th>
-                <th className="p-3 text-right">Groups</th>
-                <th className="p-3 text-right">Clients</th>
-                {!program && <th className="p-3 text-right">SO</th>}
-                {!program && <th className="p-3 text-right">BIP</th>}
-                {showSo && SO_PHASES.map(p => <th key={p} className="p-3 text-right whitespace-nowrap">{p.replace(' - ', ' ')}</th>)}
-                {program === 'BIP' && BIP_WEEK_BANDS.map(b => <th key={b.label} className="p-3 text-right whitespace-nowrap">{b.label}</th>)}
-                {showBip && <th className="p-3 text-right whitespace-nowrap">BIP Avg Week</th>}
+                <SortableTh k="name" table={counselorSort} className="p-3">Counselor</SortableTh>
+                <SortableTh k="groups" table={counselorSort} className="p-3 text-right">Groups</SortableTh>
+                <SortableTh k="clients" table={counselorSort} className="p-3 text-right">Clients</SortableTh>
+                {!program && <SortableTh k="so" table={counselorSort} className="p-3 text-right">SO</SortableTh>}
+                {!program && <SortableTh k="bip" table={counselorSort} className="p-3 text-right">BIP</SortableTh>}
+                {showSo && SO_PHASES.map(p => <SortableTh key={p} k={`phase:${p}`} table={counselorSort} className="p-3 text-right whitespace-nowrap">{p.replace(' - ', ' ')}</SortableTh>)}
+                {program === 'BIP' && BIP_WEEK_BANDS.map(b => <SortableTh key={b.label} k={`phase:${b.label}`} table={counselorSort} className="p-3 text-right whitespace-nowrap">{b.label}</SortableTh>)}
+                {showBip && <SortableTh k="avgWeek" table={counselorSort} className="p-3 text-right whitespace-nowrap">BIP Avg Week</SortableTh>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800 text-sm">
-              {counselors.map(c => {
-                const phases = countBy(c.so, SO_PHASE_KEYS);
-                const bands = countBy(c.bip, BIP_PHASE_KEYS);
-                const weeks = c.bip.map(cl => String(cl.phase ?? '').trim()).filter(p => /^\d+$/.test(p)).map(Number);
-                const avgWeek = weeks.length ? Math.round(weeks.reduce((t, w) => t + w, 0) / weeks.length) : null;
+              {sortRows(counselorRows, counselorSort.sort, counselorValue).map(({ c, phases, bands, avgWeek }) => {
                 return (
                   <tr
                     key={c.name}
@@ -334,15 +369,15 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
-                <th className="p-3">Group</th>
-                <th className="p-3">Counselor</th>
-                <th className="p-3">Program</th>
-                <th className="p-3">Schedule</th>
-                <th className="p-3 text-right">Clients</th>
+                <SortableTh k="group" table={groupSort} className="p-3">Group</SortableTh>
+                <SortableTh k="counselor" table={groupSort} className="p-3">Counselor</SortableTh>
+                <SortableTh k="program" table={groupSort} className="p-3">Program</SortableTh>
+                <SortableTh k="schedule" table={groupSort} className="p-3">Schedule</SortableTh>
+                <SortableTh k="clients" table={groupSort} className="p-3 text-right">Clients</SortableTh>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800 text-sm">
-              {shown.flatMap(c => c.groups.map(({ group, clients: members }) => {
+              {sortRows(groupRows, groupSort.sort, groupValue).map(({ c, group, clients: members }) => {
                 const open = expanded.has(group.groupid);
                 return (
                   <Fragment key={group.groupid}>
@@ -367,17 +402,17 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
                             <table className="w-full text-left text-xs">
                               <thead>
                                 <tr className="text-slate-500 uppercase tracking-wider">
-                                  <th className="py-1.5 pr-3">Client</th>
-                                  <th className="py-1.5 pr-3">ID #</th>
-                                  <th className="py-1.5 pr-3">Program</th>
-                                  <th className="py-1.5 pr-3">Phase</th>
-                                  <th className="py-1.5 pr-3">Status</th>
-                                  <th className="py-1.5 pr-3">Last Attended</th>
-                                  <th className="py-1.5 text-right">Balance</th>
+                                  <SortableTh k="name" table={clientSort} className="py-1.5 pr-3">Client</SortableTh>
+                                  <SortableTh k="id" table={clientSort} className="py-1.5 pr-3">ID #</SortableTh>
+                                  <SortableTh k="program" table={clientSort} className="py-1.5 pr-3">Program</SortableTh>
+                                  <SortableTh k="phase" table={clientSort} className="py-1.5 pr-3">Phase</SortableTh>
+                                  <SortableTh k="status" table={clientSort} className="py-1.5 pr-3">Status</SortableTh>
+                                  <SortableTh k="lastattended" table={clientSort} className="py-1.5 pr-3">Last Attended</SortableTh>
+                                  <SortableTh k="balance" table={clientSort} className="py-1.5 text-right">Balance</SortableTh>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-800/60">
-                                {members.map(m => (
+                                {sortRows(members, clientSort.sort, clientValue).map(m => (
                                   <tr key={m.clientid} onClick={() => onOpenClient(m.clientid)} className="cursor-pointer hover:bg-slate-800/50" title="Open client account">
                                     <td className="py-1.5 pr-3 text-white font-medium">{m.lastname}, {m.firstname}</td>
                                     <td className="py-1.5 pr-3 text-slate-400 font-mono">{idText(m) || '—'}</td>
@@ -396,7 +431,7 @@ export default function CounselorClientReport({ clients, groups, statuses, onOpe
                     )}
                   </Fragment>
                 );
-              }))}
+              })}
               {shown.length === 0 && (
                 <tr><td colSpan={5} className="p-4 text-center text-slate-500 italic">No groups to show.</td></tr>
               )}

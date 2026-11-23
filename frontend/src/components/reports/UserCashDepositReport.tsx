@@ -7,6 +7,12 @@ import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { idText } from '../../utils/clients';
 import { paymentMethodText } from '../../utils/paymentMethods';
 
+import { useTableSort } from '../../hooks/useTableSort';
+import { sortRows, timeValue } from '../../utils/tableSort';
+import type { SortValue } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
+
+type SortKey = 'taken' | 'client' | 'cash' | 'status';
 const NOT_RECORDED = 'Not recorded';
 
 const money = (n: number) => `$${n.toFixed(2)}`;
@@ -43,6 +49,7 @@ export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmai
   const [rows, setRows] = useState<UserCashDepositRow[]>([]);
   // The range the rows (or the error) were loaded for; an invalid range keeps showing the last one
   const [loaded, setLoaded] = useState<{ key: string; error: string } | null>(null);
+  const sort = useTableSort<SortKey>();
 
   const rangeKey = from && to && from <= to ? `${from}|${to}|${userEmail}` : null;
   useEffect(() => {
@@ -81,6 +88,13 @@ export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmai
 
   const input = 'block mt-1 h-9 bg-slate-950 border border-slate-700 rounded px-2 text-white text-xs';
   const columns = 4;
+  // Payments are sorted inside each person's list; the people stay in name order
+  const sortValue = (r: UserCashDepositRow, k: SortKey): SortValue => {
+    if (k === 'taken') return timeValue(r.paidon);
+    if (k === 'client') return r.lastname || r.firstname ? `${r.lastname}, ${r.firstname}` : null;
+    if (k === 'cash') return cashOf(r);
+    return isDroppedOff(r) ? `1 ${r.depositdate}` : '0';
+  };
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl space-y-5">
@@ -137,10 +151,10 @@ export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmai
         <table className="w-full text-left border-collapse text-xs">
           <thead>
             <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
-              <th className="p-3">Taken</th>
-              <th className="p-3">Client</th>
-              <th className="p-3 text-right">Cash</th>
-              <th className="p-3">Status</th>
+              <SortableTh k="taken" table={sort} className="p-3">Taken</SortableTh>
+              <SortableTh k="client" table={sort} className="p-3">Client</SortableTh>
+              <SortableTh k="cash" table={sort} className="p-3 text-right">Cash</SortableTh>
+              <SortableTh k="status" table={sort} title="Holding first, then by drop-off date" className="p-3">Status</SortableTh>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800 text-sm">
@@ -158,7 +172,7 @@ export default function UserCashDepositReport({ userEmail, isAdmin }: { userEmai
                     </div>
                   </td>
                 </tr>
-                {p.rows.map(r => {
+                {sortRows(p.rows, sort.sort, sortValue).map(r => {
                   const id = r.transactionid;
                   const dropped = isDroppedOff(r);
                   return (

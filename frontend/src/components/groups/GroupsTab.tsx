@@ -4,9 +4,12 @@ import { EditConflictError, createGroup, deleteGroup, getGroupClients, getGroups
 import ScheduleSelect from '../ScheduleSelect';
 import { BY_APPOINTMENT } from '../../utils/schedule';
 import { DEFAULT_GROUP_FILTERS } from '../../utils/filters';
-import { balanceColor, formatBalanceLabeled } from '../../utils/balance';
+import { balanceColor, formatBalanceLabeled, toDisplayBalance } from '../../utils/balance';
 import { OBSERVER_ROLES, POLY_GROUP_TYPE, allowsByAppointment, formatPhase, groupLeadLabel, isChaperonGroup, isDrugTestGroup, isPolyGroup, idText } from '../../utils/clients';
 import { toLocalDay } from '../../utils/dates';
+import { useTableSort } from '../../hooks/useTableSort';
+import { phaseValue, sortRows, timeValue } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
 
 interface DirectoryGroup {
   groupid: number;
@@ -107,6 +110,7 @@ export default function GroupsTab({ groups, clients, employees, role, onSuccess,
   // The Roster lists only active clients, matching the Assigned Clients count in the directory
   const activeRoster = groupRoster.filter(c => c.programstatus === 'Active');
   const [groupTab, setGroupTab] = useState<'roster' | 'schedule'>('roster');
+  const rosterSort = useTableSort<'client' | 'phase' | 'lastattended' | 'balance'>();
   const [editGroupName, setEditGroupName] = useState('');
   const [editCounselor, setEditCounselor] = useState('');
   const [editSchedule, setEditSchedule] = useState('');
@@ -313,14 +317,20 @@ export default function GroupsTab({ groups, clients, employees, role, onSuccess,
               <table className="stack-table w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="text-slate-500 uppercase tracking-wider border-b border-slate-800">
-                    <th className="p-2.5">Client</th>
-                    <th className="p-2.5">Phase</th>
-                    <th className="p-2.5">Last Attended</th>
-                    <th className="p-2.5 text-right">Balance</th>
+                    <SortableTh k="client" table={rosterSort} className="p-2.5">Client</SortableTh>
+                    <SortableTh k="phase" table={rosterSort} className="p-2.5">Phase</SortableTh>
+                    <SortableTh k="lastattended" table={rosterSort} className="p-2.5">Last Attended</SortableTh>
+                    <SortableTh k="balance" table={rosterSort} className="p-2.5 text-right">Balance</SortableTh>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800 text-sm">
-                  {[...activeRoster].sort((a, b) => `${a.lastname}, ${a.firstname}`.localeCompare(`${b.lastname}, ${b.firstname}`)).map(c => (
+                  {/* Name order until a header is clicked */}
+                  {sortRows(
+                    [...activeRoster].sort((a, b) => `${a.lastname}, ${a.firstname}`.localeCompare(`${b.lastname}, ${b.firstname}`)),
+                    rosterSort.sort,
+                    (c, k) => (k === 'client' ? `${c.lastname}, ${c.firstname}` : k === 'phase' ? phaseValue(c.phase)
+                      : k === 'lastattended' ? timeValue(c.lastattended) : toDisplayBalance(c.accountbalance)),
+                  ).map(c => (
                     <tr
                       key={c.clientid}
                       // The full client from the directory when it's there; the roster row carries every client field too

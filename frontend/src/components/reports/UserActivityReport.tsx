@@ -8,6 +8,12 @@ import { escapeHtml } from '../../utils/receipt';
 import { idText } from '../../utils/clients';
 import { paymentMethodText } from '../../utils/paymentMethods';
 import QuickRanges from './QuickRanges';
+import { useTableSort } from '../../hooks/useTableSort';
+import { sortRows, timeValue } from '../../utils/tableSort';
+import type { SortValue } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
+
+type SortKey = 'time' | 'enteredBy' | 'type' | 'client' | 'amount' | 'comments';
 
 interface Props {
   userEmail: string;
@@ -50,6 +56,7 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
   const [rows, setRows] = useState<UserActivityRow[]>([]);
   // The range the rows (or the error) were loaded for; an invalid range keeps showing the last one
   const [loaded, setLoaded] = useState<{ key: string; error: string } | null>(null);
+  const sort = useTableSort<SortKey>();
 
   const rangeKey = from && to && from <= to ? `${from}|${to}|${userEmail}` : null;
   useEffect(() => {
@@ -93,6 +100,16 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
       paid.length ? `${paid.length} payment${paid.length === 1 ? '' : 's'} (net ${money(cents(paid.reduce((t, r) => t + signedAmount(r), 0)))})` : '',
       noteCount ? `${noteCount} note${noteCount === 1 ? '' : 's'}` : '',
     ].filter(Boolean).join(' · ');
+  };
+
+  // Entries are sorted inside each day; the days stay newest first
+  const sortValue = (r: UserActivityRow, k: SortKey): SortValue => {
+    if (k === 'time') return timeValue(r.enteredon);
+    if (k === 'enteredBy') return r.enteredby ? enteredByOf(r) : null;
+    if (k === 'type') return r.kind === 'Payment' ? r.detail : `${r.detail} Note`;
+    if (k === 'client') return r.lastname || r.firstname ? clientOf(r) : null;
+    if (k === 'amount') return r.kind === 'Payment' ? signedAmount(r) : null;
+    return r.comments || null;
   };
 
   const openClient = (r: UserActivityRow) => {
@@ -205,12 +222,12 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
         <table className="w-full text-left border-collapse text-xs">
           <thead>
             <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
-              <th className="p-3 whitespace-nowrap">Time</th>
-              <th className="p-3">Entered By</th>
-              <th className="p-3">Type</th>
-              <th className="p-3">Client</th>
-              <th className="p-3 text-right">Amount</th>
-              <th className="p-3">Comments</th>
+              <SortableTh k="time" table={sort} className="p-3 whitespace-nowrap">Time</SortableTh>
+              <SortableTh k="enteredBy" table={sort} className="p-3">Entered By</SortableTh>
+              <SortableTh k="type" table={sort} className="p-3">Type</SortableTh>
+              <SortableTh k="client" table={sort} className="p-3">Client</SortableTh>
+              <SortableTh k="amount" table={sort} className="p-3 text-right">Amount</SortableTh>
+              <SortableTh k="comments" table={sort} className="p-3">Comments</SortableTh>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800 text-sm">
@@ -221,7 +238,7 @@ export default function UserActivityReport({ userEmail, onOpenClient }: Props) {
                   <span className="ml-3 text-xs text-slate-400">{daySummary(list)}</span>
                 </td>
               </tr>,
-              ...list.map(r => (
+              ...sortRows(list, sort.sort, sortValue).map(r => (
               <tr key={`${r.kind}-${r.id}`} onClick={() => openClient(r)} title="Open client account" className="cursor-pointer align-top transition hover:bg-slate-800/50">
                 <td className="p-3 text-slate-300 whitespace-nowrap">{formatTime(r.enteredon)}</td>
                 <td className={`p-3 whitespace-nowrap ${enteredByOf(r) === NOT_RECORDED ? 'text-slate-500 italic' : 'text-white'}`}>{enteredByOf(r)}</td>

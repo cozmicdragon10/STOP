@@ -9,6 +9,11 @@ import { idText } from '../../utils/clients';
 import { errorMessage } from '../../utils/errors';
 import { AGENT_TYPE_SUGGESTIONS, NO_TYPE, agentKey, distinctValues, filterAgentRows } from '../../utils/agents';
 import type { ActiveClientFilter, DirectoryFilter } from '../../utils/agents';
+import { useTableSort } from '../../hooks/useTableSort';
+import { sortRows } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
+
+type AgentSortKey = 'name' | 'agenttype' | 'location' | 'phone' | 'email' | 'activeClients';
 
 interface Props {
   // Current clients (not discharged); the selected agent's discharged clients are loaded on their own
@@ -108,8 +113,13 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
   const typeOptions = useMemo(() => distinctValues([...AGENT_TYPE_SUGGESTIONS, ...typesInUse]), [typesInUse]);
   const locationOptions = useMemo(() => distinctValues(agents.map(a => a.location)), [agents]);
   const filtering = search.trim() !== '' || directoryFilter !== 'all' || typeFilter !== '' || activeFilter !== 'all';
-  // 50 agents per page; a new search or filter starts again on page 1
-  const pager = usePagination(visibleRows, `${search.trim().toLowerCase()}|${directoryFilter}|${typeFilter}|${activeFilter}`);
+  // Sorted before paging, so a sort covers every agent, not just the page shown
+  const agentSort = useTableSort<AgentSortKey>();
+  const sortedRows = sortRows(visibleRows, agentSort.sort, (r, k) => (
+    k === 'name' ? r.name : k === 'activeClients' ? r.activeClients : r.agent?.[k] || null
+  ));
+  // 50 agents per page; a new search, filter, or sort starts again on page 1
+  const pager = usePagination(sortedRows, `${search.trim().toLowerCase()}|${directoryFilter}|${typeFilter}|${activeFilter}|${JSON.stringify(agentSort.sort)}`);
 
   const selected = rows.find(r => r.key === selectedKey) || null;
   const selectedName = selected?.name;
@@ -335,12 +345,12 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
           <table className="w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
-                <th className="p-3">Name</th>
-                <th className="p-3">Type</th>
-                <th className="p-3">Location</th>
-                <th className="p-3">Phone</th>
-                <th className="p-3">Email</th>
-                <th className="p-3 text-right">Active Clients</th>
+                <SortableTh k="name" table={agentSort} className="p-3">Name</SortableTh>
+                <SortableTh k="agenttype" table={agentSort} className="p-3">Type</SortableTh>
+                <SortableTh k="location" table={agentSort} className="p-3">Location</SortableTh>
+                <SortableTh k="phone" table={agentSort} className="p-3">Phone</SortableTh>
+                <SortableTh k="email" table={agentSort} className="p-3">Email</SortableTh>
+                <SortableTh k="activeClients" table={agentSort} className="p-3 text-right">Active Clients</SortableTh>
                 {canEdit && <th className="p-3"></th>}
               </tr>
             </thead>

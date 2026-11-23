@@ -3,8 +3,18 @@ import { getCensus } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { monthLabel, monthsAgo, rangeText, summarizeCensus } from '../../utils/directorReports';
 import type { ReportTable } from '../../utils/directorReports';
-import { DateRange, ExportButtons, fieldClass, Section, SimpleTable, StatCards } from './ReportControls';
+import { DateRange, ExportButtons, fieldClass, Section, SimpleTable, StatCards, th } from './ReportControls';
 import { useReportData } from '../../hooks/useReportData';
+import { useTableSort } from '../../hooks/useTableSort';
+import { sortRows } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
+
+// The By Month table's columns; the bar column has no header and does not sort
+type MonthKey = 'month' | 'enrolled' | 'intakes' | 'discharged' | 'wentInactive' | 'seen';
+const MONTH_COLUMNS: [MonthKey | null, string][] = [
+  ['month', 'Month'], ['enrolled', 'Enrolled at Month End'], [null, ''], ['intakes', 'Intakes'], ['discharged', 'Discharged'],
+  ['wentInactive', 'Went Inactive'], ['seen', 'Clients Seen'],
+];
 
 const loadCensus = (key: string) => {
   const [from, to] = key.split('|');
@@ -24,6 +34,7 @@ export default function CensusReport() {
   const subtitle = `${rangeText(shownFrom, shownTo)} · ${program || 'All programs'}`;
   // Tallest bar in the month table
   const peak = Math.max(1, ...(s?.months.map(m => m.enrolled) ?? []));
+  const monthSort = useTableSort<MonthKey>();
 
   const tables = (): ReportTable[] => (s ? [
     {
@@ -83,6 +94,7 @@ export default function CensusReport() {
                 rows={s.byProgram.map(p => [p.program, p.enrolled,
                   <span className={p.change > 0 ? 'text-emerald-400' : p.change < 0 ? 'text-red-400' : ''}>{signed(p.change)}</span>,
                   p.intakesTotal, p.dischargedTotal, p.seen])}
+                values={s.byProgram.map(p => [undefined, undefined, p.change])}
               />
             </Section>
           )}
@@ -90,12 +102,13 @@ export default function CensusReport() {
           <Section title="By Month">
             <table className="w-full text-sm">
               <thead><tr className="text-left border-b border-slate-800">
-                {['Month', 'Enrolled at Month End', '', 'Intakes', 'Discharged', 'Went Inactive', 'Clients Seen'].map((h, i) => (
-                  <th key={i} className={`py-2 px-3 text-xs font-semibold uppercase tracking-wide text-slate-400 whitespace-nowrap ${i === 1 || i > 2 ? 'text-right' : ''}`}>{h}</th>
+                {MONTH_COLUMNS.map(([k, h], i) => (k
+                  ? <SortableTh key={k} k={k} table={monthSort} className={`${th} ${i > 0 ? 'text-right' : ''}`}>{h}</SortableTh>
+                  : <th key={i} className={th} />
                 ))}
               </tr></thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                {s.months.map(m => (
+                {sortRows(s.months, monthSort.sort, (m, k) => m[k]).map(m => (
                   <tr key={m.month}>
                     <td className="py-2 px-3 whitespace-nowrap">{monthLabel(m.month)}</td>
                     <td className="py-2 px-3 text-right tabular-nums font-semibold">{m.enrolled}</td>

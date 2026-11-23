@@ -5,6 +5,12 @@ import type { GroupCashDepositRow } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { errorMessage } from '../../utils/errors';
+import { useTableSort } from '../../hooks/useTableSort';
+import { sortRows } from '../../utils/tableSort';
+import type { SortValue } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
+
+type SortKey = 'session' | 'responsible' | 'attendance' | 'cash' | 'status';
 
 interface GroupTotals {
   key: string;
@@ -47,6 +53,7 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
   const [rows, setRows] = useState<GroupCashDepositRow[]>([]);
   // The range the rows (or the error) were loaded for; an invalid range keeps showing the last one
   const [loaded, setLoaded] = useState<{ key: string; error: string } | null>(null);
+  const sort = useTableSort<SortKey>();
 
   const rangeKey = from && to && from <= to ? `${from}|${to}|${userEmail}` : null;
   useEffect(() => {
@@ -97,6 +104,15 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
   };
 
   const columns = isAdmin ? 5 : 4;
+
+  // Sessions are sorted inside each group; the groups stay in name order
+  const sortValue = (r: GroupCashDepositRow, k: SortKey): SortValue => {
+    if (k === 'session') return `${r.sessiondate}#${String(r.sessionnumber ?? 1).padStart(3, '0')}`;
+    if (k === 'responsible') return responsibleOf(r);
+    if (k === 'attendance') return Number(r.attendance) || 0;
+    if (k === 'cash') return cashOf(r);
+    return isDroppedOff(r) ? `1 ${r.depositdate}` : '0';
+  };
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl space-y-5">
@@ -153,11 +169,11 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
         <table className="w-full text-left border-collapse text-xs">
           <thead>
             <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
-              <th className="p-3">Session</th>
-              {isAdmin && <th className="p-3">Responsible</th>}
-              <th className="p-3 text-right">Attendance</th>
-              <th className="p-3 text-right">Cash</th>
-              <th className="p-3">Status</th>
+              <SortableTh k="session" table={sort} className="p-3">Session</SortableTh>
+              {isAdmin && <SortableTh k="responsible" table={sort} className="p-3">Responsible</SortableTh>}
+              <SortableTh k="attendance" table={sort} className="p-3 text-right">Attendance</SortableTh>
+              <SortableTh k="cash" table={sort} className="p-3 text-right">Cash</SortableTh>
+              <SortableTh k="status" table={sort} title="Holding first, then by drop-off date" className="p-3">Status</SortableTh>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800 text-sm">
@@ -176,7 +192,7 @@ export default function GroupCashDepositReport({ userEmail, isAdmin }: { userEma
                     </div>
                   </td>
                 </tr>
-                {g.rows.map(r => {
+                {sortRows(g.rows, sort.sort, sortValue).map(r => {
                   const key = rowKey(r);
                   const dropped = isDroppedOff(r);
                   const deposited = Number(r.amountdeposited) || 0;

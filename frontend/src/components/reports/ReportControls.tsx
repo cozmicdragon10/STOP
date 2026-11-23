@@ -4,6 +4,10 @@ import { Download, Printer } from 'lucide-react';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { downloadCsv, monthsAgo, printTables } from '../../utils/directorReports';
 import type { ReportTable } from '../../utils/directorReports';
+import { sortRows, valueFromText } from '../../utils/tableSort';
+import type { SortValue } from '../../utils/tableSort';
+import { useTableSort } from '../../hooks/useTableSort';
+import SortableTh from '../SortableTh';
 
 // Shared pieces of the director's reports: a date range with quick picks, and Print / CSV buttons.
 
@@ -87,16 +91,29 @@ export function Section({ title, note, children }: { title: string; note?: strin
   );
 }
 
-// A plain table: the first column is a label, the rest line up on the right
-export function SimpleTable({ head, rows, foot, empty = 'Nothing to show.' }: {
-  head: string[]; rows: ReactNode[][]; foot?: ReactNode[]; empty?: string;
+// A plain table: the first column is a label, the rest line up on the right. Click a header to sort by that column.
+// Text and number cells sort by what they show ("$1,234.00" as an amount); values gives the sort value of any other
+// cell (an entry left undefined falls back to the cell).
+export function SimpleTable({ head, rows, values, foot, empty = 'Nothing to show.' }: {
+  head: string[]; rows: ReactNode[][]; values?: SortValue[][]; foot?: ReactNode[]; empty?: string;
 }) {
+  const table = useTableSort<string>();
+  const valueOf = (ri: number, col: string) => {
+    const i = Number(col);
+    const given = values?.[ri]?.[i];
+    if (given !== undefined) return given;
+    const cell = rows[ri][i];
+    return typeof cell === 'string' || typeof cell === 'number' ? valueFromText(cell) : null;
+  };
+  const order = sortRows(rows.map((_, ri) => ri), table.sort, valueOf);
   return (
     <table className="w-full text-sm">
-      <thead><tr className="text-left border-b border-slate-800">{head.map((h, i) => <th key={h} className={`${th} ${i > 0 ? num : ''}`}>{h}</th>)}</tr></thead>
+      <thead><tr className="text-left border-b border-slate-800">{head.map((h, i) => (
+        <SortableTh key={i} k={String(i)} table={table} className={`${th} ${i > 0 ? num : ''}`}>{h}</SortableTh>
+      ))}</tr></thead>
       <tbody className="divide-y divide-slate-800/60 text-slate-200">
         {rows.length === 0 && <tr><td colSpan={head.length} className={`${td} text-slate-500`}>{empty}</td></tr>}
-        {rows.map((r, ri) => <tr key={ri}>{r.map((v, i) => <td key={i} className={`${td} ${i > 0 ? num : ''}`}>{v}</td>)}</tr>)}
+        {order.map(ri => <tr key={ri}>{rows[ri].map((v, i) => <td key={i} className={`${td} ${i > 0 ? num : ''}`}>{v}</td>)}</tr>)}
       </tbody>
       {foot && <tfoot><tr className="border-t border-slate-700 font-semibold text-white">{foot.map((v, i) => <td key={i} className={`${td} ${i > 0 ? num : ''}`}>{v}</td>)}</tr></tfoot>}
     </table>

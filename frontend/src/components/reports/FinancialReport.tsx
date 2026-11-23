@@ -9,6 +9,9 @@ import { escapeHtml } from '../../utils/receipt';
 import { errorMessage } from '../../utils/errors';
 import { financialCsv, OLD_SYSTEM_LABEL, summarizeFinancials } from '../../utils/financialReport';
 import type { AmountLine, FinancialSummary } from '../../utils/financialReport';
+import { useTableSort } from '../../hooks/useTableSort';
+import { byField, sortRows } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
 
 const money = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const monthLabel = (month: string) =>
@@ -31,12 +34,17 @@ function Section({ title, note, children }: { title: string; note?: string; chil
 }
 
 function AmountTable({ lines, total, empty, totalLabel = 'Total' }: { lines: AmountLine[]; total: number; empty: string; totalLabel?: string }) {
+  const sort = useTableSort<'label' | 'count' | 'amount'>();
   return (
     <table className="w-full text-sm">
-      <thead><tr className="text-left border-b border-slate-800"><th className={th}>Item</th><th className={`${th} ${r}`}>Count</th><th className={`${th} ${r}`}>Amount</th></tr></thead>
+      <thead><tr className="text-left border-b border-slate-800">
+        <SortableTh k="label" table={sort} className={th}>Item</SortableTh>
+        <SortableTh k="count" table={sort} className={`${th} ${r}`}>Count</SortableTh>
+        <SortableTh k="amount" table={sort} className={`${th} ${r}`}>Amount</SortableTh>
+      </tr></thead>
       <tbody className="divide-y divide-slate-800/60 text-slate-200">
         {lines.length === 0 && <tr><td colSpan={3} className={`${td} text-slate-500`}>{empty}</td></tr>}
-        {lines.map(l => (
+        {sortRows(lines, sort.sort, byField).map(l => (
           <tr key={l.label}><td className={td}>{l.label}</td><td className={`${td} ${r}`}>{l.count}</td><td className={`${td} ${r}`}>{money(l.amount)}</td></tr>
         ))}
       </tbody>
@@ -96,6 +104,11 @@ export default function FinancialReport() {
   // The range the data (or the error) was loaded for; an invalid range keeps showing the last one
   const [loaded, setLoaded] = useState<{ key: string; error: string } | null>(null);
   const [printError, setPrintError] = useState('');
+  // Each table's sort; the total and refund rows always stay at the bottom
+  const paymentSort = useTableSort<'label' | 'count' | 'cash' | 'card' | 'other' | 'unrecorded' | 'total'>();
+  const cashSort = useTableSort<'label' | 'cash' | 'deposited' | 'held'>();
+  const monthSort = useTableSort<'month' | 'charged' | 'credits' | 'collected' | 'refunded' | 'net'>();
+  const balanceSort = useTableSort<'status' | 'clients' | 'owing' | 'owed' | 'inCredit' | 'credit'>();
 
   const rangeKey = from && to && from <= to ? `${from}|${to}` : null;
   useEffect(() => {
@@ -180,12 +193,17 @@ export default function FinancialReport() {
           <Section title="Money Collected" note={`Payments by fee type and method, less refunds and chargebacks.${hasOldSystem ? ' Old system check-ins are payments imported from the previous system, which did not record the method.' : ''}`}>
             <table className="w-full text-sm">
               <thead><tr className="text-left border-b border-slate-800">
-                <th className={th}>Fee Type</th><th className={`${th} ${r}`}>Count</th><th className={`${th} ${r}`}>Cash</th>
-                <th className={`${th} ${r}`}>Credit Card</th><th className={`${th} ${r}`}>Other</th><th className={`${th} ${r}`}>Not Recorded</th><th className={`${th} ${r}`}>Total</th>
+                <SortableTh k="label" table={paymentSort} className={th}>Fee Type</SortableTh>
+                <SortableTh k="count" table={paymentSort} className={`${th} ${r}`}>Count</SortableTh>
+                <SortableTh k="cash" table={paymentSort} className={`${th} ${r}`}>Cash</SortableTh>
+                <SortableTh k="card" table={paymentSort} className={`${th} ${r}`}>Credit Card</SortableTh>
+                <SortableTh k="other" table={paymentSort} className={`${th} ${r}`}>Other</SortableTh>
+                <SortableTh k="unrecorded" table={paymentSort} className={`${th} ${r}`}>Not Recorded</SortableTh>
+                <SortableTh k="total" table={paymentSort} className={`${th} ${r}`}>Total</SortableTh>
               </tr></thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                 {s.payments.length === 0 && <tr><td colSpan={7} className={`${td} text-slate-500`}>No payments in this range.</td></tr>}
-                {s.payments.map(p => (
+                {sortRows(s.payments, paymentSort.sort, byField).map(p => (
                   <tr key={p.label}>
                     <td className={td}>{p.label}</td><td className={`${td} ${r}`}>{p.count || ''}</td><td className={`${td} ${r}`}>{money(p.cash)}</td>
                     <td className={`${td} ${r}`}>{money(p.card)}</td><td className={`${td} ${r}`}>{money(p.other)}</td><td className={`${td} ${r}`}>{money(p.unrecorded)}</td><td className={`${td} ${r}`}>{money(p.total)}</td>
@@ -227,10 +245,13 @@ export default function FinancialReport() {
           <Section title="Cash Deposits" note="Cash taken in this range and how much is checked off as dropped off at the bank.">
             <table className="w-full text-sm">
               <thead><tr className="text-left border-b border-slate-800">
-                <th className={th}>Where Taken</th><th className={`${th} ${r}`}>Cash Taken</th><th className={`${th} ${r}`}>Deposited</th><th className={`${th} ${r}`}>Not Deposited</th>
+                <SortableTh k="label" table={cashSort} className={th}>Where Taken</SortableTh>
+                <SortableTh k="cash" table={cashSort} className={`${th} ${r}`}>Cash Taken</SortableTh>
+                <SortableTh k="deposited" table={cashSort} className={`${th} ${r}`}>Deposited</SortableTh>
+                <SortableTh k="held" table={cashSort} className={`${th} ${r}`}>Not Deposited</SortableTh>
               </tr></thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                {[...s.cash, s.cashTotals].map((c, i) => (
+                {[...sortRows(s.cash, cashSort.sort, byField), s.cashTotals].map((c, i) => (
                   <tr key={c.label} className={i === s.cash.length ? 'font-semibold text-white border-t border-slate-700' : ''}>
                     <td className={td}>{c.label}</td><td className={`${td} ${r}`}>{money(c.cash)}</td><td className={`${td} ${r}`}>{money(c.deposited)}</td>
                     <td className={`${td} ${r} ${c.held > 0 ? 'text-red-400' : ''}`}>{money(c.held)}{c.heldCount ? ` (${c.heldCount})` : ''}</td>
@@ -243,11 +264,15 @@ export default function FinancialReport() {
           <Section title="By Month">
             <table className="w-full text-sm">
               <thead><tr className="text-left border-b border-slate-800">
-                <th className={th}>Month</th><th className={`${th} ${r}`}>Charged</th><th className={`${th} ${r}`}>Credits</th>
-                <th className={`${th} ${r}`}>Collected</th><th className={`${th} ${r}`}>Refunds &amp; Disputes</th><th className={`${th} ${r}`}>Net Collected</th>
+                <SortableTh k="month" table={monthSort} className={th}>Month</SortableTh>
+                <SortableTh k="charged" table={monthSort} className={`${th} ${r}`}>Charged</SortableTh>
+                <SortableTh k="credits" table={monthSort} className={`${th} ${r}`}>Credits</SortableTh>
+                <SortableTh k="collected" table={monthSort} className={`${th} ${r}`}>Collected</SortableTh>
+                <SortableTh k="refunded" table={monthSort} className={`${th} ${r}`}>Refunds &amp; Disputes</SortableTh>
+                <SortableTh k="net" table={monthSort} className={`${th} ${r}`}>Net Collected</SortableTh>
               </tr></thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                {s.months.map(m => (
+                {sortRows(s.months, monthSort.sort, byField).map(m => (
                   <tr key={m.month}>
                     <td className={td}>{monthLabel(m.month)}</td><td className={`${td} ${r}`}>{money(m.charged)}</td><td className={`${td} ${r}`}>{money(m.credits)}</td>
                     <td className={`${td} ${r}`}>{money(m.collected)}</td><td className={`${td} ${r}`}>{money(m.refunded)}</td><td className={`${td} ${r} font-semibold`}>{money(m.net)}</td>
@@ -265,11 +290,15 @@ export default function FinancialReport() {
           <Section title="Client Balances Today" note="What every client owes (or has in credit) right now, by program status. Not limited to the dates above.">
             <table className="w-full text-sm">
               <thead><tr className="text-left border-b border-slate-800">
-                <th className={th}>Program Status</th><th className={`${th} ${r}`}>Clients</th><th className={`${th} ${r}`}>Owing</th>
-                <th className={`${th} ${r}`}>Owed</th><th className={`${th} ${r}`}>In Credit</th><th className={`${th} ${r}`}>Credit</th>
+                <SortableTh k="status" table={balanceSort} className={th}>Program Status</SortableTh>
+                <SortableTh k="clients" table={balanceSort} className={`${th} ${r}`}>Clients</SortableTh>
+                <SortableTh k="owing" table={balanceSort} className={`${th} ${r}`}>Owing</SortableTh>
+                <SortableTh k="owed" table={balanceSort} className={`${th} ${r}`}>Owed</SortableTh>
+                <SortableTh k="inCredit" table={balanceSort} className={`${th} ${r}`}>In Credit</SortableTh>
+                <SortableTh k="credit" table={balanceSort} className={`${th} ${r}`}>Credit</SortableTh>
               </tr></thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                {s.balances.map(b => (
+                {sortRows(s.balances, balanceSort.sort, byField).map(b => (
                   <tr key={b.status}>
                     <td className={td}>{b.status}</td><td className={`${td} ${r}`}>{b.clients}</td><td className={`${td} ${r}`}>{b.owing}</td>
                     <td className={`${td} ${r}`}>{money(b.owed)}</td><td className={`${td} ${r}`}>{b.inCredit}</td><td className={`${td} ${r}`}>{money(b.credit)}</td>

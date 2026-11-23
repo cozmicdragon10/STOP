@@ -3,6 +3,9 @@ import { RefreshCw } from 'lucide-react';
 import { endDevSession, getDevSessions } from '../../api';
 import type { DevSession } from '../../api';
 import { describeUserAgent } from '../../utils/deviceAccess';
+import { useTableSort } from '../../hooks/useTableSort';
+import { sortRows, timeValue } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
 
 // "13 Nov 2026, 2:05 PM" style, in the browser's time zone
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -14,6 +17,7 @@ export default function ActiveSessions() {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<'' | 'load' | string>('load');
   const [message, setMessage] = useState('');
+  const sort = useTableSort<'employee' | 'device' | 'role' | 'createdOn' | 'lastActiveOn' | 'expiresOn'>();
 
   const fetchSessions = () => getDevSessions()
     .then(list => { setSessions(list); setError(''); })
@@ -60,17 +64,19 @@ export default function ActiveSessions() {
           <table className="w-full text-xs">
             <thead>
               <tr className="text-left text-slate-400 border-b border-slate-800">
-                <th className="py-2 pr-3 font-medium">Employee</th>
-                <th className="py-2 pr-3 font-medium">Device</th>
-                <th className="py-2 pr-3 font-medium">Role</th>
-                <th className="py-2 pr-3 font-medium">Logged in</th>
-                <th className="py-2 pr-3 font-medium">Last active</th>
-                <th className="py-2 pr-3 font-medium">Ends by</th>
+                <SortableTh k="employee" table={sort} className="py-2 pr-3 font-medium">Employee</SortableTh>
+                <SortableTh k="device" table={sort} className="py-2 pr-3 font-medium">Device</SortableTh>
+                <SortableTh k="role" table={sort} className="py-2 pr-3 font-medium">Role</SortableTh>
+                <SortableTh k="createdOn" table={sort} className="py-2 pr-3 font-medium">Logged in</SortableTh>
+                <SortableTh k="lastActiveOn" table={sort} className="py-2 pr-3 font-medium">Last active</SortableTh>
+                <SortableTh k="expiresOn" table={sort} className="py-2 pr-3 font-medium">Ends by</SortableTh>
                 <th className="py-2 font-medium text-right">&nbsp;</th>
               </tr>
             </thead>
             <tbody>
-              {sessions.map(s => (
+              {sortRows(sessions, sort.sort, (s, k) => (
+                k === 'employee' ? s.displayName || s.email : k === 'device' ? s.deviceName : k === 'role' ? s.role : timeValue(s[k])
+              )).map(s => (
                 <tr key={s.sessionHash} className="border-b border-slate-800 last:border-b-0 text-white">
                   <td className="py-2 pr-3">
                     <div>{s.displayName || s.email}</div>

@@ -3,6 +3,9 @@ import { Printer } from 'lucide-react';
 import type { Client, Group } from '../../api';
 import { escapeHtml } from '../../utils/receipt';
 import { idText } from '../../utils/clients';
+import { useTableSort } from '../../hooks/useTableSort';
+import { phaseValue, sortRows, valueFromText } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
 
 interface Props {
   // Current clients (not discharged)
@@ -38,6 +41,9 @@ export default function FederalSoGroupReport({ clients, groups, onOpenClient }: 
 
   // A group counselor's name, or '' for all; clients with no group have no counselor, so picking one hides them
   const [counselorFilter, setCounselorFilter] = useState('');
+  // One sort for every group's client list (by column number in COLUMNS)
+  const sort = useTableSort<`${number}`>();
+  const sortValue = (c: Client, k: `${number}`) => (k === '3' ? phaseValue(c.phase) : valueFromText(cells(c)[Number(k)]));
 
   const allSections = useMemo(() => {
     const fed = clients.filter(c => FEDERAL_PROGRAMS.includes(c.programtype) && (!statusFilter || c.programstatus === statusFilter));
@@ -149,11 +155,11 @@ export default function FederalSoGroupReport({ clients, groups, onOpenClient }: 
             <table className="stack-table w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-800/50 text-slate-400 uppercase">
-                  {COLUMNS.map(h => <th key={h} className="p-2 whitespace-nowrap">{h}</th>)}
+                  {COLUMNS.map((h, i) => <SortableTh key={h} k={`${i}`} table={sort} className="p-2 whitespace-nowrap">{h}</SortableTh>)}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800 text-sm">
-                {s.clients.map(c => {
+                {sortRows(s.clients, sort.sort, sortValue).map(c => {
                   const [name, ...rest] = cells(c);
                   return (
                     <tr key={c.clientid} onClick={() => onOpenClient(c)} className="cursor-pointer hover:bg-slate-800/50" title="Open client account">

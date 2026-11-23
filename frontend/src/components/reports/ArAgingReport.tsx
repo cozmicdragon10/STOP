@@ -5,6 +5,9 @@ import { formatDate, money, pct, summarizeAging } from '../../utils/directorRepo
 import type { AgingRow, ReportTable } from '../../utils/directorReports';
 import { ExportButtons, fieldClass, num, Section, SimpleTable, StatCards, td, th } from './ReportControls';
 import { useReportData } from '../../hooks/useReportData';
+import { useTableSort } from '../../hooks/useTableSort';
+import { sortRows, timeValue } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
 
 const loadAging = () => getArAging();
 const PAGE = 100;
@@ -20,6 +23,14 @@ export default function ArAgingReport({ onOpenClient }: { onOpenClient: (clientI
   const s = useMemo(() => (data ? summarizeAging(data, { group, program, search }) : null), [data, group, program, search]);
   const programs = useMemo(() => [...new Set((data?.clients ?? []).map(c => c.programtype))].sort(), [data]);
   const keys = data?.buckets.map(b => b.key) ?? [];
+  // The client list starts largest balance first (its own order) until a header is clicked
+  const clientSort = useTableSort<string>();
+  const sortedClients = sortRows(s?.clients ?? [], clientSort.sort, (c, k) => {
+    if (k === 'name') return `${c.lastname}, ${c.firstname}`;
+    if (k === 'lastattended' || k === 'lastpayment') return timeValue(c[k]);
+    if (k === 'programtype' || k === 'programstatus') return c[k];
+    return Number(c[k as keyof typeof c]) || 0;
+  });
   const filterText = [group || 'All statuses', program || 'All programs', search && `matching "${search}"`].filter(Boolean).join(' · ');
 
   const bucketTable = (title: string, rows: AgingRow[]): ReportTable => ({
@@ -98,16 +109,20 @@ export default function ArAgingReport({ onOpenClient }: { onOpenClient: (clientI
             </Section>
           ))}
 
-          <Section title={`Clients (${s.clients.length})`} note="Largest balances first. Click a name to open the account.">
+          <Section title={`Clients (${s.clients.length})`} note="Largest balances first; click a column header to sort. Click a name to open the account.">
             <table className="w-full text-sm">
               <thead><tr className="text-left border-b border-slate-800">
-                <th className={th}>Client</th><th className={th}>Program</th><th className={th}>Status</th>
-                <th className={th}>Last Attended</th><th className={th}>Last Payment</th><th className={`${th} ${num}`}>Owed</th>
-                {s.bucketLabels.map(l => <th key={l} className={`${th} ${num}`}>{l}</th>)}
+                <SortableTh k="name" table={clientSort} className={th}>Client</SortableTh>
+                <SortableTh k="programtype" table={clientSort} className={th}>Program</SortableTh>
+                <SortableTh k="programstatus" table={clientSort} className={th}>Status</SortableTh>
+                <SortableTh k="lastattended" table={clientSort} className={th}>Last Attended</SortableTh>
+                <SortableTh k="lastpayment" table={clientSort} className={th}>Last Payment</SortableTh>
+                <SortableTh k="balance" table={clientSort} className={`${th} ${num}`}>Owed</SortableTh>
+                {s.bucketLabels.map((l, i) => <SortableTh key={l} k={keys[i]} table={clientSort} className={`${th} ${num}`}>{l}</SortableTh>)}
               </tr></thead>
               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                 {s.clients.length === 0 && <tr><td colSpan={6 + keys.length} className={`${td} text-slate-500`}>No clients match.</td></tr>}
-                {s.clients.slice(0, shown).map(c => (
+                {sortedClients.slice(0, shown).map(c => (
                   <tr key={c.clientid}>
                     <td className={td}>
                       <button type="button" onClick={() => onOpenClient(c.clientid)} className="text-blue-400 hover:underline text-left">{c.lastname}, {c.firstname}</button>

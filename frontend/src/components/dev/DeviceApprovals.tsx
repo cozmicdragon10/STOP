@@ -3,6 +3,9 @@ import { Check, Pencil, RefreshCw, X } from 'lucide-react';
 import { approveDevice, denyDevice, getDevices, renameDevice, revokeDevice } from '../../api';
 import type { DeviceRow } from '../../api';
 import { DEVICE_MEMO_MAX, DEVICE_NAME_MAX, describeUserAgent } from '../../utils/deviceAccess';
+import { useTableSort } from '../../hooks/useTableSort';
+import { sortRows, timeValue } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
 
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '-');
 const STATUS_LABEL: Record<string, string> = { denied: 'Denied', revoked: 'Removed', expired: 'Expired', pending: 'Pending', approved: 'Approved' };
@@ -66,6 +69,8 @@ export default function DeviceApprovals() {
   const [busy, setBusy] = useState<number | 'load' | null>('load');
   const [renaming, setRenaming] = useState<{ id: number; name: string } | null>(null);
   const [showPast, setShowPast] = useState(false);
+  const approvedSort = useTableSort<'name' | 'requestedBy' | 'lastSeenOn' | 'approvalMemo'>();
+  const pastSort = useTableSort<'status' | 'name' | 'requestEmail' | 'requestedOn' | 'memo'>();
 
   const fetchDevices = () => getDevices()
     .then(list => { setDevices(list); setError(''); })
@@ -141,15 +146,17 @@ export default function DeviceApprovals() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-slate-400 border-b border-slate-800">
-                  <th className="py-2 pr-3 font-medium">Device</th>
-                  <th className="py-2 pr-3 font-medium">Requested by</th>
-                  <th className="py-2 pr-3 font-medium">Last seen</th>
-                  <th className="py-2 pr-3 font-medium">Approval memo</th>
+                  <SortableTh k="name" table={approvedSort} className="py-2 pr-3 font-medium">Device</SortableTh>
+                  <SortableTh k="requestedBy" table={approvedSort} className="py-2 pr-3 font-medium">Requested by</SortableTh>
+                  <SortableTh k="lastSeenOn" table={approvedSort} className="py-2 pr-3 font-medium">Last seen</SortableTh>
+                  <SortableTh k="approvalMemo" table={approvedSort} className="py-2 pr-3 font-medium">Approval memo</SortableTh>
                   <th className="py-2 font-medium text-right">&nbsp;</th>
                 </tr>
               </thead>
               <tbody>
-                {approved.map(d => (
+                {sortRows(approved, approvedSort.sort, (d, k) => (
+                  k === 'name' ? d.name : k === 'requestedBy' ? d.requestEmail || d.requestName : k === 'lastSeenOn' ? timeValue(d.lastSeenOn) : d.approvalMemo
+                )).map(d => (
                   <tr key={d.deviceId} className="border-b border-slate-800 last:border-b-0 text-white align-top">
                     <td className="py-2 pr-3 min-w-[10rem]">
                       {renaming?.id === d.deviceId ? (
@@ -201,15 +208,18 @@ export default function DeviceApprovals() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-left text-slate-400 border-b border-slate-800">
-                    <th className="py-2 pr-3 font-medium">Status</th>
-                    <th className="py-2 pr-3 font-medium">Device</th>
-                    <th className="py-2 pr-3 font-medium">Email</th>
-                    <th className="py-2 pr-3 font-medium">Requested</th>
-                    <th className="py-2 font-medium">Memo</th>
+                    <SortableTh k="status" table={pastSort} className="py-2 pr-3 font-medium">Status</SortableTh>
+                    <SortableTh k="name" table={pastSort} className="py-2 pr-3 font-medium">Device</SortableTh>
+                    <SortableTh k="requestEmail" table={pastSort} className="py-2 pr-3 font-medium">Email</SortableTh>
+                    <SortableTh k="requestedOn" table={pastSort} className="py-2 pr-3 font-medium">Requested</SortableTh>
+                    <SortableTh k="memo" table={pastSort} className="py-2 font-medium">Memo</SortableTh>
                   </tr>
                 </thead>
                 <tbody>
-                  {past.map(d => (
+                  {sortRows(past, pastSort.sort, (d, k) => (
+                    k === 'status' ? STATUS_LABEL[d.status] ?? d.status : k === 'name' ? d.name : k === 'requestEmail' ? d.requestEmail
+                      : k === 'requestedOn' ? timeValue(d.requestedOn) : d.approvalMemo || d.requestNote
+                  )).map(d => (
                     <tr key={d.deviceId} className="border-b border-slate-800 last:border-b-0 text-slate-300 align-top">
                       <td className="py-2 pr-3">{STATUS_LABEL[d.status] ?? d.status}</td>
                       <td className="py-2 pr-3">{d.name}<div className="text-slate-500">{describeUserAgent(d.userAgent)}</div></td>

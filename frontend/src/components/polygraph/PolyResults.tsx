@@ -4,6 +4,9 @@ import { deletePolygraphSlot, submitPolygraphResult } from '../../api';
 import { POLY_INCENTIVE_OVERRIDE_RESULTS, cancelReservationHint, cancelReservationLabel } from '../../utils/polygraph';
 import { formatDisplayTime, getLocalDateString } from '../../utils/dates';
 import { matchesAllWords } from '../../utils/search';
+import { useTableSort } from '../../hooks/useTableSort';
+import { sortRows } from '../../utils/tableSort';
+import SortableTh from '../SortableTh';
 import ScrollLock from '../ScrollLock';
 
 export interface AssignedPolySlot {
@@ -51,6 +54,7 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
   const [resNotes, setResNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
+  const sort = useTableSort<'client' | 'type' | 'location' | 'scheduled' | 'examiner'>();
 
   const scheduledText = (slot: AssignedPolySlot) => `${new Date(slot.date).toLocaleDateString()} @ ${formatDisplayTime(slot.time)}`;
   // Every word typed must match the client, type, location, scheduled date/time, or examiner
@@ -126,15 +130,18 @@ export default function PolyResults({ slots, role, userEmail, examinerName, onCa
           <table className="stack-table w-full text-left border-collapse text-xs whitespace-nowrap">
             <thead>
               <tr className="bg-slate-800/50 text-slate-400 uppercase tracking-wider border-b border-slate-800">
-                <th className="p-3">Client</th>
-                <th className="p-3">Type</th>
-                <th className="p-3">Location</th>
-                <th className="p-3">Scheduled</th>
-                <th className="p-3">Examiner</th>
+                <SortableTh k="client" table={sort} className="p-3">Client</SortableTh>
+                <SortableTh k="type" table={sort} className="p-3">Type</SortableTh>
+                <SortableTh k="location" table={sort} className="p-3">Location</SortableTh>
+                <SortableTh k="scheduled" table={sort} className="p-3">Scheduled</SortableTh>
+                <SortableTh k="examiner" table={sort} className="p-3">Examiner</SortableTh>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800 text-sm">
-              {visibleSlots.map(slot => (
+              {sortRows(visibleSlots, sort.sort, (slot, k) => (
+                k === 'client' ? slot.assignedClientName : k === 'type' ? slot.type || 'Polygraph' : k === 'location' ? slot.location
+                  : k === 'scheduled' ? `${String(slot.date).slice(0, 10)} ${slot.time ?? ''}` : examinerName(slot.polygrapher || '')
+              )).map(slot => (
                 <tr
                   key={slot.slotid}
                   onClick={() => { setSelectedId(slot.slotid); setResIncentiveContinued(false); setResIncentiveOverride(false); }}

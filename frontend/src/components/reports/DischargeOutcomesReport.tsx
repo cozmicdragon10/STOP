@@ -85,6 +85,7 @@ export default function DischargeOutcomesReport() {
               <SimpleTable
                 head={['Outcome', 'Clients', 'Share', 'Avg Time in Program']}
                 rows={s.byType.map(t => [<span className={TYPE_TONE[t.label] ?? ''}>{t.label}</span>, t.count, pct(t.count, s.total), days(t.avgDays)])}
+                values={s.byType.map(t => [t.label, undefined, undefined, t.avgDays])}
                 foot={['Total', s.total, '', '']}
                 empty="No discharges in this range."
               />
@@ -93,6 +94,7 @@ export default function DischargeOutcomesReport() {
               <SimpleTable
                 head={['Outcome', 'Reason', 'Clients', 'Avg Time']}
                 rows={s.reasons.map(r => [r.type, r.label, r.count, days(r.avgDays)])}
+                values={s.reasons.map(r => [undefined, undefined, undefined, r.avgDays])}
                 empty="No failed, revoked, or terminated discharges."
               />
             </Section>
@@ -111,6 +113,7 @@ export default function DischargeOutcomesReport() {
             <SimpleTable
               head={['Month', 'Discharges', ...s.types]}
               rows={s.months.map(m => [monthLabel(m.month), m.total, ...s.types.map(t => m.byType[t] ?? 0)])}
+              values={s.months.map(m => [m.month])}
               empty="No discharges in this range."
             />
           </Section>
