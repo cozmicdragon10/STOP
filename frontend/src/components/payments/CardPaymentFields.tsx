@@ -31,10 +31,6 @@ export default function CardPaymentFields({ value, onChange }: Props) {
           <input type="text" value={value.cardholderName} onChange={(e) => set({ cardholderName: e.target.value })} placeholder="Name as shown on card" className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" />
         </div>
         <div className="col-span-2">
-          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Receipt Email <span className="normal-case font-normal text-slate-500">(optional)</span></label>
-          <input type="email" value={value.receiptEmail} onChange={(e) => set({ receiptEmail: e.target.value })} placeholder="name@example.com" className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" />
-        </div>
-        <div className="col-span-2">
           <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Billing Street Address</label>
           <input type="text" value={value.street} onChange={(e) => set({ street: e.target.value })} className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white text-sm" />
         </div>
