@@ -9,6 +9,7 @@ import {
 import { CLOSED_RANGES, closedGroupCounselors, closedRangeDates, filterClosedGroups } from './utils/closedGroups';
 import type { ClosedRange } from './utils/closedGroups';
 import { isTabLockedByPrivacy, readPrivacyOn, writePrivacyOn } from './utils/privacy';
+import { isMoreTab } from './utils/moreTabs';
 import {
   loginUser, logoutUser, setSessionEndedHandler, setSessionStartedHandler, setDeviceBlockedHandler, getDeviceStatus,
   getCurrentUser, hasSavedSession, getClient, getClients, getGroups, getProgramFees,
@@ -938,7 +939,7 @@ export default function App() {
     { tab: 'admin', icon: Settings, label: 'Admin' },
     { tab: 'dev', icon: Code2, label: 'DEV' },
   ].filter(item => item.tab === 'home' || isAllowed(item.tab))
-    .map(item => ({ ...item, locked: isTabLockedByPrivacy(item.tab, privacyOn) }));
+    .map(item => ({ ...item, locked: isTabLockedByPrivacy(item.tab, privacyOn), more: isMoreTab(role, item.tab) }));
 
   const getExaminerDisplayName = (email: string) =>
     employees.find(e => e.employeeemail === email)?.displayname || email;

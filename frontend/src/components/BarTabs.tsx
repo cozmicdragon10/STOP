@@ -10,6 +10,8 @@ export interface NavItem {
   icon: ComponentType<{ size?: number }>;
   // Visible but can't be opened right now (privacy view); shows a lock
   locked?: boolean;
+  // Main tab bar only: listed under its More menu instead of on the bar (see utils/moreTabs.ts)
+  more?: boolean;
 }
 
 interface Props {
