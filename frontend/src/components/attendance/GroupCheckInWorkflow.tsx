@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import GroupPicker from './GroupPicker';
-import { Check } from 'lucide-react';
+import { Check, Undo2, X } from 'lucide-react';
 import { clientFee, todayLocal, useGroupCheckIn } from '../../hooks/useGroupCheckIn';
 import type { ClientRecord, GroupRecord } from '../../hooks/useGroupCheckIn';
 import { getSessionTypes } from '../../api';
@@ -348,7 +348,38 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
 
       {/* Steps 2 and 3 stay hidden until a group is chosen */}
       {group && (
-        <div ref={stepPanelRef}>
+        <div ref={stepPanelRef} className="space-y-3">
+          {/* Clients removed from the sheet this session; Undo puts them back as they were */}
+          {(() => {
+            const undoable = wf.removedEntries.filter(r => !wf.checkedInIds.has(r.entry.client.clientid));
+            if (undoable.length === 0) return null;
+            return (
+              <div role="status" className="bg-amber-500/10 border border-amber-500/40 rounded-lg p-3 text-sm space-y-2">
+                <div className="flex justify-between items-center gap-3">
+                  <p className="text-amber-200 font-semibold">Removed from the sheet ({undoable.length})</p>
+                  <button type="button" onClick={wf.dismissRemoved} className="text-slate-400 hover:text-slate-200 p-1 rounded" aria-label="Dismiss removed clients">
+                    <X size={14} />
+                  </button>
+                </div>
+                <ul className="space-y-1">
+                  {undoable.map(({ entry }) => (
+                    <li key={entry.client.clientid} className="flex justify-between items-center gap-3">
+                      <span className="text-slate-200 truncate">{entry.client.lastname}, {entry.client.firstname}</span>
+                      <button
+                        type="button"
+                        onClick={() => wf.undoRemoval(entry.client.clientid)}
+                        disabled={wf.submitting}
+                        className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40"
+                        aria-label={`Undo removing ${entry.client.firstname} ${entry.client.lastname}`}
+                      >
+                        <Undo2 size={12} /> Undo
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()}
           {wf.view === 'checkin' ? (
             <CheckInStep group={group} wf={wf} onOpenSearch={() => setSearchOpen(true)} onOpenClient={onOpenClient} />
           ) : (

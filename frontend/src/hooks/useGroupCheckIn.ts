@@ -227,6 +227,9 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
   const [pendingCheckIn, setPendingCheckIn] = useState<{ clients: ClientRecord[]; makeupIds: Set<number> } | null>(null);
   // A client who paid Cash or Other at check-in, waiting in the Remove dialog for where that money goes
   const [pendingRemoval, setPendingRemoval] = useState<SessionEntry | null>(null);
+  // Clients taken off the sheet whose removal can be undone (no money moved), newest first. savedChanged: the saved open
+  // check-in was updated to drop them, so undoing saves it again with them back on.
+  const [removedEntries, setRemovedEntries] = useState<{ entry: SessionEntry; savedChanged: boolean }[]>([]);
   // Clients who already attended this session of the group; a client can attend a session only once
   const [attendedIds, setAttendedIds] = useState<Set<number>>(() => new Set());
   // Which session of the group on the session date this sheet is for (1 = the day's first)
@@ -324,6 +327,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
     setSession([]);
     setSessionDate(null);
     setPendingCheckIn(null);
+    setPendingRemoval(null);
+    setRemovedEntries([]);
     setAttendedIds(new Set());
     setSessionNumber(1);
     setSessionChoice(null);
@@ -569,8 +574,9 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
     setSession(prev => prev.map(e => (e.client.clientid === clientId ? { ...e, ...patch } : e)));
   };
 
-  // A client with a printed attendance receipt stays on the sheet. A client who paid at check-in isn't removed straight
-  // away: the Remove dialog asks where the money goes first. Cash or Other is recorded only when the group closes, so it
+  // A client with a printed attendance receipt stays on the sheet. Anyone else is removed only after a confirmation, and
+  // the removal can be undone (undoRemoval) until the sheet is cleared. A client who paid at check-in isn't removed
+  // straight away: the Remove dialog asks where the money goes first. Cash or Other is recorded only when the group closes, so it
   // goes on an account now or back to the client; a card payment is already on their account and can move to the client
   // who actually paid (the usual case: the wrong client was checked in).
   const removeEntry = async (clientId: number) => {
@@ -585,13 +591,46 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
       return;
     }
     // A sheet saved before card payments kept their receipt numbers: the payment stays where it is
-    if (entry.cardPaid > 0 && !(await askConfirm({
+    const card = entry.cardPaid > 0
+      ? `They paid $${entry.cardPaid.toFixed(2)} by card at check-in. That payment is already on their account and stays there as a credit.\n\n`
+      : '';
+    if (!(await askConfirm({
       title: `Remove ${entry.client.lastname}, ${entry.client.firstname} from the sheet?`,
-      message: `They paid $${entry.cardPaid.toFixed(2)} by card at check-in. That payment is already on their account and stays there as a credit.`,
+      message: `${card}They are already checked in to this session. You can undo this until the group is closed or the sheet is cleared.`,
       confirmLabel: 'Remove', cancelLabel: 'Keep on Sheet', danger: true,
     }))) return;
     setSession(prev => prev.filter(e => e.client.clientid !== clientId || e.receiptPrinted));
+    setRemovedEntries(prev => [{ entry, savedChanged: false }, ...prev.filter(r => r.entry.client.clientid !== clientId)]);
+    notify.onSuccess(`${entry.client.lastname}, ${entry.client.firstname} removed from the sheet. Press Undo to put them back.`);
   };
+
+  // Puts a removed client back on the sheet exactly as they were. Skipped if they've been checked in again since.
+  const undoRemoval = async (clientId: number) => {
+    const removed = removedEntries.find(r => r.entry.client.clientid === clientId);
+    if (!removed) return;
+    setRemovedEntries(prev => prev.filter(r => r.entry.client.clientid !== clientId));
+    const { entry } = removed;
+    const name = `${entry.client.lastname}, ${entry.client.firstname}`;
+    if (session.some(e => e.client.clientid === clientId)) {
+      notify.onError(`${name} is already back on the sheet.`);
+      return;
+    }
+    const next = sortEntriesByName([...session, entry]);
+    setSession(next);
+    if (removed.savedChanged && groupId !== null) {
+      try {
+        await saveOpenGroup({ group: groupId, date: sessionDate ?? todayLocal(), sessionNumber, entries: next, createdBy, coveredBy });
+        notify.onOpenGroupsChanged?.();
+      } catch (err: unknown) {
+        const reason = err instanceof Error && err.message ? ` (${err.message})` : '';
+        notify.onError(`${name} is back on the sheet, but the saved check-in could not be updated${reason}. Press Save for Later or Finish Check-In.`);
+        return;
+      }
+    }
+    notify.onSuccess(`${name} is back on the sheet.`);
+  };
+
+  const dismissRemoved = () => setRemovedEntries([]);
 
   // The open check-in saved on the server (Finish Check-In or Save for Later) for this sheet, if there is one
   const savedOpenGroup = () => openGroups.find(o => o.groupid === groupId
@@ -670,8 +709,13 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
       notify.onSaved?.();
       reloadRoster();
     }
-    // A saved open check-in still lists the payment; update it now so it isn't recorded again when the group closes
     const saved = savedOpenGroup();
+    // Only a card payment left where it was can be undone; the other choices moved money or it was handed back
+    if (choice.kind === 'keep-card') {
+      setRemovedEntries(prev => [{ entry, savedChanged: Boolean(saved) }, ...prev.filter(r => r.entry.client.clientid !== entry.client.clientid)]);
+      message += ' Press Undo to put them back.';
+    }
+    // A saved open check-in still lists the payment; update it now so it isn't recorded again when the group closes
     try {
       if (saved && next.length > 0) {
         await saveOpenGroup({ group: groupId, date: sessionDate ?? todayLocal(), sessionNumber, entries: next, createdBy, coveredBy });
@@ -797,6 +841,9 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
     session,
     updateEntry,
     removeEntry,
+    removedEntries,
+    undoRemoval,
+    dismissRemoved,
     pendingRemoval,
     resolveRemoval,
     cancelRemoval,
