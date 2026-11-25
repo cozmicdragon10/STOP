@@ -33,7 +33,7 @@ function RosterRow({ client, checked, attended, onOpenClient, groupProgram, sess
   groupProgram: string | null;
   sessionDate: string;
   checked: boolean;
-  // Already attended this group today, so cannot be checked in again
+  // Already attended this session of the group (today's, or the closed one being added to), so cannot be checked in again
   attended: boolean;
   onOpenClient: () => void;
 }) {
@@ -54,7 +54,7 @@ function RosterRow({ client, checked, attended, onOpenClient, groupProgram, sess
       <div className="min-w-0 flex-1 flex flex-wrap items-baseline gap-x-3">
         <p className="text-sm font-medium text-white truncate">{client.lastname}, {client.firstname}</p>
         {checked && <span className="text-[0.625rem] font-semibold uppercase text-emerald-400">Checked in</span>}
-        {!checked && attended && <span className="text-[0.625rem] font-semibold uppercase text-amber-400">Already attended today</span>}
+        {!checked && attended && <span className="text-[0.625rem] font-semibold uppercase text-amber-400">Already attended this session</span>}
         {unitsBlocked && (
           <span className="text-[0.625rem] font-semibold uppercase text-amber-400" title="Enter their units on their account first.">
             No {unitCode} units left

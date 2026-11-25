@@ -16,6 +16,15 @@
 }
 
 /*
+  Full-screen dialog backdrops cover the whole window. One placed inside a space-y-* list would otherwise get that list's
+  gap as a bottom margin, which stops the backdrop short of the bottom of the screen and leaves whatever is there clickable
+  behind the dialog. Unlayered, so it wins over the space-y utilities.
+*/
+.fixed.inset-0 {
+  margin: 0;
+}
+
+/*
   Touch screens. Sizes are set once here rather than on every control, and are left out for mouse users so desktop keeps
   its dense layout. iOS zooms the whole page when a field under 16px is tapped, so fields never go smaller than that.
 */

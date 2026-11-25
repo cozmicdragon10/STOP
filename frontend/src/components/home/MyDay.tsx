@@ -95,6 +95,8 @@ const longDate = (ymd: string) => {
 // sessions they opened, closed, or covered that month. No client or money figures here.
 export default function MyDay({ displayName, groups, onOpenAttendance, viewing = false, clients = [] }: Props) {
   const todayKey = dayKey(new Date());
+  // 'HH:MM' now, so a meeting earlier today that nobody opened isn't called "Coming up"
+  const nowHm = `${String(new Date().getHours()).padStart(2, '0')}:${String(new Date().getMinutes()).padStart(2, '0')}`;
   const [month, setMonth] = useState(monthOfDate(new Date()));
   const [sessions, setSessions] = useState<{ closed: MyClosedSession[]; open: MyOpenSession[]; assessments: MyAssessment[]; groupDays?: MyGroupDay[] } | null>(null);
   const [error, setError] = useState('');
@@ -179,7 +181,8 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
       const why = change?.reason ? ` · Reason: ${change.reason}` : '';
       if (!change) {
         add(day, { ...groupItem(`s${g.groupid}-${day}`, 'scheduled', name, g.groupid,
-          `${day < todayKey ? 'Scheduled, never opened' : 'Coming up'}${time ? ` at ${time}` : ''}`), meeting });
+          `${day < todayKey ? 'Scheduled, never opened'
+            : day === todayKey && to24h(time) && to24h(time) <= nowHm ? 'Scheduled, not opened yet' : 'Coming up'}${time ? ` at ${time}` : ''}`), meeting });
       } else if (change.action === 'Cancelled') {
         add(day, { key: `x${change.changeid}`, kind: 'cancelled', label: name, title: `Cancelled: ${name}`, name, detail: `Cancelled${why}`, sort: to24h(time), meeting });
       } else {
@@ -234,9 +237,9 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
   const assessments = sessions?.assessments ?? [];
 
   const listed = [
-    ...(sessions?.closed ?? []).map(s => ({ day: s.sessiondate, kind: 'closed' as const, groupname: s.groupname, tags: closedTags(s, !viewing), clients: s.clients })),
-    ...(sessions?.open ?? []).map(s => ({ day: s.sessiondate, kind: 'open' as const, groupname: s.groupname, tags: openTags(s, !viewing), clients: null })),
-  ].sort((a, b) => a.day.localeCompare(b.day) || a.groupname.localeCompare(b.groupname));
+    ...(sessions?.closed ?? []).map(s => ({ day: s.sessiondate, kind: 'closed' as const, groupid: s.groupid, session: s.sessionnumber, groupname: s.groupname, tags: closedTags(s, !viewing), clients: s.clients })),
+    ...(sessions?.open ?? []).map(s => ({ day: s.sessiondate, kind: 'open' as const, groupid: s.groupid, session: s.sessionnumber, groupname: s.groupname, tags: openTags(s, !viewing), clients: null })),
+  ].sort((a, b) => a.day.localeCompare(b.day) || a.groupname.localeCompare(b.groupname) || Number(a.session ?? 1) - Number(b.session ?? 1));
 
 
   return (
@@ -394,7 +397,7 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
         {sessions && listed.length === 0 && <p className="p-4 text-sm text-slate-500">No sessions {viewing ? 'they' : 'you'} opened, closed, or covered this month.</p>}
         <ul className="divide-y divide-slate-800">
           {listed.map(row => (
-            <li key={`${row.kind}-${row.day}-${row.groupname}`} className="px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <li key={`${row.kind}-${row.day}-${row.groupid}-${row.session ?? 1}`} className="px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-sm">
               <span className="min-w-0">
                 <span className="text-white">{row.groupname}</span>
                 <span className="text-xs text-slate-400"> · {longDate(row.day)}{row.clients != null ? ` · ${row.clients} client${row.clients === 1 ? '' : 's'}` : ''}</span>

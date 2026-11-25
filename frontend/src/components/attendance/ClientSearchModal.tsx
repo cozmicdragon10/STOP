@@ -7,7 +7,7 @@ import ScrollLock from '../ScrollLock';
 interface Props {
   clients: ClientRecord[];
   checkedInIds: Set<number>;
-  // Already attended this group today, so cannot be added again
+  // Already attended this session of the group, so cannot be added again
   attendedIds: Set<number>;
   onAdd: (clients: ClientRecord[]) => void;
   onClose: () => void;
@@ -112,7 +112,7 @@ export default function ClientSearchModal({ clients, checkedInIds, attendedIds, 
                       <p className="text-xs text-slate-400 truncate">ID # {idText(c) || '—'} · {c.groupname || 'Unassigned'}</p>
                     </div>
                     {onSheet && <span className="text-[0.625rem] font-semibold uppercase text-emerald-400">On sheet</span>}
-                    {attended && <span className="text-[0.625rem] font-semibold uppercase text-amber-400">Attended today</span>}
+                    {attended && <span className="text-[0.625rem] font-semibold uppercase text-amber-400">Attended this session</span>}
                   </label>
                 </li>
               );

@@ -62,15 +62,17 @@ const reopenGroupSession = async (db, { group, date, sessionNumber, user, reason
          ORDER BY a.AttendanceId FOR UPDATE OF a`,
         [group, date, sessionNumber]
     )).rows;
-    if (rows.length === 0) throw Object.assign(new Error('That closed group session was not found.'), { status: 404 });
+    // Already back on an open sheet (reopened on another screen, say): its check-ins are gone, so say that rather than "not found"
+    const openSheet = (await db.query('SELECT 1 FROM OpenGroupSessions WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3',
+        [group, date, sessionNumber])).rows.length > 0;
+    if (rows.length === 0 && !openSheet) throw Object.assign(new Error('That closed group session was not found.'), { status: 404 });
     const ids = rows.map(r => r.attendanceid);
 
     const groupRow = (await db.query('SELECT GroupName, Active FROM Groups WHERE GroupId = $1', [group])).rows[0];
     const key = groupItemKey(group, date, sessionNumber);
     const problem = reopenProblem({
         groupActive: groupRow?.active !== false,
-        openSheet: (await db.query('SELECT 1 FROM OpenGroupSessions WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3',
-            [group, date, sessionNumber])).rows.length > 0,
+        openSheet,
         deposited: (await db.query('SELECT 1 FROM GroupDeposits WHERE GroupId = $1 AND SessionDate = $2 AND SessionNumber = $3',
             [group, date, sessionNumber])).rows.length > 0,
         pendingHandoff: (await db.query(

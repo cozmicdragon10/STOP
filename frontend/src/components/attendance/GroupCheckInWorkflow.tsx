@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import GroupPicker from './GroupPicker';
 import { Check } from 'lucide-react';
-import { todayLocal, useGroupCheckIn } from '../../hooks/useGroupCheckIn';
+import { clientFee, todayLocal, useGroupCheckIn } from '../../hooks/useGroupCheckIn';
 import type { ClientRecord, GroupRecord } from '../../hooks/useGroupCheckIn';
 import { getSessionTypes } from '../../api';
 import type { ClosedGroupSession, OpenGroupSession, SessionType } from '../../api';
-import { individualPriceFrom, isIndividualGroup } from '../../utils/clients';
+import { individualPriceFrom, individualSessionFee, isIndividualGroup } from '../../utils/clients';
 import CheckInStep from './CheckInStep';
 import ReviewStep from './ReviewStep';
 import ClientSearchModal from './ClientSearchModal';
@@ -146,13 +146,21 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
   }, [currentStep]);
   const searchableClients = group ? filterSearchableClients(clients, group.programtype, group.groupname) : [];
 
-  // Saved entries keep the client details from when they were checked in; swap in current balances where we have them
+  // Saved entries keep the client details from when they were checked in; swap in current balances where we have them.
+  // The fee is worked out again from the current account the way a fresh check-in does (it always comes from the account,
+  // never typed in): a sheet saved days ago may hold a fee from before another check-in that month was added or deleted,
+  // and the server charges by the current account when the group closes.
   const resume = (open: OpenGroupSession) => {
+    const openGroup = groups.find(g => g.groupid === open.groupid);
+    const individualPrice = isIndividualGroup(openGroup?.programtype) ? (sessionTypes ? individualPriceFrom(sessionTypes) : null) : undefined;
     wf.resumeOpenGroup({
       ...open,
       entries: open.entries.map(e => {
-        const client = clients.find(c => c.clientid === e.client.clientid) ?? e.client;
-        return { ...e, client, balance: Number(client.accountbalance || 0), cardPaid: e.cardPaid ?? 0 };
+        const current = clients.find(c => c.clientid === e.client.clientid);
+        const client = current ?? e.client;
+        const fee = !current || individualPrice === null ? e.fee
+          : individualPrice !== undefined ? individualSessionFee(current, individualPrice) : clientFee(current);
+        return { ...e, client, fee, balance: Number(client.accountbalance || 0), cardPaid: e.cardPaid ?? 0 };
       }),
     });
   };
@@ -308,7 +316,8 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
       {wf.offDayPrompt && (() => {
         const { off, date, then } = wf.offDayPrompt;
         const closing = then === 'close';
-        const clients = off.clients == null ? 'each active client' : `the ${off.clients} active client${off.clients === 1 ? '' : 's'}`;
+        const clients = off.clients == null ? "each active client's account"
+          : off.clients === 1 ? "the 1 active client's account" : `the ${off.clients} active clients' accounts`;
         return (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <ScrollLock />
@@ -318,7 +327,7 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
             </h3>
             <p className="text-sm text-slate-300">
               {off.groupName} normally meets on {off.scheduleDay}s (this week: {formatSessionDay(off.scheduledDate!)}),
-              but this check-in is for {formatSessionDay(date)}. Add a Group Reschedule note to {clients}' accounts, moving
+              but this check-in is for {formatSessionDay(date)}. Add a Group Reschedule note to {clients}, moving
               this week's meeting to {formatSessionDay(date)}?
             </p>
             <div className="space-y-2">
