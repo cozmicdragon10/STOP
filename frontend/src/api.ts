@@ -2192,7 +2192,7 @@ export interface BipAbsenceStatus {
     groupId?: number;
     groupName?: string | null;
     locked: boolean;
-    // Locked from every group: the 7th absence's make-up week passed
+    // Locked from every group: the make-up week for a 3rd-in-a-row or 7th absence passed
     fullLock: boolean;
     lockReason: 'streak' | 'total' | null;
     nextDeadline: string | null;

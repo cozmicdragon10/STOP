@@ -67,7 +67,7 @@ export default function BipAbsencePanel({ clientId, canExcuse, refreshKey, onSuc
   };
 
   const lockText = status.fullLock
-    ? 'Locked from all groups: the week to make up the 7th absence has passed.'
+    ? `Locked from all groups: the week to make up the ${status.lockReason === 'streak' ? '3rd absence in a row' : '7th absence'} has passed.`
     : status.locked
     ? (status.lockReason === 'streak'
       ? 'Locked from their primary group: 3 missed in a row.'

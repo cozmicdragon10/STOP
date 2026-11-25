@@ -29,6 +29,8 @@ test('the 3rd absence in a row locks check-in at the primary group, with a week 
     assert.equal(s.nextDeadline, '2026-11-10');
     assert.equal(s.streak, 3);
     assert.equal(s.failEligible, false);
+    // Still inside the week: only the primary group is locked
+    assert.equal(s.fullLock, false);
 });
 
 test('a make-up at another group within a week clears the absence and the lock', () => {
@@ -41,8 +43,9 @@ test('a make-up after the week has passed does not clear it, and the client is e
     const s = bipAbsenceStatus({ ...base, today: '2026-11-19', attendance: [...attended('2026-10-06', '2026-10-13'), makeUp('2026-11-12')] });
     assert.equal(s.locked, true);
     assert.equal(s.failEligible, true);
-    // A missed 3-in-a-row deadline still only locks the primary group
-    assert.equal(s.fullLock, false);
+    // A missed 3-in-a-row deadline locks them out of every group
+    assert.equal(s.fullLock, true);
+    assert.equal(s.lockReason, 'streak');
 });
 
 test('a check-in at another group in the same week does not cover the primary group meeting', () => {

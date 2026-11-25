@@ -5,7 +5,8 @@
 // made up is no longer open, so it breaks the streak and stops counting toward the total. An absence a Business
 // Administrator excused (BipAbsenceExcuses, by week) isn't counted at all.
 // While a threshold is open the client is locked from checking in to their primary group (other groups still allow
-// make-ups). If its week passes with no make-up, the client is eligible for Program Failed (staff confirm that).
+// make-ups). If its week passes with no make-up, the client is locked out of every group and is eligible for Program
+// Failed (staff confirm that).
 // The absences come from lib/missedGroups.js, looking only at the primary group's meetings: a check-in at another group
 // doesn't cover the week here, since that's the make-up.
 
@@ -95,14 +96,10 @@ function bipAbsenceStatus({ primaryGroup, attendance = [], held = [], callIns = 
 
     // Thresholds: a 3rd-in-a-row absence, or an open absence from the 7th on
     const open = items.filter(i => i.open);
-    // A 7th (or later) open absence whose week passed with no make-up locks the client out of every group, not only
-    // their primary one
-    let totalFailed = false;
     open.forEach((item, index) => {
         if (item.run >= STREAK_LIMIT) item.threshold = 'streak';
         else if (index >= TOTAL_LIMIT - 1) item.threshold = 'total';
         if (item.threshold) item.failed = item.deadline < today;
-        if (index >= TOTAL_LIMIT - 1 && item.deadline < today) totalFailed = true;
     });
     const thresholds = items.filter(i => i.threshold);
     const active = currentStatus === 'Active';
@@ -115,8 +112,8 @@ function bipAbsenceStatus({ primaryGroup, attendance = [], held = [], callIns = 
 
     return {
         locked,
-        // Locked from all groups (make-ups too): the 7th absence's week passed without a make-up
-        fullLock: locked && totalFailed,
+        // Locked from all groups (make-ups too): the week to make up a 3rd-in-a-row or 7th absence passed without one
+        fullLock: locked && thresholds.some(t => t.failed),
         lockReason,
         nextDeadline,
         failEligible: locked && thresholds.some(t => t.failed),
@@ -129,7 +126,7 @@ function bipAbsenceStatus({ primaryGroup, attendance = [], held = [], callIns = 
 
 // The lock's message at check-in
 const bipAbsenceBlockMessage = (reason, name, deadline, fullLock = false) => (fullLock
-    ? `${name} has 7 open absences and the week to make one up has passed. They can't check in to any group; a Business Administrator can excuse an absence or discharge them.`
+    ? `${name} ${reason === 'streak' ? 'missed 3 group meetings in a row' : 'has 7 open absences'} and the week to make one up has passed. They can't check in to any group; a Business Administrator can excuse an absence or discharge them.`
     : reason === 'streak'
     ? `${name} has missed 3 group meetings in a row. Make up the absence at a different group by ${deadline}. Check-in at their primary group is blocked until then.`
     : `${name} has 7 open absences. Make up one at a different group by ${deadline}. Check-in at their primary group is blocked until then.`);
