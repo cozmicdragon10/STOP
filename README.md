@@ -158,6 +158,13 @@ reports changes back. Saves that finish after another client was opened don't ov
   It is written as the covering counselor, else the group's usual counselor, else whoever closed the group. An
   approved make-up is still marked on the attendance. The note is linked to the attendance (Notes.AttendanceId), so
   Update Attendance Notes on a closed group can add, change, or remove it later.
+- **Reopening a closed group** (`backend/lib/reopenGroup.js`, Business Administrators and DEV): every check-in in the
+  session is undone like deleting it (`backend/lib/undoAttendance.js`: fee, payment, BIP week, poly voucher, Federal SO
+  units, Last Date Attended) and the clients go back on an open sheet with the same fees, Cash/Other payments, vouchers,
+  make-ups, durations and comments (their Therapist notes come off and are written again on close). The sheet keeps the
+  session's opener and covering counselor. Closing it again records everything fresh under today's fee rules. Refused
+  when the session's cash is on a deposit or a waiting hand-off, a payment was refunded or disputed, or a client is in
+  the session twice (old-system data). A reason is required and goes on each client's change log.
 - **BIP weeks** (`backend/lib/bipWeeks.js`): a BIP client's week (stored in Phase) is the number of group attendances
   on or after their last BIP intake (a completed BIP Intake or DV Assessment here, or one recorded from another
   provider; a reinstate doesn't restart it). A check-in adds one and deleting a check-in takes one off, only when it is

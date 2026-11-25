@@ -11,10 +11,11 @@ const { CLIENT_INFO_COLUMNS, clientInfoChanges, groupNameFor, logClientChange, n
 const { changedFields, clientConflictMessage } = require('../lib/editConflicts');
 const { MONEY_FIELDS, LABELS: MONEY_LABELS, moneyEditProblem, moneyText, standardTreatmentFee } = require('../lib/moneyFields');
 const { POLY_VOUCHER_MAX_SQL, polyVoucherMax, activePolyFeeOverride, countPolyFeeFill } = require('../lib/poly');
-const { ACTIVE_DEBT_LIMIT, ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED, INDIVIDUAL_THIS_MONTH, SESSION_FEE_SQL } = require('../lib/sql');
+const { SESSION_FEE_SQL } = require('../lib/sql');
+const { NEXT_POLY_SQL, clientRowsSql } = require('../lib/clientRows');
 const { BUS_PASS_MAX, FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
 const { COPAY_FIELDS, copayText } = require('../lib/copays');
-const { FEDERAL_UNITS_SQL, FEDERAL_UNIT_REFILLS_SQL, LAST_DRUG_TEST_SQL, saveClientFederalUnits, saveClientUnitRefills, unitsProblem } = require('../lib/federalUnits');
+const { FEDERAL_UNITS_SQL, FEDERAL_UNIT_REFILLS_SQL, saveClientFederalUnits, saveClientUnitRefills, unitsProblem } = require('../lib/federalUnits');
 const { findMissedGroups, phaseEveryMonths } = require('../lib/missedGroups');
 
 const router = express.Router();
@@ -34,33 +35,6 @@ const individualGroupFrom = async (value) => {
     return { id: r.rows[0].groupid };
 };
 
-// The day (YYYY-MM-DD) of the client's next scheduled polygraph, today or later; null when none is booked
-const NEXT_POLY_SQL = `(SELECT to_char(s.Date, 'YYYY-MM-DD') FROM PolygraphAppointments a JOIN PolygraphSlots s ON s.SlotId = a.SlotId
-        WHERE a.Client = c.ClientId AND a.Status = 'Scheduled' AND s.Date >= CURRENT_DATE ORDER BY s.Date, s.Time LIMIT 1)`;
-
-// A client row as the roster and every client picker use it
-const clientRowsSql = (where) => `
-    SELECT
-        c.*,
-        g.GroupName,
-        ig.GroupName AS IndividualGroupName,
-        ${FEDERAL_UNITS_SQL('c.ClientId')} AS FederalUnits, ${FEDERAL_UNIT_REFILLS_SQL('c.ClientId')} AS FederalUnitRefills,
-        CASE WHEN c.ProgramType = 'Fed Drug Test' THEN ${LAST_DRUG_TEST_SQL('c.ClientId')} END AS LastDrugTest,
-        COALESCE(c.ProgramType, g.ProgramType, 'State SO') AS ProgramType,
-        (SELECT Date FROM Attendance WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastAttended,
-        (SELECT Date FROM PolygraphResults WHERE Client = c.ClientId ORDER BY Date DESC LIMIT 1) AS LastPoly,
-        ${NEXT_POLY_SQL} AS NextPoly,
-        ${ATTENDED_THIS_MONTH} AS AttendedThisMonth,
-        ${FEE_ALREADY_CHARGED} AS FeeAlreadyCharged,
-        ${ACTIVE_FEE_OVERRIDE} AS ActiveFeeOverride,
-        ${INDIVIDUAL_THIS_MONTH} AS IndividualThisMonth,
-        ${ACTIVE_DEBT_LIMIT()} AS MaxOwed,
-        ${BIP_CHECKIN_BLOCK} AS BipCheckInBlock
-    FROM Clients c
-    LEFT JOIN Groups g ON c.GroupId = g.GroupId
-    LEFT JOIN Groups ig ON c.IndividualGroupId = ig.GroupId
-    ${where}
-    ORDER BY c.LastName ASC`;
 
 // Without a status, current clients only (not discharged): discharged clients pile up over the years, so they are only
 // sent when asked for. status: 'all', 'discharged' (any discharge status), or one program status.

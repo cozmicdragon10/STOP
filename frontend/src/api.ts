@@ -943,6 +943,18 @@ export interface ClosedGroupSession {
     }[];
 }
 
+// Reopens a closed group session (Business Administrators): its check-ins are undone and the clients go back on an open
+// sheet with the same fees, payments, and comments, to change and close again (backend lib/reopenGroup.js). Returns the
+// open group to load into check-in.
+export async function reopenClosedGroup(data: { group: number; date: string; sessionNumber: number; reason: string }): Promise<OpenGroupSession> {
+    const res = await apiFetch(`${API_BASE}/closed-groups/reopen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return jsonResponse(res, 'Failed to reopen the group.');
+}
+
 // Update Attendance Notes on a closed group. Each change sends the note as it was shown (original, null when the client
 // had none); if one was changed on another screen meanwhile, nothing is saved and this throws with the server's message.
 export async function updateClosedGroupNotes(data: {

@@ -8,6 +8,8 @@ const { addAttendanceNote, bipWeekAt, noteAuthor, noteBody, replaceNoteBody } = 
 const { logClientChange } = require('../lib/changeLog');
 const { paymentMethodProblem } = require('../lib/paymentMethods');
 const { assertCheckAllowed, isCheckPayment } = require('../lib/checkBlock');
+const { requireRole } = require('../lib/auth');
+const { reopenGroupSession } = require('../lib/reopenGroup');
 
 const router = express.Router();
 
@@ -161,6 +163,32 @@ router.put('/api/closed-groups/notes', async (req, res) => {
         await db.query('COMMIT');
         await logAction(user, 'Update Attendance Notes', `${rows[0].groupname} ${date} session ${sessionNum}: ${done.added} added, ${done.updated} updated, ${done.removed} removed`);
         res.json(done);
+    } catch (err) {
+        await db.query('ROLLBACK');
+        res.status(err.status || 500).json({ error: err.message });
+    } finally {
+        db.release();
+    }
+});
+
+// Reopens a closed group session (Business Administrators; DEV accounts act as one): its check-ins are undone and the
+// clients go back on an open check-in sheet to change and close again (lib/reopenGroup.js). A reason is required; it goes
+// on each client's change log. Returns the open group, like GET /api/open-groups lists it.
+router.post('/api/closed-groups/reopen', requireRole('Business Administrator'), async (req, res) => {
+    const { group, date, sessionNumber } = req.body || {};
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A reason is required to reopen a group.' });
+    if (!Number(group) || !ymdOrNull(date)) return res.status(400).json({ error: 'A group and session date are required.' });
+    const sessionNum = Number(sessionNumber) > 0 ? Math.floor(Number(sessionNumber)) : 1;
+    const user = req.user.employeeemail;
+    const db = await pool.connect();
+    try {
+        await db.query('BEGIN');
+        const { openSessionId, clients, groupName } = await reopenGroupSession(db, { group: Number(group), date, sessionNumber: sessionNum, user, reason });
+        await db.query('COMMIT');
+        await logAction(user, 'Group Reopened', `${groupName || `Group ID ${group}`} ${date} session ${sessionNum}: ${clients} check-in(s) undone and put back on an open sheet. ${reason}`);
+        const result = await pool.query(`SELECT ${OPEN_GROUP_COLUMNS} FROM OpenGroupSessions o JOIN Groups g ON g.GroupId = o.GroupId WHERE o.OpenSessionId = $1`, [openSessionId]);
+        res.json(result.rows[0]);
     } catch (err) {
         await db.query('ROLLBACK');
         res.status(err.status || 500).json({ error: err.message });

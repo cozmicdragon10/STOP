@@ -20,7 +20,7 @@ import {
   deleteClient,
   getClientDeletable,
   getEmployees, fetchClientFeeOverride, fetchPolyFeeOverride,
-  getOpenGroups, deleteOpenGroup, getClosedGroups, CLOSED_GROUPS_MAX, getSupervisingAgents, getCoveredByMe
+  getOpenGroups, deleteOpenGroup, getClosedGroups, reopenClosedGroup, CLOSED_GROUPS_MAX, getSupervisingAgents, getCoveredByMe
 } from './api';
 import type {
   CardBlock, CheckBlock, Client, ClientAttendance, CoveredClient, ClientNote, ClosedGroupSession, DeviceState, Employee, FinancialTransaction, Group,
@@ -253,6 +253,8 @@ export default function App() {
   const [missedCheckInRequest, setMissedCheckInRequest] = useState<ClosedGroupSession | null>(null);
   // Closed group whose Update Attendance Notes window is open
   const [closedGroupNotes, setClosedGroupNotes] = useState<ClosedGroupSession | null>(null);
+  // Closed group being reopened (Business Administrators): its card's key and the reason typed so far
+  const [reopening, setReopening] = useState<{ key: string; reason: string; saving: boolean; error: string } | null>(null);
 
   // Group check-in panel; on phones the Open Groups list sits below it, so picking a group scrolls back up to it
   const checkInPanelRef = useRef<HTMLDivElement>(null);
@@ -459,6 +461,26 @@ export default function App() {
     }
     // Closing an open group moves it to the Closed tab, so both lists refresh together
     await loadClosedGroups();
+  };
+
+  // Reopens a closed group (Business Administrators): the server undoes its check-ins and saves them as an open sheet,
+  // which is then loaded into group check-in to change and close again
+  const reopenGroup = async (c: ClosedGroupSession, key: string, reason: string) => {
+    setReopening({ key, reason, saving: true, error: '' });
+    try {
+      const open = await reopenClosedGroup({ group: c.groupid, date: c.sessiondate, sessionNumber: c.sessionnumber ?? 1, reason });
+      setReopening(null);
+      setExpandedClosedGroup(null);
+      // Balances, BIP weeks and vouchers changed; the sheet shows the clients' current balances
+      await Promise.all([loadDashboardData(), loadOpenGroups()]);
+      setIsAccountOnly(false);
+      setIsCustomCharge(false);
+      setResumeRequest(open);
+      scrollToStackedPanel(checkInPanelRef.current);
+      setSuccessMsg(`${c.groupname} reopened: ${open.entries.length} check-in(s) were taken back off the clients' accounts and put on the sheet with the same fees, payments and comments. Make your changes, then close the group again.`);
+    } catch (err) {
+      setReopening({ key, reason, saving: false, error: errorMessage(err, 'Failed to reopen the group.') });
+    }
   };
 
   // Only the latest request's answer is kept, so quickly changing the dates can't show an older range's list
@@ -1832,6 +1854,53 @@ export default function App() {
                                       Add Missed Check-In
                                     </button>
                                   )}
+                                  {role === 'Business Administrator' && (reopening?.key !== key ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setReopening({ key, reason: '', saving: false, error: '' })}
+                                      className="mt-2 w-full bg-amber-600 hover:bg-amber-500 text-white rounded py-1.5 font-semibold"
+                                    >
+                                      Reopen Group
+                                    </button>
+                                  ) : (
+                                    <div className="mt-2 rounded border border-amber-500/40 bg-amber-500/10 p-2 space-y-2">
+                                      <p className="text-slate-200 leading-relaxed">
+                                        Reopening takes every check-in in this session back off the clients' accounts (fees, payments, BIP weeks,
+                                        poly vouchers) and puts the clients back on an open sheet with the same fees, payments and comments.
+                                        Make your changes, then close the group again. Card payments stay on the accounts.
+                                      </p>
+                                      <label className="block">
+                                        <span className="text-slate-400">Reason (goes on each client's change log)</span>
+                                        <textarea
+                                          value={reopening.reason}
+                                          onChange={e => setReopening({ ...reopening, reason: e.target.value, error: '' })}
+                                          rows={2}
+                                          maxLength={500}
+                                          className="mt-1 w-full bg-slate-950 border border-slate-700 rounded p-1.5 text-slate-100"
+                                          placeholder="e.g. Wrong client checked in; fee entered wrong"
+                                        />
+                                      </label>
+                                      {reopening.error && <p className="text-red-400">{reopening.error}</p>}
+                                      <div className="flex gap-2">
+                                        <button
+                                          type="button"
+                                          disabled={reopening.saving || !reopening.reason.trim()}
+                                          onClick={() => reopenGroup(c, key, reopening.reason.trim())}
+                                          className="flex-1 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded py-1.5 font-semibold"
+                                        >
+                                          {reopening.saving ? 'Reopening…' : 'Reopen Group'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={reopening.saving}
+                                          onClick={() => setReopening(null)}
+                                          className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 rounded py-1.5 font-semibold"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
                                   <button
                                     type="button"
                                     onClick={() => setClosedGroupNotes(c)}
