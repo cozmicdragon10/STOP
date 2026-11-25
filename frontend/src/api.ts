@@ -2594,6 +2594,10 @@ export interface AssessmentAppointment {
     notes: string | null;
     status: 'Open' | 'Scheduled' | 'Cancelled';
     createdby: string | null;
+    // Set once the assessment was begun from this time (Begin Assessment); null while it's only scheduled
+    progress: 'In Progress' | 'Completed' | null;
+    begunon: string | null;
+    completedon: string | null;
 }
 
 const sendJson = (url: string, data: unknown, method = 'POST') => apiFetch(url, {

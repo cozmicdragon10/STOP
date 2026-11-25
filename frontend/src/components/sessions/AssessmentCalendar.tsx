@@ -41,6 +41,11 @@ const FILTER_KEY = 'stop.assessmentCalendar.assessor';
 
 const errorText = (err: unknown, fallback: string) => (err instanceof Error && err.message ? err.message : fallback);
 const longDay = (ymd: string) => new Date(`${ymd}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+const shortDay = (ymd: string) => new Date(`${ymd}T00:00:00`).toLocaleDateString();
+// "2 open · 1 scheduled · 1 completed", leaving out the kinds there are none of
+const dayCountText = (c: { open: number; waiting: number; begun: number; completed: number }, joiner: string) =>
+  ([[c.open, 'open'], [c.waiting, 'scheduled'], [c.begun, 'in progress'], [c.completed, 'completed']] as const)
+    .filter(([n]) => n > 0).map(([n, word]) => `${n} ${word}`).join(joiner);
 
 // open: a counselor's availability (no client); edit: change an open time. A client gets a time only by being assigned
 // to an open one (or begins right away with New Assessment).
@@ -119,8 +124,14 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
   const byDay = new Map<string, AssessmentAppointment[]>();
   for (const a of shown) byDay.set(a.apptdate, [...(byDay.get(a.apptdate) ?? []), a]);
   const dayList = byDay.get(pickedDay) ?? [];
-  const monthOpen = shown.filter(a => a.status === 'Open').length;
-  const monthScheduled = shown.filter(a => a.status === 'Scheduled').length;
+  // A scheduled time splits three ways: still waiting, begun (in progress), or completed
+  const countDay = (entries: AssessmentAppointment[]) => ({
+    open: entries.filter(a => a.status === 'Open').length,
+    waiting: entries.filter(a => a.status === 'Scheduled' && !a.progress).length,
+    begun: entries.filter(a => a.progress === 'In Progress').length,
+    completed: entries.filter(a => a.progress === 'Completed').length,
+  });
+  const monthCount = countDay(shown);
 
   const canChange = (a: { assessor: string }) => !isCounselor || a.assessor === me;
   // Counselors work on their own times; everyone else picks the counselor
@@ -255,8 +266,12 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
   const renderCard = (a: AssessmentAppointment) => {
     const isOpen = a.status === 'Open';
     const mine = canChange(a);
+    const completed = a.progress === 'Completed';
+    const begun = !!a.progress;
+    const chip = isOpen ? TONE_CHIP.available : completed ? TONE_CHIP.done : begun ? TONE_CHIP.open : TONE_CHIP.assessment;
+    const border = isOpen ? 'border-slate-800' : completed ? 'border-emerald-500/40 bg-emerald-950/10' : begun ? 'border-amber-500/40 bg-amber-950/10' : 'border-blue-500/40 bg-blue-950/10';
     return (
-      <div key={a.appointmentid} className={`bg-slate-950 border ${isOpen ? 'border-slate-800' : 'border-blue-500/40 bg-blue-950/10'} px-4 py-3 rounded-xl text-sm space-y-2`}>
+      <div key={a.appointmentid} className={`bg-slate-950 border ${border} px-4 py-3 rounded-xl text-sm space-y-2`}>
         <div className="flex justify-between items-start gap-3">
           <div className="min-w-0">
             <p className="font-semibold text-white">{isOpen ? 'Open for assessment' : `${a.lastname}, ${a.firstname}`}</p>
@@ -266,11 +281,18 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
             </p>
             {a.notes && <p className="text-xs text-slate-500 mt-1">{a.notes}</p>}
           </div>
-          <span className={`shrink-0 text-xs px-2 py-0.5 rounded border ${isOpen ? TONE_CHIP.available : TONE_CHIP.assessment}`}>
-            {isOpen ? 'Open' : 'Scheduled'}
+          <span className={`shrink-0 text-xs px-2 py-0.5 rounded border ${chip}`}>
+            {isOpen ? 'Open' : completed ? 'Completed' : begun ? 'In Progress' : 'Scheduled'}
           </span>
         </div>
-        {mine ? (
+        {begun ? (
+          // Already begun: the time is a record now, so nothing to move, unassign or cancel (the server refuses too)
+          <p className="pt-2 border-t border-slate-800 text-xs text-slate-400">
+            {completed
+              ? `Assessment completed${a.completedon ? ` ${shortDay(a.completedon)}` : ''}.`
+              : `Assessment begun${a.begunon ? ` ${shortDay(a.begunon)}` : ''}; complete it from the In Progress list.`}
+          </p>
+        ) : mine ? (
           <div className="pt-2 border-t border-slate-800 flex flex-col md:flex-row md:items-end gap-2">
             {isOpen && (
               <div className="flex-1 flex flex-col sm:flex-row gap-2 sm:items-end">
@@ -525,26 +547,26 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
           today={today}
           onMonth={m => { setMonth(m); setPickedDay(''); }}
           onToday={() => { setMonth(today.slice(0, 7)); setPickedDay(today); }}
-          summary={monthOpen + monthScheduled === 0 ? 'Nothing open or scheduled this month' : `${monthOpen} open · ${monthScheduled} scheduled`}
+          summary={shown.length === 0 ? 'Nothing open or scheduled this month' : dayCountText(monthCount, ' · ')}
           pickedDay={pickedDay}
           onPickDay={pickDay}
           dayLabel={day => {
             const entries = byDay.get(day) ?? [];
-            const open = entries.filter(a => a.status === 'Open').length;
-            return `${longDay(day)}: ${entries.length ? `${open} open, ${entries.length - open} scheduled` : 'nothing scheduled'}`;
+            return `${longDay(day)}: ${entries.length ? dayCountText(countDay(entries), ', ') : 'nothing scheduled'}`;
           }}
           renderDay={day => {
-            const entries = byDay.get(day) ?? [];
-            const open = entries.filter(a => a.status === 'Open').length;
-            const booked = entries.length - open;
+            const c = countDay(byDay.get(day) ?? []);
+            const chipClass = 'text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate';
             return (
               <>
-                {open > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.available}`}>{open}<span className="hidden sm:inline"> open</span></span>}
-                {booked > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.assessment}`}>{booked}<span className="hidden sm:inline"> scheduled</span></span>}
+                {c.open > 0 && <span className={`${chipClass} ${TONE_CHIP.available}`}>{c.open}<span className="hidden sm:inline"> open</span></span>}
+                {c.waiting > 0 && <span className={`${chipClass} ${TONE_CHIP.assessment}`}>{c.waiting}<span className="hidden sm:inline"> scheduled</span></span>}
+                {c.begun > 0 && <span className={`${chipClass} ${TONE_CHIP.open}`}>{c.begun}<span className="hidden sm:inline"> in progress</span></span>}
+                {c.completed > 0 && <span className={`${chipClass} ${TONE_CHIP.done}`}>{c.completed}<span className="hidden sm:inline"> completed</span></span>}
               </>
             );
           }}
-          legend={<CalendarLegend tones={['available', 'assessment']} labels={{ available: 'Open time', assessment: 'Client scheduled' }} />}
+          legend={<CalendarLegend tones={['available', 'assessment', 'open', 'done']} labels={{ available: 'Open time', assessment: 'Client scheduled', open: 'Assessment in progress', done: 'Assessment completed' }} />}
         />
       </div>
 

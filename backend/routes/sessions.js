@@ -541,7 +541,7 @@ router.post('/api/assessments/begin', async (req, res) => {
         const refuse = async (status, error) => { await db.query('ROLLBACK'); return res.status(status).json({ error }); };
         let open = null;
         if (openSessionId) {
-            open = (await db.query('SELECT ClientId, Category, CreatedBy, Provider, SessionTypeId, Fee FROM OpenIndividualSessions WHERE OpenSessionId = $1 FOR UPDATE', [openSessionId])).rows[0];
+            open = (await db.query('SELECT ClientId, Category, CreatedBy, Provider, SessionTypeId, Fee, AssessmentAppointmentId FROM OpenIndividualSessions WHERE OpenSessionId = $1 FOR UPDATE', [openSessionId])).rows[0];
             if (!open) return refuse(409, 'This assessment was already begun or removed. Refresh the list.');
             if (open.category !== 'Assessment') return refuse(400, 'That open session is not an assessment.');
             if (!canSeeIndividualSession(viewer, open)) return refuse(403, 'Only the employee who scheduled this assessment, its counselor, or an administrator can begin it.');
@@ -588,6 +588,10 @@ router.post('/api/assessments/begin', async (req, res) => {
                 `INSERT INTO Notes (Client, Date, "User", Comments, Category, ApprovalStatus, AttendanceId) VALUES ($1, NOW(), $2, $3, 'Assessment', NULL, $4)`,
                 [s.client, viewer.employeeemail, note, attendanceId]
             );
+        }
+        // The calendar time it was scheduled at now shows as begun (then completed)
+        if (open?.assessmentappointmentid) {
+            await db.query('UPDATE AssessmentAppointments SET AttendanceId = $1 WHERE AppointmentId = $2', [attendanceId, open.assessmentappointmentid]);
         }
         if (openSessionId) await db.query('DELETE FROM OpenIndividualSessions WHERE OpenSessionId = $1', [openSessionId]);
         await clearWaitingAssessor(db, s.client, viewer.employeeemail, `${s.typeName} begun on ${dateText(s.date)} with ${s.provider}.`);

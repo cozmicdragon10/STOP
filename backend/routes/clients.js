@@ -483,7 +483,7 @@ router.get('/api/clients/:id/calendar', async (req, res) => {
             pool.query(
                 `SELECT AppointmentId AS appointmentid, to_char(ApptDate, 'YYYY-MM-DD') AS date, to_char(ApptTime, 'HH24:MI') AS time,
                         Assessor AS assessor, Location AS location
-                 FROM AssessmentAppointments WHERE ClientId = $1 AND Status = 'Scheduled' AND ApptDate >= $2 ORDER BY ApptDate, ApptTime`,
+                 FROM AssessmentAppointments WHERE ClientId = $1 AND Status = 'Scheduled' AND AttendanceId IS NULL AND ApptDate >= $2 ORDER BY ApptDate, ApptTime`,
                 [id, today]),
             pool.query(
                 `SELECT a.AppointmentId AS appointmentid, to_char(s.Date, 'YYYY-MM-DD') AS date, to_char(s.Time, 'HH24:MI') AS time,

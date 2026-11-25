@@ -15,8 +15,12 @@ const router = express.Router();
 // (Scheduled); either can be rescheduled or cancelled. Anyone who can open the Assessments tab can do these, but a
 // counselor only changes times assigned to themselves. Identity (createdBy, updatedBy, ...) is stamped by requireSession.
 const APPOINTMENT_COLUMNS = `a.AppointmentId, a.ClientId, c.FirstName, c.LastName, c.ProgramType, c.DOCNumber, c.DocType,
-    a.Assessor, to_char(a.ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(a.ApptTime, 'HH24:MI') AS ApptTime, a.Location, a.Notes, a.Status, a.CreatedBy`;
-const APPOINTMENT_FROM = 'AssessmentAppointments a LEFT JOIN Clients c ON c.ClientId = a.ClientId';
+    a.Assessor, to_char(a.ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(a.ApptTime, 'HH24:MI') AS ApptTime, a.Location, a.Notes, a.Status, a.CreatedBy,
+    t.AssessmentStatus AS Progress, to_char(t.Date, 'YYYY-MM-DD') AS BegunOn, to_char(t.CompletedOn, 'YYYY-MM-DD') AS CompletedOn`;
+// Progress: 'In Progress' or 'Completed' once the assessment was begun from this time (null before)
+const APPOINTMENT_FROM = 'AssessmentAppointments a LEFT JOIN Clients c ON c.ClientId = a.ClientId LEFT JOIN Attendance t ON t.AttendanceId = a.AttendanceId';
+// A time whose assessment was already begun stays as a record: it can't be moved, unassigned or cancelled
+const BEGUN = 'This assessment was already begun, so its time can no longer be changed.';
 
 const counselorActive = async (db, name) => !!(await db.query(
     "SELECT 1 FROM EmployeeRoles WHERE DisplayName = $1 AND Role = 'Counselor' AND Active = TRUE", [name])).rows[0];
@@ -25,7 +29,7 @@ const clientActive = async (db, clientId) => !!(await db.query(
 
 // The appointment as stored (for ownership, status and the change log), or null
 const loadAppointment = async (db, id) => (await db.query(
-    `SELECT AppointmentId, ClientId, Assessor, to_char(ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(ApptTime, 'HH24:MI') AS ApptTime, Location, Status
+    `SELECT AppointmentId, ClientId, Assessor, to_char(ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(ApptTime, 'HH24:MI') AS ApptTime, Location, Status, AttendanceId
      FROM AssessmentAppointments WHERE AppointmentId = $1`, [id])).rows[0] ?? null;
 
 const note = (value) => String(value || '').trim() || null;
@@ -200,8 +204,9 @@ router.post('/api/assessment-appointments/:id/unassign', async (req, res) => {
         if (reasonProblem) return res.status(400).json({ error: reasonProblem });
         await db.query('BEGIN');
         const row = (await db.query(
-            `SELECT AppointmentId, ClientId, Assessor, to_char(ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(ApptTime, 'HH24:MI') AS ApptTime, Location, Status
+            `SELECT AppointmentId, ClientId, Assessor, to_char(ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(ApptTime, 'HH24:MI') AS ApptTime, Location, Status, AttendanceId
              FROM AssessmentAppointments WHERE AppointmentId = $1 FOR UPDATE`, [id])).rows[0];
+        if (row?.attendanceid) { await db.query('ROLLBACK'); return res.status(400).json({ error: BEGUN }); }
         if (!row || row.status !== 'Scheduled') { await db.query('ROLLBACK'); return res.status(400).json({ error: 'No client is assigned to that time.' }); }
         if (!ownsSlot(req.user, row.assessor)) { await db.query('ROLLBACK'); return res.status(403).json({ error: 'Counselors can only change their own times.' }); }
         await db.query(`UPDATE AssessmentAppointments SET ClientId = NULL, Status = 'Open' WHERE AppointmentId = $1`, [id]);
@@ -233,6 +238,7 @@ router.put('/api/assessment-appointments/:id', async (req, res) => {
         const before = await loadAppointment(pool, id);
         if (!before) return res.status(404).json({ error: 'Assessment not found.' });
         if (before.status === 'Cancelled') return res.status(400).json({ error: 'This assessment was cancelled. Open a new time instead.' });
+        if (before.attendanceid) return res.status(400).json({ error: BEGUN });
         if (!ownsSlot(req.user, before.assessor) || !ownsSlot(req.user, who)) {
             return res.status(403).json({ error: 'Counselors can only change their own times.' });
         }
@@ -274,13 +280,14 @@ router.post('/api/assessment-appointments/:id/move', async (req, res) => {
         await db.query('BEGIN');
         const rows = (await db.query(
             `SELECT AppointmentId, ClientId, Assessor, to_char(ApptDate, 'YYYY-MM-DD') AS ApptDate, to_char(ApptTime, 'HH24:MI') AS ApptTime,
-                    Location, Notes, Status
+                    Location, Notes, Status, AttendanceId
              FROM AssessmentAppointments WHERE AppointmentId = ANY($1::int[]) ORDER BY AppointmentId FOR UPDATE`,
             [[Number(id), Number(toId)].filter(Number.isInteger)])).rows;
         const from = rows.find(r => String(r.appointmentid) === String(id));
         const to = rows.find(r => String(r.appointmentid) === String(toId));
         if (!from) { await db.query('ROLLBACK'); return res.status(404).json({ error: 'Assessment not found.' }); }
         if (!ownsSlot(req.user, from.assessor)) { await db.query('ROLLBACK'); return res.status(403).json({ error: 'Counselors can only change their own times.' }); }
+        if (from.attendanceid) { await db.query('ROLLBACK'); return res.status(400).json({ error: BEGUN }); }
         const problem = moveProblem({ from, to, today: todayLocal() });
         if (problem) { await db.query('ROLLBACK'); return res.status(400).json({ error: problem }); }
         // The client (and the assessment's note, unless the open time has its own) go to the open time; the old time reopens
@@ -317,6 +324,7 @@ router.post('/api/assessment-appointments/:id/cancel', async (req, res) => {
         const row = await loadAppointment(pool, id);
         if (!row || row.status === 'Cancelled') return res.status(404).json({ error: 'No open or scheduled assessment with that id.' });
         if (!ownsSlot(req.user, row.assessor)) return res.status(403).json({ error: 'Counselors can only cancel their own times.' });
+        if (row.attendanceid) return res.status(400).json({ error: BEGUN });
         await pool.query(`UPDATE AssessmentAppointments SET Status = 'Cancelled' WHERE AppointmentId = $1`, [id]);
         if (row.clientid) await releaseOpenSession(pool, id);
         if (row.clientid) {
