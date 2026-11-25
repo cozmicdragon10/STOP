@@ -3,6 +3,7 @@ const { todayLocal } = require('../lib/dates');
 const { logAction, pool } = require('../db');
 const { OPEN_GROUP_ADMIN_ROLES, activeRoleFor, openGroupViewer } = require('../lib/access');
 const { recordAttendance } = require('../lib/attendance');
+const { recountBipWeek } = require('../lib/bipWeeks');
 const { dateText, dollars, logClientChange } = require('../lib/changeLog');
 const { moneyText } = require('../lib/moneyFields');
 const { ACTIVE_DEBT_LIMIT, BIP_CHECKIN_BLOCK, INDIVIDUAL_SESSION_TYPES, NEEDS_OUR_INTAKE, YMD } = require('../lib/sql');
@@ -137,6 +138,8 @@ router.post('/api/clients/:id/outside-bip-assessments', async (req, res) => {
         if (!result.rows[0]) return res.status(400).json({ error: 'The assessment date cannot be in the future.' });
         const what = `${assessmentType} on ${assessmentDate} at ${String(providerName).trim()}`;
         await logClientChange(pool, { clientId: id, changedBy: user, changeType: 'Outside BIP Assessment', newValue: what, details: String(notes || '').trim() || null });
+        // BIP weeks count from the last intake (lib/bipWeeks.js)
+        await recountBipWeek(pool, { clientId: id, changedBy: user, why: `${what} recorded.` });
         await logAction(user, 'Outside BIP Assessment Recorded', `Client ID ${id}: ${what}`);
         res.status(201).json({ success: true, id: result.rows[0].outsideassessmentid });
     } catch (err) {
@@ -160,6 +163,7 @@ router.delete('/api/outside-bip-assessments/:id', async (req, res) => {
         if (!row) return res.status(404).json({ error: 'Outside assessment not found.' });
         const what = `${row.assessmenttype} on ${row.assessmentdate} at ${row.providername}`;
         await logClientChange(pool, { clientId: row.clientid, changedBy: user, changeType: 'Outside BIP Assessment', oldValue: what, newValue: 'Removed' });
+        await recountBipWeek(pool, { clientId: row.clientid, changedBy: user, why: `${what} removed.` });
         await logAction(user, 'Outside BIP Assessment Removed', `Client ID ${row.clientid}: ${what}`);
         res.json({ success: true });
     } catch (err) {
@@ -706,6 +710,10 @@ router.post('/api/assessments/:id/complete', async (req, res) => {
             clientId: a.clientid, changedBy: req.user.employeeemail, changeType: 'Assessment Completed',
             newValue: a.sessiontypename, details: `Begun ${dateText(a.beganon)} with ${a.provider}.${paperwork}${note ? ` ${note}` : ''}`,
         });
+        // A BIP client's weeks count from their last intake (lib/bipWeeks.js), so a new one starts the count again
+        if (a.kind === 'BIP Intake') {
+            await recountBipWeek(db, { clientId: a.clientid, changedBy: req.user.employeeemail, why: `${a.sessiontypename} begun ${dateText(a.beganon)} completed.` });
+        }
         await db.query('COMMIT');
         await logAction(req.user.employeeemail, 'Assessment Completed', `${a.sessiontypename} for ${a.lastname}, ${a.firstname} (Client ID ${a.clientid}), begun ${a.beganon}`);
         res.json({ success: true });

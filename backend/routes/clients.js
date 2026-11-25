@@ -1006,6 +1006,13 @@ const updateClientInfo = async (req, res) => {
         if (polyOverride && polyfee !== undefined && polyfee !== null && polyfee !== '' && Number(polyfee) !== Number(before?.polyfee)) {
             return refuse(400, { error: 'A temporary poly fee override is active. Change or remove the override to change the poly fee total.' });
         }
+        // A BIP client's week is a whole number (0 or more): anything else would quietly restart the count at week 1 on
+        // their next check-in. Checked when the week or the program is changed.
+        const phaseValue = phase === undefined || phase === null || phase === '' ? null : String(phase).trim();
+        if ((programtype || before.programtype) === 'BIP' && (phaseValue !== null || (programtype && programtype !== before.programtype))
+            && !/^\d+$/.test(phaseValue ?? String(before.phase ?? '').trim())) {
+            return refuse(400, { error: 'A BIP client\'s week must be a whole number of 0 or more.' });
+        }
         if (programstatus && programstatus !== before?.programstatus) {
             if (DISCHARGE_STATUSES.includes(before?.programstatus)) {
                 return refuse(400, { error: 'Program status is locked while the client is discharged. Use the Activate button.' });
@@ -1077,7 +1084,7 @@ const updateClientInfo = async (req, res) => {
             WHERE ClientId = $24`,
             [
                 firstname || null, middlename || null, lastname || null, docnumber || null, supervisingagent || null,
-                programstartdate || null, programstatus || null, phase || null, groupid ? Number(groupid) : null,
+                programstartdate || null, programstatus || null, phaseValue || null, groupid ? Number(groupid) : null,
                 treatmentfee !== undefined && treatmentfee !== null && treatmentfee !== '' ? Number(treatmentfee) : null,
                 accountbalance !== undefined && accountbalance !== null && accountbalance !== '' ? Number(accountbalance) : null,
                 vouchers !== undefined && vouchers !== null && vouchers !== '' ? Number(vouchers) : null,

@@ -8,6 +8,7 @@ const { printedReceiptProblem } = require('../lib/printedReceipts');
 const { addAttendanceNote, noteAuthor, splitEntryComments } = require('../lib/attendanceNotes');
 const { paymentMethodProblem, paymentMethodText } = require('../lib/paymentMethods');
 const { INDIVIDUAL_SESSION_TYPES } = require('../lib/sql');
+const { countsAsBipWeek, recountBipWeek } = require('../lib/bipWeeks');
 const { UNIT_PROGRAMS, returnSessionUnits, useSessionUnits } = require('../lib/federalUnits');
 const { FEDERAL_PROGRAM_TYPES } = require('../lib/busPasses');
 
@@ -226,7 +227,8 @@ const TIMESTAMP_TEXT = (column) => `to_char(${column}, 'YYYY-MM-DD HH24:MI:SS.US
 // Deletes a check-in (Business Administrators only) and undoes what it did: its charge and payment come off the ledger
 // (with any refund or dispute on that payment, and the payment's cash drop-off check-off), the client's balance and the
 // balance on every later ledger and attendance row move back, Last Date Attended falls back to the latest Group,
-// Individual, or Assessment check-in left, a BIP client's week count goes down by one, and a poly fee voucher the
+// Individual, or Assessment check-in left, a BIP client's week count goes down by one (when the check-in counted toward
+// it: lib/bipWeeks.js), and a poly fee voucher the
 // check-in earned is taken back. Closed groups and the Group Income Report are built from
 // attendance, so they follow on their own.
 router.delete('/api/attendance/:id', requireRole('Business Administrator'), async (req, res) => {
@@ -240,7 +242,7 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
         await db.query('BEGIN');
         const attRes = await db.query(
             `SELECT a.*, a."Group" AS GroupId, to_char(a.Date, 'YYYY-MM-DD') AS Day, ${TIMESTAMP_TEXT('a.CreatedOn')} AS CreatedAt,
-                    g.GroupName, st.Name AS SessionTypeName
+                    g.GroupName, st.Name AS SessionTypeName, st.Kind AS SessionKind
              FROM Attendance a LEFT JOIN Groups g ON g.GroupId = a."Group" LEFT JOIN SessionTypes st ON st.SessionTypeId = a.SessionTypeId
              WHERE a.AttendanceId = $1 FOR UPDATE OF a`,
             [req.params.id]
@@ -380,9 +382,15 @@ router.delete('/api/attendance/:id', requireRole('Business Administrator'), asyn
         // What the client's balance goes down by: the deleted check-in's effect, less a fee moved to another check-in
         const balanceTakenBack = money(totalEffect - (feeMoved?.amount ?? 0));
 
-        // BIP clients count one week per group attendance. Last Date Attended becomes the most recent Group, Individual,
-        // or Assessment check-in left on the account (none: cleared).
-        const isBipWeek = client.programtype === 'BIP' && att.groupid && !INDIVIDUAL_SESSION_TYPES.includes(att.type);
+        // BIP clients count one week per group attendance since their last intake (lib/bipWeeks.js): deleting one takes a
+        // week off, but one from before the last intake never added a week, so it leaves the week alone. Deleting a
+        // completed BIP intake counts the week again from the intake before it. Last Date Attended becomes the most
+        // recent Group, Individual, or Assessment check-in left on the account (none: cleared).
+        const isBip = client.programtype === 'BIP';
+        const isBipWeek = isBip && !INDIVIDUAL_SESSION_TYPES.includes(att.type) && await countsAsBipWeek(db, att.client, att.day);
+        if (isBip && att.sessionkind === 'BIP Intake' && att.assessmentstatus !== 'In Progress') {
+            await recountBipWeek(db, { clientId: att.client, changedBy: user, why: `the intake on ${att.day} was deleted.` });
+        }
         const updated = await db.query(
             `UPDATE Clients SET AccountBalance = AccountBalance - $1,
                  Phase = CASE WHEN $3::boolean AND TRIM(Phase) ~ '^\\d+$' THEN GREATEST(TRIM(Phase)::int - 1, 0)::text ELSE Phase END,

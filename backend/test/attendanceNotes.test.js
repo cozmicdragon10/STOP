@@ -26,6 +26,8 @@ test('a BIP client\'s week at an earlier attendance is the current week less the
     assert.equal(await bipWeekAt(db({ programtype: 'State SO', phase: '3', later: 0 }), { clientId: 1, attendanceId: 5, date: '2026-11-01' }), null);
     assert.equal(await bipWeekAt(db({ programtype: 'BIP', phase: 'Phase 1', later: 0 }), { clientId: 1, attendanceId: 5, date: '2026-11-01' }), null);
     assert.equal(await bipWeekAt(db({ programtype: 'BIP', phase: '2', later: 5 }), { clientId: 1, attendanceId: 5, date: '2026-11-01' }), null);
+    // An attendance from before the client's last intake isn't one of their weeks
+    assert.equal(await bipWeekAt(db({ programtype: 'BIP', phase: '12', later: 2, beforeintake: true }), { clientId: 1, attendanceId: 5, date: '2026-11-01' }), null);
 });
 
 test('a comment goes to the note and nothing stays on the attendance', () => {

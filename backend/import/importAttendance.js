@@ -87,6 +87,11 @@ runImport(pool, COMMIT, async (db) => {
     await insertRows(db, 'Attendance', ['Client', 'Date', 'Type', 'SessionTypeId', 'Comments', 'CreatedOn'], intakes);
     await insertRows(db, 'Notes', ['Client', 'Date', 'Comments', 'Category'], notes);
 
+    // BIP weeks (imported as 0 by the client import): the group attendances since each client's last intake (lib/bipWeeks.js)
+    const { BIP_WEEKS } = require('../lib/sql');
+    const weeks = await db.query(`UPDATE Clients c SET Phase = (${BIP_WEEKS('c.ClientId')})::text WHERE c.ProgramType = 'BIP'`);
+    console.log(`BIP weeks counted from the last intake for ${weeks.rowCount} clients.`);
+
     const summary = `Imported ${stats.attendance} attendance rows, ${stats.callInNotes} call-in notes and ${stats.accountNotes} account notes from ${FOLDER}\\ClientAttendance.csv; added ${stats.bipIntakes} BIP intakes.`;
     await logImport(db, ACTION, summary);
     console.log(summary);

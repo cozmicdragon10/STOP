@@ -4,6 +4,8 @@ const { paymentDetails, paymentMethodProblem, paymentMethodText } = require('./p
 const { dateText, dollars, logClientChange } = require('./changeLog');
 const { moneyText } = require('./moneyFields');
 const { todayLocal } = require('./dates');
+const { countsAsBipWeek } = require('./bipWeeks');
+const { bipWeekAt } = require('./attendanceNotes');
 const { LAST_POLY_RESULT_SQL, POLY_VOUCHER_EARNING_RESULTS, polyVoucherMax } = require('./poly');
 const {
     ACTIVE_DEBT_LIMIT, BIP_CHECKIN_BLOCK, FEE_ONCE_PER_PERIOD_PROGRAMS, FEE_PERIOD_MONTHS, GROUP_ATTENDANCE, INDIVIDUAL_SESSION_TYPES, MONTHLY_FEE_PHASES,
@@ -241,10 +243,11 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         );
     }
 
-    // BIP clients count weeks attended: every attendance adds one to the week number stored in Phase.
-    // A non-numeric value (left over from before BIP used week numbers) counts as week 0.
+    // BIP clients count weeks attended since their last intake (lib/bipWeeks.js): a group attendance on or after it adds one
+    // to the week number stored in Phase; one dated before it doesn't count. A non-numeric value (left over from before BIP
+    // used week numbers; Edit Info no longer saves one) counts as week 0.
     const { programtype, phase } = clientRes.rows[0];
-    const newPhase = programtype === 'BIP' && !isIndividualSession
+    const newPhase = programtype === 'BIP' && !isIndividualSession && await countsAsBipWeek(db, client, sessionDate)
         ? String((/^\d+$/.test(String(phase ?? '').trim()) ? Number(phase) : 0) + 1)
         : null;
 
@@ -285,8 +288,10 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
     });
 
     // feeCharged and feeReason: what the account was charged and why, for telling the user when it differs from what was sent.
-    // bipWeek: a BIP client's week number counting this attendance (null for everyone else)
-    return { attendanceId, newBalance, polyVoucherAwarded, feeCharged: feeNum, feeReason, bipWeek: newPhase };
+    // bipWeek: the BIP week this attendance fell in, for its case note (null for everyone else). It is the newest week
+    // unless the check-in was added for an earlier date with later attendance already recorded (bipWeekAt).
+    const bipWeek = newPhase ? await bipWeekAt(db, { clientId: client, attendanceId, date: sessionDate }) : null;
+    return { attendanceId, newBalance, polyVoucherAwarded, feeCharged: feeNum, feeReason, bipWeek };
 };
 
 // The Individual price on the Admin price list that an INDIVIDUAL group check-in charges: the active Individual entry

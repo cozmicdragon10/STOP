@@ -40,7 +40,8 @@ const OLD_STATUS_NAMES = {
 const DISCHARGE_SUBCATEGORY = { 6: 'New SO Charge', 8: 'Attendance' };
 
 // Old TreatmentPhase (ProgramPhase.csv) -> [ProgramType, Phase]. BIP phase is the client's week number, which the old
-// system didn't track, so BIP clients start at '0'. Services with no matching program keep the old phase name.
+// system didn't track, so BIP clients start at '0' here; the attendance import then counts each one's group attendances
+// since their last intake. Services with no matching program keep the old phase name.
 const PHASE_MAP = {
     0: ['State SO', 'Completed'],
     1: ['State SO', 'Phase 1 - Weekly'],

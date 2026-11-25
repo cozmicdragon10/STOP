@@ -40,6 +40,15 @@ const bipCheckInBlockMessage = (block, name) => (block === 'intake'
         ? `${name} was discharged after an intake done at another provider. Complete our BIP Intake or DV Assessment on the Assessments tab before group check-in.`
         : `${name} was discharged and reactivated. Complete the BIP Reinstate assessment on the Assessments tab before group check-in.`);
 
+// The date of the client's last BIP intake: a completed BIP Intake or DV Assessment done here, or one recorded from another
+// provider (NULL when there is none). A BIP Reinstate is not an intake, so the week count carries on through a reinstate.
+const LAST_BIP_INTAKE = (client) => `(SELECT MAX(x.Done) FROM (${BIP_ASSESSMENTS_FOR(client)}) x WHERE x.Kind = 'BIP Intake')`;
+// A BIP client's week: the group attendances dated on or after their last BIP intake (all of them when there is none).
+// Check-ins add one and deletions take one off (lib/attendance.js, routes/attendance.js); lib/bipWeeks.js recounts it
+// from here when the last intake changes.
+const BIP_WEEKS = (client) => `(SELECT COUNT(*) FROM Attendance w WHERE w.Client = ${client} AND w.${GROUP_ATTENDANCE}
+    AND w.Date >= COALESCE(${LAST_BIP_INTAKE(client)}, '-infinity'::date))`;
+
 // True when the client already has an attendance row in the current calendar month.
 // Used for the State SO Phase 1 rule: the treatment fee is charged once per month.
 const ATTENDED_THIS_MONTH = `EXISTS (SELECT 1 FROM Attendance a WHERE a.Client = c.ClientId AND a.${GROUP_ATTENDANCE} AND date_trunc('month', a.Date) = date_trunc('month', CURRENT_DATE))`;
@@ -80,7 +89,7 @@ const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const DISCHARGE_STATUSES = ['Completed', 'Deceased', 'Discharged Supervision', 'Program Failed', 'Revoked', 'Transferred', 'Terminated'];
 
 module.exports = {
-    DISCHARGE_STATUSES, INDIVIDUAL_SESSION_TYPES, GROUP_ATTENDANCE, NEEDS_OUR_INTAKE, BIP_CHECKIN_BLOCK, bipCheckInBlockMessage, ATTENDED_THIS_MONTH,
+    DISCHARGE_STATUSES, INDIVIDUAL_SESSION_TYPES, GROUP_ATTENDANCE, LAST_BIP_INTAKE, BIP_WEEKS, NEEDS_OUR_INTAKE, BIP_CHECKIN_BLOCK, bipCheckInBlockMessage, ATTENDED_THIS_MONTH,
     INDIVIDUAL_THIS_MONTH, ACTIVE_DEBT_LIMIT,
     MONTHLY_FEE_PHASES, FEE_PERIOD_MONTHS, FEE_ONCE_PER_PERIOD_PROGRAMS, FEE_ALREADY_CHARGED, ACTIVE_FEE_OVERRIDE, SESSION_FEE_SQL, YMD,
 };

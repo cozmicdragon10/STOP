@@ -2,7 +2,7 @@
 // not on the attendance. The note says which attendance it is about: a BIP client's BIP week number, otherwise just
 // "Attendance" (or "Individual Session" in an INDIVIDUAL group), with the group and the date it took place.
 // The approved make-up flag stays on the attendance (Attendance.Comments) so the week it covers is still marked there.
-const { GROUP_ATTENDANCE } = require('./sql');
+const { GROUP_ATTENDANCE, LAST_BIP_INTAKE } = require('./sql');
 const { logClientChange } = require('./changeLog');
 
 const MAKEUP_COMMENT = 'Approved make-up attendance';
@@ -61,18 +61,23 @@ const replaceNoteBody = (comments, text) => {
     return `${heading ? heading[1] : ''}${text}`;
 };
 
-// A BIP client's week number at an earlier attendance: the week stored now (Phase) less the group attendances after it,
-// since each one added a week (lib/attendance.js). null when Phase isn't a week number or the result makes no sense.
+// A BIP client's week number at an attendance: the week stored now (Phase) less the group attendances after it (later
+// dates, or later sessions that day), since each one added a week (lib/attendance.js). Used for a check-in added for an
+// earlier date too, so its note names the week it fell in, not the newest one. null when Phase isn't a week number, the
+// attendance is from before the client's last intake (it doesn't count toward the week), or the result makes no sense.
 const bipWeekAt = async (db, { clientId, attendanceId, date }) => {
     const res = await db.query(
         `SELECT c.ProgramType, TRIM(c.Phase) AS Phase,
-                (SELECT COUNT(*)::int FROM Attendance WHERE Client = c.ClientId AND ${GROUP_ATTENDANCE}
-                   AND (Date > $2::date OR (Date = $2::date AND AttendanceId > $3))) AS later
+                $2::date < COALESCE(${LAST_BIP_INTAKE('c.ClientId')}, '-infinity'::date) AS BeforeIntake,
+                (SELECT COUNT(*)::int FROM Attendance l LEFT JOIN Attendance t ON t.AttendanceId = $3
+                 WHERE l.Client = c.ClientId AND l.${GROUP_ATTENDANCE} AND l.AttendanceId <> $3
+                   AND (l.Date > $2::date OR (l.Date = $2::date
+                        AND (COALESCE(l.SessionNumber, 1), l.AttendanceId) > (COALESCE(t.SessionNumber, 1), $3)))) AS later
          FROM Clients c WHERE c.ClientId = $1`,
         [clientId, date, attendanceId]
     );
     const row = res.rows[0];
-    if (!row || row.programtype !== 'BIP' || !/^\d+$/.test(String(row.phase ?? ''))) return null;
+    if (!row || row.programtype !== 'BIP' || row.beforeintake || !/^\d+$/.test(String(row.phase ?? ''))) return null;
     const week = Number(row.phase) - row.later;
     return week >= 1 ? String(week) : null;
 };

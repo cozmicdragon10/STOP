@@ -158,6 +158,11 @@ reports changes back. Saves that finish after another client was opened don't ov
   It is written as the covering counselor, else the group's usual counselor, else whoever closed the group. An
   approved make-up is still marked on the attendance. The note is linked to the attendance (Notes.AttendanceId), so
   Update Attendance Notes on a closed group can add, change, or remove it later.
+- **BIP weeks** (`backend/lib/bipWeeks.js`): a BIP client's week (stored in Phase) is the number of group attendances
+  on or after their last BIP intake (a completed BIP Intake or DV Assessment here, or one recorded from another
+  provider; a reinstate doesn't restart it). A check-in adds one and deleting a check-in takes one off, only when it is
+  dated on or after the last intake. Completing, recording, or removing an intake counts the week again. A check-in
+  added for an earlier date is labeled with the week it fell in. Edit Info only accepts a whole number.
 - **Poly fee payment corrections** (`backend/lib/poly.js`): adjusting, refunding, or disputing a poly fee payment
   moves poly fee paid, which never goes below $0. Booking a polygraph spends the poly fee (paid resets to $0), so
   taking money back after that is owed on the account balance instead.
