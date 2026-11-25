@@ -372,9 +372,10 @@ const applyPolyPaidChange = async (db, clientId, paidChange, moveBalance) => {
 
 const owedOnAccountText = (owed) => (owed > 0 ? ` $${owed.toFixed(2)} more than was paid on the poly fee is owed on the account balance.` : '');
 
-// Corrects the amount of a cash payment (Business Administrators only). For an account payment the difference moves the
-// client's balance and the balance stored on this and every later ledger and attendance row, and a payment taken at
-// check-in also updates that attendance row's AccountPaid, which the group income report and its cash deposits use.
+// Corrects the amount of a cash payment (Business Administrators only), down to $0 when nothing was really paid. For an
+// account payment the difference moves the client's balance and the balance stored on this and every later ledger and
+// attendance row, and a payment taken at check-in also updates that attendance row's AccountPaid, which the Attendance
+// tab, the group income report and its cash deposits use (at $0 the check-in shows no payment and no method).
 // For a poly fee payment the difference moves PolyFeePaid instead, and the vouchers follow (see changePolyFeePaid); a
 // decrease PolyFeePaid can't absorb (it never goes below $0) moves the balance like an account payment would.
 router.put('/api/financials/:id/adjust', async (req, res) => {
@@ -384,8 +385,8 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
         return res.status(403).json({ error: 'Only Business Administrators can adjust payments.' });
     }
     const newAmount = Math.round(Number(amount) * 100) / 100;
-    if (!(newAmount > 0)) {
-        return res.status(400).json({ error: 'The adjusted amount must be greater than zero.' });
+    if (amount === '' || amount === null || amount === undefined || !Number.isFinite(newAmount) || newAmount < 0) {
+        return res.status(400).json({ error: 'Enter the corrected amount: $0.00 or more.' });
     }
     const why = String(reason || '').trim();
     if (!why) {
@@ -455,9 +456,15 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
         const attendanceId = await checkInFor(db, tx);
         const newBalance = await shiftBalanceFrom(db, tx, delta, attendanceId);
         if (attendanceId) {
+            // Adjusted to $0, the check-in took no payment: no method or check details either. Raised again from $0, they come
+            // back from the payment's ledger row.
             await db.query(
-                `UPDATE Attendance SET AccountPaid = $1, PaymentMethod = COALESCE(PaymentMethod, 'Cash') WHERE AttendanceId = $2`,
-                [newAmount, attendanceId]
+                `UPDATE Attendance SET AccountPaid = $1::numeric, Paid = $1::numeric > 0,
+                     PaymentMethod = CASE WHEN $1::numeric > 0 THEN COALESCE(PaymentMethod, $3, 'Cash') END,
+                     PaymentSubtype = CASE WHEN $1::numeric > 0 THEN COALESCE(PaymentSubtype, $4) END,
+                     PaymentReference = CASE WHEN $1::numeric > 0 THEN COALESCE(PaymentReference, $5) END
+                 WHERE AttendanceId = $2`,
+                [newAmount, attendanceId, tx.paymentmethod || null, tx.paymentsubtype || null, tx.paymentreference || null]
             );
         }
         await db.query(

@@ -181,7 +181,9 @@ export default function ClientLedger({ client, role, userEmail, financials, high
     const reason = paymentAction.reason.trim();
     const amount = Number(paymentAction.amount);
     const needsAmount = kind === 'adjust' || kind === 'forgive-change' || kind === 'refund' || kind === 'dispute';
-    if ((needsAmount && !(amount > 0)) || !reason) return;
+    // A payment can be adjusted down to $0 (nothing was really paid); the other amounts must be more than $0
+    const amountOk = kind === 'adjust' ? paymentAction.amount.trim() !== '' && amount >= 0 : amount > 0;
+    if ((needsAmount && !amountOk) || !reason) return;
     const clientid = client.clientid;
     // What the forgiveness row showed when the form opened (the server refuses if it was corrected meanwhile)
     const forgivenBefore = Number(financials.find(f => f.transactionid === id)?.amount ?? 0);
@@ -567,7 +569,7 @@ export default function ClientLedger({ client, role, userEmail, financials, high
                       : action.kind === 'dispute-won' ? (card?.openDispute ?? 0)
                       : action.kind === 'dispute-lost' ? 0
                       : -entered;
-                    const amountOk = !needsAmount || (entered > 0 && entered <= max + 0.005
+                    const amountOk = !needsAmount || ((action.kind === 'adjust' ? action.amount.trim() !== '' && entered >= 0 : entered > 0) && entered <= max + 0.005
                       && ((action.kind !== 'adjust' && action.kind !== 'forgive-change') || Math.abs(paidChange) >= 0.005));
                     let preview: React.ReactNode = null;
                     if (action.kind === 'dispute-lost') {
@@ -606,7 +608,7 @@ export default function ClientLedger({ client, role, userEmail, financials, high
                               <input
                                 type="number"
                                 step="0.01"
-                                min="0.01"
+                                min={action.kind === 'adjust' ? '0' : '0.01'}
                                 max={Number.isFinite(max) ? max : undefined}
                                 value={action.amount}
                                 onKeyDown={(e) => { if (e.key === '-' || e.key === 'e' || e.key === 'E') e.preventDefault(); }}
