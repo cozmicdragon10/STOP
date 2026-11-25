@@ -7,7 +7,7 @@
 //   checked in) their program start date; through today while they are Active.
 // - Weeks after a logged status change away from Active (and until a change back) don't count.
 // A meeting counts as held when anyone was checked in to it (a closed session). Groups meet weekly, so any group,
-// Make-Up, Holiday, or Closure attendance in the same week (Monday to Sunday) covers the meeting: a make-up at another
+// Make-Up, Holiday, or Closure attendance in the same week (Sunday to Saturday, like the calendars) covers the meeting: a make-up at another
 // group isn't a miss. A call-in doesn't cover it; the miss is marked as called in instead.
 
 // Attendance types that cover a week's group meeting. Individual sessions and assessments don't stand in for a group.
@@ -15,11 +15,11 @@ const COVERING_TYPES = new Set(['Group', 'Make-Up', 'Holiday', 'Closure']);
 
 const ymd = (v) => String(v ?? '').slice(0, 10);
 
-// The Monday of the week a YYYY-MM-DD date falls in, as YYYY-MM-DD
+// The Sunday of the week a YYYY-MM-DD date falls in, as YYYY-MM-DD
 const weekOf = (day) => {
     const [y, m, d] = ymd(day).split('-').map(Number);
     const t = new Date(Date.UTC(y, m - 1, d));
-    t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
+    t.setUTCDate(t.getUTCDate() - t.getUTCDay());
     return t.toISOString().slice(0, 10);
 };
 

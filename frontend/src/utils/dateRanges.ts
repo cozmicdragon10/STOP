@@ -1,5 +1,5 @@
 // Quick date ranges for the reports' From/To boxes ("This Month", "Last Week", ...). Days are 'YYYY-MM-DD' (local);
-// weeks run Monday to Sunday, like the rest of the app (missed groups count by Monday-to-Sunday weeks).
+// weeks run Sunday to Saturday, like the rest of the app (calendars, missed groups, the BIP once-a-week rule).
 
 export type RangeKey = 'today' | 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth' | 'thisYear' | 'lastYear';
 
@@ -28,14 +28,14 @@ export function dateRange(key: RangeKey, today: string): { from: string; to: str
   const t = parse(today);
   const y = t.getFullYear();
   const m = t.getMonth();
-  // Monday of this week (Sunday counts as the end of the week before it starts again)
-  const monday = new Date(y, m, t.getDate() - ((t.getDay() + 6) % 7));
+  // Sunday, the first day of this week
+  const sunday = new Date(y, m, t.getDate() - t.getDay());
   switch (key) {
     case 'today': return { from: today, to: today };
-    case 'thisWeek': return { from: ymd(monday), to: today };
+    case 'thisWeek': return { from: ymd(sunday), to: today };
     case 'lastWeek': {
-      const start = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - 7);
-      const end = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - 1);
+      const start = new Date(sunday.getFullYear(), sunday.getMonth(), sunday.getDate() - 7);
+      const end = new Date(sunday.getFullYear(), sunday.getMonth(), sunday.getDate() - 1);
       return { from: ymd(start), to: ymd(end) };
     }
     case 'thisMonth': return { from: ymd(new Date(y, m, 1)), to: today };

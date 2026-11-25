@@ -5,16 +5,16 @@ describe('dateRange', () => {
   // Sunday, November 22, 2026
   const today = '2026-11-22';
 
-  it('today, and this week from Monday (a Sunday is the end of its week)', () => {
+  it('today, and this week from Sunday (a Sunday starts its week)', () => {
     expect(dateRange('today', today)).toEqual({ from: '2026-11-22', to: '2026-11-22' });
-    expect(dateRange('thisWeek', today)).toEqual({ from: '2026-11-16', to: '2026-11-22' });
-    expect(dateRange('thisWeek', '2026-11-16')).toEqual({ from: '2026-11-16', to: '2026-11-16' });
+    expect(dateRange('thisWeek', today)).toEqual({ from: '2026-11-22', to: '2026-11-22' });
+    expect(dateRange('thisWeek', '2026-11-28')).toEqual({ from: '2026-11-22', to: '2026-11-28' });
   });
 
-  it('last week is the whole Monday to Sunday before', () => {
-    expect(dateRange('lastWeek', today)).toEqual({ from: '2026-11-09', to: '2026-11-15' });
-    // Across a month and a year
-    expect(dateRange('lastWeek', '2026-01-02')).toEqual({ from: '2025-12-22', to: '2025-12-28' });
+  it('last week is the whole Sunday to Saturday before', () => {
+    expect(dateRange('lastWeek', today)).toEqual({ from: '2026-11-15', to: '2026-11-21' });
+    // Across a month and a year (Friday, January 2, 2026)
+    expect(dateRange('lastWeek', '2026-01-02')).toEqual({ from: '2025-12-21', to: '2025-12-27' });
   });
 
   it('months: this month through today, last month whole', () => {

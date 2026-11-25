@@ -12,10 +12,12 @@ const base = {
 const att = (date, type = 'Group', group = 1) => ({ group: type === 'Group' ? group : null, date, type });
 const dates = (missed) => missed.map(m => m.date);
 
-test('weeks run Monday to Sunday', () => {
-    assert.equal(weekOf('2026-11-16'), '2026-11-16');
-    assert.equal(weekOf('2026-11-22'), '2026-11-16');
-    assert.equal(weekOf('2026-11-23'), '2026-11-23');
+test('weeks run Sunday to Saturday', () => {
+    assert.equal(weekOf('2026-11-15'), '2026-11-15');
+    assert.equal(weekOf('2026-11-21'), '2026-11-15');
+    assert.equal(weekOf('2026-11-22'), '2026-11-22');
+    // Across a month
+    assert.equal(weekOf('2026-12-02'), '2026-11-29');
 });
 
 test('an active client misses the meetings they did not check in to, through today, newest first', () => {
@@ -134,4 +136,14 @@ test('weekly misses count until the client moved to a monthly phase, then by mon
 test('a meeting closed in two session numbers is one miss', () => {
     const missed = findMissedGroups({ ...base, held: [...held, { group: 1, date: '2026-11-17' }], attendance: [att('2026-11-10')] });
     assert.deepEqual(dates(missed), ['2026-11-17']);
+});
+
+test('a make-up on the Sunday before a Monday group covers it (weeks start on Sunday)', () => {
+    // Group 3 meets on Mondays; the client made it up on Sunday, November 8, the start of Monday the 9th's week
+    const mondays = { ...base, currentGroup: 3, held: [{ group: 3, date: '2026-11-02' }, { group: 3, date: '2026-11-09' }, { group: 3, date: '2026-11-16' }] };
+    const missed = findMissedGroups({ ...mondays, attendance: [att('2026-11-02', 'Group', 3), att('2026-11-08', 'Make-Up'), att('2026-11-16', 'Group', 3)] });
+    assert.deepEqual(dates(missed), []);
+    // A make-up on Saturday the 7th belongs to the week before, so it doesn't cover Monday the 9th
+    const late = findMissedGroups({ ...mondays, attendance: [att('2026-11-02', 'Group', 3), att('2026-11-07', 'Make-Up'), att('2026-11-16', 'Group', 3)] });
+    assert.deepEqual(dates(late), ['2026-11-09']);
 });
