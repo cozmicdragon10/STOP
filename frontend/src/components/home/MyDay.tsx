@@ -209,16 +209,21 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
   for (const a of sessions?.assessments ?? []) {
     const kind = a.status === 'Scheduled' ? 'assessBooked' : 'assessOpen';
     const time = formatDisplayTime(a.appttime);
+    // Begun or completed (same colors; the words say so)
+    const progress = a.progress === 'Completed' ? 'Completed' : a.progress === 'In Progress' ? 'In progress' : '';
+    const progressDetail = a.progress === 'Completed'
+      ? ` · Completed${a.completedon ? ` ${shortDate(a.completedon)}` : ''}`
+      : progress ? ' · In progress' : '';
     add(a.apptdate, {
       key: `a${a.appointmentid}`,
       kind,
-      label: `${time} ${a.location || 'Assessment'}`,
-      title: `${KIND_LABEL[kind]} at ${time}, ${assessmentPlace(a)}${a.status === 'Scheduled' ? `: ${assessmentClient(a)}` : ''}`,
-      name: a.status === 'Scheduled' ? `Assessment: ${assessmentClient(a)}` : 'Open assessment time',
-      detail: `${time} · ${assessmentPlace(a)}`,
+      label: progress === 'Completed' ? `✓ ${time} ${a.location || 'Assessment'}` : `${time} ${a.location || 'Assessment'}`,
+      title: `${KIND_LABEL[kind]} at ${time}, ${assessmentPlace(a)}${a.status === 'Scheduled' ? `: ${assessmentClient(a)}` : ''}${progress ? ` (${progress})` : ''}`,
+      name: a.status === 'Scheduled' ? `Assessment: ${assessmentClient(a)}${progress ? ` (${progress})` : ''}` : 'Open assessment time',
+      detail: `${time} · ${assessmentPlace(a)}${progressDetail}`,
       sort: a.appttime,
-      // Past times can't be assigned or moved (the server refuses earlier dates)
-      appt: a.apptdate >= todayKey ? a : undefined,
+      // Past times can't be assigned or moved (the server refuses earlier dates), nor ones already begun
+      appt: a.apptdate >= todayKey && !a.progress ? a : undefined,
     });
   }
   // The picked day (if it's in this month), else today when looking at the current month

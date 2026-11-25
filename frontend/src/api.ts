@@ -573,6 +573,9 @@ export interface MyAssessment {
     notes: string | null;
     firstname: string | null;
     lastname: string | null;
+    // Set once the assessment was begun from this time; null while it's only scheduled
+    progress?: 'In Progress' | 'Completed' | null;
+    completedon?: string | null;
 }
 
 // counselor (a display name): another counselor's month, for the Calendars tab (office roles only)

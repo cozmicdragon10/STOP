@@ -69,8 +69,10 @@ router.get('/api/my-sessions', async (req, res) => {
         const assessments = await pool.query(
             `SELECT a.AppointmentId AS appointmentid, to_char(a.ApptDate, 'YYYY-MM-DD') AS apptdate, to_char(a.ApptTime, 'HH24:MI') AS appttime,
                     a.Location AS location, a.Status AS status, a.Assessor AS assessor, a.Notes AS notes,
-                    c.FirstName AS firstname, c.LastName AS lastname
+                    c.FirstName AS firstname, c.LastName AS lastname,
+                    t.AssessmentStatus AS progress, to_char(t.CompletedOn, 'YYYY-MM-DD') AS completedon
              FROM AssessmentAppointments a LEFT JOIN Clients c ON c.ClientId = a.ClientId
+             LEFT JOIN Attendance t ON t.AttendanceId = a.AttendanceId
              WHERE LOWER(TRIM(a.Assessor)) = LOWER(TRIM($1)) AND (a.Status = 'Scheduled' OR (a.Status = 'Open' AND a.ApptDate >= $3::date))
                AND date_trunc('month', a.ApptDate) = date_trunc('month', $2::date)
              ORDER BY a.ApptDate, a.ApptTime`,
