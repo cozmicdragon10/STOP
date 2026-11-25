@@ -26,8 +26,6 @@ test('the override raises the balance a check-in allows', () => {
     // Chaperon: the balance after today's fee may reach the limit
     assert.equal(minimumCheckInPayment('each', 50, 40, true, 100), 0);
     assert.equal(minimumCheckInPayment('each', 80, 40, true, 100), 20);
-    // No-limit programs stay free
-    assert.equal(minimumCheckInPayment('none', 900, 40, false, 100), 0);
 });
 
 test('counselors can see the override but not change it', () => {

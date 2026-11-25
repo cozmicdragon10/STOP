@@ -7,20 +7,17 @@
 export const FIRST_CHECKIN_MAX_OWED = 0;
 
 // Which payment rule a client's group check-in follows (mirrors checkInPaymentRule in backend/lib/attendance.js):
-//   'none'    BIP clients: no balance requirement
 //   'federal' Federal SO, Fed Drug Test and Poly Only clients: no balance requirement, so they can owe any amount, unless
 //             a Max Debt Override is set: then a check-in that charges a copay can't leave them owing more than it
 //   'each'    Chaperon clients: every attendance is paid the day of it, so the balance after check-in, today's fee
 //             included, must be $0.00 or better
-//   'first'   everyone else: the first group check-in of the month needs the balance before today's fee at $0.00 or better
-export type CheckInPaymentRule = 'none' | 'federal' | 'each' | 'first';
-export const NO_CHECKIN_LIMIT_PROGRAMS = ['BIP'];
+//   'first'   everyone else (State SO, Voluntary SO, BIP, ...): the first group check-in of the month needs the balance before today's fee at $0.00 or better
+export type CheckInPaymentRule = 'federal' | 'each' | 'first';
 export const FEDERAL_PAYMENT_PROGRAMS = ['Federal SO', 'Fed Drug Test', 'Poly Only'];
 export const PAY_EACH_VISIT_PROGRAMS = ['Chaperon'];
 export const checkInPaymentRule = (programType?: string | null): CheckInPaymentRule =>
-  NO_CHECKIN_LIMIT_PROGRAMS.includes(programType || '') ? 'none'
-    : FEDERAL_PAYMENT_PROGRAMS.includes(programType || '') ? 'federal'
-      : PAY_EACH_VISIT_PROGRAMS.includes(programType || '') ? 'each' : 'first';
+  FEDERAL_PAYMENT_PROGRAMS.includes(programType || '') ? 'federal'
+    : PAY_EACH_VISIT_PROGRAMS.includes(programType || '') ? 'each' : 'first';
 
 // A Max Debt Override (Business Administrators) lets a client owe up to its amount and still attend; this is the most it
 // can be. Mirrors MAX_DEBT_LIMIT in backend/lib/debtLimits.js.

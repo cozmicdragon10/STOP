@@ -59,7 +59,7 @@ const feeLabel = (c: ClientRecord, fee: number): string => {
 };
 // How much a client still has to pay before the check-in is allowed (0 when they may check in), by their payment rule
 // (checkInPaymentRule): Chaperon attendances are paid the day of them, others need the balance paid on their first group
-// check-in of the month, BIP clients have no requirement, and federal clients have none unless a Max Debt Override caps
+// check-in of the month (SO and BIP alike), and federal clients have none unless a Max Debt Override caps
 // what a copay may leave them owing. Balances are in the stored sign (positive = owes);
 // a processed card payment is already in the balance. A card amount counts only once the card is processed.
 // Individual sessions count the client's first individual session of the month. A Max Debt Override (maxowed) raises

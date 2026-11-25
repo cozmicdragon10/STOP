@@ -34,19 +34,16 @@ const chargedWithinMonths = async (db, client, date, months) => {
 const FIRST_CHECKIN_MAX_OWED = 0;
 
 // Which payment rule a client's group check-in follows (mirrors checkInPaymentRule in frontend/src/utils/balance.ts):
-//   'none'    BIP clients: no balance requirement
 //   'federal' Federal SO, Fed Drug Test and Poly Only clients: no balance requirement, so they can owe any amount, unless
 //             a Max Debt Override is set: then a check-in that charges a copay can't leave them owing more than it
 //   'each'    Chaperon clients: every attendance is paid the day of it, so the balance after check-in, today's fee
 //             included, must be $0.00 or better
-//   'first'   everyone else: the first group check-in of the month needs the balance before today's fee at $0.00 or better
-const NO_CHECKIN_LIMIT_PROGRAMS = ['BIP'];
+//   'first'   everyone else (State SO, Voluntary SO, BIP, ...): the first group check-in of the month needs the balance before today's fee at $0.00 or better
 const FEDERAL_PAYMENT_PROGRAMS = ['Federal SO', 'Fed Drug Test', 'Poly Only'];
 const PAY_EACH_VISIT_PROGRAMS = ['Chaperon'];
 const checkInPaymentRule = (programType) =>
-    NO_CHECKIN_LIMIT_PROGRAMS.includes(programType) ? 'none'
-        : FEDERAL_PAYMENT_PROGRAMS.includes(programType) ? 'federal'
-            : PAY_EACH_VISIT_PROGRAMS.includes(programType) ? 'each' : 'first';
+    FEDERAL_PAYMENT_PROGRAMS.includes(programType) ? 'federal'
+        : PAY_EACH_VISIT_PROGRAMS.includes(programType) ? 'each' : 'first';
 // The smallest payment that lets a group or individual check-in through, from the balance before it (stored sign:
 // positive = owes) and today's fee; 0 when nothing has to be paid. maxOwed: a Max Debt Override (ClientDebtLimits) lets
 // the client owe up to that much instead of FIRST_CHECKIN_MAX_OWED; for federal clients it is the most a charge may

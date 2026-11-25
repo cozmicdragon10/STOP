@@ -3,9 +3,10 @@ import { checkInPaymentRule, minimumCheckInPayment } from './balance';
 import { federalGroupFee } from './clients';
 
 describe('check-in payment rule', () => {
-  it('BIP clients have no balance requirement', () => {
-    expect(checkInPaymentRule('BIP')).toBe('none');
-    expect(minimumCheckInPayment('none', 500, 40, false)).toBe(0);
+  it('BIP clients follow the SO rule: $0.00 or better at the first group check-in of the month', () => {
+    for (const p of ['BIP', 'State SO', 'Voluntary SO']) expect(checkInPaymentRule(p)).toBe('first');
+    expect(minimumCheckInPayment(checkInPaymentRule('BIP'), 500, 40, false)).toBe(500);
+    expect(minimumCheckInPayment(checkInPaymentRule('BIP'), 500, 40, true)).toBe(0);
   });
 
   it('federal clients can owe any amount when no max debt override is set', () => {
@@ -39,7 +40,6 @@ describe('check-in payment rule', () => {
     expect(minimumCheckInPayment('first', 80, 40, false, 100)).toBe(0);
     expect(minimumCheckInPayment('first', 130, 40, false, '100.00')).toBe(30);
     expect(minimumCheckInPayment('each', 80, 40, true, 100)).toBe(20);
-    expect(minimumCheckInPayment('none', 900, 40, false, 100)).toBe(0);
   });
 });
 
