@@ -311,6 +311,8 @@ export interface FinancialTransaction {
     // On a client's ledger: the fee charged at the check-in this payment was taken at (a check-in has one ledger
     // row, its payment); null on every other row
     sessionfee?: Money | null;
+    // Rebuilt from the old system (backend/import/importLedger.js): no payment method, and locked (no adjust or reprint)
+    imported?: boolean;
 }
 
 export interface ClientNote {
@@ -1652,6 +1654,8 @@ export interface FinancialLedgerRow {
     feetype: string; // '' when none was saved
     paymentmethod: string; // '' when none was saved
     atcheckin: boolean;
+    // A row rebuilt from the old system (import/importLedger.js)
+    imported?: boolean;
     count: number;
     amount: Amount;
 }
@@ -1662,7 +1666,6 @@ export interface FinancialAttendanceRow {
     count: number;
     fees: Amount;
     fundedprice: Amount;
-    importedpaid: Amount;
 }
 export interface FinancialCashTotals {
     cash: Amount;

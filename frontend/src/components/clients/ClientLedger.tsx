@@ -455,7 +455,9 @@ export default function ClientLedger({ client, role, userEmail, financials, high
               const isPoly = fin.feetype === 'Poly Fee';
               // Payments saved before the method was recorded were all cash
               // Cash and Other (check, money order, ...) payments are adjusted; card payments are refunded or disputed
-              const canAdjust = isAdmin && fin.type === 'Payment' && (!fin.paymentmethod || fin.paymentmethod === 'Cash' || fin.paymentmethod === 'Other');
+              // Rows from the old system are its record, not money taken here: locked, and no receipt to reprint
+              const oldSystem = Boolean(fin.imported);
+              const canAdjust = isAdmin && !oldSystem && fin.type === 'Payment' && (!fin.paymentmethod || fin.paymentmethod === 'Cash' || fin.paymentmethod === 'Other');
               const card = fin.type === 'Payment' && fin.paymentmethod === 'Credit Card' ? cardPaymentStatus(fin, financials) : null;
               const disputeOpen = fin.disputestatus === 'Open';
               const action = paymentAction?.id === fin.transactionid ? paymentAction : null;
@@ -479,6 +481,9 @@ export default function ClientLedger({ client, role, userEmail, financials, high
                       <p className="font-semibold text-white">
                         {fin.feetype || fin.type}
                         <span className={`ml-2 align-middle text-[0.625rem] uppercase tracking-wide px-2 py-0.5 rounded border ${undone ? 'text-slate-400 bg-slate-800 border-slate-700' : tone.badge}`}>{badge}</span>
+                        {oldSystem && (
+                          <span className="ml-2 align-middle text-[0.625rem] uppercase tracking-wide bg-slate-800 text-slate-400 px-2 py-0.5 rounded" title="Imported from the previous system, which did not record the payment method. It can't be adjusted.">Old system</span>
+                        )}
                         {!charge && fin.paymentmethod && (
                           <span className="ml-2 align-middle text-[0.625rem] uppercase tracking-wide bg-slate-800 text-slate-300 px-2 py-0.5 rounded">{paymentMethodText(fin.paymentmethod, fin.paymentsubtype, fin.paymentreference)}</span>
                         )}
@@ -507,12 +512,14 @@ export default function ClientLedger({ client, role, userEmail, financials, high
                       <p className={`font-bold ${tone.text}`}>{minus ? '-' : '+'}${Number(fin.amount).toFixed(2)}{sessionFee > 0 && <span className="text-xs font-normal text-slate-400"> paid</span>}</p>
                       {balance && (
                         <p className={`text-xs mt-1 ${balance.after < 0 ? 'text-red-400' : 'text-slate-400'}`}>
-                          {balance.changesBalance ? <>Balance {signedMoney(balance.before)} → {signedMoney(balance.after)}</> : <>Balance unchanged: {signedMoney(balance.after)}</>}
+                          {/* The old system's balances don't always add up entry to entry, so only its balance after is shown */}
+                          {oldSystem ? <>Balance after: {signedMoney(balance.after)}</>
+                            : balance.changesBalance ? <>Balance {signedMoney(balance.before)} → {signedMoney(balance.after)}</> : <>Balance unchanged: {signedMoney(balance.after)}</>}
                         </p>
                       )}
                       {!action && (
                         <div className="mt-1 flex sm:justify-end gap-3">
-                          {fin.type === 'Payment' && (
+                          {fin.type === 'Payment' && !oldSystem && (
                             <button type="button" onClick={() => printPastPayment(fin)} className={linkClass} title="Print a copy of the receipt for this payment">
                               <Printer size={12} /> Print Receipt
                             </button>

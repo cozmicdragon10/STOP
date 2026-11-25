@@ -401,6 +401,11 @@ router.put('/api/financials/:id/adjust', async (req, res) => {
             await db.query('ROLLBACK');
             return res.status(404).json({ error: 'That ledger entry no longer exists.' });
         }
+        // Rows rebuilt from the old system (import/importLedger.js) are a record of what it held, not money taken here
+        if (tx.imported) {
+            await db.query('ROLLBACK');
+            return res.status(400).json({ error: 'Payments from the old system can\'t be adjusted.' });
+        }
         // Cash and Other payments (check, money order, ...) are adjusted here and keep their method. Payments saved before the
         // method was recorded were all cash; adjusting one records it as Cash. Credit card payments are corrected with a
         // refund or dispute instead.

@@ -1,8 +1,8 @@
 import type { FinancialSummaryData } from '../api';
 
 // Adds up the Financial Summary report (GET /api/reports/financial-summary) for one date range.
-//   Collected  payments (ledger) plus what was paid at check-ins imported from the old system (no ledger rows),
-//              less refunds and chargebacks (Dispute rows), plus disputes won back.
+//   Collected  payments (ledger), less refunds and chargebacks (Dispute rows), plus disputes won back. Payments from the
+//              old system (ledger rows marked imported) have their own lines, since it didn't record the method.
 //   Charged    check-in fees from attendance (the ledger's check-in Charge rows repeat them, so they are skipped),
 //              plus charges not tied to a check-in (custom fees, polygraph copays).
 //   Credits    Adjustment rows: debt forgiven and polygraph copays credited back. They lower balances without money.
@@ -38,6 +38,7 @@ export interface FinancialSummary {
 const num = (v: unknown) => Number(v) || 0;
 export const cents = (n: number) => Math.round(n * 100) / 100;
 export const OLD_SYSTEM_LABEL = 'Old system check-ins';
+export const OLD_SYSTEM_ACCOUNT_LABEL = 'Old system account payments';
 
 // YYYY-MM for every month from one date's month to another's, inclusive
 export const monthsBetween = (from: string, to: string): string[] => {
@@ -92,7 +93,8 @@ export function summarizeFinancials(data: FinancialSummaryData, from: string, to
     const amount = num(r.amount);
     const m = monthOf(r.month);
     if (r.type === 'Payment') {
-      pay(r.feetype || 'Payment (no fee type)', r.paymentmethod, r.count, amount);
+      const label = r.imported ? (r.atcheckin ? OLD_SYSTEM_LABEL : OLD_SYSTEM_ACCOUNT_LABEL) : r.feetype || 'Payment (no fee type)';
+      pay(label, r.paymentmethod, r.count, amount);
       m.collected = cents(m.collected + amount);
     } else if (r.type === 'Refund' || r.type === 'Dispute') {
       const line = r.type === 'Refund' ? refunds : disputes;
@@ -109,6 +111,8 @@ export function summarizeFinancials(data: FinancialSummaryData, from: string, to
       addTo(charges, r.feetype || 'Other charges', r.count, amount);
       m.charged = cents(m.charged + amount);
     } else if (r.type === 'Adjustment') {
+      // An old check-in's fee taken off is already netted into its fee (counted from attendance)
+      if (r.imported && r.atcheckin) continue;
       addTo(credits, r.feetype === 'Polygraph Copay' ? 'Polygraph copays credited back' : r.feetype || 'Other adjustments', r.count, amount);
       m.credits = cents(m.credits + amount);
     }
@@ -122,11 +126,6 @@ export function summarizeFinancials(data: FinancialSummaryData, from: string, to
       m.charged = cents(m.charged + fees);
     }
     if (r.fundedby) addTo(funded, `Assessments billed to ${r.fundedby === 'DHS Voucher' ? 'DHS vouchers' : 'invoices'}`, r.count, num(r.fundedprice));
-    const imported = num(r.importedpaid);
-    if (imported !== 0) {
-      pay(OLD_SYSTEM_LABEL, '', 0, imported);
-      m.collected = cents(m.collected + imported);
-    }
   }
 
   const paymentLines = [...payments.values()].sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));

@@ -545,7 +545,7 @@ router.get('/api/clients/:id/financials', async (req, res) => {
         const result = await pool.query(
             `SELECT f.*, ${SESSION_FEE_SQL} AS SessionFee
              FROM FinancialTransactions f LEFT JOIN Attendance a ON a.AttendanceId = f.AttendanceId
-             WHERE f.Client = $1 ORDER BY f.Date DESC`,
+             WHERE f.Client = $1 ORDER BY f.Date DESC, f.TransactionId DESC`,
             [id]
         );
         res.json(result.rows);

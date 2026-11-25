@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { financialCsv, monthsBetween, OLD_SYSTEM_LABEL, summarizeFinancials } from './financialReport';
+import { financialCsv, monthsBetween, OLD_SYSTEM_ACCOUNT_LABEL, OLD_SYSTEM_LABEL, summarizeFinancials } from './financialReport';
 import type { FinancialSummaryData } from '../api';
 
 const cash = { cash: 0, deposited: 0, held: 0, heldcount: 0 };
@@ -9,7 +9,7 @@ const data = (over: Partial<FinancialSummaryData>): FinancialSummaryData => ({
 const ledger = (type: string, amount: number, extra: Partial<FinancialSummaryData['ledger'][number]> = {}) =>
   ({ month: '2026-10', type, feetype: '', paymentmethod: '', atcheckin: false, count: 1, amount: String(amount), ...extra });
 const att = (type: string, fees: number, extra: Partial<FinancialSummaryData['attendance'][number]> = {}) =>
-  ({ month: '2026-10', type, fundedby: '' as const, count: 1, fees: String(fees), fundedprice: '0', importedpaid: '0', ...extra });
+  ({ month: '2026-10', type, fundedby: '' as const, count: 1, fees: String(fees), fundedprice: '0', ...extra });
 
 describe('monthsBetween', () => {
   it('lists every month in the range, across a year end', () => {
@@ -63,10 +63,22 @@ describe('summarizeFinancials', () => {
     expect(s.netCollected).toBe(0);
   });
 
-  it('adds payments from imported old-system check-ins as method not recorded', () => {
-    const s = summarizeFinancials(data({ attendance: [att('Group', 30, { month: '2025-01', importedpaid: '30' })] }), '2025-01-01', '2025-02-28');
-    expect(s.payments).toEqual([{ label: OLD_SYSTEM_LABEL, count: 0, cash: 0, card: 0, other: 0, unrecorded: 30, total: 30 }]);
-    expect(s.months.map(m => [m.month, m.collected])).toEqual([['2025-01', 30], ['2025-02', 0]]);
+  it('lists old-system payments (imported ledger rows) on their own lines, method not recorded', () => {
+    const s = summarizeFinancials(data({
+      attendance: [att('Group', 40, { month: '2025-01' })],
+      ledger: [
+        ledger('Payment', 30, { month: '2025-01', feetype: 'Group Fee', atcheckin: true, imported: true }),
+        ledger('Payment', 20, { month: '2025-01', feetype: 'Account Payment', imported: true }),
+        // An old check-in's fee taken off is already in its attendance fee
+        ledger('Adjustment', 35, { month: '2025-01', feetype: 'Old System Credit', atcheckin: true, imported: true }),
+      ],
+    }), '2025-01-01', '2025-02-28');
+    expect(s.payments).toEqual([
+      { label: OLD_SYSTEM_LABEL, count: 1, cash: 0, card: 0, other: 0, unrecorded: 30, total: 30 },
+      { label: OLD_SYSTEM_ACCOUNT_LABEL, count: 1, cash: 0, card: 0, other: 0, unrecorded: 20, total: 20 },
+    ]);
+    expect(s.credits).toEqual([]);
+    expect(s.months.map(m => [m.month, m.charged, m.collected])).toEqual([['2025-01', 40, 50], ['2025-02', 0, 0]]);
   });
 
   it('totals cash deposits and client balances', () => {

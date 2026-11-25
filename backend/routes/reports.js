@@ -225,7 +225,7 @@ router.get('/api/reports/user-activity', async (req, res) => {
                         f.Type AS Detail, f.Amount, f.PaymentMethod, f.FeeType, f.Comments, NULL::varchar AS EditedBy, NULL::timestamp AS EditedOn,
                         f.PaymentSubtype, f.PaymentReference
                  FROM FinancialTransactions f
-                 WHERE f.Type IN ('Payment', 'Refund', 'Dispute', 'Dispute Won') AND f.Date >= $1::date AND f.Date < $2::date + 1
+                 WHERE f.Type IN ('Payment', 'Refund', 'Dispute', 'Dispute Won') AND NOT f.Imported AND f.Date >= $1::date AND f.Date < $2::date + 1
                  UNION ALL
                  SELECT 'Note', n.NoteId, n.Client, n.Date, n."User",
                         n.Category, NULL, NULL, NULL, n.Comments, n.EditedBy, n.EditedOn, NULL, NULL
@@ -247,11 +247,10 @@ router.get('/api/reports/user-activity', async (req, res) => {
 // --- FINANCIAL SUMMARY REPORT ---
 // Every money total for the company over a date range (YYYY-MM-DD, inclusive), by month, plus what clients owe today.
 // Business Administrators only. The page (utils/financialReport.ts) adds the pieces up:
-//   ledger      FinancialTransactions by month, type, fee type, method, and whether the row belongs to a check-in.
+//   ledger      FinancialTransactions by month, type, fee type, method, whether the row belongs to a check-in, and
+//               whether it came from the old system (Imported, import/importLedger.js).
 //               Charge rows tied to a check-in repeat the check-in's fee, so the page counts fees from attendance instead.
 //   attendance  check-in fees (Attendance.GroupFee) by month and type, and assessments a DHS invoice or voucher covers.
-//               ImportedPaid is what was paid at check-ins imported from the old system (no CreatedBy), which have no
-//               ledger rows (import/importAttendance.js), so the page adds it to what was collected.
 //   cash        cash taken at group sessions and outside them, and how much of it is checked off as deposited
 //   balances    every client's account balance today, by program status (not limited to the range). Poly fees are left
 //               out: they are paid ahead toward the next polygraph, not owed.
@@ -264,17 +263,16 @@ router.get('/api/reports/financial-summary', businessOnly, async (req, res) => {
         const [ledger, attendance, groupCash, userCash, balances] = await Promise.all([
             pool.query(
                 `SELECT to_char(f.Date, 'YYYY-MM') AS Month, f.Type, COALESCE(f.FeeType, '') AS FeeType,
-                        COALESCE(f.PaymentMethod, '') AS PaymentMethod, (f.AttendanceId IS NOT NULL) AS AtCheckIn,
+                        COALESCE(f.PaymentMethod, '') AS PaymentMethod, (f.AttendanceId IS NOT NULL) AS AtCheckIn, f.Imported,
                         COUNT(*)::int AS Count, COALESCE(SUM(f.Amount), 0) AS Amount
                  FROM FinancialTransactions f
                  WHERE f.Date >= $1::date AND f.Date < $2::date + 1
-                 GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 2, 3, 4`,
+                 GROUP BY 1, 2, 3, 4, 5, 6 ORDER BY 1, 2, 3, 4`,
                 [from, to]
             ),
             pool.query(
                 `SELECT to_char(a.Date, 'YYYY-MM') AS Month, COALESCE(a.Type, 'Group') AS Type, COALESCE(a.FundedBy, '') AS FundedBy,
-                        COUNT(*)::int AS Count, COALESCE(SUM(a.GroupFee), 0) AS Fees, COALESCE(SUM(a.FundedPrice), 0) AS FundedPrice,
-                        COALESCE(SUM(a.AccountPaid) FILTER (WHERE a.CreatedBy IS NULL), 0) AS ImportedPaid
+                        COUNT(*)::int AS Count, COALESCE(SUM(a.GroupFee), 0) AS Fees, COALESCE(SUM(a.FundedPrice), 0) AS FundedPrice
                  FROM Attendance a
                  WHERE a.Date BETWEEN $1 AND $2
                  GROUP BY 1, 2, 3 ORDER BY 1, 2, 3`,

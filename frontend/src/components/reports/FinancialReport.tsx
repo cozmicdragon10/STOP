@@ -7,7 +7,7 @@ import type { FinancialSummaryData } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { escapeHtml } from '../../utils/receipt';
 import { errorMessage } from '../../utils/errors';
-import { financialCsv, OLD_SYSTEM_LABEL, summarizeFinancials } from '../../utils/financialReport';
+import { financialCsv, OLD_SYSTEM_ACCOUNT_LABEL, OLD_SYSTEM_LABEL, summarizeFinancials } from '../../utils/financialReport';
 import type { AmountLine, FinancialSummary } from '../../utils/financialReport';
 import { useTableSort } from '../../hooks/useTableSort';
 import { byField, sortRows } from '../../utils/tableSort';
@@ -146,7 +146,7 @@ export default function FinancialReport() {
   };
 
   const button = 'h-9 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 border border-slate-700 text-slate-200 px-3 rounded text-xs font-semibold';
-  const hasOldSystem = s?.payments.some(p => p.label === OLD_SYSTEM_LABEL);
+  const hasOldSystem = s?.payments.some(p => p.label === OLD_SYSTEM_LABEL || p.label === OLD_SYSTEM_ACCOUNT_LABEL);
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl space-y-5">
@@ -190,7 +190,7 @@ export default function FinancialReport() {
             ))}
           </div>
 
-          <Section title="Money Collected" note={`Payments by fee type and method, less refunds and chargebacks.${hasOldSystem ? ' Old system check-ins are payments imported from the previous system, which did not record the method.' : ''}`}>
+          <Section title="Money Collected" note={`Payments by fee type and method, less refunds and chargebacks.${hasOldSystem ? ' Old system check-ins and account payments were imported from the previous system, which did not record the method.' : ''}`}>
             <table className="w-full text-sm">
               <thead><tr className="text-left border-b border-slate-800">
                 <SortableTh k="label" table={paymentSort} className={th}>Fee Type</SortableTh>
