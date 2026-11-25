@@ -36,10 +36,10 @@ describe('calendar', () => {
     expect(shiftMonth('2026-01', -1)).toBe('2025-12');
   });
 
-  it('puts my scheduled groups on their days from today on', () => {
-    const byDay = scheduledDatesIn(groups, 'Ana Ruiz', '2026-11', '2026-11-10');
+  it('puts my scheduled groups on their days, past days too', () => {
+    const byDay = scheduledDatesIn(groups, 'Ana Ruiz', '2026-11');
     // Ana leads a Tuesday group and a Thursday group (the Thursday one is inactive, so it's skipped)
-    expect([...byDay.keys()]).toEqual(['2026-11-10', '2026-11-12', '2026-11-17', '2026-11-19', '2026-11-24', '2026-11-26']);
+    expect([...byDay.keys()]).toEqual(['2026-11-03', '2026-11-05', '2026-11-10', '2026-11-12', '2026-11-17', '2026-11-19', '2026-11-24', '2026-11-26']);
     expect(byDay.get('2026-11-12')?.map(g => g.groupname)).toEqual(['Thursday Men']);
     expect(byDay.get('2026-11-11')).toBeUndefined();
   });

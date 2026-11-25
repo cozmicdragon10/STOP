@@ -90,17 +90,16 @@ export const monthGrid = (month: string): (string | null)[] => {
   return cells;
 };
 
-// The dates in a month, from today on, when one of my active groups meets (by its schedule), keyed by day
+// Every date in a month (past days too) when one of my active groups meets (by its schedule), keyed by day
 export const scheduledDatesIn = <T extends { groupname?: string | null; counselor?: string | null; schedule?: string | null; active?: boolean | null }>(
   groups: T[],
   displayName: string,
   month: string,
-  today: string,
 ) => {
   const mine = groups.filter(g => g.active !== false && isMyGroup(g, displayName));
   const byDay = new Map<string, T[]>();
   for (const day of monthGrid(month)) {
-    if (!day || day < today) continue;
+    if (!day) continue;
     const [y, m, d] = day.split('-').map(Number);
     const meets = mine.filter(g => parseSchedule(g.schedule || '').day === weekdayName(new Date(y, m - 1, d)));
     if (meets.length > 0) byDay.set(day, meets);

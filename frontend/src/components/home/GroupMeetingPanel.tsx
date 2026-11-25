@@ -4,7 +4,7 @@ import PopupDialog from './PopupDialog';
 import { changeGroupMeeting, undoGroupScheduleChange, type GroupScheduleChange } from '../../api';
 import { formatDisplayTime } from '../../utils/dates';
 
-// One upcoming meeting of a group the counselor leads, picked on the My Day calendar
+// One scheduled meeting of a group the counselor leads (upcoming, or past and never opened), picked on the calendar
 export interface Meeting {
   groupid: number | string;
   groupname: string;
@@ -99,13 +99,9 @@ export default function GroupMeetingPanel({ meeting, today, onClose, onChanged }
             {change.reason && <span className="text-slate-400"> Reason: {change.reason}</span>}
           </p>
           <p className="text-xs text-slate-400">{change.notes} client case note{change.notes === 1 ? '' : 's'} added.</p>
-          {meeting.date >= today ? (
-            <button type="button" onClick={undo} disabled={saving} className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-600/40 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50">
-              <RotateCcw size={13} /> Undo {change.action === 'Cancelled' ? 'Cancel' : 'Reschedule'}
-            </button>
-          ) : (
-            <p className="text-xs text-slate-500 italic">The meeting date has passed, so this can't be undone.</p>
-          )}
+          <button type="button" onClick={undo} disabled={saving} className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-600/40 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50">
+            <RotateCcw size={13} /> Undo {change.action === 'Cancelled' ? 'Cancel' : 'Reschedule'}
+          </button>
         </div>
       ) : (
         <div className="space-y-3">

@@ -33,7 +33,7 @@ interface Props {
 
 // A day's chip: a group session (closed, open, or coming up), or one of the counselor's assessment times (open
 // availability, or a client booked)
-// An upcoming meeting of a group the counselor leads carries `meeting`, so its chip opens the cancel/reschedule panel.
+// A scheduled meeting (upcoming, or past and never opened) of a group the counselor leads carries `meeting`, so its chip opens the cancel/reschedule panel.
 // label is the short chip text; name, detail and sort (HH:MM, '' when no time) are for the day's list when the day is clicked.
 interface DayItem {
   key: string;
@@ -156,8 +156,9 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
     add(s.sessiondate, groupItem(`o${s.groupid}-${s.sessiondate}-${s.sessionnumber}`, 'open', s.groupname, s.groupid,
       ['Check-in sheet still open', ...openTags(s, !viewing)].join(' · ')));
   }
-  // Upcoming meetings: click to cancel or reschedule; a changed one shows as Cancelled, or Moved with its new date
-  for (const [day, meets] of scheduledDatesIn(groups, displayName, month, todayKey)) {
+  // Scheduled meetings that weren't held (upcoming, or past and never opened) look the same: click to cancel or
+  // reschedule. A changed one shows as Cancelled, or Moved with its new date.
+  for (const [day, meets] of scheduledDatesIn(groups, displayName, month)) {
     for (const g of meets) {
       if (taken.has(`${day}|${g.groupid}`)) continue;
       const name = g.groupname || '';
@@ -166,7 +167,8 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
       const meeting = meetingOf(g.groupid, name, day, change);
       const why = change?.reason ? ` · Reason: ${change.reason}` : '';
       if (!change) {
-        add(day, { ...groupItem(`s${g.groupid}-${day}`, 'scheduled', name, g.groupid, `Coming up${time ? ` at ${time}` : ''}`), meeting });
+        add(day, { ...groupItem(`s${g.groupid}-${day}`, 'scheduled', name, g.groupid,
+          `${day < todayKey ? 'Scheduled, never opened' : 'Coming up'}${time ? ` at ${time}` : ''}`), meeting });
       } else if (change.action === 'Cancelled') {
         add(day, { key: `x${change.changeid}`, kind: 'cancelled', label: name, title: `Cancelled: ${name}`, name, detail: `Cancelled${why}`, sort: to24h(time), meeting });
       } else {
@@ -288,7 +290,7 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
             />
           }
         />
-        <p className="text-[11px] text-slate-500 mt-2">Click a day to see everything on it. Click an upcoming group to cancel or reschedule that meeting; its clients get a case note.</p>
+        <p className="text-[11px] text-slate-500 mt-2">Click a day to see everything on it. Click a scheduled group (upcoming, or past and never opened) to cancel or reschedule that meeting; its clients get a case note.</p>
       </div>
 
       {shownDay && (

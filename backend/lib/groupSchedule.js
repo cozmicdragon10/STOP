@@ -1,4 +1,5 @@
-// Group schedules ("Thursdays @ 5:00 PM") and the rules for cancelling or rescheduling one upcoming meeting from My Day.
+// Group schedules ("Thursdays @ 5:00 PM") and the rules for cancelling or rescheduling one meeting from My Day (upcoming,
+// or a past one that was never opened; the server refuses one that has a check-in).
 // parseSchedule mirrors frontend/src/utils/schedule.ts (backend/test/sharedRules.test.js checks they match).
 const { YMD } = require('./sql');
 
@@ -43,14 +44,14 @@ const canChangeGroup = (user, groupCounselor) => {
     return user?.role === 'Counselor' && mine !== '' && mine === String(groupCounselor || '').trim().toLowerCase();
 };
 
-// The first problem with cancelling or rescheduling the meeting on originalDate, or null. schedule is the group's
+// The first problem with cancelling or rescheduling the meeting on originalDate (past or upcoming), or null. A reschedule
+// still moves it to today or later. schedule is the group's
 // schedule text; today is YYYY-MM-DD (local).
 const changeProblem = ({ action, originalDate, newDate, newTime, schedule, today }) => {
     if (!CHANGE_ACTIONS.includes(action)) return 'Choose Cancel or Reschedule.';
     const { day, time } = parseSchedule(schedule);
     if (!day) return 'This group has no weekly day and time, so it has no upcoming meetings to change.';
     if (!YMD.test(String(originalDate || ''))) return 'Choose the meeting date.';
-    if (originalDate < today) return 'Only upcoming meetings can be changed.';
     if (weekdayOf(originalDate) !== day) return `This group meets on ${day}s, not on ${longDate(originalDate)}.`;
     if (action === 'Cancelled') return null;
     if (!YMD.test(String(newDate || ''))) return 'Enter the new date.';

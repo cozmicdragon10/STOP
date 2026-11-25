@@ -32,7 +32,7 @@ router.get('/api/group-schedule-changes', async (req, res) => {
     }
 });
 
-// Cancel or reschedule one upcoming meeting: { originalDate, action: 'Cancelled' | 'Rescheduled', newDate, newTime, reason }
+// Cancel or reschedule one meeting (upcoming, or a past one never opened): { originalDate, action: 'Cancelled' | 'Rescheduled', newDate, newTime, reason }
 router.post('/api/groups/:id/schedule-changes', async (req, res) => {
     const db = await pool.connect();
     try {
@@ -91,7 +91,7 @@ router.post('/api/groups/:id/schedule-changes', async (req, res) => {
     }
 });
 
-// Undo a cancel or reschedule before the meeting's original date passes; its case notes are removed with it
+// Undo a cancel or reschedule (past or upcoming); its case notes are removed with it
 router.delete('/api/group-schedule-changes/:id', async (req, res) => {
     try {
         const { id } = req.params;
@@ -101,7 +101,6 @@ router.delete('/api/group-schedule-changes/:id', async (req, res) => {
              FROM GroupScheduleChanges s JOIN Groups g ON g.GroupId = s.GroupId WHERE s.ChangeId = $1`, [id])).rows[0];
         if (!row) return res.status(404).json({ error: 'That change was not found. It may already have been undone.' });
         if (!canChangeGroup(req.user, row.counselor)) return res.status(403).json({ error: 'Counselors can only change the groups they lead.' });
-        if (row.originaldate < todayLocal()) return res.status(400).json({ error: 'That meeting date has passed, so the change can no longer be undone.' });
         const notes = (await pool.query('SELECT Client FROM Notes WHERE ScheduleChangeId = $1', [id])).rows;
         // Deleting the change removes its notes (ON DELETE CASCADE)
         await pool.query('DELETE FROM GroupScheduleChanges WHERE ChangeId = $1', [id]);
