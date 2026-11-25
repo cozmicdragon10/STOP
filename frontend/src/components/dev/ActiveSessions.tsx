@@ -6,6 +6,7 @@ import { describeUserAgent } from '../../utils/deviceAccess';
 import { useTableSort } from '../../hooks/useTableSort';
 import { sortRows, timeValue } from '../../utils/tableSort';
 import SortableTh from '../SortableTh';
+import { askConfirm } from '../../utils/confirm';
 
 // "13 Nov 2026, 2:05 PM" style, in the browser's time zone
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -33,7 +34,7 @@ export default function ActiveSessions() {
 
   const end = async (session: DevSession) => {
     const name = session.displayName || session.email;
-    if (!window.confirm(`Sign out ${name} (${session.email}) on this login? They will have to log in again.`)) return;
+    if (!(await askConfirm({ title: `Sign out ${name} (${session.email}) on this login?`, message: 'They will have to log in again.', confirmLabel: 'Sign Out', danger: true }))) return;
     setBusy(session.sessionHash);
     setError('');
     setMessage('');

@@ -11,6 +11,7 @@ import {
 import type { AssessmentInProgress, ClosedIndividualSession, OpenIndividualSession, SessionType } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { ASSESSMENT_ADMIN_ROLES, LONG_OPEN_DAYS, daysOpenText } from '../../utils/assessmentWork';
+import { askConfirm } from '../../utils/confirm';
 
 interface TabClient {
   clientid: number;
@@ -112,7 +113,7 @@ export default function AssessmentsIndividualsTab({ active, clients, groups, emp
     .map(e => e.displayname))).sort((a, b) => a.localeCompare(b));
 
   const discard = async (o: OpenIndividualSession) => {
-    if (!window.confirm(`Remove the scheduled assessment for ${o.lastname}, ${o.firstname}? Nothing was charged.`)) return;
+    if (!(await askConfirm({ title: `Remove the scheduled assessment for ${o.lastname}, ${o.firstname}?`, message: 'Nothing was charged.', confirmLabel: 'Remove', danger: true }))) return;
     try {
       await deleteOpenIndividualSession(o.opensessionid, user.employeeemail);
       if (view.kind === 'begin' && view.open?.opensessionid === o.opensessionid) setView({ kind: 'calendar' });

@@ -4,6 +4,7 @@ import { checkDepositAgainstBank, setDepositSlip, voidBankDeposit } from '../../
 import type { BankDeposit } from '../../api';
 import { errorMessage } from '../../utils/errors';
 import { depositDifference, depositStatus, depositStatusText, moneyText, sameEmail, shortDate } from '../../utils/moneyOnHand';
+import { askConfirm } from '../../utils/confirm';
 
 const TONE = {
   waiting: 'text-amber-300 bg-amber-500/10 border-amber-500/30',
@@ -147,7 +148,7 @@ export default function DepositCard({ deposit: d, userEmail, isAdmin, onChanged,
               {isAdmin && status === 'waiting' && <button type="button" onClick={() => setForm('check')} className={`${buttonClass} bg-emerald-600 hover:bg-emerald-500 text-white`}>Check against bank</button>}
               {isAdmin && d.verifiedon && !d.voidedon && (
                 <button type="button" disabled={busy}
-                  onClick={() => { if (window.confirm('Clear the bank check on this deposit?')) run(() => checkDepositAgainstBank(d.bankdepositid, { clear: true }), `${label}: bank check cleared.`); }}
+                  onClick={async () => { if (await askConfirm({ title: 'Clear the bank check on this deposit?', confirmLabel: 'Clear Bank Check', danger: true })) run(() => checkDepositAgainstBank(d.bankdepositid, { clear: true }), `${label}: bank check cleared.`); }}
                   className={`${buttonClass} bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700`}>Clear bank check</button>
               )}
               {isAdmin && status === 'waiting' && <button type="button" onClick={() => setForm('void')} className={`${buttonClass} bg-slate-800 hover:bg-red-900/60 text-red-300 border border-slate-700`}>Void</button>}

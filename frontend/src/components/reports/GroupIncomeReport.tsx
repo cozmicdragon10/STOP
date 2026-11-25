@@ -13,6 +13,7 @@ import { useTableSort } from '../../hooks/useTableSort';
 import { byField, sortRows } from '../../utils/tableSort';
 import type { SortValue } from '../../utils/tableSort';
 import SortableTh from '../SortableTh';
+import { askConfirm } from '../../utils/confirm';
 
 interface GroupTotals {
   key: string;
@@ -287,7 +288,7 @@ export default function GroupIncomeReport({ userEmail, canRecordDeposits }: { us
   };
 
   const removeDeposit = async (g: GroupTotals, attendees: GroupReportRow[]) => {
-    if (!window.confirm('Remove this deposit? The session will show as pending again.')) return;
+    if (!(await askConfirm({ title: 'Remove this deposit?', message: 'The session will show as pending again.', confirmLabel: 'Remove Deposit', danger: true }))) return;
     const key = sessionDepositKey(g, attendees);
     setFormError(null);
     try {

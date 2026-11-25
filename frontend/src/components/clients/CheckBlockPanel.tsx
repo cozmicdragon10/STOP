@@ -3,6 +3,7 @@ import { Ban } from 'lucide-react';
 import { setClientCheckPayments, type CheckBlock } from '../../api';
 import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
+import { askConfirm } from '../../utils/confirm';
 
 interface Props {
   client: {
@@ -61,7 +62,7 @@ export default function CheckBlockPanel({ client, isAdmin, onChanged, onSuccess,
           <button
             type="button"
             disabled={saving}
-            onClick={() => { if (window.confirm(`Allow ${name} to pay by check again?`)) change(false, ''); }}
+            onClick={async () => { if (await askConfirm({ title: `Allow ${name} to pay by check again?`, confirmLabel: 'Allow Checks' })) change(false, ''); }}
             className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border border-amber-500/40 hover:bg-amber-500/10 disabled:opacity-50"
           >
             Allow Check Payments

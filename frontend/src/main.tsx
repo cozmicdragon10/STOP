@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import ConfirmDialogHost from './components/ConfirmDialogHost'
 import { turnOffBrowserAutofill } from './utils/noAutofill'
 import { applyBannerTheme, applyClientSide, applyClientTabsPosition, applyColorVision, applyCustomColors, applyFontSize, applyFontType, applyTabsPosition, applyTheme, applyWindowTheme, getSavedBannerTheme, getSavedClientSide, getSavedClientTabsPosition, getSavedColorVision, getSavedCustomColors, getSavedFontSize, getSavedFontType, getSavedTabsPosition, getSavedTheme, getSavedWindowTheme } from './hooks/useTheme'
 
@@ -23,5 +24,6 @@ turnOffBrowserAutofill()
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
+    <ConfirmDialogHost />
   </StrictMode>,
 )

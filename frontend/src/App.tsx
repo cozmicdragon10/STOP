@@ -92,6 +92,7 @@ import { scrollToStackedPanel } from './utils/layout';
 import { polygraphHistoryText, polygraphNotice, slotStart, slotSummary, takesPolygraphs } from './utils/polygraph';
 import { errorMessage } from './utils/errors';
 import ScrollLock from './components/ScrollLock';
+import { askConfirm } from './utils/confirm';
 
 export default function App() {
   const [user, setUser] = useState<Employee | null>(null);
@@ -545,7 +546,7 @@ export default function App() {
   };
 
   const handleDeleteSlot = async (slotId: number) => {
-    if (!window.confirm('Are you sure you want to delete this open polygraph slot?')) {
+    if (!(await askConfirm({ title: 'Delete this open polygraph slot?', confirmLabel: 'Delete Slot', danger: true }))) {
       return;
     }
     setLoading(true);
@@ -1400,7 +1401,7 @@ export default function App() {
                       title="Delete client"
                       aria-label={`Delete ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}`}
                       onClick={async () => {
-                        if (!window.confirm(`Delete client ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}? This action cannot be undone.`)) return;
+                        if (!(await askConfirm({ title: `Delete client ${selectedClientDetail.firstname} ${selectedClientDetail.lastname}?`, message: 'This action cannot be undone.', confirmLabel: 'Delete Client', danger: true }))) return;
                         setLoading(true);
                         try {
                           await deleteClient(selectedClientDetail.clientid, user.employeeemail);
@@ -1964,7 +1965,7 @@ export default function App() {
                           <button
                             type="button"
                             onClick={async () => {
-                              if (!window.confirm(`Discard the open check-in for ${o.groupname}? Attendance for these ${o.entries.length} client(s) will not be saved. Payments already taken stay on their accounts.`)) return;
+                              if (!(await askConfirm({ title: `Discard the open check-in for ${o.groupname}?`, message: `Attendance for these ${o.entries.length} client(s) will not be saved. Payments already taken stay on their accounts.`, confirmLabel: 'Discard', danger: true }))) return;
                               try {
                                 await deleteOpenGroup(o.opensessionid, user.employeeemail);
                                 setSuccessMsg(`Open check-in for ${o.groupname} discarded.`);

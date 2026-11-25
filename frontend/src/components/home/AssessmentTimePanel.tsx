@@ -8,6 +8,7 @@ import {
 } from '../../api';
 import { formatDisplayTime } from '../../utils/dates';
 import { assessmentPickList } from '../../utils/counselor';
+import { askConfirm } from '../../utils/confirm';
 
 export interface PanelClient {
   clientid: number;
@@ -103,8 +104,8 @@ export default function AssessmentTimePanel({ appt, clients, today, onClose, onC
     run(() => moveAssessmentAppointment(appt.appointmentid, target.appointmentid),
       `${client}'s assessment moved to ${longDate(target.apptdate)} at ${formatDisplayTime(target.appttime)}. Their old time is open again.`);
   };
-  const cancel = () => {
-    if (!window.confirm(`Cancel ${client}'s assessment on ${when}?`)) return;
+  const cancel = async () => {
+    if (!(await askConfirm({ title: `Cancel ${client}'s assessment on ${when}?`, confirmLabel: 'Cancel Assessment', cancelLabel: 'Keep', danger: true }))) return;
     run(() => cancelAssessmentAppointment(appt.appointmentid), `${client}'s assessment on ${when} was cancelled.`);
   };
 

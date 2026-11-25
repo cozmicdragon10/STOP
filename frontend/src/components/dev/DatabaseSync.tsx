@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ArrowDownToLine, ArrowUpFromLine, RefreshCw } from 'lucide-react';
 import { getDevSyncStatus, runDevSync } from '../../api';
 import type { DevDatabase, DevSyncStatus } from '../../api';
+import { askConfirm } from '../../utils/confirm';
 
 function DatabaseCard({ title, db }: { title: string; db: DevDatabase }) {
   const row = (label: string, value: React.ReactNode) => (
@@ -54,9 +55,9 @@ export default function DatabaseSync() {
   const sync = async (direction: 'pull' | 'push') => {
     if (!status) return;
     const question = direction === 'pull'
-      ? `Replace ${status.dev.name} with a fresh copy of ${status.app.name}? Anything only in ${status.dev.name} is lost.`
-      : `Replace the LIVE database ${status.app.name} with ${status.dev.name}? Everything entered in the app since your last pull is lost (a backup is taken first), and anyone who logged in since then is logged out.`;
-    if (!window.confirm(question)) return;
+      ? { title: `Replace ${status.dev.name} with a fresh copy of ${status.app.name}?`, message: `Anything only in ${status.dev.name} is lost.` }
+      : { title: `Replace the LIVE database ${status.app.name} with ${status.dev.name}?`, message: 'Everything entered in the app since your last pull is lost (a backup is taken first), and anyone who logged in since then is logged out.' };
+    if (!(await askConfirm({ ...question, confirmLabel: 'Replace', danger: true }))) return;
     setBusy(direction);
     setError('');
     setMessage('');

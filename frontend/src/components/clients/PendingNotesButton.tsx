@@ -7,6 +7,7 @@ import { toLocalDay } from '../../utils/dates';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { idText } from '../../utils/clients';
 import ScrollLock from '../ScrollLock';
+import { askConfirm } from '../../utils/confirm';
 
 interface Props {
   userEmail: string;
@@ -50,7 +51,7 @@ export default function PendingNotesButton({ userEmail, refreshKey, onOpenClient
   }
 
   const review = async (note: PendingNote, decision: 'approve' | 'deny') => {
-    if (decision === 'deny' && !window.confirm(`Deny this note on ${note.lastname}, ${note.firstname}'s account? It will no longer show on the account.`)) return;
+    if (decision === 'deny' && !(await askConfirm({ title: `Deny this note on ${note.lastname}, ${note.firstname}'s account?`, message: 'It will no longer show on the account.', confirmLabel: 'Deny Note', danger: true }))) return;
     setBusy(note.noteid);
     setRowError(null);
     try {

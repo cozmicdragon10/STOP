@@ -15,6 +15,7 @@ import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
 import { polyVoucherMax, slotSummary } from '../../utils/polygraph';
 import { idText } from '../../utils/clients';
 import { paymentMethodText, type PaymentMethod } from '../../utils/paymentMethods';
+import { askConfirm } from '../../utils/confirm';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- client, ledger, and slot rows are untyped throughout App */
 export interface LedgerRefresh {
@@ -242,7 +243,7 @@ export default function ClientLedger({ client, role, userEmail, financials, high
     const amount = Math.round(Number(forgive.amount) * 100) / 100;
     const problem = forgivenessProblem({ amount, reason: forgive.reason, owed: forgive.owed });
     if (problem) { setForgiveError(problem); return; }
-    if (!window.confirm(`Forgive ${formatMoney(amount)} of ${client.firstname} ${client.lastname}'s debt? This can't be undone from the ledger.`)) return;
+    if (!(await askConfirm({ title: `Forgive ${formatMoney(amount)} of ${client.firstname} ${client.lastname}'s debt?`, message: 'This can\'t be undone from the ledger.', confirmLabel: 'Forgive Debt', danger: true }))) return;
     const clientid = client.clientid;
     setSaving(true);
     setForgiveError('');
@@ -276,8 +277,8 @@ export default function ClientLedger({ client, role, userEmail, financials, high
             <button
               type="button"
               disabled={blockSaving}
-              onClick={() => {
-                if (window.confirm(`Allow ${client.firstname} ${client.lastname} to pay by credit card again?`)) changeCardBlock(false, '');
+              onClick={async () => {
+                if (await askConfirm({ title: `Allow ${client.firstname} ${client.lastname} to pay by credit card again?`, confirmLabel: 'Allow Cards' })) changeCardBlock(false, '');
               }}
               className="shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg border border-amber-500/40 hover:bg-amber-500/10 disabled:opacity-50"
             >

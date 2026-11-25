@@ -3,6 +3,7 @@ import { CalendarClock, CalendarX, RotateCcw } from 'lucide-react';
 import PopupDialog from './PopupDialog';
 import { changeGroupMeeting, undoGroupScheduleChange, type GroupScheduleChange } from '../../api';
 import { formatDisplayTime } from '../../utils/dates';
+import { askConfirm } from '../../utils/confirm';
 
 // One scheduled meeting of a group the counselor leads (upcoming, or past and never opened), picked on the calendar
 export interface Meeting {
@@ -54,7 +55,7 @@ export default function GroupMeetingPanel({ meeting, today, onClose, onChanged }
     const what = action === 'Cancelled'
       ? `Cancel ${meeting.groupname} on ${longDate(meeting.date)}?`
       : `Move ${meeting.groupname} from ${longDate(meeting.date)} to ${longDate(newDate)} at ${formatDisplayTime(newTime)}?`;
-    if (!window.confirm(`${what}\n\n${clientsText} will get a ${action === 'Cancelled' ? 'Group Cancel' : 'Group Reschedule'} case note.`)) return;
+    if (!(await askConfirm({ title: what, message: `${clientsText} will get a ${action === 'Cancelled' ? 'Group Cancel' : 'Group Reschedule'} case note.`, confirmLabel: action === 'Cancelled' ? 'Cancel Group' : 'Reschedule', cancelLabel: 'Back', danger: action === 'Cancelled' }))) return;
     setSaving(true);
     try {
       const result = await changeGroupMeeting(meeting.groupid, {
@@ -71,7 +72,7 @@ export default function GroupMeetingPanel({ meeting, today, onClose, onChanged }
 
   const undo = async () => {
     if (!change || saving) return;
-    if (!window.confirm(`Undo the ${change.action === 'Cancelled' ? 'cancel' : 'reschedule'} of ${meeting.groupname} on ${longDate(meeting.date)}? The ${change.notes} case note${change.notes === 1 ? '' : 's'} it added will be removed.`)) return;
+    if (!(await askConfirm({ title: `Undo the ${change.action === 'Cancelled' ? 'cancel' : 'reschedule'} of ${meeting.groupname} on ${longDate(meeting.date)}?`, message: `The ${change.notes} case note${change.notes === 1 ? '' : 's'} it added will be removed.`, confirmLabel: 'Undo', danger: true }))) return;
     setSaving(true);
     try {
       const result = await undoGroupScheduleChange(change.changeid);

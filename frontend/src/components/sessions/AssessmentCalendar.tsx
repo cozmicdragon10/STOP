@@ -14,6 +14,7 @@ import {
   openAssessmentSlot, unassignAssessmentSlot, updateAssessmentAppointment,
   type AssessmentAppointment, type AssessmentCreateResult, type AssessmentRepeat,
 } from '../../api';
+import { askConfirm } from '../../utils/confirm';
 
 interface CalendarClient {
   clientid: number;
@@ -210,9 +211,9 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
       setUnassigning(u => u && { ...u, saving: false, error: errorText(err, 'Could not take the client off this time.') });
     }
   };
-  const cancel = (a: AssessmentAppointment) => {
+  const cancel = async (a: AssessmentAppointment) => {
     const what = a.status === 'Open' ? `the open time with ${a.assessor}` : `the assessment for ${a.firstname} ${a.lastname}`;
-    if (!window.confirm(`Cancel ${what} on ${longDay(a.apptdate)} at ${formatDisplayTime(a.appttime)}?`)) return;
+    if (!(await askConfirm({ title: `Cancel ${what} on ${longDay(a.apptdate)} at ${formatDisplayTime(a.appttime)}?`, confirmLabel: a.status === 'Open' ? 'Remove Time' : 'Cancel Assessment', cancelLabel: 'Keep', danger: true }))) return;
     act(() => cancelAssessmentAppointment(a.appointmentid), a.status === 'Open' ? 'Open time removed.' : 'Assessment cancelled.');
   };
 

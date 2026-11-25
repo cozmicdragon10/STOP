@@ -3,6 +3,7 @@ import { Download, Eye, FileText, Pencil, Printer, Trash2, Upload } from 'lucide
 import { ATTACHMENT_MAX_BYTES, deleteLibraryDocument, fetchLibraryDocument, getLibraryDocuments, updateLibraryDocument, uploadLibraryDocument } from '../../api';
 import type { LibraryDocument } from '../../api';
 import { useEmployeeLabel } from '../../hooks/useEmployeeLabel';
+import { askConfirm } from '../../utils/confirm';
 
 interface Props {
   role: string;
@@ -126,7 +127,7 @@ export default function FormsTab({ role, onSuccess }: Props) {
   };
 
   const handleDelete = async (doc: LibraryDocument) => {
-    if (!window.confirm(`Delete ${doc.filename} from the forms library? This cannot be undone.`)) return;
+    if (!(await askConfirm({ title: `Delete ${doc.filename} from the forms library?`, message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true }))) return;
     setError('');
     try {
       await deleteLibraryDocument(doc.documentid);

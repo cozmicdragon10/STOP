@@ -12,6 +12,7 @@ import {
 import { printMoneySlip } from '../../utils/receipt';
 import DepositCard from './DepositCard';
 import HistoryDialog from './HistoryDialog';
+import { askConfirm } from '../../utils/confirm';
 
 interface Props {
   userEmail: string;
@@ -146,10 +147,10 @@ export default function MoneyOnHand({ userEmail, wide = false }: Props) {
     setSlipNumber('');
     return `Bank deposit of ${moneyText(r.total)} recorded${slipNumber.trim() ? ` (slip ${slipNumber.trim()})` : ''}.`;
   });
-  const resolve = (h: MoneyHandoff, act: 'accept' | 'decline' | 'cancel') => {
-    if (act !== 'accept' && !window.confirm(act === 'decline'
-      ? `Decline ${moneyText(h.total)} from ${h.fromname}? It stays with them.`
-      : `Cancel handing ${moneyText(h.total)} to ${h.toname}?`)) return;
+  const resolve = async (h: MoneyHandoff, act: 'accept' | 'decline' | 'cancel') => {
+    if (act !== 'accept' && !(await askConfirm(act === 'decline'
+      ? { title: `Decline ${moneyText(h.total)} from ${h.fromname}?`, message: 'It stays with them.', confirmLabel: 'Decline', danger: true }
+      : { title: `Cancel handing ${moneyText(h.total)} to ${h.toname}?`, confirmLabel: 'Cancel Handoff', cancelLabel: 'Keep', danger: true }))) return;
     run(async () => {
       await resolveHandoff(h.handoffid, act);
       return act === 'accept' ? `You accepted ${moneyText(h.total)} from ${h.fromname}. It's on your money on hand now.`

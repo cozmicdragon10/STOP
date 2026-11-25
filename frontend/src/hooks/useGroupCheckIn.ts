@@ -8,6 +8,7 @@ import type { BipCheckInBlock } from '../utils/bip';
 import { drugTestedOn, needsDuration, outOfUnits, unitCodeFor, unitCodeLabel } from '../utils/federalUnits';
 import { federalGroupFee, individualSessionFee } from '../utils/clients';
 import { paymentMethodText, type PaymentMethod } from '../utils/paymentMethods';
+import { askConfirm } from '../utils/confirm';
 
 export interface ClientRecord {
   clientid: number;
@@ -193,17 +194,20 @@ export const attendedThisWeek = (client: ClientRecord): boolean => {
 
 // Asks about each BIP client who already attended this week. Confirmed clients are approved make-ups;
 // denied clients are left off the check-in.
-const confirmMakeups = (clients: ClientRecord[]) => {
+const confirmMakeups = async (clients: ClientRecord[]) => {
   const makeupIds = new Set<number>();
-  const approved = clients.filter(c => {
-    if (!attendedThisWeek(c)) return true;
-    const ok = window.confirm(
-      `${c.lastname}, ${c.firstname} already attended this week (last attendance: ${new Date(c.lastattended!).toLocaleDateString()}).\n\n` +
-      'Is this an approved make-up attendance?\n\nOK = confirm check-in    Cancel = deny check-in'
-    );
-    if (ok) makeupIds.add(c.clientid);
-    return ok;
-  });
+  const approved: ClientRecord[] = [];
+  // One question at a time, in order
+  for (const c of clients) {
+    if (!attendedThisWeek(c)) { approved.push(c); continue; }
+    const ok = await askConfirm({
+      title: `${c.lastname}, ${c.firstname} already attended this week`,
+      message: `Last attendance: ${new Date(c.lastattended!).toLocaleDateString()}.\n\nIs this an approved make-up attendance?`,
+      confirmLabel: 'Approved Make-Up',
+      cancelLabel: 'Deny Check-In',
+    });
+    if (ok) { makeupIds.add(c.clientid); approved.push(c); }
+  }
   return { approved, makeupIds };
 };
 
@@ -343,10 +347,12 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
 
   // Business Administrators: missed check-ins for a session already closed, picked from the Closed Groups panel. Saved on
   // the day it was held; clients who attended it can't be checked in to it again.
-  const openClosedSession = (id: number, groupName: string, date: string, number: number) => {
-    if (session.length > 0 && !window.confirm(
-      `Discard the ${session.length} client(s) on this attendance sheet and add missed check-ins to ${groupName}?`
-    )) return;
+  const openClosedSession = async (id: number, groupName: string, date: string, number: number) => {
+    if (session.length > 0 && !(await askConfirm({
+      title: `Discard the ${session.length} client(s) on this attendance sheet?`,
+      message: `The sheet is cleared and missed check-ins can be added to ${groupName}.`,
+      confirmLabel: 'Discard Sheet', cancelLabel: 'Keep Sheet', danger: true,
+    }))) return;
     clearWorkflow();
     setGroupId(id);
     setSessionDate(date === todayLocal() ? null : date);
@@ -356,15 +362,17 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
   };
 
   // Loads a saved open group onto the sheet, ready to review and close
-  const resumeOpenGroup = (open: OpenGroupSession) => {
+  const resumeOpenGroup = async (open: OpenGroupSession) => {
     const openSession = open.sessionnumber ?? 1;
     if (groupId === open.groupid && sessionDate === open.sessiondate && sessionNumber === openSession) {
       setView('review');
       return;
     }
-    if (session.length > 0 && !window.confirm(
-      `Discard the ${session.length} client(s) on this attendance sheet and open ${open.groupname}?`
-    )) return;
+    if (session.length > 0 && !(await askConfirm({
+      title: `Discard the ${session.length} client(s) on this attendance sheet?`,
+      message: `The sheet is cleared and ${open.groupname} opens instead.`,
+      confirmLabel: 'Discard Sheet', cancelLabel: 'Keep Sheet', danger: true,
+    }))) return;
 
     clearWorkflow();
     setGroupId(open.groupid);
@@ -429,11 +437,13 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
   };
 
   // date (YYYY-MM-DD) is the day the group took place; today unless a different date was picked
-  const selectGroup = (id: number | null, date = todayLocal()) => {
+  const selectGroup = async (id: number | null, date = todayLocal()) => {
     if (id === groupId && date === (sessionDate ?? todayLocal())) return;
-    if (session.length > 0 && !window.confirm(
-      `Discard the ${session.length} client(s) on this attendance sheet and ${id === groupId ? 'change the session date' : 'switch groups'}?`
-    )) return;
+    if (session.length > 0 && !(await askConfirm({
+      title: `Discard the ${session.length} client(s) on this attendance sheet?`,
+      message: `The sheet is cleared to ${id === groupId ? 'change the session date' : 'switch groups'}.`,
+      confirmLabel: 'Discard Sheet', cancelLabel: 'Keep Sheet', danger: true,
+    }))) return;
 
     clearWorkflow();
     if (id === null) return;
@@ -501,15 +511,15 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
 
   // The Check In button on one roster row: opens the details dialog for just that client. Both check-in paths open the
   // dialog first; nothing reaches the sheet until it is confirmed.
-  const checkInOne = (clientId: number) => {
+  const checkInOne = async (clientId: number) => {
     const client = selectableRoster.find(c => c.clientid === clientId);
     if (!client) return;
-    const { approved, makeupIds } = confirmMakeups([client]);
+    const { approved, makeupIds } = await confirmMakeups([client]);
     if (approved.length === 0) return;
     setPendingCheckIn({ clients: approved, makeupIds });
   };
 
-  const addExternalClients = (clients: ClientRecord[]) => {
+  const addExternalClients = async (clients: ClientRecord[]) => {
     const alreadyAttended = clients.filter(c => attendedIds.has(c.clientid));
     if (alreadyAttended.length > 0) {
       notify.onError(`${alreadyAttended.map(c => `${c.lastname}, ${c.firstname}`).join('; ')} already attended this group session and cannot be checked in to it again.`);
@@ -534,7 +544,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
     const fresh = clients.filter(c => !checkedInIds.has(c.clientid) && !attendedIds.has(c.clientid) && !c.bipcheckinblock
       && !bipIndividual.includes(c) && !noUnits.includes(c));
     if (fresh.length === 0) return;
-    const { approved, makeupIds } = confirmMakeups(fresh);
+    const { approved, makeupIds } = await confirmMakeups(fresh);
     if (approved.length === 0) return;
     setPendingCheckIn({ clients: [...approved].sort(byClientName), makeupIds });
   };
@@ -563,7 +573,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
   // away: the Remove dialog asks where the money goes first. Cash or Other is recorded only when the group closes, so it
   // goes on an account now or back to the client; a card payment is already on their account and can move to the client
   // who actually paid (the usual case: the wrong client was checked in).
-  const removeEntry = (clientId: number) => {
+  const removeEntry = async (clientId: number) => {
     const entry = session.find(e => e.client.clientid === clientId);
     if (!entry) return;
     if (entry.receiptPrinted) {
@@ -575,9 +585,11 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
       return;
     }
     // A sheet saved before card payments kept their receipt numbers: the payment stays where it is
-    if (entry.cardPaid > 0 && !window.confirm(
-      `${entry.client.lastname}, ${entry.client.firstname} paid $${entry.cardPaid.toFixed(2)} by card at check-in. That payment is already on their account and stays there as a credit. Remove them from the sheet?`
-    )) return;
+    if (entry.cardPaid > 0 && !(await askConfirm({
+      title: `Remove ${entry.client.lastname}, ${entry.client.firstname} from the sheet?`,
+      message: `They paid $${entry.cardPaid.toFixed(2)} by card at check-in. That payment is already on their account and stays there as a credit.`,
+      confirmLabel: 'Remove', cancelLabel: 'Keep on Sheet', danger: true,
+    }))) return;
     setSession(prev => prev.filter(e => e.client.clientid !== clientId || e.receiptPrinted));
   };
 

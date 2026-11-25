@@ -7,6 +7,7 @@ import {
   uploadClientAttachment,
 } from '../../api';
 import type { ClientAttachment } from '../../api';
+import { askConfirm } from '../../utils/confirm';
 
 interface Props {
   clientId: number;
@@ -135,7 +136,7 @@ export default function ClientAttachments({ clientId, userEmail, canDelete, canR
   };
 
   const handleDelete = async (attachment: ClientAttachment) => {
-    if (!window.confirm(`Delete ${attachment.filename}? This cannot be undone.`)) return;
+    if (!(await askConfirm({ title: `Delete ${attachment.filename}?`, message: 'This cannot be undone.', confirmLabel: 'Delete', danger: true }))) return;
     setError('');
     try {
       await deleteClientAttachment(attachment.attachmentid, userEmail);

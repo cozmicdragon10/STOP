@@ -3,6 +3,7 @@ import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { deleteClientDebtLimit, fetchClientDebtLimit, saveClientDebtLimit, type DebtLimit } from '../../api';
 import { getLocalDateString, parseLogDate } from '../../utils/dates';
 import { MAX_DEBT_LIMIT, formatBalanceLabeled } from '../../utils/balance';
+import { askConfirm } from '../../utils/confirm';
 
 interface Props {
   client: { clientid: number; accountbalance?: number | string | null };
@@ -68,7 +69,7 @@ export default function MaxDebtOverridePanel({ client, role, onChanged, onSucces
   };
 
   const remove = async () => {
-    if (!window.confirm('Remove the max debt override? The normal balance rules apply again right away.')) return;
+    if (!(await askConfirm({ title: 'Remove the max debt override?', message: 'The normal balance rules apply again right away.', confirmLabel: 'Remove Override', danger: true }))) return;
     setSaving(true);
     setError('');
     try {

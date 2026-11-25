@@ -6,6 +6,7 @@ import { DEVICE_MEMO_MAX, DEVICE_NAME_MAX, describeUserAgent } from '../../utils
 import { useTableSort } from '../../hooks/useTableSort';
 import { sortRows, timeValue } from '../../utils/tableSort';
 import SortableTh from '../SortableTh';
+import { askConfirm } from '../../utils/confirm';
 
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '-');
 const STATUS_LABEL: Record<string, string> = { denied: 'Denied', revoked: 'Removed', expired: 'Expired', pending: 'Pending', approved: 'Approved' };
@@ -96,16 +97,16 @@ export default function DeviceApprovals() {
     }
   };
 
-  const decide = (device: DeviceRow, approve: boolean, memo: string, name: string) => {
+  const decide = async (device: DeviceRow, approve: boolean, memo: string, name: string) => {
     const who = device.requestName || device.name;
-    if (!approve && !window.confirm(`Deny the request from ${who}? They will not be able to use STOP from that device.`)) return;
+    if (!approve && !(await askConfirm({ title: `Deny the request from ${who}?`, message: 'They will not be able to use STOP from that device.', confirmLabel: 'Deny', danger: true }))) return;
     run(device.deviceId,
       () => (approve ? approveDevice(device.deviceId, memo.trim(), name.trim() || undefined) : denyDevice(device.deviceId, memo.trim())),
       approve ? `Approved ${name.trim() || who}.` : `Denied the request from ${who}.`);
   };
 
-  const revoke = (device: DeviceRow) => {
-    if (!window.confirm(`Remove ${device.name}? It will be signed out and will have to request access again.`)) return;
+  const revoke = async (device: DeviceRow) => {
+    if (!(await askConfirm({ title: `Remove ${device.name}?`, message: 'It will be signed out and will have to request access again.', confirmLabel: 'Remove', danger: true }))) return;
     run(device.deviceId, () => revokeDevice(device.deviceId), `Removed ${device.name}.`);
   };
 

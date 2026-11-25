@@ -10,6 +10,7 @@ import { toLocalDay } from '../../utils/dates';
 import { useTableSort } from '../../hooks/useTableSort';
 import { phaseValue, sortRows, timeValue } from '../../utils/tableSort';
 import SortableTh from '../SortableTh';
+import { askConfirm } from '../../utils/confirm';
 
 interface DirectoryGroup {
   groupid: number;
@@ -275,7 +276,7 @@ export default function GroupsTab({ groups, clients, employees, role, onSuccess,
 
   const handleDeleteGroup = async () => {
     if (!selectedGroupDetail || !canDeleteGroups) return;
-    if (!window.confirm(`Delete group "${selectedGroupDetail.groupname}"? This cannot be undone.`)) return;
+    if (!(await askConfirm({ title: `Delete group "${selectedGroupDetail.groupname}"?`, message: 'This cannot be undone.', confirmLabel: 'Delete Group', danger: true }))) return;
     setSaving(true);
     try {
       const res = await deleteGroup(selectedGroupDetail.groupid);

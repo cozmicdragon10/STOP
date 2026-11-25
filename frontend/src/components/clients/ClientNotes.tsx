@@ -9,6 +9,7 @@ import { caseNoteLabel } from '../../utils/notes';
 import { EMPTY_NOTE_FILTERS, sortedUnique } from '../../utils/filters';
 import { formatLogMonthDay, formatLogTime, formatLogYear, localYmd } from '../../utils/dates';
 import ScrollLock from '../ScrollLock';
+import { askConfirm } from '../../utils/confirm';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- note rows are untyped throughout App */
 interface Props {
@@ -206,7 +207,7 @@ export default function ClientNotes({ clientId, user, notes, setNotes, onApprova
   // Business Administrators approve or deny a pending note here or from the Client Directory's approval list.
   // A denied note leaves the account.
   const handleReview = async (noteId: number, decision: 'approve' | 'deny') => {
-    if (decision === 'deny' && !window.confirm('Deny this case note? It will no longer show on the account.')) return;
+    if (decision === 'deny' && !(await askConfirm({ title: 'Deny this case note?', message: 'It will no longer show on the account.', confirmLabel: 'Deny Note', danger: true }))) return;
     setReviewingId(noteId);
     setNoteError(null);
     try {

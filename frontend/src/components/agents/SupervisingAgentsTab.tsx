@@ -12,6 +12,7 @@ import type { ActiveClientFilter, DirectoryFilter } from '../../utils/agents';
 import { useTableSort } from '../../hooks/useTableSort';
 import { sortRows } from '../../utils/tableSort';
 import SortableTh from '../SortableTh';
+import { askConfirm } from '../../utils/confirm';
 
 type AgentSortKey = 'name' | 'agenttype' | 'location' | 'phone' | 'email' | 'activeClients';
 
@@ -206,7 +207,7 @@ export default function SupervisingAgentsTab({ clients, user, dischargeStatuses,
   };
 
   const handleDelete = async (agent: SupervisingAgent) => {
-    if (!window.confirm(`Delete ${agent.name} from the directory? Clients keep this agent's name on their records.`)) return;
+    if (!(await askConfirm({ title: `Delete ${agent.name} from the directory?`, message: 'Clients keep this agent\'s name on their records.', confirmLabel: 'Delete', danger: true }))) return;
     try {
       await deleteSupervisingAgent(agent.agentid, user.employeeemail);
       onSuccess('Agent deleted.');

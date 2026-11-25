@@ -5,6 +5,7 @@ import { deleteOutsideBipAssessment, getClientProgress, recordOutsideBipAssessme
 import type { ClientProgress, CompletedAssessment } from '../../api';
 import { todayLocal } from '../../hooks/useGroupCheckIn';
 import { errorMessage } from '../../utils/errors';
+import { askConfirm } from '../../utils/confirm';
 
 interface Props {
   clientId: number;
@@ -60,7 +61,7 @@ export default function ProgressTab({ clientId, role, userEmail, onChanged, onSu
   };
 
   const remove = async (id: number, what: string) => {
-    if (!window.confirm(`Remove the outside ${what}? If it is the client's only intake, they can't be checked into group until another is recorded.`)) return;
+    if (!(await askConfirm({ title: `Remove the outside ${what}?`, message: 'If it is the client\'s only intake, they can\'t be checked into group until another is recorded.', confirmLabel: 'Remove', danger: true }))) return;
     try {
       await deleteOutsideBipAssessment(id, userEmail);
       onSuccess(`Outside ${what} removed.`);
