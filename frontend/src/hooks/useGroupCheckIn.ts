@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { addClientNote, changeGroupMeeting, deleteOpenGroup, getGroupClients, getGroupOffDay, getGroupSessions, moveCardPayment, saveOpenGroup, submitAccountPayment, submitBatchAttendance } from '../api';
-import type { GroupDaySession } from '../api';
+import type { GroupDaySession, GroupOffDay } from '../api';
 import type { OpenGroupSession } from '../api';
 import { isMonthlyFeeClient } from '../utils/soPhases';
 import { bipCheckInBlockMessage } from '../utils/bip';
@@ -245,6 +245,11 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
   const rosterRequestId = useRef(0);
   // The same for the "not its regular day" question, so it's never asked about a group no longer picked
   const offDayRequestId = useRef(0);
+  // Finish Check-In on a day that isn't the group's regular day: the Group Reschedule dialog waiting for an answer
+  // (or Close Group: then says which one carries on once it's answered)
+  const [offDayPrompt, setOffDayPrompt] = useState<{ groupId: number; date: string; off: GroupOffDay; then: 'review' | 'close' } | null>(null);
+  // "groupId|date" once that question has been answered, so going back and pressing Finish Check-In again doesn't re-ask
+  const offDayAsked = useRef('');
 
   const checkedInIds = useMemo(() => new Set(session.map(e => e.client.clientid)), [session]);
 
@@ -305,6 +310,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
   const clearWorkflow = () => {
     rosterRequestId.current++;
     offDayRequestId.current++;
+    setOffDayPrompt(null);
+    offDayAsked.current = '';
     setGroupId(null);
     setView('checkin');
     setRoster([]);
@@ -371,7 +378,37 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
 
   // Saves the sheet as an open group so it can be closed later. Finish Check-In (thenReview) then goes on to the Review &
   // Comments screen to add comments and close the group; Save for Later clears the screen.
+  // Finish Check-In on a day that isn't the group's regular day first opens the Group Reschedule dialog (offDayPrompt);
+  // answering it (answerOffDay) carries on with the save.
   const finishCheckIn = async ({ thenReview = false }: { thenReview?: boolean } = {}) => {
+    if (groupId === null || session.length === 0) return;
+    if (thenReview && await askOffDay('review')) return;
+    await saveCheckIn(thenReview);
+  };
+
+  // Finish Check-In (then = 'review') and Close Group (then = 'close') on a day that isn't the group's regular day: opens
+  // the Group Reschedule dialog and returns true, or false when there's nothing to ask (its regular day, already asked
+  // for this group and day, adding to a closed session, or the meeting already moved, held or cancelled that week).
+  const askOffDay = async (then: 'review' | 'close'): Promise<boolean> => {
+    if (groupId === null || addingToClosed) return false;
+    const date = sessionDate ?? todayLocal();
+    if (offDayAsked.current === `${groupId}|${date}`) return false;
+    const requestId = ++offDayRequestId.current;
+    setSubmitting(true);
+    let off: GroupOffDay | null = null;
+    try {
+      off = await getGroupOffDay(groupId, date);
+    } catch {
+      // The schedule check failing never holds up the check-in; it just isn't asked
+    }
+    setSubmitting(false);
+    if (requestId !== offDayRequestId.current) return true;
+    if (!off?.offer || !off.scheduledDate || !off.newTime) return false;
+    setOffDayPrompt({ groupId, date, off, then });
+    return true;
+  };
+
+  const saveCheckIn = async (thenReview: boolean) => {
     if (groupId === null || session.length === 0) return;
     setSubmitting(true);
     try {
@@ -403,38 +440,32 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
     setGroupId(id);
     setSessionDate(date === todayLocal() ? null : date);
     loadRoster(id, date);
-    offerOffDayReschedule(id, date);
   };
 
-  // Picking a group on a day that isn't its regular day: ask whether to move that week's meeting here, which adds a Group
-  // Reschedule case note for each client. Asked only while that week's meeting hasn't been held, opened, cancelled or
-  // moved, and only of someone who can change the group's meetings. Either way the calendar shows the day it was held.
-  const offerOffDayReschedule = async (id: number, date: string) => {
-    const requestId = ++offDayRequestId.current;
-    try {
-      const off = await getGroupOffDay(id, date);
-      if (requestId !== offDayRequestId.current || !off.offer || !off.scheduledDate || !off.newTime) return;
-      const clients = off.clients == null ? 'each active client' : `the ${off.clients} active client${off.clients === 1 ? '' : 's'}`;
-      const ok = window.confirm(
-        `${off.groupName} normally meets on ${off.scheduleDay}s (this week: ${checkInDate(off.scheduledDate)}), ` +
-        `but you're opening it on ${checkInDate(date)}.
-
-` +
-        `Add a Group Reschedule note to ${clients}' accounts, moving this week's meeting to ${checkInDate(date)}?
-
-` +
-        'OK = add the notes    Cancel = no notes (the calendar still shows the day it was held)'
-      );
-      if (!ok || requestId !== offDayRequestId.current) return;
-      const result = await changeGroupMeeting(id, {
-        originalDate: off.scheduledDate, action: 'Rescheduled', newDate: date, newTime: off.newTime,
-        reason: 'The group met on a different day this week.',
-      });
-      notify.onSuccess(`${off.groupName}: this week's meeting moved to ${checkInDate(date)}. Group Reschedule note added to ${result.notes} client${result.notes === 1 ? '' : 's'}.`);
-    } catch (err: unknown) {
-      if (requestId !== offDayRequestId.current) return;
-      notify.onError(`The reschedule note wasn't added: ${err instanceof Error && err.message ? err.message : 'something went wrong'}. The check-in itself isn't affected.`);
+  // Answer to the Group Reschedule dialog shown at Finish Check-In or Close Group on a day that isn't the group's regular
+  // day. 'add' moves that week's meeting to the check-in day, which adds a Group Reschedule case note for each client;
+  // 'skip' adds no notes (the calendar still shows the day it was held); both then carry on: Finish Check-In saves the
+  // check-in and goes on to Review, Close Group saves the attendance. 'cancel' goes back to the screen without saving.
+  // Asked once per group and day: answered, neither button asks again.
+  const answerOffDay = async (choice: 'add' | 'skip' | 'cancel') => {
+    const prompt = offDayPrompt;
+    setOffDayPrompt(null);
+    if (!prompt || choice === 'cancel') return;
+    offDayAsked.current = `${prompt.groupId}|${prompt.date}`;
+    const { off, date } = prompt;
+    if (choice === 'add') {
+      try {
+        const result = await changeGroupMeeting(prompt.groupId, {
+          originalDate: off.scheduledDate!, action: 'Rescheduled', newDate: date, newTime: off.newTime!,
+          reason: 'The group met on a different day this week.',
+        });
+        notify.onSuccess(`${off.groupName}: this week's meeting moved to ${checkInDate(date)}. Group Reschedule note added to ${result.notes} client${result.notes === 1 ? '' : 's'}.`);
+      } catch (err: unknown) {
+        notify.onError(`The reschedule note wasn't added: ${err instanceof Error && err.message ? err.message : 'something went wrong'}. The check-in itself isn't affected.`);
+      }
     }
+    if (prompt.then === 'close') await closeGroup();
+    else await saveCheckIn(true);
   };
 
   const reloadRoster = () => {
@@ -671,6 +702,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
 
   const backToCheckIn = () => setView('checkin');
 
+  // Close Group & Save Attendance. On a day that isn't the group's regular day it first asks about Group Reschedule notes
+  // (if Finish Check-In didn't already, e.g. a sheet saved for later and reopened from Open Groups)
   const submitSession = async () => {
     if (groupId === null) return;
     const problem = validateSession(session, groupProgram);
@@ -678,7 +711,12 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
       notify.onError(problem);
       return;
     }
+    if (await askOffDay('close')) return;
+    await closeGroup();
+  };
 
+  const closeGroup = async () => {
+    if (groupId === null) return;
     setSubmitting(true);
     try {
       const res = await submitBatchAttendance({
@@ -756,6 +794,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
     openClosedSession,
     resumeOpenGroup,
     finishCheckIn,
+    offDayPrompt,
+    answerOffDay,
     coveredBy,
     setCoveredBy,
     individualFee,

@@ -115,9 +115,9 @@ router.delete('/api/group-schedule-changes/:id', async (req, res) => {
     }
 });
 
-// Picking a group to check in on a day that isn't its regular day (?date=YYYY-MM-DD): whether to offer moving that week's
-// meeting there, so each client gets a Group Reschedule note. The check-in screen asks the user; saying yes posts the
-// reschedule above. { offDay: false } on its regular day or for a group with no weekly day.
+// Finishing a group check-in on a day that isn't its regular day (?date=YYYY-MM-DD): whether to offer moving that week's
+// meeting there, so each client gets a Group Reschedule note. The check-in screen asks the user in a dialog at Finish
+// Check-In; saying yes posts the reschedule above. { offDay: false } on its regular day or for a group with no weekly day.
 router.get('/api/groups/:id/off-day', async (req, res) => {
     try {
         const { id } = req.params;
@@ -130,11 +130,13 @@ router.get('/api/groups/:id/off-day', async (req, res) => {
         const weekStart = weekStartOf(date);
         const [changed, held, clients] = await Promise.all([
             pool.query('SELECT 1 FROM GroupScheduleChanges WHERE GroupId = $1 AND OriginalDate = $2', [id, scheduledDate]),
-            // Any check-in that week, saved or still open
+            // Any check-in that week, saved or still open. An open check-in on date itself is the sheet being finished
+            // (Finish Check-In asks this question), so it doesn't count.
             pool.query(
                 `SELECT 1 FROM Attendance WHERE "Group" = $1 AND Type = 'Group' AND Date BETWEEN $2::date AND $2::date + 6
-                 UNION ALL SELECT 1 FROM OpenGroupSessions WHERE GroupId = $1 AND SessionDate BETWEEN $2::date AND $2::date + 6 LIMIT 1`,
-                [id, weekStart]),
+                 UNION ALL SELECT 1 FROM OpenGroupSessions WHERE GroupId = $1 AND SessionDate BETWEEN $2::date AND $2::date + 6
+                   AND SessionDate <> $3::date LIMIT 1`,
+                [id, weekStart, date]),
             pool.query("SELECT COUNT(*)::int AS n FROM Clients WHERE GroupId = $1 AND ProgramStatus = 'Active'", [id]),
         ]);
         const check = offDayCheck({

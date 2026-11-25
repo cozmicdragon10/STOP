@@ -303,6 +303,40 @@ export default function GroupCheckInWorkflow({ groups, clients, createdBy, canPi
         );
       })()}
 
+      {/* Finish Check-In or Close Group on a day that isn't the group's regular day: move this week's meeting here (a Group
+          Reschedule note on each client's account), or carry on without notes */}
+      {wf.offDayPrompt && (() => {
+        const { off, date, then } = wf.offDayPrompt;
+        const closing = then === 'close';
+        const clients = off.clients == null ? 'each active client' : `the ${off.clients} active client${off.clients === 1 ? '' : 's'}`;
+        return (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <ScrollLock />
+          <div role="dialog" aria-modal="true" aria-labelledby="off-day-title" className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md max-h-full overflow-y-auto p-6 space-y-4">
+            <h3 id="off-day-title" className="text-lg font-bold text-white">
+              {off.groupName} isn't usually held on this day
+            </h3>
+            <p className="text-sm text-slate-300">
+              {off.groupName} normally meets on {off.scheduleDay}s (this week: {formatSessionDay(off.scheduledDate!)}),
+              but this check-in is for {formatSessionDay(date)}. Add a Group Reschedule note to {clients}' accounts, moving
+              this week's meeting to {formatSessionDay(date)}?
+            </p>
+            <div className="space-y-2">
+              <button type="button" onClick={() => wf.answerOffDay('add')} className="w-full text-left bg-blue-600 hover:bg-blue-500 text-white rounded-lg p-3">
+                <p className="font-semibold text-sm">Add Reschedule Notes</p>
+                <p className="text-xs text-blue-100 mt-0.5">Moves this week's meeting to {formatSessionDay(date)}, adds the note to each client's case notes, then {closing ? 'closes the group' : 'finishes the check-in'}.</p>
+              </button>
+              <button type="button" onClick={() => wf.answerOffDay('skip')} className="w-full text-left bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 rounded-lg p-3">
+                <p className="font-semibold text-sm">No Notes</p>
+                <p className="text-xs text-slate-400 mt-0.5">{closing ? 'Closes the group' : 'Finishes the check-in'} without notes. The calendar still shows the day it was held.</p>
+              </button>
+              <button type="button" onClick={() => wf.answerOffDay('cancel')} className="w-full text-center text-xs text-slate-400 hover:text-slate-200 py-2">{closing ? 'Back to Review' : 'Back to Check-In'}</button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
       {/* Steps 2 and 3 stay hidden until a group is chosen */}
       {group && (
         <div ref={stepPanelRef}>

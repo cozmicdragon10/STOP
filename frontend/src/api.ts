@@ -529,7 +529,7 @@ export async function getGroupScheduleChanges(month: string): Promise<GroupSched
     return jsonResponse(res, 'Failed to load group schedule changes.');
 }
 
-// Picking a group to check in on a day (YYYY-MM-DD) that isn't its regular day: offer says whether to ask about moving
+// Finishing a group check-in on a day (YYYY-MM-DD) that isn't its regular day: offer says whether to ask about moving
 // that week's meeting (scheduledDate) there, at newTime (HH:MM, its regular time)
 export interface GroupOffDay {
     offDay: boolean;
