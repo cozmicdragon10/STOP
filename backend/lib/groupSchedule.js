@@ -44,9 +44,9 @@ const canChangeGroup = (user, groupCounselor) => {
     return user?.role === 'Counselor' && mine !== '' && mine === String(groupCounselor || '').trim().toLowerCase();
 };
 
-// The first problem with cancelling or rescheduling the meeting on originalDate (past or upcoming), or null. A reschedule
-// still moves it to today or later. schedule is the group's
-// schedule text; today is YYYY-MM-DD (local).
+// The first problem with cancelling or rescheduling the meeting on originalDate (past or upcoming), or null. An upcoming
+// meeting moves to today or later; a past one to any date. schedule is the group's schedule text; today is YYYY-MM-DD
+// (local).
 const changeProblem = ({ action, originalDate, newDate, newTime, schedule, today }) => {
     if (!CHANGE_ACTIONS.includes(action)) return 'Choose Cancel or Reschedule.';
     const { day, time } = parseSchedule(schedule);
@@ -55,7 +55,8 @@ const changeProblem = ({ action, originalDate, newDate, newTime, schedule, today
     if (weekdayOf(originalDate) !== day) return `This group meets on ${day}s, not on ${longDate(originalDate)}.`;
     if (action === 'Cancelled') return null;
     if (!YMD.test(String(newDate || ''))) return 'Enter the new date.';
-    if (newDate < today) return 'The new date must be today or later.';
+    // A past meeting can be moved to any date (say, the day it was really held); an upcoming one only to today or later
+    if (originalDate >= today && newDate < today) return 'The new date must be today or later.';
     if (!HHMM.test(String(newTime || ''))) return 'Enter the new time.';
     if (newDate === originalDate && newTime === to24h(time)) return 'Pick a different date or time to reschedule to.';
     return null;

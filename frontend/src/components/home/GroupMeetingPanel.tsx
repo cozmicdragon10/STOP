@@ -117,7 +117,7 @@ export default function GroupMeetingPanel({ meeting, today, onClose, onChanged }
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label htmlFor="meeting-new-date" className="block text-xs text-slate-400 uppercase mb-1">New Date</label>
-                <input id="meeting-new-date" type="date" min={today} value={newDate} onChange={e => { setNewDate(e.target.value); setError(''); }} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" />
+                <input id="meeting-new-date" type="date" min={meeting.date < today ? undefined : today} value={newDate} onChange={e => { setNewDate(e.target.value); setError(''); }} className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-white text-sm" />
               </div>
               <div>
                 <label htmlFor="meeting-new-time" className="block text-xs text-slate-400 uppercase mb-1">New Time</label>

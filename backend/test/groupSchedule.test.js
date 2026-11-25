@@ -23,10 +23,11 @@ test('an upcoming meeting on the group\'s day can be cancelled', () => {
     assert.equal(changeProblem({ ...base, action: 'Cancelled', originalDate: '2026-11-16', schedule: 'Mondays @ 6:00 PM' }), null);
 });
 
-test('a past meeting can be cancelled, or rescheduled to today or later', () => {
+test('a past meeting can be cancelled, or rescheduled to any date (say, the day it was really held)', () => {
     assert.equal(changeProblem({ ...base, action: 'Cancelled', originalDate: '2026-11-12' }), null);
     assert.equal(changeProblem({ ...base, action: 'Rescheduled', originalDate: '2026-11-12', newDate: '2026-11-17', newTime: '17:00' }), null);
-    assert.match(changeProblem({ ...base, action: 'Rescheduled', originalDate: '2026-11-12', newDate: '2026-11-13', newTime: '17:00' }), /today or later/);
+    assert.equal(changeProblem({ ...base, action: 'Rescheduled', originalDate: '2026-11-12', newDate: '2026-11-13', newTime: '17:00' }), null);
+    assert.match(changeProblem({ ...base, action: 'Rescheduled', originalDate: '2026-11-12', newDate: '', newTime: '17:00' }), /new date/);
 });
 
 test('only real meetings can change', () => {

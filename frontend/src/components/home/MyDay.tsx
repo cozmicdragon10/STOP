@@ -177,9 +177,11 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
       }
     }
   }
-  // Where a rescheduled meeting moved to (its original date may be in another month)
+  // Where a rescheduled meeting moved to (its original date may be in another month), until it's held there: then the
+  // held (or open) session stands in for it
   for (const c of myChanges) {
     if (c.action !== 'Rescheduled' || !c.newdate || !c.newdate.startsWith(month)) continue;
+    if (taken.has(`${c.newdate}|${c.groupid}`)) continue;
     const time = formatDisplayTime(c.newtime || '');
     add(c.newdate, {
       key: `r${c.changeid}`, kind: 'scheduled', label: `${time} ${c.groupname}`,
