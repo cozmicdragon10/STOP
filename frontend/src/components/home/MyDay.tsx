@@ -153,8 +153,10 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
   for (const s of sessions?.closed ?? []) {
     taken.add(`${s.sessiondate}|${s.groupid}`);
     const tags = closedTags(s, !viewing);
-    add(s.sessiondate, groupItem(`c${s.groupid}-${s.sessiondate}-${s.sessionnumber}`, 'closed', s.groupname, s.groupid,
-      [`Closed · ${plural(s.clients, 'client')} checked in`, ...tags].join(' · ')));
+    const item = groupItem(`c${s.groupid}-${s.sessiondate}-${s.sessionnumber}`, 'closed', s.groupname, s.groupid,
+      [`Closed · ${plural(s.clients, 'client')} checked in`, ...tags].join(' · '));
+    // A check on the calendar chip, like a completed assessment
+    add(s.sessiondate, { ...item, label: `✓ ${item.label}` });
   }
   for (const s of sessions?.open ?? []) {
     taken.add(`${s.sessiondate}|${s.groupid}`);
