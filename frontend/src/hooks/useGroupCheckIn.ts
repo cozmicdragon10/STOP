@@ -677,6 +677,11 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
         await saveOpenGroup({ group: groupId, date: sessionDate ?? todayLocal(), sessionNumber, entries: next, createdBy, coveredBy });
         notify.onOpenGroupsChanged?.();
       } else if (saved) {
+        // The last client is off the sheet. The saved copy still lists their cash, which the server won't let a discard
+        // lose; it's settled now (applied to an account or handed back), so clear it on the saved copy first.
+        if (entry.payment > 0) {
+          await saveOpenGroup({ group: groupId, date: sessionDate ?? todayLocal(), sessionNumber, entries: [{ ...entry, payment: 0 }], createdBy, coveredBy });
+        }
         await deleteOpenGroup(saved.opensessionid, createdBy);
         notify.onOpenGroupsChanged?.();
       }
