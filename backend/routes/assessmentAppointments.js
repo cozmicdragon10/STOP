@@ -42,7 +42,8 @@ const releaseOpenSession = async (db, appointmentId) => {
     await db.query('UPDATE OpenIndividualSessions SET AssessmentAppointmentId = NULL WHERE AssessmentAppointmentId = $1', [appointmentId]);
 };
 
-// Appointments and open times from one date through another (YYYY-MM-DD), oldest first, cancelled ones included
+// Appointments and open times from one date through another (YYYY-MM-DD), oldest first, cancelled ones included. An open
+// time on a day that has passed with nobody booked into it is left out: it can't be used any more.
 router.get('/api/assessment-appointments', async (req, res) => {
     try {
         const { from, to } = req.query;
@@ -51,8 +52,9 @@ router.get('/api/assessment-appointments', async (req, res) => {
         }
         const result = await pool.query(
             `SELECT ${APPOINTMENT_COLUMNS} FROM ${APPOINTMENT_FROM}
-             WHERE a.ApptDate BETWEEN $1 AND $2 ORDER BY a.ApptDate, a.ApptTime, c.LastName, c.FirstName`,
-            [from, to]);
+             WHERE a.ApptDate BETWEEN $1 AND $2 AND NOT (a.Status = 'Open' AND a.ApptDate < $3::date)
+             ORDER BY a.ApptDate, a.ApptTime, c.LastName, c.FirstName`,
+            [from, to, todayLocal()]);
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: err.message });

@@ -1,6 +1,7 @@
 // The look every month calendar shares (My Day / Calendars tab, Assessments, Polygraph Schedule, a client's Attendance
 // calendar), so a color means the same thing wherever it shows up. Color is what state an entry is in; an icon on the
-// chip says what kind of entry it is (assessment, individual, polygraph). Days before today are dimmed and today is
+// chip says what kind of entry it is (assessment, individual, polygraph). A scheduled assessment has its own color, so it
+// doesn't look like a scheduled group beside it. Days before today are dimmed and today is
 // outlined.
 
 // What an entry's color means
@@ -8,6 +9,7 @@ export type CalendarTone =
   | 'done'       // happened: a closed session, an attended session, a polygraph taken
   | 'open'       // a check-in sheet still open, waiting to be closed
   | 'booked'     // scheduled, with someone expected: an upcoming group meeting, a client's booked time
+  | 'assessment' // an assessment scheduled with a client
   | 'available'  // an open time nobody is booked into yet
   | 'cancelled'
   | 'moved'      // moved to another day (shown on the day it was moved from)
@@ -19,6 +21,8 @@ export const TONE_CHIP: Record<CalendarTone, string> = {
   open: 'bg-amber-500/15 border-amber-500/40 text-amber-200',
   // Filled, so it stands apart from an open time's empty dashed box
   booked: 'bg-blue-500/25 border-dashed border-blue-400/80 text-blue-200',
+  // Violet with a solid border, so it can't be taken for a scheduled group (blue, dashed)
+  assessment: 'bg-violet-500/20 border-violet-400/80 text-violet-200',
   available: 'bg-transparent border-dashed border-slate-500/70 text-slate-300',
   cancelled: 'bg-rose-500/10 border-rose-500/40 text-rose-300 line-through',
   moved: 'bg-transparent border-dashed border-rose-400/50 text-rose-300',
@@ -31,6 +35,7 @@ export const TONE_LABEL: Record<CalendarTone, string> = {
   done: 'Happened',
   open: 'Check-in still open',
   booked: 'Scheduled, coming up',
+  assessment: 'Assessment scheduled',
   available: 'Open time, nobody booked',
   cancelled: 'Cancelled',
   moved: 'Moved to another day',

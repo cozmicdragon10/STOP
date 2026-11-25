@@ -1,5 +1,6 @@
 const express = require('express');
 const { pool } = require('../db');
+const { todayLocal } = require('../lib/dates');
 
 const router = express.Router();
 const MONTH = /^\d{4}-\d{2}$/;
@@ -63,16 +64,17 @@ router.get('/api/my-sessions', async (req, res) => {
              ORDER BY o.SessionDate, g.GroupName`,
             [me, firstDay]
         );
-        // Their own assessment times this month from the Assessments calendar: open availability and scheduled clients
+        // Their own assessment times this month from the Assessments calendar: open availability (from today on; one that
+        // passed with nobody booked is gone) and scheduled clients
         const assessments = await pool.query(
             `SELECT a.AppointmentId AS appointmentid, to_char(a.ApptDate, 'YYYY-MM-DD') AS apptdate, to_char(a.ApptTime, 'HH24:MI') AS appttime,
                     a.Location AS location, a.Status AS status, a.Assessor AS assessor, a.Notes AS notes,
                     c.FirstName AS firstname, c.LastName AS lastname
              FROM AssessmentAppointments a LEFT JOIN Clients c ON c.ClientId = a.ClientId
-             WHERE LOWER(TRIM(a.Assessor)) = LOWER(TRIM($1)) AND a.Status IN ('Open', 'Scheduled')
+             WHERE LOWER(TRIM(a.Assessor)) = LOWER(TRIM($1)) AND (a.Status = 'Scheduled' OR (a.Status = 'Open' AND a.ApptDate >= $3::date))
                AND date_trunc('month', a.ApptDate) = date_trunc('month', $2::date)
              ORDER BY a.ApptDate, a.ApptTime`,
-            [myName, firstDay]
+            [myName, firstDay, todayLocal()]
         );
         // Every day the groups they lead had a check-in (saved or open, whoever ran it), over the whole weeks the month's
         // calendar shows. A group held on another day of a week stands in for that week's regular meeting.

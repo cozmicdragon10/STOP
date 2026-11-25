@@ -80,7 +80,7 @@ export default function ClientAttendanceCalendar({ rows, schedule, filtered }: P
   const sessions = inMonth.filter(r => !r.cancellation && !r.missed).length;
   const cancelled = inMonth.filter(r => r.cancellation).length;
   const missed = inMonth.filter(r => r.missed).length;
-  const comingUp = [...scheduled.values()].flat().filter(e => e.tone === 'booked').length;
+  const comingUp = [...scheduled.values()].flat().filter(e => e.tone === 'booked' || e.tone === 'assessment').length;
   const phaseNote = shownSchedule?.group ? phaseAttendanceNote(shownSchedule.phase) : '';
 
   return (
@@ -103,7 +103,7 @@ export default function ClientAttendanceCalendar({ rows, schedule, filtered }: P
         ))}
         legend={
           <CalendarLegend
-            tones={['done', 'booked', 'cancelled', 'moved', 'missed']}
+            tones={['done', 'booked', 'assessment', 'cancelled', 'moved', 'missed']}
             labels={{ done: 'Attended / taken' }}
             kinds={['assessment', 'individual', 'polygraph']}
           />

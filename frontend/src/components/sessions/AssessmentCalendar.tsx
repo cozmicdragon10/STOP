@@ -265,7 +265,7 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
             </p>
             {a.notes && <p className="text-xs text-slate-500 mt-1">{a.notes}</p>}
           </div>
-          <span className={`shrink-0 text-xs px-2 py-0.5 rounded border ${isOpen ? TONE_CHIP.available : TONE_CHIP.booked}`}>
+          <span className={`shrink-0 text-xs px-2 py-0.5 rounded border ${isOpen ? TONE_CHIP.available : TONE_CHIP.assessment}`}>
             {isOpen ? 'Open' : 'Scheduled'}
           </span>
         </div>
@@ -539,11 +539,11 @@ export default function AssessmentCalendar({ clients, counselors, user, onNewAss
             return (
               <>
                 {open > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.available}`}>{open}<span className="hidden sm:inline"> open</span></span>}
-                {booked > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.booked}`}>{booked}<span className="hidden sm:inline"> scheduled</span></span>}
+                {booked > 0 && <span className={`text-[10px] sm:text-[11px] leading-tight rounded border px-1 truncate ${TONE_CHIP.assessment}`}>{booked}<span className="hidden sm:inline"> scheduled</span></span>}
               </>
             );
           }}
-          legend={<CalendarLegend tones={['available', 'booked']} labels={{ available: 'Open time', booked: 'Client scheduled' }} />}
+          legend={<CalendarLegend tones={['available', 'assessment']} labels={{ available: 'Open time', assessment: 'Client scheduled' }} />}
         />
       </div>
 

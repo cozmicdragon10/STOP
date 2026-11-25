@@ -64,7 +64,7 @@ describe('clientCalendarEntries', () => {
     const map = clientCalendarEntries(data, '2026-12');
     expect(labels(map)).toEqual({
       '2026-12-02': ['done:Polygraph: Maintenance'],
-      '2026-12-15': ['booked:1:30 PM Assessment'],
+      '2026-12-15': ['assessment:1:30 PM Assessment'],
       '2026-12-20': ['booked:9:00 AM Polygraph'],
     });
     expect(map.get('2026-12-15')![0].title).toBe('Assessment at 1:30 PM with Pat, Room 2');
@@ -115,7 +115,7 @@ describe('upcomingItems', () => {
     };
     expect(short(upcomingItems(data))).toEqual([
       '2026-12-20 booked Polygraph (Maintenance): 9:00 AM · Office',
-      '2027-02-15 booked Assessment: 1:30 PM · with Pat · Room 2',
+      '2027-02-15 assessment Assessment: 1:30 PM · with Pat · Room 2',
     ]);
   });
 });

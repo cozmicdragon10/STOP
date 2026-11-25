@@ -96,7 +96,7 @@ export function clientCalendarEntries(
 
   for (const a of data.assessments) {
     add(a.date, {
-      key: `a-${a.appointmentid}`, tone: 'booked', kind: 'assessment', label: `${a.time ? `${formatDisplayTime(a.time)} ` : ''}Assessment`,
+      key: `a-${a.appointmentid}`, tone: 'assessment', kind: 'assessment', label: `${a.time ? `${formatDisplayTime(a.time)} ` : ''}Assessment`,
       title: `Assessment${at(a.time)}${a.assessor ? ` with ${a.assessor}` : ''}${a.location ? `, ${a.location}` : ''}`,
     });
   }
@@ -193,7 +193,7 @@ export function upcomingItems(data: ClientCalendarData, checkedInDays: Set<strin
 
   for (const a of data.assessments) {
     items.push({
-      key: `a-${a.appointmentid}`, day: a.date, sort: a.time || '', tone: 'booked', kind: 'assessment', what: 'Assessment',
+      key: `a-${a.appointmentid}`, day: a.date, sort: a.time || '', tone: 'assessment', kind: 'assessment', what: 'Assessment',
       detail: [a.time && formatDisplayTime(a.time), a.assessor && `with ${a.assessor}`, a.location].filter(Boolean).join(' · '),
     });
   }

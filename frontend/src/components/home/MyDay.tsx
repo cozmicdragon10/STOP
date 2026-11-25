@@ -59,7 +59,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // Each kind of entry in the calendar colors every calendar shares (utils/calendar.ts); assessment times also get an icon
 const KIND_TONE: Record<DayItem['kind'], CalendarTone> = {
-  closed: 'done', open: 'open', scheduled: 'booked', cancelled: 'cancelled', moved: 'moved', heldOtherDay: 'moved', assessOpen: 'available', assessBooked: 'booked',
+  closed: 'done', open: 'open', scheduled: 'booked', cancelled: 'cancelled', moved: 'moved', heldOtherDay: 'moved', assessOpen: 'available', assessBooked: 'assessment',
 };
 const KIND_STYLE = Object.fromEntries(Object.entries(KIND_TONE).map(([k, t]) => [k, TONE_CHIP[t]])) as Record<DayItem['kind'], string>;
 const isAssessment = (kind: DayItem['kind']) => kind === 'assessOpen' || kind === 'assessBooked';
@@ -297,8 +297,8 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
           }}
           legend={
             <CalendarLegend
-              tones={['done', 'open', 'booked', 'cancelled', 'moved', 'available']}
-              labels={{ done: 'Closed', open: 'Still open', booked: 'Scheduled, coming up', available: 'Open assessment time' }}
+              tones={['done', 'open', 'booked', 'cancelled', 'moved', 'assessment', 'available']}
+              labels={{ done: 'Closed', open: 'Still open', booked: 'Group scheduled, coming up', available: 'Open assessment time' }}
               kinds={['assessment']}
             />
           }
