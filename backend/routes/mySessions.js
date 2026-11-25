@@ -8,7 +8,8 @@ const MONTH = /^\d{4}-\d{2}$/;
 const CALENDAR_VIEWER_ROLES = ['Business Administrator', 'Office Admin'];
 
 // The signed-in employee's group sessions for one month (YYYY-MM): closed sessions they opened, closed, or were covered
-// for (the office can close a session on a counselor's behalf), and open sheets they opened or are covering. Only flags
+// for (the office can close a session on a counselor's behalf) or of a group they lead that no other counselor ran
+// (sessions imported from the old system have no one recorded), and open sheets they opened or are covering. Only flags
 // are sent back, not other employees' names. Upcoming scheduled groups are worked out on the client from each schedule.
 // ?counselor=<display name> gives that counselor's instead (Calendars tab; office roles only).
 router.get('/api/my-sessions', async (req, res) => {
@@ -39,12 +40,17 @@ router.get('/api/my-sessions', async (req, res) => {
              FROM Attendance a
              JOIN Groups g ON g.GroupId = a."Group"
              WHERE a.Type = 'Group' AND date_trunc('month', a.Date) = date_trunc('month', $2::date)
-             GROUP BY a."Group", g.GroupName, a.Date, a.SessionNumber
+             GROUP BY a."Group", g.GroupName, g.Counselor, a.Date, a.SessionNumber
              HAVING bool_or(LOWER(COALESCE(a.OpenedBy, a.CreatedBy)) = LOWER($1))
                  OR bool_or(LOWER(a.CreatedBy) = LOWER($1))
                  OR bool_or(LOWER(a.CoveredBy) = LOWER($1))
+                 -- Their own group held without another counselor: sessions imported from the old system (no one
+                 -- recorded) and ones the office ran or closed for them. A session another counselor ran shows on theirs.
+                 OR (LOWER(TRIM(g.Counselor)) = LOWER(TRIM($3)) AND NOT bool_or(EXISTS (
+                        SELECT 1 FROM EmployeeRoles e WHERE e.Role = 'Counselor' AND LOWER(e.EmployeeEmail) <> LOWER($1)
+                          AND LOWER(e.EmployeeEmail) IN (LOWER(COALESCE(a.OpenedBy, a.CreatedBy, '')), LOWER(COALESCE(a.CoveredBy, ''))))))
              ORDER BY a.Date, g.GroupName`,
-            [me, firstDay]
+            [me, firstDay, myName]
         );
         const open = await pool.query(
             `SELECT o.GroupId AS groupid, g.GroupName AS groupname, to_char(o.SessionDate, 'YYYY-MM-DD') AS sessiondate,
