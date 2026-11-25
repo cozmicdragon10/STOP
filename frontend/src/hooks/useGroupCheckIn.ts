@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { addClientNote, deleteOpenGroup, getGroupClients, getGroupSessions, moveCardPayment, saveOpenGroup, submitAccountPayment, submitBatchAttendance } from '../api';
+import { addClientNote, changeGroupMeeting, deleteOpenGroup, getGroupClients, getGroupOffDay, getGroupSessions, moveCardPayment, saveOpenGroup, submitAccountPayment, submitBatchAttendance } from '../api';
 import type { GroupDaySession } from '../api';
 import type { OpenGroupSession } from '../api';
 import { isMonthlyFeeClient } from '../utils/soPhases';
@@ -171,6 +171,9 @@ const weekStartOf = (ymd: string) => {
   return localYmd(d);
 };
 
+// 'Wednesday, November 18'
+const checkInDate = (ymd: string) => new Date(`${ymd}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+
 // Check-in lists (roster, attendance sheet, check-in dialog) are in alphabetical order by last name, then first name
 export const byClientName = (a: Pick<ClientRecord, 'lastname' | 'firstname'>, b: Pick<ClientRecord, 'lastname' | 'firstname'>) =>
   (a.lastname ?? '').localeCompare(b.lastname ?? '', undefined, { sensitivity: 'base' })
@@ -240,6 +243,8 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
 
   // Guards against a slow response for a previous group overwriting the current roster.
   const rosterRequestId = useRef(0);
+  // The same for the "not its regular day" question, so it's never asked about a group no longer picked
+  const offDayRequestId = useRef(0);
 
   const checkedInIds = useMemo(() => new Set(session.map(e => e.client.clientid)), [session]);
 
@@ -299,6 +304,7 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
   // Pure state reset, used when switching groups and after a successful save.
   const clearWorkflow = () => {
     rosterRequestId.current++;
+    offDayRequestId.current++;
     setGroupId(null);
     setView('checkin');
     setRoster([]);
@@ -397,6 +403,38 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
     setGroupId(id);
     setSessionDate(date === todayLocal() ? null : date);
     loadRoster(id, date);
+    offerOffDayReschedule(id, date);
+  };
+
+  // Picking a group on a day that isn't its regular day: ask whether to move that week's meeting here, which adds a Group
+  // Reschedule case note for each client. Asked only while that week's meeting hasn't been held, opened, cancelled or
+  // moved, and only of someone who can change the group's meetings. Either way the calendar shows the day it was held.
+  const offerOffDayReschedule = async (id: number, date: string) => {
+    const requestId = ++offDayRequestId.current;
+    try {
+      const off = await getGroupOffDay(id, date);
+      if (requestId !== offDayRequestId.current || !off.offer || !off.scheduledDate || !off.newTime) return;
+      const clients = off.clients == null ? 'each active client' : `the ${off.clients} active client${off.clients === 1 ? '' : 's'}`;
+      const ok = window.confirm(
+        `${off.groupName} normally meets on ${off.scheduleDay}s (this week: ${checkInDate(off.scheduledDate)}), ` +
+        `but you're opening it on ${checkInDate(date)}.
+
+` +
+        `Add a Group Reschedule note to ${clients}' accounts, moving this week's meeting to ${checkInDate(date)}?
+
+` +
+        'OK = add the notes    Cancel = no notes (the calendar still shows the day it was held)'
+      );
+      if (!ok || requestId !== offDayRequestId.current) return;
+      const result = await changeGroupMeeting(id, {
+        originalDate: off.scheduledDate, action: 'Rescheduled', newDate: date, newTime: off.newTime,
+        reason: 'The group met on a different day this week.',
+      });
+      notify.onSuccess(`${off.groupName}: this week's meeting moved to ${checkInDate(date)}. Group Reschedule note added to ${result.notes} client${result.notes === 1 ? '' : 's'}.`);
+    } catch (err: unknown) {
+      if (requestId !== offDayRequestId.current) return;
+      notify.onError(`The reschedule note wasn't added: ${err instanceof Error && err.message ? err.message : 'something went wrong'}. The check-in itself isn't affected.`);
+    }
   };
 
   const reloadRoster = () => {

@@ -72,4 +72,33 @@ const changeNoteText = ({ action, groupName, originalDate, scheduleTime, newDate
     return why ? `${what} Reason: ${why}` : what;
 };
 
-module.exports = { SCHEDULE_DAYS, CHANGE_ACTIONS, parseSchedule, weekdayOf, to24h, to12h, longDate, canChangeGroup, changeProblem, changeNoteText };
+// Weeks run Sunday to Saturday (like the calendars and the BIP once-a-week rule). The Sunday of a date's week, and the
+// day in that week the group meets by its schedule ('' when the schedule has no weekly day).
+const addDays = (ymd, days) => {
+    const d = new Date(`${ymd}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+};
+const weekStartOf = (ymd) => addDays(ymd, -WEEKDAYS.indexOf(weekdayOf(ymd)));
+const scheduledDayInWeek = (schedule, ymd) => {
+    const { day } = parseSchedule(schedule);
+    return day ? addDays(weekStartOf(ymd), WEEKDAYS.indexOf(day)) : '';
+};
+
+// Opening a group on date when it isn't its regular day: whether to offer moving that week's meeting there (a Group
+// Reschedule note for each client). Offered only when the week's regular meeting hasn't been held, opened, cancelled or
+// moved yet, the group has no other session that week, and the user can change the group's meetings. scheduledDate is
+// '' when the date is the regular day or the group has no weekly day.
+const offDayCheck = ({ schedule, date, today, canChange, alreadyChanged, sessionThisWeek }) => {
+    const scheduledDate = scheduledDayInWeek(schedule, date);
+    if (!scheduledDate || scheduledDate === date) return { offDay: false };
+    const newTime = to24h(parseSchedule(schedule).time);
+    const offer = canChange && !alreadyChanged && !sessionThisWeek
+        && !changeProblem({ action: 'Rescheduled', originalDate: scheduledDate, newDate: date, newTime, schedule, today });
+    return { offDay: true, scheduledDate, newTime, offer };
+};
+
+module.exports = {
+    SCHEDULE_DAYS, CHANGE_ACTIONS, parseSchedule, weekdayOf, to24h, to12h, longDate, canChangeGroup, changeProblem, changeNoteText,
+    weekStartOf, scheduledDayInWeek, offDayCheck,
+};

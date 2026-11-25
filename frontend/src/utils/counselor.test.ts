@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { assessmentPickList, clientsNotAttendedThisMonth, groupByCounselor, groupsMeetingOn, isMyClient, monthGrid, myGroupIds, scheduledDatesIn, shiftMonth, weekdayName } from './counselor';
+import { assessmentPickList, clientsNotAttendedThisMonth, groupByCounselor, groupHeldDays, groupsMeetingOn, isMyClient, monthGrid, myGroupIds, scheduledDatesIn, shiftMonth, weekStartOf, weekdayName } from './counselor';
 
 const groups = [
   { groupid: 1, groupname: 'Tuesday Men', counselor: 'Ana Ruiz', schedule: 'Tuesdays @ 6:00 PM', active: true },
@@ -34,6 +34,23 @@ describe('calendar', () => {
   it('moves between months across a year', () => {
     expect(shiftMonth('2026-11', 1)).toBe('2026-12');
     expect(shiftMonth('2026-01', -1)).toBe('2025-12');
+  });
+
+  it('finds the Sunday of a week, across months', () => {
+    expect(weekStartOf('2026-11-19')).toBe('2026-11-15');
+    expect(weekStartOf('2026-11-15')).toBe('2026-11-15');
+    expect(weekStartOf('2026-12-02')).toBe('2026-11-29');
+  });
+
+  it('marks the days and weeks a group had a check-in', () => {
+    const held = groupHeldDays([{ groupid: 7, sessiondate: '2026-11-20' }, { groupid: 7, sessiondate: '2026-11-18' }, { groupid: 9, sessiondate: '2026-12-01' }]);
+    expect(held.on.has('7|2026-11-18')).toBe(true);
+    expect(held.on.has('7|2026-11-19')).toBe(false);
+    // Held Wednesday (and Friday): that week's Thursday meeting is covered, and the list says when it was held
+    expect(held.inWeek.get(`7|${weekStartOf('2026-11-19')}`)).toEqual(['2026-11-18', '2026-11-20']);
+    expect(held.inWeek.has(`7|${weekStartOf('2026-11-26')}`)).toBe(false);
+    // A week that starts in November
+    expect(held.inWeek.has('9|2026-11-29')).toBe(true);
   });
 
   it('puts my scheduled groups on their days, past days too', () => {

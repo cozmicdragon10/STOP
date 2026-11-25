@@ -2,7 +2,8 @@ const express = require('express');
 const { pool, logAction } = require('../db');
 const { todayLocal } = require('../lib/dates');
 const { logClientChange } = require('../lib/changeLog');
-const { canChangeGroup, changeNoteText, changeProblem, parseSchedule } = require('../lib/groupSchedule');
+const { canChangeGroup, changeNoteText, changeProblem, offDayCheck, parseSchedule, scheduledDayInWeek, weekStartOf } = require('../lib/groupSchedule');
+const { YMD } = require('../lib/sql');
 
 const router = express.Router();
 const MONTH = /^\d{4}-\d{2}$/;
@@ -109,6 +110,38 @@ router.delete('/api/group-schedule-changes/:id', async (req, res) => {
         }
         await logAction(removedBy, 'Group Meeting Change Undone', `${row.groupname} ${row.originaldate} (${row.action}); ${notes.length} note(s) removed`);
         res.json({ success: true, notesRemoved: notes.length });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Picking a group to check in on a day that isn't its regular day (?date=YYYY-MM-DD): whether to offer moving that week's
+// meeting there, so each client gets a Group Reschedule note. The check-in screen asks the user; saying yes posts the
+// reschedule above. { offDay: false } on its regular day or for a group with no weekly day.
+router.get('/api/groups/:id/off-day', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const date = String(req.query.date || '');
+        if (!YMD.test(date)) return res.status(400).json({ error: 'A date (YYYY-MM-DD) is required.' });
+        const group = (await pool.query('SELECT GroupName, Counselor, Schedule, Active FROM Groups WHERE GroupId = $1', [id])).rows[0];
+        if (!group) return res.status(404).json({ error: 'Group not found.' });
+        const scheduledDate = scheduledDayInWeek(group.schedule, date);
+        if (!scheduledDate || scheduledDate === date || group.active === false) return res.json({ offDay: false });
+        const weekStart = weekStartOf(date);
+        const [changed, held, clients] = await Promise.all([
+            pool.query('SELECT 1 FROM GroupScheduleChanges WHERE GroupId = $1 AND OriginalDate = $2', [id, scheduledDate]),
+            // Any check-in that week, saved or still open
+            pool.query(
+                `SELECT 1 FROM Attendance WHERE "Group" = $1 AND Type = 'Group' AND Date BETWEEN $2::date AND $2::date + 6
+                 UNION ALL SELECT 1 FROM OpenGroupSessions WHERE GroupId = $1 AND SessionDate BETWEEN $2::date AND $2::date + 6 LIMIT 1`,
+                [id, weekStart]),
+            pool.query("SELECT COUNT(*)::int AS n FROM Clients WHERE GroupId = $1 AND ProgramStatus = 'Active'", [id]),
+        ]);
+        const check = offDayCheck({
+            schedule: group.schedule, date, today: todayLocal(), canChange: canChangeGroup(req.user, group.counselor),
+            alreadyChanged: changed.rows.length > 0, sessionThisWeek: held.rows.length > 0,
+        });
+        res.json({ ...check, groupName: group.groupname, scheduleDay: parseSchedule(group.schedule).day, clients: clients.rows[0].n });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

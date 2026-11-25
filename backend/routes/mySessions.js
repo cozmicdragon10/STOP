@@ -74,7 +74,20 @@ router.get('/api/my-sessions', async (req, res) => {
              ORDER BY a.ApptDate, a.ApptTime`,
             [myName, firstDay]
         );
-        res.json({ closed: closed.rows, open: open.rows, assessments: assessments.rows });
+        // Every day the groups they lead had a check-in (saved or open, whoever ran it), over the whole weeks the month's
+        // calendar shows. A group held on another day of a week stands in for that week's regular meeting.
+        const groupDays = await pool.query(
+            `WITH span AS (SELECT $2::date - EXTRACT(DOW FROM $2::date)::int AS first,
+                                  (($2::date + INTERVAL '1 month')::date - 1) + (6 - EXTRACT(DOW FROM ($2::date + INTERVAL '1 month')::date - 1))::int AS last),
+                  mine AS (SELECT GroupId FROM Groups WHERE LOWER(TRIM(Counselor)) = LOWER(TRIM($1)))
+             SELECT DISTINCT a."Group" AS groupid, to_char(a.Date, 'YYYY-MM-DD') AS sessiondate
+             FROM Attendance a, span WHERE a.Type = 'Group' AND a."Group" IN (SELECT GroupId FROM mine) AND a.Date BETWEEN span.first AND span.last
+             UNION
+             SELECT o.GroupId, to_char(o.SessionDate, 'YYYY-MM-DD')
+             FROM OpenGroupSessions o, span WHERE o.GroupId IN (SELECT GroupId FROM mine) AND o.SessionDate BETWEEN span.first AND span.last`,
+            [myName, firstDay]
+        );
+        res.json({ closed: closed.rows, open: open.rows, assessments: assessments.rows, groupDays: groupDays.rows });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

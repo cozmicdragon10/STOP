@@ -72,6 +72,26 @@ export const groupsMeetingOn = <T extends { groupname?: string | null; counselor
 const pad2 = (n: number) => String(n).padStart(2, '0');
 export const dayKey = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 export const monthOfDate = (d: Date) => dayKey(d).slice(0, 7);
+// The Sunday of a day's week; weeks run Sunday to Saturday, like the calendars and the BIP once-a-week rule
+export const weekStartOf = (ymd: string) => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  date.setDate(d - date.getDay());
+  return dayKey(date);
+};
+
+// Days a group had a check-in, for the calendar: on (that exact day, "groupid|YYYY-MM-DD") and inWeek (the days it was
+// held each week, keyed "groupid|<the week's Sunday>", in date order). A group held on another day of a week stands in
+// for that week's regular meeting, so a counselor who forgot to reschedule doesn't show a meeting that never happened.
+export const groupHeldDays = (days: { groupid: number | string; sessiondate: string }[]) => {
+  const inWeek = new Map<string, string[]>();
+  for (const d of [...days].sort((a, b) => a.sessiondate.localeCompare(b.sessiondate))) {
+    const key = `${d.groupid}|${weekStartOf(d.sessiondate)}`;
+    const held = inWeek.get(key) ?? [];
+    if (!held.includes(d.sessiondate)) inWeek.set(key, [...held, d.sessiondate]);
+  }
+  return { on: new Set(days.map(d => `${d.groupid}|${d.sessiondate}`)), inWeek };
+};
 
 // The month before or after (delta -1 or 1) a "YYYY-MM"
 export const shiftMonth = (month: string, delta: number) => {

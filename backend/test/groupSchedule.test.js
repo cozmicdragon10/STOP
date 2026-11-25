@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseSchedule, weekdayOf, to24h, to12h, longDate, canChangeGroup, changeProblem, changeNoteText } = require('../lib/groupSchedule');
+const { parseSchedule, weekdayOf, to24h, to12h, longDate, canChangeGroup, changeProblem, changeNoteText, weekStartOf, scheduledDayInWeek, offDayCheck } = require('../lib/groupSchedule');
 
 const today = '2026-11-16'; // a Monday
 // 2026-11-19 and 2026-11-26 are Thursdays
@@ -61,4 +61,29 @@ test('the case note says what happened and why', () => {
     assert.equal(
         changeNoteText({ action: 'Rescheduled', groupName: 'Ada SO', originalDate: '2026-11-19', scheduleTime: '5:00 PM', newDate: '2026-11-20', newTime: '18:00', reason: '' }),
         'Ada SO on Thursday, November 19, 2026 at 5:00 PM was rescheduled to Friday, November 20, 2026 at 6:00 PM.');
+});
+
+test('a group\'s regular day in a week (weeks run Sunday to Saturday)', () => {
+    assert.equal(weekStartOf('2026-11-19'), '2026-11-15');
+    assert.equal(weekStartOf('2026-11-15'), '2026-11-15');
+    assert.equal(weekStartOf('2026-12-02'), '2026-11-29');
+    assert.equal(scheduledDayInWeek('Thursdays @ 5:00 PM', '2026-11-16'), '2026-11-19');
+    assert.equal(scheduledDayInWeek('Thursdays @ 5:00 PM', '2026-11-21'), '2026-11-19');
+    // A week across two months
+    assert.equal(scheduledDayInWeek('Mondays @ 6:00 PM', '2026-12-03'), '2026-11-30');
+    assert.equal(scheduledDayInWeek('By Appointment', '2026-11-19'), '');
+});
+
+test('opening a group on another day offers to move that week\'s meeting there', () => {
+    const open = { schedule: 'Thursdays @ 5:00 PM', today: '2026-11-18', canChange: true, alreadyChanged: false, sessionThisWeek: false };
+    // Opened early (Wednesday) and late (the next Saturday, after Thursday passed)
+    assert.deepEqual(offDayCheck({ ...open, date: '2026-11-18' }), { offDay: true, scheduledDate: '2026-11-19', newTime: '17:00', offer: true });
+    assert.deepEqual(offDayCheck({ ...open, date: '2026-11-21', today: '2026-11-21' }), { offDay: true, scheduledDate: '2026-11-19', newTime: '17:00', offer: true });
+    // A past date picked for the check-in, a week whose Thursday is still ahead: an upcoming meeting can't move to the past
+    assert.equal(offDayCheck({ ...open, date: '2026-11-17' }).offer, false);
+    assert.deepEqual(offDayCheck({ ...open, date: '2026-11-19' }), { offDay: false });
+    assert.deepEqual(offDayCheck({ ...open, schedule: 'By Appointment', date: '2026-11-18' }), { offDay: false });
+    assert.equal(offDayCheck({ ...open, date: '2026-11-18', canChange: false }).offer, false);
+    assert.equal(offDayCheck({ ...open, date: '2026-11-18', alreadyChanged: true }).offer, false);
+    assert.equal(offDayCheck({ ...open, date: '2026-11-18', sessionThisWeek: true }).offer, false);
 });

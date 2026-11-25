@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { getGroupScheduleChanges, getMySessions } from '../../api';
-import type { GroupScheduleChange, MyAssessment, MyClosedSession, MyOpenSession } from '../../api';
-import { dayKey, monthOfDate, myGroupIds, scheduledDatesIn } from '../../utils/counselor';
+import type { GroupScheduleChange, MyAssessment, MyClosedSession, MyGroupDay, MyOpenSession } from '../../api';
+import { dayKey, groupHeldDays, monthOfDate, myGroupIds, scheduledDatesIn, weekStartOf } from '../../utils/counselor';
 import { formatDisplayTime } from '../../utils/dates';
 import { parseSchedule } from '../../utils/schedule';
 import GroupMeetingPanel, { type Meeting } from './GroupMeetingPanel';
@@ -37,13 +37,16 @@ interface Props {
 // label is the short chip text; name, detail and sort (HH:MM, '' when no time) are for the day's list when the day is clicked.
 interface DayItem {
   key: string;
-  kind: 'closed' | 'open' | 'scheduled' | 'cancelled' | 'moved' | 'assessOpen' | 'assessBooked';
+  // heldOtherDay: the group's regular day in a week it was held on another day; only in the day's list, not the calendar
+  kind: 'closed' | 'open' | 'scheduled' | 'cancelled' | 'moved' | 'heldOtherDay' | 'assessOpen' | 'assessBooked';
   label: string;
   title: string;
   name: string;
   detail: string;
   sort: string;
   meeting?: Meeting;
+  // Shown in the day's list when the day is clicked, not on the calendar
+  listOnly?: boolean;
   // An assessment time from today on: assign a client (open), or cancel or reschedule (scheduled)
   appt?: MyAssessment;
 }
@@ -56,12 +59,12 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 // Each kind of entry in the calendar colors every calendar shares (utils/calendar.ts); assessment times also get an icon
 const KIND_TONE: Record<DayItem['kind'], CalendarTone> = {
-  closed: 'done', open: 'open', scheduled: 'booked', cancelled: 'cancelled', moved: 'moved', assessOpen: 'available', assessBooked: 'booked',
+  closed: 'done', open: 'open', scheduled: 'booked', cancelled: 'cancelled', moved: 'moved', heldOtherDay: 'moved', assessOpen: 'available', assessBooked: 'booked',
 };
 const KIND_STYLE = Object.fromEntries(Object.entries(KIND_TONE).map(([k, t]) => [k, TONE_CHIP[t]])) as Record<DayItem['kind'], string>;
 const isAssessment = (kind: DayItem['kind']) => kind === 'assessOpen' || kind === 'assessBooked';
 const KIND_LABEL: Record<DayItem['kind'], string> = {
-  closed: 'Closed', open: 'Open', scheduled: 'Scheduled', cancelled: 'Cancelled', moved: 'Moved',
+  closed: 'Closed', open: 'Open', scheduled: 'Scheduled', cancelled: 'Cancelled', moved: 'Moved', heldOtherDay: 'Held another day',
   assessOpen: 'Open assessment time', assessBooked: 'Assessment',
 };
 const shortDate = (ymd: string) => {
@@ -93,7 +96,7 @@ const longDate = (ymd: string) => {
 export default function MyDay({ displayName, groups, onOpenAttendance, viewing = false, clients = [] }: Props) {
   const todayKey = dayKey(new Date());
   const [month, setMonth] = useState(monthOfDate(new Date()));
-  const [sessions, setSessions] = useState<{ closed: MyClosedSession[]; open: MyOpenSession[]; assessments: MyAssessment[] } | null>(null);
+  const [sessions, setSessions] = useState<{ closed: MyClosedSession[]; open: MyOpenSession[]; assessments: MyAssessment[]; groupDays?: MyGroupDay[] } | null>(null);
   const [error, setError] = useState('');
   // Cancelled and rescheduled meetings this month; reloaded after a change (changesKey)
   const [changes, setChanges] = useState<GroupScheduleChange[]>([]);
@@ -158,12 +161,20 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
   }
   // Scheduled meetings that weren't held (upcoming, or past and never opened) look the same: click to cancel or
   // reschedule. A changed one shows as Cancelled, or Moved with its new date.
+  // A group held on another day that week (whoever ran it) shows only there; its regular day lists where it was held.
+  const held = groupHeldDays(sessions?.groupDays ?? []);
   for (const [day, meets] of scheduledDatesIn(groups, displayName, month)) {
     for (const g of meets) {
-      if (taken.has(`${day}|${g.groupid}`)) continue;
+      if (taken.has(`${day}|${g.groupid}`) || held.on.has(`${g.groupid}|${day}`)) continue;
       const name = g.groupname || '';
       const time = groupTime(g.groupid);
       const change = changeFor.get(`${g.groupid}|${day}`);
+      const heldOn = held.inWeek.get(`${g.groupid}|${weekStartOf(day)}`);
+      if (!change && heldOn) {
+        add(day, { key: `h${g.groupid}-${day}`, kind: 'heldOtherDay', label: name, title: `Held another day: ${name}`, name,
+          detail: `Held on ${heldOn.map(longDate).join(' and ')} instead of its regular day`, sort: to24h(time), listOnly: true });
+        continue;
+      }
       const meeting = meetingOf(g.groupid, name, day, change);
       const why = change?.reason ? ` · Reason: ${change.reason}` : '';
       if (!change) {
@@ -181,7 +192,7 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
   // held (or open) session stands in for it
   for (const c of myChanges) {
     if (c.action !== 'Rescheduled' || !c.newdate || !c.newdate.startsWith(month)) continue;
-    if (taken.has(`${c.newdate}|${c.groupid}`)) continue;
+    if (taken.has(`${c.newdate}|${c.groupid}`) || held.on.has(`${c.groupid}|${c.newdate}`)) continue;
     const time = formatDisplayTime(c.newtime || '');
     add(c.newdate, {
       key: `r${c.changeid}`, kind: 'scheduled', label: `${time} ${c.groupname}`,
@@ -257,12 +268,12 @@ export default function MyDay({ displayName, groups, onOpenAttendance, viewing =
           cellClassName="min-h-24"
           minWidthClassName="min-w-[560px]"
           dayLabel={day => {
-            const count = byDay.get(day)?.length ?? 0;
+            const count = (byDay.get(day) ?? []).filter(item => !item.listOnly).length;
             return `${longDate(day)}: ${count ? plural(count, 'item') : 'nothing scheduled'}`;
           }}
           renderDay={day => {
             // Assessment times first, so a busy day's "+N more" only ever hides groups
-            const items = chipsInOrder(byDay.get(day) ?? [], item => isAssessment(item.kind));
+            const items = chipsInOrder((byDay.get(day) ?? []).filter(item => !item.listOnly), item => isAssessment(item.kind));
             // The whole day opens its list below the calendar; a chip inside also opens its own panel
             return (
               <>

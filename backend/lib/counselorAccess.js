@@ -46,6 +46,8 @@ const ALLOWED = [
     ['GET', /^\/api\/group-schedule-changes$/],
     ['POST', /^\/api\/groups\/\d+\/schedule-changes$/],
     ['DELETE', /^\/api\/group-schedule-changes\/\d+$/],
+    // Check-in on a day that isn't the group's regular day: whether to offer a reschedule note
+    ['GET', /^\/api\/groups\/\d+\/off-day$/],
     // Check-in, sessions and payments taken in the field
     ['GET', /^\/api\/open-groups$/],
     ['PUT', /^\/api\/open-groups$/],

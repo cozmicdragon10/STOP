@@ -527,7 +527,23 @@ export async function getGroupScheduleChanges(month: string): Promise<GroupSched
     return jsonResponse(res, 'Failed to load group schedule changes.');
 }
 
-// Cancel or reschedule one upcoming meeting; every active client in the group gets a case note
+// Picking a group to check in on a day (YYYY-MM-DD) that isn't its regular day: offer says whether to ask about moving
+// that week's meeting (scheduledDate) there, at newTime (HH:MM, its regular time)
+export interface GroupOffDay {
+    offDay: boolean;
+    scheduledDate?: string;
+    newTime?: string;
+    offer?: boolean;
+    groupName?: string;
+    scheduleDay?: string;
+    clients?: number;
+}
+export async function getGroupOffDay(groupId: number, date: string): Promise<GroupOffDay> {
+    const res = await apiFetch(`${API_BASE}/groups/${groupId}/off-day?date=${encodeURIComponent(date)}`);
+    return jsonResponse(res, 'Failed to check the group\'s schedule.');
+}
+
+// Cancel or reschedule one meeting; every active client in the group gets a case note
 export async function changeGroupMeeting(groupId: number | string, data: { originalDate: string; action: 'Cancelled' | 'Rescheduled'; newDate?: string; newTime?: string; reason: string }): Promise<{ success: true; changeId: number; notes: number }> {
     const res = await apiFetch(`${API_BASE}/groups/${groupId}/schedule-changes`, {
         method: 'POST',
@@ -558,7 +574,12 @@ export interface MyAssessment {
 }
 
 // counselor (a display name): another counselor's month, for the Calendars tab (office roles only)
-export async function getMySessions(month: string, counselor?: string): Promise<{ closed: MyClosedSession[]; open: MyOpenSession[]; assessments: MyAssessment[] }> {
+// groupDays: every day the counselor's groups had a check-in (whoever ran it), over the whole weeks the month shows
+export interface MyGroupDay {
+    groupid: number;
+    sessiondate: string;
+}
+export async function getMySessions(month: string, counselor?: string): Promise<{ closed: MyClosedSession[]; open: MyOpenSession[]; assessments: MyAssessment[]; groupDays?: MyGroupDay[] }> {
     const res = await apiFetch(`${API_BASE}/my-sessions?month=${encodeURIComponent(month)}${counselor ? `&counselor=${encodeURIComponent(counselor)}` : ''}`);
     return jsonResponse(res, 'Failed to load your sessions for this month.');
 }
