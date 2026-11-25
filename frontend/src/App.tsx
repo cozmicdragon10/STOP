@@ -44,6 +44,7 @@ import DevTab from './components/dev/DevTab';
 import SettingsTab from './components/settings/SettingsTab';
 import MyDay from './components/home/MyDay';
 import OfficeToday from './components/home/OfficeToday';
+import BipAbsenceAlerts from './components/home/BipAbsenceAlerts';
 import DevHealth from './components/home/DevHealth';
 import HomeCount from './components/home/HomeCount';
 import PolygrapherHome from './components/home/PolygrapherHome';
@@ -1116,6 +1117,7 @@ export default function App() {
         {/* HOME TAB */}
         {activeTab === 'home' && (
           <div className="space-y-6">
+            {(isBusinessAdmin || isCounselor) && <BipAbsenceAlerts />}
             {isCounselor && (
               <MyDay
                 displayName={user.displayname}
@@ -1304,6 +1306,7 @@ export default function App() {
             clientId={selectedClientDetail.clientid}
             clientName={`${selectedClientDetail.firstname} ${selectedClientDetail.lastname}`}
             userEmail={user.employeeemail}
+            canExcuse={role === 'Business Administrator'}
             onClose={() => setShowCallIn(false)}
             onLogged={async () => {
               const clientid = selectedClientDetail.clientid;
@@ -1580,6 +1583,8 @@ export default function App() {
                   balance={Number(selectedClientDetail.accountbalance) || 0}
                   attendance={clientAttendance}
                   canDelete={role === 'Business Administrator'}
+                  isBip={selectedClientDetail.programtype === 'BIP'}
+                  canExcuse={role === 'Business Administrator'}
                   onDeleted={handleAttendanceDeleted}
                   onSuccess={setSuccessMsg}
                   clientName={`${selectedClientDetail.lastname}, ${selectedClientDetail.firstname}`}

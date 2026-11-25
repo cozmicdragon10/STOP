@@ -5,6 +5,8 @@ const { groupNameFor, logClientChange } = require('../lib/changeLog');
 const { ACTIVE_DEBT_LIMIT, ACTIVE_FEE_OVERRIDE, ATTENDED_THIS_MONTH, BIP_CHECKIN_BLOCK, FEE_ALREADY_CHARGED, GROUP_ATTENDANCE, INDIVIDUAL_THIS_MONTH } = require('../lib/sql');
 const { FEDERAL_UNITS_SQL, LAST_DRUG_TEST_SQL } = require('../lib/federalUnits');
 const { staleFields, staleMessage } = require('../lib/editConflicts');
+const { bipAbsenceStatusFor } = require('../lib/bipAbsences');
+const { todayLocal } = require('../lib/dates');
 
 const router = express.Router();
 // Group details, and new groups, are changed by Business Administrators and Office Admins (as on the Groups tab)
@@ -51,6 +53,15 @@ router.get('/api/groups/:id/clients', async (req, res) => {
              FROM Clients c WHERE c.GroupId = $1 OR c.IndividualGroupId = $1`,
             [id]
         );
+        // A BIP client locked by an absence threshold shows as blocked on their primary group's sheet, and on every sheet
+        // once the 7th absence's make-up week has passed (lib/bipAbsences.js)
+        const bipRows = result.rows.filter(r => r.programtype === 'BIP' && r.programstatus === 'Active' && !r.bipcheckinblock);
+        const states = await Promise.all(bipRows.map(r => bipAbsenceStatusFor(pool, r.clientid, todayLocal())));
+        bipRows.forEach((r, i) => {
+            const s = states[i];
+            if (s.fullLock) r.bipcheckinblock = 'absence-failed';
+            else if (s.locked && Number(r.groupid) === Number(id)) r.bipcheckinblock = s.lockReason === 'streak' ? 'absence-streak' : 'absence-total';
+        });
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: err.message });

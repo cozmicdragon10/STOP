@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useUnsavedForm } from '../../hooks/useUnsavedForm';
 import { CalendarDays, CalendarX, List, Printer, SlidersHorizontal, Trash2, UserX } from 'lucide-react';
 import ClientAttendanceCalendar from './ClientAttendanceCalendar';
+import BipAbsencePanel from './BipAbsencePanel';
 import { printAttendanceReceipt } from '../../utils/receipt';
 import { deleteAttendance, getClient, getClientAttendance, getClientCalendar, getClientFinancials, getClientGroupCancellations, getClientMissedGroups, type GroupCancellation, type MissedGroup } from '../../api';
 import { groupCheckInDays, hasUpcoming, upcomingItems, type ClientCalendarData } from '../../utils/clientCalendar';
@@ -39,12 +40,15 @@ interface Props {
   clientName: string;
   docNumber: string;
   onError: (message: string) => void;
+  // BIP clients get the absences panel; Business Administrators (and DEV) can excuse absences in it
+  isBip?: boolean;
+  canExcuse?: boolean;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 // The Attendance tab of a client's account: sessions by month with fee, payment, and the balance before and after.
 // Business Administrators can delete a session, which takes back its fee and payment.
-export default function ClientAttendanceHistory({ clientId, balance, attendance, canDelete, onDeleted, onSuccess, clientName, docNumber, onError }: Props) {
+export default function ClientAttendanceHistory({ clientId, balance, attendance, canDelete, onDeleted, onSuccess, clientName, docNumber, onError, isBip = false, canExcuse = false }: Props) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- attendance rows are untyped throughout App
   const printAttendance = (att: any) => {
     const c = attendanceBalanceChange(att);
@@ -181,6 +185,7 @@ export default function ClientAttendanceHistory({ clientId, balance, attendance,
 
   return (
     <div className="space-y-3">
+      {isBip && <BipAbsencePanel clientId={clientId} canExcuse={canExcuse} refreshKey={attendance} onSuccess={onSuccess} onError={onError} />}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"

@@ -44,6 +44,7 @@ app.use(require('./routes/programFees'));
 app.use(require('./routes/federalUnits'));
 app.use(require('./routes/financials'));
 app.use(require('./routes/callins'));
+app.use(require('./routes/bipAbsences'));
 app.use(require('./routes/polygraphs'));
 app.use(require('./routes/reports'));
 app.use(require('./routes/moneyOnHand'));

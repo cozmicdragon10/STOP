@@ -10,6 +10,8 @@ const { paymentMethodProblem } = require('../lib/paymentMethods');
 const { assertCheckAllowed, isCheckPayment } = require('../lib/checkBlock');
 const { requireRole } = require('../lib/auth');
 const { reopenGroupSession } = require('../lib/reopenGroup');
+const { bipAbsenceBlockMessage, bipAbsenceStatusFor } = require('../lib/bipAbsences');
+const { todayLocal } = require('../lib/dates');
 
 const router = express.Router();
 
@@ -255,6 +257,16 @@ router.put('/api/open-groups', async (req, res) => {
             const tested = await drugTestedOn(pool, added, date, { group: Number(group), sessionNumber: sessionNum });
             if (tested.length) return res.status(400).json({ error: `${tested.join('; ')} already had a drug test that day. Clients can be drug tested once a day.` });
         }
+        // A BIP client newly put on the sheet who is locked out by absences: from their primary group, or from every group
+        // once the 7th absence's make-up week has passed (lib/bipAbsences.js; closing the group refuses them too)
+        const lockedOut = [];
+        for (const clientId of added) {
+            const s = await bipAbsenceStatusFor(pool, clientId, todayLocal());
+            if (s.applies && (s.fullLock || (s.locked && Number(s.groupId) === Number(group)))) {
+                lockedOut.push(bipAbsenceBlockMessage(s.lockReason, s.clientName, s.nextDeadline, s.fullLock));
+            }
+        }
+        if (lockedOut.length) return res.status(400).json({ error: lockedOut.join(' ') });
         const toSave = keepPrintedMarks(savedEntries, entries);
         const saved = await pool.query(
             `INSERT INTO OpenGroupSessions (GroupId, SessionDate, SessionNumber, Entries, CreatedBy, CoveredBy, UpdatedOn)

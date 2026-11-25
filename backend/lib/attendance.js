@@ -5,6 +5,7 @@ const { dateText, dollars, logClientChange } = require('./changeLog');
 const { moneyText } = require('./moneyFields');
 const { todayLocal } = require('./dates');
 const { countsAsBipWeek } = require('./bipWeeks');
+const { bipAbsenceStatusFor, bipAbsenceBlockMessage } = require('./bipAbsences');
 const { bipWeekAt } = require('./attendanceNotes');
 const { LAST_POLY_RESULT_SQL, POLY_VOUCHER_EARNING_RESULTS, polyVoucherMax } = require('./poly');
 const {
@@ -116,6 +117,15 @@ const recordAttendance = async (db, { client, group, date, sessionNumber, paid, 
         const blockRes = await db.query(`SELECT ${BIP_CHECKIN_BLOCK} AS block FROM Clients c WHERE c.ClientId = $1`, [client]);
         const block = blockRes.rows[0]?.block;
         if (block) throw new Error(bipCheckInBlockMessage(block, `${clientRes.rows[0].lastname}, ${clientRes.rows[0].firstname}`));
+    }
+    // A BIP client locked by an absence threshold can't check in to their primary group. A make-up at another group is fine.
+    if (group && !isIndividualSession && clientRes.rows[0].programtype === 'BIP') {
+        const absence = await bipAbsenceStatusFor(db, client, todayLocal());
+        // After the 7th absence's make-up week passes, every group is closed to them
+        if (absence.fullLock || (absence.locked && Number(absence.groupId) === Number(group))) {
+            const name = `${clientRes.rows[0].lastname}, ${clientRes.rows[0].firstname}`;
+            throw Object.assign(new Error(bipAbsenceBlockMessage(absence.lockReason, name, absence.nextDeadline, absence.fullLock)), { status: 400 });
+        }
     }
 
     // A client can attend a given session of a group only once

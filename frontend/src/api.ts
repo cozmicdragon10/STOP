@@ -1573,7 +1573,8 @@ export async function recordCardPaymentAction(transactionId: number, data: { act
 }
 
 // reason is one of the call-in reasons (utils/notes.ts); the server refuses any other
-export async function submitClientCallIn(data: { client: number; date: Date | string; comment: string; createdBy: string; reason: string | null }): Promise<{ success: true; eventId: number }> {
+// excuseDate (Business Administrators and DEV only): the absence this call-in excuses (YYYY-MM-DD), for a BIP client
+export async function submitClientCallIn(data: { client: number; date: Date | string; comment: string; createdBy: string; reason: string | null; excuseDate?: string | null }): Promise<{ success: true; eventId: number }> {
     const res = await apiFetch(`${API_BASE}/callin/client`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2170,6 +2171,66 @@ export interface GroupCancellation {
 export async function getClientGroupCancellations(clientId: number): Promise<GroupCancellation[]> {
     const res = await apiFetch(`${API_BASE}/clients/${clientId}/group-cancellations`);
     return jsonResponse(res, 'Failed to load cancelled groups.');
+}
+
+// A BIP client's absences and whether they're locked from their primary group (backend/lib/bipAbsences.js)
+export interface BipAbsence {
+    date: string; // the missed meeting, YYYY-MM-DD
+    week: string;
+    calledIn: boolean;
+    callInReason: string | null;
+    excused: boolean;
+    madeUp: boolean;
+    open: boolean;
+    deadline: string; // a week after the absence
+    threshold: 'streak' | 'total' | null;
+    failed: boolean;
+}
+export interface BipAbsenceStatus {
+    applies: boolean;
+    clientName?: string;
+    groupId?: number;
+    groupName?: string | null;
+    locked: boolean;
+    // Locked from every group: the 7th absence's make-up week passed
+    fullLock: boolean;
+    lockReason: 'streak' | 'total' | null;
+    nextDeadline: string | null;
+    failEligible: boolean;
+    openCount: number;
+    streak: number;
+    absences: BipAbsence[];
+}
+export interface BipAbsenceAlert {
+    clientid: number;
+    name: string;
+    groupname: string;
+    counselor: string | null;
+    reason: 'streak' | 'total';
+    deadline: string | null;
+    failEligible: boolean;
+    fullLock: boolean;
+    openCount: number;
+}
+export async function getBipAbsences(clientId: number): Promise<BipAbsenceStatus> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/bip-absences`);
+    return jsonResponse(res, 'Could not load the absences.');
+}
+export async function excuseBipAbsence(clientId: number, date: string, reason: string): Promise<{ success: true }> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/bip-absences/excuse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date, reason }),
+    });
+    return jsonResponse(res, 'Could not excuse the absence.');
+}
+export async function removeBipAbsenceExcuse(clientId: number, date: string): Promise<{ success: true }> {
+    const res = await apiFetch(`${API_BASE}/clients/${clientId}/bip-absences/excuse/${date}`, { method: 'DELETE' });
+    return jsonResponse(res, 'Could not remove the excuse.');
+}
+export async function getBipAbsenceAlerts(): Promise<BipAbsenceAlert[]> {
+    const res = await apiFetch(`${API_BASE}/bip-absence-alerts`);
+    return jsonResponse(res, 'Could not load the BIP absence alerts.');
 }
 
 // Group meetings the client was expected at and didn't check in to, newest first (backend/lib/missedGroups.js). A Phase

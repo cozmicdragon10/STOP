@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../db');
 const { logClientChange, noteText } = require('../lib/changeLog');
+const { excuseAbsence } = require('../lib/bipAbsences');
 
 const router = express.Router();
 
@@ -11,10 +12,15 @@ router.post('/api/callin/client', async (req, res) => {
     const clientDb = await pool.connect();
     try {
         await clientDb.query('BEGIN');
-        const { client, date, comment, createdBy, reason } = req.body;
+        const { client, date, comment, createdBy, reason, excuseDate } = req.body;
         if (reason && !CALL_IN_REASONS.includes(reason)) {
             await clientDb.query('ROLLBACK');
             return res.status(400).json({ error: 'Unknown call-in reason.' });
+        }
+        // Excusing a BIP absence with this call-in: Business Administrators (and DEV) only. The call-in's details are the reason.
+        if (excuseDate && req.user?.role !== 'Business Administrator') {
+            await clientDb.query('ROLLBACK');
+            return res.status(403).json({ error: 'Only Business Administrators can excuse an absence.' });
         }
         const reasonText = reason ? ` (Reason: ${reason})` : '';
 
@@ -29,11 +35,14 @@ router.post('/api/callin/client', async (req, res) => {
         );
         await logClientChange(clientDb, { clientId: client, changedBy: createdBy, changeType: 'Call-In', newValue: reason || 'Logged', details: noteText(comment) });
 
+        if (excuseDate) {
+            await excuseAbsence(clientDb, { clientId: client, date: excuseDate, reason: comment, excusedBy: req.user.employeeemail });
+        }
         await clientDb.query('COMMIT');
         res.status(201).json({ success: true, eventId: eventRes.rows[0].eventid });
     } catch (err) {
         await clientDb.query('ROLLBACK');
-        res.status(500).json({ error: err.message });
+        res.status(err.status || 500).json({ error: err.message });
     } finally {
         clientDb.release();
     }
