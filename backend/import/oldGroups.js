@@ -1,6 +1,8 @@
 // Old GroupId (GroupData.csv) -> current group name. Old groups with no clear match (assessments, individuals,
-// accounts, "Shawnee", ...) are left out; clients and attendance from them get no group. Old group 9, named just "Okc",
+// accounts, ...) are left out; clients and attendance from them get no group. Old group 9, named just "Okc",
 // is OKC M-SO 1 (user, 2026-11-12): its visits are on Mondays and it ran alongside "OKC MSO 2".
+// Shawnee Monday groups are numbered one higher here (user, 2026-11-25): old 16 "Shawnee" -> M-SO 1,
+// old 141 "Shawnee MSO 1" -> M-SO 2, old 27 "Shawnee MSO 2" -> M-SO 3.
 const GROUP_MAP = {
     1: 'Ada SO', 113: 'Ada BIP',
     3: 'Ardmore SO',
@@ -16,7 +18,7 @@ const GROUP_MAP = {
     36: 'OKC W-SO 1', 105: 'OKC W-SO 2', 109: 'OKC W-SO 3', 6: 'OKC W-SO 4', 12: 'OKC W-SO 5',
     11: 'Okmulgee SO', 100: 'Okmulgee BIP',
     14: 'Sapulpa SO 1', 61: 'Sapulpa SO 2',
-    141: 'Shawnee M-SO 1', 27: 'Shawnee M-SO 2', 33: 'Shawnee M-BIP',
+    16: 'Shawnee M-SO 1', 141: 'Shawnee M-SO 2', 27: 'Shawnee M-SO 3', 33: 'Shawnee M-BIP',
     50: 'Shawnee Th-SO 1', 85: 'Shawnee Th-SO 2', 76: 'Shawnee Th-BIP',
     130: 'Stillwater SO 1', 137: 'Stillwater SO 2', 72: 'Stillwater SO 3',
     62: 'Tulsa North-SO 1', 43: 'Tulsa North-SO 2',
