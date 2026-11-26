@@ -599,9 +599,23 @@ export function useGroupCheckIn(createdBy: string, notify: WorkflowNotifier, ope
       message: `${card}They are already checked in to this session. You can undo this until the group is closed or the sheet is cleared.`,
       confirmLabel: 'Remove', cancelLabel: 'Keep on Sheet', danger: true,
     }))) return;
-    setSession(prev => prev.filter(e => e.client.clientid !== clientId || e.receiptPrinted));
-    setRemovedEntries(prev => [{ entry, savedChanged: false }, ...prev.filter(r => r.entry.client.clientid !== clientId)]);
-    notify.onSuccess(`${entry.client.lastname}, ${entry.client.firstname} removed from the sheet. Press Undo to put them back.`);
+    const next = session.filter(e => e.client.clientid !== clientId);
+    setSession(next);
+    const name = `${entry.client.lastname}, ${entry.client.firstname}`;
+    // The last client off a saved open check-in: drop the saved copy too (Open Groups has no discard button); Undo saves it again
+    const saved = next.length === 0 ? savedOpenGroup() : null;
+    setRemovedEntries(prev => [{ entry, savedChanged: Boolean(saved) }, ...prev.filter(r => r.entry.client.clientid !== clientId)]);
+    if (saved) {
+      try {
+        await deleteOpenGroup(saved.opensessionid, createdBy);
+        notify.onOpenGroupsChanged?.();
+      } catch (err: unknown) {
+        const reason = err instanceof Error && err.message ? ` (${err.message})` : '';
+        notify.onError(`${name} removed from the sheet, but the saved open check-in could not be removed${reason}.`);
+        return;
+      }
+    }
+    notify.onSuccess(`${name} removed from the sheet. Press Undo to put them back.`);
   };
 
   // Puts a removed client back on the sheet exactly as they were. Skipped if they've been checked in again since.

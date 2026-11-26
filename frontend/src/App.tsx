@@ -20,7 +20,7 @@ import {
   deleteClient,
   getClientDeletable,
   getEmployees, fetchClientFeeOverride, fetchPolyFeeOverride,
-  getOpenGroups, deleteOpenGroup, getClosedGroups, reopenClosedGroup, CLOSED_GROUPS_MAX, getSupervisingAgents, getCoveredByMe
+  getOpenGroups, getClosedGroups, reopenClosedGroup, CLOSED_GROUPS_MAX, getSupervisingAgents, getCoveredByMe
 } from './api';
 import type {
   CardBlock, CheckBlock, Client, ClientAttendance, CoveredClient, ClientNote, ClosedGroupSession, DeviceState, Employee, FinancialTransaction, Group,
@@ -1940,51 +1940,14 @@ export default function App() {
                   <ul className="space-y-2">
                     {counselorSections(openGroups, o => groups.find(g => g.groupid === o.groupid)?.counselor, o => (
                       <li key={o.opensessionid} className="bg-slate-950 border border-slate-800 rounded-lg p-3">
-                        <div className="flex justify-between items-start gap-2">
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-white truncate">{o.groupname}</p>
-                            <p className={`text-xs ${o.sessiondate === todayLocal() ? 'text-slate-400' : 'text-amber-400'}`}>
-                              {o.sessiondate === todayLocal() ? 'Today' : new Date(`${o.sessiondate}T00:00:00`).toLocaleDateString()}{(o.sessionnumber ?? 1) > 1 ? ` · Session ${o.sessionnumber}` : ''} · {o.entries.length} client(s)
-                            </p>
-                            <p className="text-[0.6875rem] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${o.createdby}` : ''}</p>
-                          </div>
-                          {o.entries.some(e => e.receiptPrinted) ? (
-                            // A printed attendance receipt locks the session: it can only be closed, not discarded
-                            <span
-                              className="text-slate-500 p-1 shrink-0"
-                              title="An attendance receipt was printed for a client in this session, so it can't be discarded. Close the group to save the attendance."
-                              aria-label={`Open check-in for ${o.groupname} has a printed receipt and can't be discarded`}
-                            >
-                              <Lock size={14} />
-                            </span>
-                          ) : o.entries.some(e => Number(e.payment) > 0) ? (
-                            // Cash on the sheet is only recorded when the group closes, so the session can't be discarded
-                            <span
-                              className="text-slate-500 p-1 shrink-0"
-                              title="Cash was entered at this check-in. It's only recorded when the group closes, so this session can't be discarded. Close the group, or open it and set the cash payments to $0 first."
-                              aria-label={`Open check-in for ${o.groupname} has cash entered and can't be discarded`}
-                            >
-                              <Lock size={14} />
-                            </span>
-                          ) : (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              if (!(await askConfirm({ title: `Discard the open check-in for ${o.groupname}?`, message: `Attendance for these ${o.entries.length} client(s) will not be saved. Payments already taken stay on their accounts.`, confirmLabel: 'Discard', danger: true }))) return;
-                              try {
-                                await deleteOpenGroup(o.opensessionid, user.employeeemail);
-                                setSuccessMsg(`Open check-in for ${o.groupname} discarded.`);
-                                loadOpenGroups();
-                              } catch (err) {
-                                setError(errorMessage(err, 'Failed to discard the open group.'));
-                              }
-                            }}
-                            className="text-slate-500 hover:text-red-400 p-1 rounded shrink-0"
-                            aria-label={`Discard open check-in for ${o.groupname}`}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                          )}
+                        {/* No discard here: an open check-in is closed from Open & Close Group (removing its clients
+                            there drops it once the sheet is empty) */}
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-white truncate">{o.groupname}</p>
+                          <p className={`text-xs ${o.sessiondate === todayLocal() ? 'text-slate-400' : 'text-amber-400'}`}>
+                            {o.sessiondate === todayLocal() ? 'Today' : new Date(`${o.sessiondate}T00:00:00`).toLocaleDateString()}{(o.sessionnumber ?? 1) > 1 ? ` · Session ${o.sessionnumber}` : ''} · {o.entries.length} client(s)
+                          </p>
+                          <p className="text-[0.6875rem] text-slate-500 truncate">Saved {new Date(o.updatedon).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}{o.createdby ? ` by ${o.createdby}` : ''}</p>
                         </div>
                         <button
                           type="button"
